@@ -1,0 +1,108 @@
+# =============================================================================
+# bootstrap.config.yaml
+# -----------------------------------------------------------------------------
+# This file is the DETERMINISTIC INPUT to the installer. It represents every
+# decision the interactive BOOTSTRAP.md wizard would otherwise collect by
+# interview. Given an identical config file, `bootstrap-install` produces a
+# byte-for-byte identical .claude/ tree.
+#
+# The wizard's remaining job (the part that genuinely needs a human) shrinks to
+# producing/validating this file. The installer does everything mechanical.
+#
+# Every field below maps to a specific BOOTSTRAP.md phase decision. Phase refs
+# are noted in comments.
+# =============================================================================
+
+# ---- Phase 0: Preflight & Classification -----------------------------------
+project:
+  name: "my-project"
+  # One of the BOOTSTRAP.md archetypes. Drives hook/principle/CI defaults.
+  # cli | library | service | fullstack | mobile | data-ml | ai-agent
+  #   | platform | other
+  archetype: "service"
+  # Detected or declared. posix-sh assumed if unset; affects hook shebangs.
+  shell: "bash"
+  # PRD tier the wizard settled on: micro | standard | full
+  prd_tier: "standard"
+  prd_path: "docs/prd/PRD.md"
+  # Phase 0 CI/CD opt-out flag.
+  cicd_opt_out: false
+
+# ---- Phase 0: Autonomous-mode opt-in flags ---------------------------------
+# All default false. Phase 9.7 (queue) requires at least one of loop/goal.
+autonomous_modes:
+  loop_mode_enabled: false
+  goal_supervised_mode_enabled: false
+  queue_mode_enabled: false
+
+# ---- Phase 4: Principles ----------------------------------------------------
+# If empty, installer fills the archetype's starter set from BOOTSTRAP.md
+# Phase 4 step 2. Provide your own to override entirely.
+principles:
+  ranked: []          # e.g. ["Clear errors over silent fallbacks", ...]
+  tiebreakers: []     # e.g. ["DRY vs YAGNI: prefer YAGNI until 3rd duplication"]
+  # off | encouraged | required  (required wires the TDD gate in Phase 6)
+  tdd_policy: "encouraged"
+
+# ---- Phase 2.7: Secrets policy ---------------------------------------------
+secrets:
+  enabled: true
+  never_read_paths:
+    - ".env*"
+    - "secrets/**"
+    - "*.pem"
+    - "*.key"
+  rotation_policy: "Rotate any exposed credential immediately; never echo to output."
+
+# ---- Phase 2.5: Dependency policy ------------------------------------------
+deps:
+  enabled: true
+  approved: []        # package names pre-approved; gate blocks anything else
+
+# ---- Phase 6: Hooks ---------------------------------------------------------
+# Each hook can be force-disabled here. Defaults follow archetype + the flags
+# above (e.g. tdd_gate only if tdd_policy == required; eval_gate only for
+# ai-agent; loop-cooperation hooks only if loop/goal enabled).
+hooks:
+  spec_gate_entry: true
+  spec_gate_commit: true
+  secrets_gate: true
+  test_gate: true
+  format_lint_gate: true
+  ci_mirror: true
+  cost_log: true
+  tdd_gate: null            # null = derive from tdd_policy
+  dependency_gate: true
+  eval_gate: null           # null = derive from archetype (ai-agent only)
+  drift_detector: true
+  task_done_alarm: true
+  decision_required_alarm: true
+  # Drift thresholds (Phase 6.E config defaults)
+  drift_tool_call_threshold: 50
+  drift_session_duration_minutes: 120
+  drift_file_read_threshold: 3
+
+# Commands that run the project's gates. The installer cannot guess these;
+# the wizard fills them from Phase 2/5. Empty strings produce a TODO marker
+# in the hook so it fails loud rather than silently passing.
+commands:
+  test: ""              # e.g. "pytest -q"
+  lint: ""              # e.g. "ruff check ."
+  format: ""            # e.g. "ruff format ."
+  typecheck: ""         # e.g. "mypy ."
+  ci_local: ""          # e.g. "make ci"
+
+# ---- Phase 6.5: Tools & MCP -------------------------------------------------
+mcp:
+  servers: []           # [{name: "github", command: "npx -y @modelcontextprotocol/server-github"}]
+  rejected: []           # [{name: "linear", reason: "specs are source of truth"}]
+
+# ---- Phase 7: Skills/commands/agents ---------------------------------------
+# These are largely fixed by the protocol; toggles exist for completeness.
+workflow:
+  install_skills: true
+  install_commands: true
+  install_agents: true
+  implementer_model: "sonnet"
+  reviewer_model: "opus"
+  integrator_model: "inherit"

@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""bootstrap-interview - the decision layer of the Project Bootstrap Protocol.
+
+Reads a PRD and PROPOSES a bootstrap.config.yaml for human approval. It never
+decides silently and never guesses the project's test/lint/format commands.
+
+Usage:
+  bootstrap-interview analyze     --prd docs/prd/PRD.md [-o bootstrap.interview.md]
+  bootstrap-interview synthesize  [-i bootstrap.interview.md] [-o bootstrap.config.yaml]
+  bootstrap-interview interactive --prd docs/prd/PRD.md [-o bootstrap.config.yaml]
+
+`analyze` + `synthesize` is the deterministic, reviewable two-pass flow.
+`interactive` is a live stdin Q&A over the same proposal core.
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "lib"))
+
+from interview import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
