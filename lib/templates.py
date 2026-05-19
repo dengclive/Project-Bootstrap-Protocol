@@ -1140,6 +1140,258 @@ def _gitignore(cfg):
 # cfg["mode"] == "retrofit". Greenfield cfgs never reach any of this
 # code (D2 golden test confirms byte-identical content tree).
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# D5 - hook-body retrofit dispatcher + preamble. Per OD-2 (operator-
+# approved): _hook_body and _HOOK_HEADER are AST-byte-identical (NOT
+# modified). _hook_dispatch is the only TEMPLATES["hook"] reassignment.
+# All runtime reads fail toward ENFORCE (T2 contract).
+#
+# Affected hooks (the only ones that need retrofit-flavor per
+# RETROFIT.md R8.A.3):
+#   - spec-gate-commit: exempt all-allowlisted commits; retrofit_active
+#     master switch for .claude/-only commits; rollout-week warn-not-block.
+#   - test-gate: rollout-week warn-not-block. (Grandfather clause for
+#     no-test modules deferred to a follow-up; rollout schedule alone
+#     covers RETROFIT.md R8.A.6 week 1-2 behavior.)
+#   - tdd-gate: exempt allowlisted src/lib paths; rollout-week warn-not-
+#     block.
+# Other hooks (secrets-gate especially): NO retrofit-flavor; greenfield
+# body is used verbatim. Secrets are catastrophic regardless of
+# retrofit status (RETROFIT.md R8.A.3 explicitly forbids retrofit-flavor
+# for secrets-gate).
+# --------------------------------------------------------------------------- #
+_RETROFIT_PREAMBLE = r'''
+# === Retrofit preamble (T2: all error paths fall through to ENFORCE) ===
+# Reads .retrofit-state.json, steering/spec-strategy.md's legacy
+# allowlist, and hooks/rollout-schedule.md's ROLLOUT_WEEK marker AT
+# RUNTIME, so updating those files changes hook behavior without re-
+# running the installer. Fail-safe defaults:
+#   - .retrofit-state.json unreadable -> retrofit_active=false (ENFORCE)
+#   - spec-strategy.md unreadable/no markers -> empty allowlist (ENFORCE)
+#   - rollout-schedule.md unreadable/no marker -> week 4+ (ENFORCE)
+RETROFIT_PROJ="${CLAUDE_PROJECT_DIR:-.}"
+RETROFIT_STATE_FILE="$RETROFIT_PROJ/.claude/.retrofit-state.json"
+RETROFIT_SPEC_STRAT="$RETROFIT_PROJ/.claude/steering/spec-strategy.md"
+RETROFIT_ROLLOUT="$RETROFIT_PROJ/.claude/hooks/rollout-schedule.md"
+
+# 1) retrofit_active — default FALSE on any read/parse failure (ENFORCE).
+RETROFIT_ACTIVE=false
+if [ -r "$RETROFIT_STATE_FILE" ]; then
+  if have_jq; then
+    _val="$(jq -r '.retrofit_active // false' "$RETROFIT_STATE_FILE" 2>/dev/null || true)"
+  else
+    _val="$(STATE_FILE="$RETROFIT_STATE_FILE" python3 - <<'PYEOF' 2>/dev/null || true
+import json, os, sys
+try:
+    with open(os.environ["STATE_FILE"]) as fh:
+        d = json.load(fh)
+    sys.stdout.write(str(bool(d.get("retrofit_active", False))).lower())
+except Exception:
+    pass
+PYEOF
+)"
+  fi
+  if [ "$_val" = "true" ]; then
+    RETROFIT_ACTIVE=true
+  fi
+fi
+
+# 2) ROLLOUT_WEEK — default 4 (steady state, all hooks BLOCK).
+RETROFIT_WEEK=4
+if [ -r "$RETROFIT_ROLLOUT" ]; then
+  _marker="$(grep -oE 'ROLLOUT_WEEK:[[:space:]]*[0-9]+' "$RETROFIT_ROLLOUT" 2>/dev/null | head -1 || true)"
+  if [ -n "$_marker" ]; then
+    _w="${_marker##*:}"
+    _w="${_w// /}"
+    case "$_w" in
+      [0-9]*) RETROFIT_WEEK="$_w" ;;
+    esac
+  fi
+fi
+
+# 3) Legacy allowlist — default empty (no exemptions, ENFORCE).
+RETROFIT_ALLOWLIST_FILE="$(mktemp 2>/dev/null || echo '')"
+if [ -n "$RETROFIT_ALLOWLIST_FILE" ]; then
+  trap 'rm -f "$RETROFIT_ALLOWLIST_FILE"' EXIT
+  if [ -r "$RETROFIT_SPEC_STRAT" ]; then
+    awk '/<!-- LEGACY_ALLOWLIST_BEGIN -->/{f=1;next} /<!-- LEGACY_ALLOWLIST_END -->/{f=0} f' \
+      "$RETROFIT_SPEC_STRAT" 2>/dev/null > "$RETROFIT_ALLOWLIST_FILE" || true
+  fi
+fi
+
+# Helper: is the given path matched by ANY allowlist pattern?
+# Globs use bash case patterns; '**' is normalized to '*' (matches the
+# secrets-gate T-1 fix). Empty path / empty allowlist -> not allowlisted.
+retrofit_is_allowlisted() {
+  local p="$1"
+  [ -z "$p" ] && return 1
+  [ -z "$RETROFIT_ALLOWLIST_FILE" ] && return 1
+  [ ! -s "$RETROFIT_ALLOWLIST_FILE" ] && return 1
+  while IFS= read -r _pat; do
+    _pat="${_pat#"${_pat%%[![:space:]]*}"}"
+    _pat="${_pat%"${_pat##*[![:space:]]}"}"
+    [ -z "$_pat" ] && continue
+    _cpat="${_pat//\*\*/*}"
+    case "$p" in
+      $_cpat) return 0 ;;
+    esac
+  done < "$RETROFIT_ALLOWLIST_FILE"
+  return 1
+}
+
+# Helper: should this hook BLOCK under the current ROLLOUT_WEEK?
+#   week 1: nothing blocks (everything warns)
+#   week 2: lint/format block
+#   week 3: + test-gate blocks
+#   week 4+: everything blocks (steady state)
+# Per RETROFIT.md R8.A.6 default schedule. Returns 0=BLOCK, 1=WARN.
+retrofit_should_block() {
+  local hname="$1"
+  case "$RETROFIT_WEEK" in
+    1) return 1 ;;
+    2) case "$hname" in format-lint-gate) return 0 ;; *) return 1 ;; esac ;;
+    3) case "$hname" in format-lint-gate|test-gate) return 0 ;; *) return 1 ;; esac ;;
+    *) return 0 ;;
+  esac
+}
+# === end retrofit preamble ===
+'''
+
+
+def _hook_body_retrofit(name: str, cfg: dict):
+    """Retrofit-flavor wrapper. For affected hooks, prepends the retrofit
+    preamble and early-exit checks to the greenfield body. For everything
+    else, returns the greenfield body unchanged. T2 contract: every
+    failure mode of the preamble reads ENFORCES (falls through to
+    greenfield) — the only paths to early exit 0 are affirmative matches.
+
+    Implementation: strips greenfield's _HOOK_HEADER (to avoid duplicate
+    set -euo pipefail + helper redefinition), then composes
+    [_HOOK_HEADER, retrofit preamble, retrofit checks, greenfield body
+    minus its _HOOK_HEADER]. The greenfield body's logic is preserved
+    verbatim and runs whenever no retrofit check early-exited.
+    """
+    greenfield = _hook_body(name, cfg)
+    if greenfield is None:
+        return None
+
+    # Only three hooks have retrofit-flavor adjustments per RETROFIT.md
+    # R8.A.3. All others pass through unchanged (including secrets-gate,
+    # which is the explicit "no retrofit-flavor" exception).
+    if name not in ("spec-gate-commit", "test-gate", "tdd-gate"):
+        return greenfield
+
+    # Strip the duplicate _HOOK_HEADER from greenfield (we keep ours).
+    if greenfield.startswith(_HOOK_HEADER):
+        gf_body = greenfield[len(_HOOK_HEADER):]
+    else:
+        # Defensive: if _hook_body ever stops prefixing _HOOK_HEADER,
+        # this returns the body unchanged rather than breaking.
+        return greenfield
+
+    if name == "spec-gate-commit":
+        checks = r'''
+HOOK_NAME=spec-gate-commit
+CMD="$(jget '.tool_input.command')"
+case "$CMD" in
+  *"git commit"*)
+    _staged="$(git diff --cached --name-only 2>/dev/null || true)"
+    # Affirmative exemption 1: retrofit_active AND all staged files under .claude/.
+    # This permits .claude/-only commits while the retrofit itself is in flight
+    # (RETROFIT.md R4 retrofit-active mode). R7 sets retrofit_active=false.
+    if [ "$RETROFIT_ACTIVE" = "true" ] && [ -n "$_staged" ]; then
+      _all_claude=true
+      while IFS= read -r _f; do
+        [ -z "$_f" ] && continue
+        case "$_f" in
+          .claude/*) ;;
+          *) _all_claude=false; break ;;
+        esac
+      done <<< "$_staged"
+      if [ "$_all_claude" = "true" ]; then
+        log "spec-gate-commit retrofit_active exempt .claude/-only commit"
+        exit 0
+      fi
+    fi
+    # Affirmative exemption 2: ALL staged files in legacy allowlist.
+    if [ -n "$_staged" ]; then
+      _all_allow=true
+      while IFS= read -r _f; do
+        [ -z "$_f" ] && continue
+        if ! retrofit_is_allowlisted "$_f"; then
+          _all_allow=false; break
+        fi
+      done <<< "$_staged"
+      if [ "$_all_allow" = "true" ]; then
+        log "spec-gate-commit all-allowlisted exempt commit"
+        exit 0
+      fi
+    fi
+    # Affirmative exemption 3: rollout-week says don't block yet.
+    if ! retrofit_should_block spec-gate-commit; then
+      log "spec-gate-commit week $RETROFIT_WEEK warn-only"
+      echo "(retrofit warn-only week $RETROFIT_WEEK) spec-gate-commit \
+would have blocked; see rollout-schedule.md" >&2
+      exit 0
+    fi
+    ;;
+esac
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    elif name == "test-gate":
+        checks = r'''
+HOOK_NAME=test-gate
+CMD="$(jget '.tool_input.command')"
+case "$CMD" in
+  *"git commit"*)
+    # Affirmative exemption: rollout-week says don't block yet
+    # (weeks 1-2 default = warn-only for test-gate).
+    if ! retrofit_should_block test-gate; then
+      log "test-gate week $RETROFIT_WEEK warn-only"
+      echo "(retrofit warn-only week $RETROFIT_WEEK) test-gate would \
+have run/blocked; see rollout-schedule.md" >&2
+      exit 0
+    fi
+    ;;
+esac
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    elif name == "tdd-gate":
+        checks = r'''
+HOOK_NAME=tdd-gate
+TARGET="$(jget '.tool_input.file_path')"
+# Affirmative exemption 1: target path is in legacy allowlist.
+if retrofit_is_allowlisted "$TARGET"; then
+  log "tdd-gate $TARGET legacy-allowlisted exempt"
+  exit 0
+fi
+# Affirmative exemption 2: rollout-week says don't block yet.
+if ! retrofit_should_block tdd-gate; then
+  log "tdd-gate week $RETROFIT_WEEK warn-only"
+  echo "(retrofit warn-only week $RETROFIT_WEEK) tdd-gate would have \
+blocked $TARGET; see rollout-schedule.md" >&2
+  exit 0
+fi
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    else:
+        # Unreachable given the guard above, but keep defensive.
+        return greenfield
+
+    return _HOOK_HEADER + _RETROFIT_PREAMBLE + checks + gf_body
+
+
+def _hook_dispatch(name: str, cfg: dict):
+    """The single TEMPLATES['hook'] reassignment per OD-2. Greenfield
+    cfgs (mode='bootstrap' or absent) hit the unmodified _hook_body
+    branch — verified byte-identical by D2 golden test."""
+    if cfg.get("mode") == "retrofit":
+        return _hook_body_retrofit(name, cfg)
+    return _hook_body(name, cfg)
+
+
 def _retrofit_inventory_readme(cfg):
     """Static pointer to the codebase-derived inventory snapshot. Per OD-5
     + non-blocking note: zero codebase-derived content (only references
@@ -1881,7 +2133,11 @@ TEMPLATES = {
     "cicd": _cicd,
     "cicd_optout": _cicd_optout,
     "tools": _tools,
-    "hook": _hook_body,
+    # D5 / OD-2: dispatch hook between greenfield and retrofit by cfg["mode"].
+    # _hook_body is preserved AST-identical; _hook_dispatch falls through
+    # to _hook_body for mode != "retrofit", so greenfield output stays
+    # byte-identical (D2 golden test confirms).
+    "hook": _hook_dispatch,
     "settings_json": _settings_json,
     "audio_config": _audio_config,
     "skills": _skills,
