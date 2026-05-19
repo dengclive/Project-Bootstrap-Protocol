@@ -920,9 +920,9 @@ def main(argv: list[str]) -> int:
 
 
 def _inventory_paths() -> list[str]:
-    """Just for the analyze summary message."""
+    """Just for the analyze summary message. README.md is excluded
+    because the installer (not the decision layer) writes it (per OD-5)."""
     return [
-        ".claude/inventory/README.md",
         ".claude/inventory/structure.md",
         ".claude/inventory/languages.md",
         ".claude/inventory/dependencies.md",

@@ -120,7 +120,103 @@ def build_plan(cfg: dict) -> list[dict]:
     # ---- gitignore fragment ----------------------------------------------- #
     add(".claude/.gitignore", TEMPLATES["gitignore"](cfg))
 
+    # ---- Retrofit overlay (single mode-gated branch, per C1) ------------- #
+    # Net AST change in build_plan: this conditional + the helper call.
+    # Greenfield cfgs never reach this branch; D2 golden test confirms
+    # greenfield output is byte-identical post-edit.
+    if cfg.get("mode") == "retrofit":
+        plan = _apply_retrofit_overlay(plan, cfg)
+
     return plan
+
+
+def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
+    """Retrofit-mode overlay: REPLACE specific greenfield entries with
+    retrofit-flavor bodies (CLAUDE.md, .gitignore, implementer.md,
+    reviewer.md) and APPEND retrofit-only artifacts (debt.md, spec-
+    strategy.md, workflow-source-of-truth.md, rollout-schedule.md, the
+    conditional steering docs, the inventory README pointer, retrofit
+    skills + commands, conditional worktree-budget).
+
+    The retrofit-flavor template functions live in lib/templates.py
+    behind their own `_retrofit_*` names; this function is the single
+    dispatch site per C1. No greenfield template fn is touched."""
+    r = cfg["retrofit"]
+
+    # Build a path -> action map for in-place replacement.
+    by_path = {a["path"]: a for a in plan}
+
+    def replace(path: str, body: str, *, mode: int = 0o644,
+                 kind: str = "file"):
+        action = {"path": path, "body": body, "mode": mode, "kind": kind}
+        by_path[path] = action
+
+    def append(path: str, body: str, *, mode: int = 0o644,
+                kind: str = "file"):
+        # Only append if not already present (idempotent overlay).
+        if path not in by_path:
+            by_path[path] = {"path": path, "body": body, "mode": mode,
+                              "kind": kind}
+
+    # REPLACE: greenfield-emitted files that need retrofit-flavor bodies.
+    replace("CLAUDE.md", TEMPLATES["retrofit_claude_md"](cfg))
+    replace(".claude/.gitignore", TEMPLATES["retrofit_gitignore"](cfg))
+    if cfg["workflow"]["install_agents"]:
+        replace(".claude/agents/implementer.md",
+                TEMPLATES["retrofit_implementer_agent"](cfg))
+        replace(".claude/agents/reviewer.md",
+                TEMPLATES["retrofit_reviewer_agent"](cfg))
+
+    # APPEND: retrofit-only artifacts.
+    append(".claude/debt.md", TEMPLATES["retrofit_debt"](cfg))
+    append(".claude/steering/spec-strategy.md",
+           TEMPLATES["retrofit_spec_strategy"](cfg))
+    append(".claude/steering/workflow-source-of-truth.md",
+           TEMPLATES["retrofit_workflow_sot"](cfg))
+    append(".claude/hooks/rollout-schedule.md",
+           TEMPLATES["retrofit_rollout_schedule"](cfg))
+    # Per OD-5: installer emits the inventory README; decision layer
+    # writes the other 10 inventory files.
+    append(".claude/inventory/README.md",
+           TEMPLATES["retrofit_inventory_readme"](cfg))
+
+    # CONDITIONAL retrofit-only artifacts.
+    if r["spec_patterns"]["boundary"]:
+        append(".claude/steering/contracts.md",
+               TEMPLATES["retrofit_contracts"](cfg))
+    if r["spec_patterns"]["migration"]:
+        append(".claude/steering/migration.md",
+               TEMPLATES["retrofit_migration"](cfg))
+    if r["regulatory_regimes"]:
+        append(".claude/steering/compliance.md",
+               TEMPLATES["retrofit_compliance"](cfg))
+    if r["codebase_size_gb"] and r["codebase_size_gb"] >= 1:
+        append(".claude/hooks/worktree-budget.md",
+               TEMPLATES["retrofit_worktree_budget"](cfg))
+
+    # APPEND retrofit skills + commands (as new files; greenfield's _skills
+    # / _commands are untouched).
+    if cfg["workflow"]["install_skills"]:
+        for skill, body in TEMPLATES["retrofit_skills"](cfg).items():
+            append(f".claude/skills/{skill}/SKILL.md", body)
+    if cfg["workflow"]["install_commands"]:
+        for cmd, body in TEMPLATES["retrofit_commands"](cfg).items():
+            append(f".claude/commands/{cmd}.md", body)
+
+    # Rebuild the plan in a deterministic order: original greenfield
+    # entries first (in their existing order, with replacements in place),
+    # then new retrofit entries (sorted by path for determinism). This
+    # preserves apply_plan's per-file ordering for greenfield-shared
+    # paths and gives retrofit-only paths a stable position.
+    out = []
+    seen: set = set()
+    for a in plan:
+        out.append(by_path[a["path"]])
+        seen.add(a["path"])
+    for path in sorted(by_path):
+        if path not in seen:
+            out.append(by_path[path])
+    return out
 
 
 # --------------------------------------------------------------------------- #

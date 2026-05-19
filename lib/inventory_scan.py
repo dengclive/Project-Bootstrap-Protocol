@@ -645,13 +645,13 @@ def render_inventory_files(inv: dict) -> dict[str, str]:
         "| Spec coverage | 0% | no specs exist yet (retrofit starting point) |\n\n"
         "**DORA performance tier:** unavailable — operator confirms.\n")
 
-    # README pointer — pure pointer, no codebase-derived content (C1/OD-5).
-    out[".claude/inventory/README.md"] = (
-        "# .claude/inventory/ — codebase audit (R0)\n\n"
-        "One-time snapshot of pre-retrofit state. Frozen at retrofit\n"
-        "time; not maintained going forward. R5/R8.E reference these\n"
-        "from the steering docs; R7 re-reads them for the equivalence\n"
-        "validation. See RETROFIT.md Phase R0 for the per-file contract.\n")
+    # NOTE: .claude/inventory/README.md is NOT written here. Per OD-5 +
+    # operator's non-blocking confirmation, the static pointer README is
+    # emitted by the installer (lib/templates._inventory_readme) so the
+    # decision-layer / installer responsibility split is clean: decision
+    # layer writes codebase-derived snapshots; installer writes the
+    # static pointer. This also avoids a content conflict when the
+    # installer re-applies (no double-writer, no SKIP).
 
     return out
 
