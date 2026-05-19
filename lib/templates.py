@@ -1224,6 +1224,14 @@ fi
 # Helper: is the given path matched by ANY allowlist pattern?
 # Globs use bash case patterns; '**' is normalized to '*' (matches the
 # secrets-gate T-1 fix). Empty path / empty allowlist -> not allowlisted.
+# Pattern semantics (verified safe under hostile inputs in the D5+D6
+# scoped review): `*` and `?` work as glob chars; literal `)` / `;` /
+# `$(...)` are treated as literal pattern content (no syntax error, no
+# command execution); `|` from a variable-expanded pattern is treated
+# as a LITERAL `|` character, NOT as case-statement alternation (bash
+# quirk — alternation only works for inline literal patterns, not for
+# expanded vars). Operator-facing implication: don't put `|` in
+# allowlist patterns; use separate lines for each path.
 retrofit_is_allowlisted() {
   local p="$1"
   [ -z "$p" ] && return 1

@@ -402,6 +402,20 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
     state.setdefault("loop_in_flight", [])
     state.setdefault("goal_in_flight", [])
     state.setdefault("queue_runs_history", [])
+    # R-2 (D5+D6 review): retrofit_active is OPERATOR-RUNTIME state.
+    # R7 sets it to false in state.json to mark retrofit complete; an
+    # installer re-apply must not overwrite that runtime decision from
+    # cfg. Same setdefault pattern as *_enabled: cfg's value is only the
+    # FIRST-WRITE default. Subsequent applies preserve what's in state.
+    state.setdefault("retrofit_active",
+                     bool(r.get("retrofit_active", True)))
+    state.setdefault("retrofit_complete", False)
+    # R-3 (D5+D6 review): R0.8 Preview & Commitment fields. The decision
+    # layer sets r08_committed=true after operator approval; the
+    # installer initializes the slot but does not flip it. Once set by
+    # the decision layer it persists across re-applies (setdefault).
+    state.setdefault("r08_committed", False)
+    state.setdefault("r08_committed_at", None)
 
     # Versioning per OD-4: both fields, both top-level.
     state.update({
@@ -425,9 +439,10 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
         "ticket_migration_disposition":
             dict(pm.get("ticket_migration", {})),
         "hybrid_review_date": pm.get("hybrid_review_date"),
-        # RETROFIT.md R0.5 / R7 retrofit-active master switch:
-        "retrofit_active": bool(r.get("retrofit_active", True)),
-        "retrofit_complete": bool(state.get("retrofit_complete", False)),
+        # NOTE: retrofit_active and retrofit_complete are operator-runtime
+        # state managed via setdefault above (R-2 fix). They are NOT
+        # overwritten by re-apply — that would silently undo R7's
+        # `retrofit_active: false` and any operator post-R7 edits.
         # RETROFIT.md R0.5 step 7 skippable decisions:
         "skip_decisions": dict(r.get("skip_decisions", {})),
     })
@@ -443,19 +458,24 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
             dict(am.get("brownfield_milestones", {})),
     }
 
-    # Defensive: never let a stale or hand-edited cfg promote a runtime
-    # *_enabled flag through the writer. The wizard NEVER enables a
-    # mode at retrofit time (RETROFIT.md "Protocol rules for the AI").
-    # An operator post-retrofit flips these in the state file directly
-    # — they are not propagated FROM the cfg's autonomous_modes.
-    # (resolve_config's retrofit branch independently rejects a cfg
-    # whose flags claim to be true; this is the second seam.)
-    if any(flags.get(k, False) for k in (
+    # R-1 (D5+D6 review): non-propagation of cfg["autonomous_modes"]
+    # *_enabled flags is guaranteed BY CONSTRUCTION above (state.update
+    # doesn't write those keys; setdefault preserves existing state.json
+    # values; cfg's autonomous_modes is never read for the *_enabled
+    # keys). resolve_config's retrofit branch is the SECOND seam (rejects
+    # cfgs whose *_enabled flags claim true). Should it somehow leak
+    # past both, surface it loudly here rather than silently — the
+    # operator needs to know the cfg is malformed.
+    bad_flags = [k for k in (
             "loop_mode_enabled", "goal_supervised_mode_enabled",
-            "queue_mode_enabled")):
-        # Should be unreachable in practice (resolve_config blocks),
-        # but keep defensive: do NOT propagate cfg's flags up.
-        pass
+            "queue_mode_enabled") if flags.get(k, False)]
+    if bad_flags:
+        print(
+            f"warning: retrofit cfg attempted to enable {bad_flags} "
+            f"(scaffold-but-defer rule violated); state file's "
+            f"*_enabled flags left at their preserved/false values. "
+            f"resolve_config should reject this case — please file a "
+            f"bug if you see this warning.", file=sys.stderr)
 
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, indent=2) + "\n")
