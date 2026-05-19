@@ -32,7 +32,9 @@ from defaults import resolve_config    # archetype defaults + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
+RETROFIT_STATE = ".claude/.retrofit-state.json"
 PROTOCOL_VERSION = "1.9.0"
+RETROFIT_PROTOCOL_VERSION = "1.6.2"
 INSTALLER_VERSION = "1.0.0"
 
 
@@ -290,7 +292,13 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         })
 
     if not dry:
-        _write_state(root, cfg, manifest)
+        # D6 / C1: single cfg["mode"] dispatch at the state-write site.
+        # _write_state is AST-byte-identical; _write_retrofit_state is a
+        # sibling. Greenfield path is point-equivalent to the prior code.
+        if cfg.get("mode") == "retrofit":
+            _write_retrofit_state(root, cfg, manifest)
+        else:
+            _write_state(root, cfg, manifest)
         (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
 
     return summary
@@ -332,6 +340,123 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     state.setdefault("queue_runs_history", [])
     state.setdefault("deferred_items", {})
     state.setdefault("skippable_phase_decisions", {})
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
+    """Write .claude/.retrofit-state.json in the B5-frozen shape from
+    RETROFIT-COMPANION v1.6.2:
+
+    TOP-LEVEL (matching BOOTSTRAP's .bootstrap-state.json shape, so any
+    BOOTSTRAP runtime tooling that reads the state file post-retrofit
+    finds the flags where BOOTSTRAP puts them):
+      - the three *_enabled flags (loop_mode_enabled,
+        goal_supervised_mode_enabled, queue_mode_enabled). These are
+        PINNED FALSE at retrofit time regardless of operator opt-in
+        (resolve_config's retrofit branch rejects any cfg that tries to
+        flip them; this writer enforces the same rule even if a hand-
+        edited cfg slipped past).
+      - the three in-flight lists (loop_in_flight, goal_in_flight,
+        queue_runs_history), initialized once, never clobbered.
+
+    NESTED UNDER `autonomous_modes` (the only RETROFIT-novel fields,
+    with no BOOTSTRAP counterpart):
+      - *_opted_in intent flags
+      - brownfield_milestones object
+
+    Plus retrofit-specific top-level fields from RETROFIT.md
+    R0.5/R0.7/R7: archetype + confidence + evidence, prd_tier_target,
+    ci_cd_applicability, pm_strategy + tool + role + migration
+    disposition, skip_decisions, retrofit_active, retrofit_complete,
+    r08_committed. bootstrap_protocol_version reuses the same constant
+    the greenfield writer uses (OD-4 condition); retrofit_protocol_
+    version records the RETROFIT protocol revision targeted.
+
+    Per C1: this is a SIBLING function. _write_state is NOT modified.
+    The dispatch decision lives at the single cfg["mode"] branch at the
+    apply_plan call site below.
+    """
+    r = cfg.get("retrofit", {})
+    proj = cfg.get("project", {})
+    flags = cfg.get("autonomous_modes", {})
+    pm = r.get("pm", {})
+    am = r.get("autonomous_modes", {})
+
+    state_path = root / RETROFIT_STATE
+    state: dict = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text())
+        except Exception:
+            state = {}
+
+    # B5 rule: *_enabled MUST be false at retrofit time. The wizard
+    # scaffolds but never enables; if a stale state file has them true,
+    # do NOT clobber that runtime decision (an operator may have
+    # post-retrofit flipped them after the brownfield milestone went
+    # green). On first write only, initialize to false.
+    state.setdefault("loop_mode_enabled", False)
+    state.setdefault("goal_supervised_mode_enabled", False)
+    state.setdefault("queue_mode_enabled", False)
+    state.setdefault("loop_in_flight", [])
+    state.setdefault("goal_in_flight", [])
+    state.setdefault("queue_runs_history", [])
+
+    # Versioning per OD-4: both fields, both top-level.
+    state.update({
+        "bootstrap_protocol_version": PROTOCOL_VERSION,
+        "retrofit_protocol_version": RETROFIT_PROTOCOL_VERSION,
+        "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
+        "installed_at": manifest["generated_at"],
+        "deterministic_install": True,
+        # RETROFIT.md R0.5 step 8 schema:
+        "archetype": proj.get("archetype"),
+        "archetype_proposed": proj.get("archetype"),
+        "archetype_confidence": r.get("archetype_confidence", "low"),
+        "archetype_evidence": list(r.get("archetype_evidence", [])),
+        "synthetic_profile": dict(r.get("synthetic_profile", {})),
+        "prd_tier_target": r.get("prd_tier_target", proj.get("prd_tier")),
+        "ci_cd_applicability": r.get("ci_cd_applicability", "unknown"),
+        # RETROFIT.md R0.7 PM strategy fields:
+        "pm_strategy": pm.get("strategy"),
+        "pm_tool": pm.get("tool"),
+        "pm_tool_role_after": pm.get("tool_role_after"),
+        "ticket_migration_disposition":
+            dict(pm.get("ticket_migration", {})),
+        "hybrid_review_date": pm.get("hybrid_review_date"),
+        # RETROFIT.md R0.5 / R7 retrofit-active master switch:
+        "retrofit_active": bool(r.get("retrofit_active", True)),
+        "retrofit_complete": bool(state.get("retrofit_complete", False)),
+        # RETROFIT.md R0.5 step 7 skippable decisions:
+        "skip_decisions": dict(r.get("skip_decisions", {})),
+    })
+
+    # B5 nested fields: autonomous_modes.*_opted_in + brownfield_milestones.
+    state["autonomous_modes"] = {
+        "loop_mode_opted_in": bool(am.get("loop_mode_opted_in", False)),
+        "goal_supervised_mode_opted_in":
+            bool(am.get("goal_supervised_mode_opted_in", False)),
+        "queue_mode_opted_in":
+            bool(am.get("queue_mode_opted_in", False)),
+        "brownfield_milestones":
+            dict(am.get("brownfield_milestones", {})),
+    }
+
+    # Defensive: never let a stale or hand-edited cfg promote a runtime
+    # *_enabled flag through the writer. The wizard NEVER enables a
+    # mode at retrofit time (RETROFIT.md "Protocol rules for the AI").
+    # An operator post-retrofit flips these in the state file directly
+    # — they are not propagated FROM the cfg's autonomous_modes.
+    # (resolve_config's retrofit branch independently rejects a cfg
+    # whose flags claim to be true; this is the second seam.)
+    if any(flags.get(k, False) for k in (
+            "loop_mode_enabled", "goal_supervised_mode_enabled",
+            "queue_mode_enabled")):
+        # Should be unreachable in practice (resolve_config blocks),
+        # but keep defensive: do NOT propagate cfg's flags up.
+        pass
+
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, indent=2) + "\n")
 
