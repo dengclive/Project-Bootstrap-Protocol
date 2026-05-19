@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""bin/retrofit-interview - decision layer for the retrofit installer.
+
+Reads an existing codebase and PROPOSES a bootstrap.config.yaml (with
+mode: retrofit) for human approval. Mirrors bin/bootstrap-interview's
+shape; never decides silently; proposes project commands with confidence
+(OD-3); honors RETROFIT.md scaffold-but-defer for autonomous modes.
+
+Usage:
+  retrofit-interview scan         [-C projectdir]
+  retrofit-interview analyze      [-C projectdir] [-o bootstrap.interview.md]
+  retrofit-interview synthesize   [-C projectdir]
+                                  [-i bootstrap.interview.md]
+                                  [-o bootstrap.config.yaml]
+  retrofit-interview interactive  [-C projectdir]
+                                  [-o bootstrap.config.yaml]
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "lib"))
+
+from retrofit_interview import main  # noqa: E402
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -66,6 +66,22 @@ PRINCIPLE_STARTERS = {
     ],
 }
 
+# --------------------------------------------------------------------------- #
+# Retrofit-mode enums and defaults (additive; greenfield path is untouched -
+# the retrofit branch in resolve_config runs only when cfg["mode"] == "retrofit"
+# and the D2 golden test asserts greenfield output is byte-identical).
+# --------------------------------------------------------------------------- #
+MODES = {"bootstrap", "retrofit"}
+
+RETROFIT_SPEC_STRATEGIES = {"forward-only", "touch-based", "bulk"}
+RETROFIT_PM_STRATEGIES = {"spec_canonical", "pm_canonical", "hybrid"}
+RETROFIT_ARCHETYPE_CONFIDENCES = {"high", "medium", "low"}
+RETROFIT_PM_TOOLS = {"linear", "jira", "github_issues", "tickets_dir", "none"}
+RETROFIT_PM_TOOL_ROLES_AFTER = {
+    "removed", "bridge_only", "community_facing", "hybrid_transitional",
+}
+RETROFIT_CI_CD_APPLICABILITY = {"yes", "no", "unknown"}
+
 # Base hook set (Phase 6 "all" hooks). Conditional ones added in resolve.
 BASE_HOOKS = [
     "spec-gate-entry",
@@ -95,6 +111,62 @@ def _deep_default(dst: dict, src: dict) -> dict:
         elif isinstance(v, dict) and isinstance(dst.get(k), dict):
             _deep_default(dst[k], v)
     return dst
+
+
+# --------------------------------------------------------------------------- #
+# Retrofit defaults. Applied ONLY when cfg["mode"] == "retrofit"; greenfield
+# configs never see these. The shape mirrors RETROFIT.md v1.6.2's R0.5/R0.7/
+# R4/R8.A.6/R8.G-I requirements. Decision layer (lib/retrofit_interview.py)
+# populates everything from inventory; resolve_config just fills absent keys.
+# --------------------------------------------------------------------------- #
+RETROFIT_DEFAULTS = {
+    "state_path": ".claude/inventory",
+    "archetype_confidence": "low",
+    "archetype_evidence": [],
+    "synthetic_profile": {},
+    "prd_tier_target": "standard",
+    "ci_cd_applicability": "unknown",
+    "spec_strategy": "forward-only",
+    "legacy_allowlist": [],
+    "retrofit_active": True,
+    "spec_patterns": {
+        "change": True, "boundary": False, "migration": False,
+    },
+    "pm": {
+        "strategy": "spec_canonical",
+        "tool": "none",
+        "tool_role_after": "removed",
+        "ticket_migration": {
+            "convert_now": [], "defer": [], "close": [],
+        },
+        "hybrid_review_date": None,
+    },
+    "regulatory_regimes": [],
+    "codebase_size_gb": 0,
+    "autonomous_modes": {
+        "loop_mode_opted_in": False,
+        "goal_supervised_mode_opted_in": False,
+        "queue_mode_opted_in": False,
+        "brownfield_milestones": {
+            "rollout_steady_state_spec_test_gate": False,
+            "rollout_steady_state_all_hooks": False,
+            "touch_based_specs_under_blocking_gates": 0,
+            "touch_based_specs_threshold": 10,
+            "legacy_allowlist_size_at_retrofit": None,
+            "legacy_allowlist_current_size": None,
+            "legacy_allowlist_shrink_threshold_pct": 25,
+            "mode_selection_ledger_entries": 0,
+            "weeks_real_per_task_operation_post_blocking": 0,
+        },
+    },
+    "debt": {"entries": []},
+    "inventory_summary": {
+        "has_prior_claude": False,
+        "has_root_claude_md": False,
+        "danger_zone_count": 0,
+        "no_test_module_count": 0,
+    },
+}
 
 
 DEFAULTS = {
@@ -136,6 +208,16 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     if "project" not in cfg or "name" not in cfg.get("project", {}):
         errors.append("project.name is required")
     _deep_default(cfg, DEFAULTS)
+
+    # mode: default "bootstrap" preserves byte-identity of every existing
+    # config (greenfield-as-of-pre-retrofit-installer cfgs implicitly carry
+    # this default). Retrofit configs declare mode: "retrofit" and trigger
+    # the retrofit branch below.
+    mode = cfg.get("mode", "bootstrap")
+    if mode not in MODES:
+        errors.append(f"mode must be one of {sorted(MODES)}; got {mode!r}")
+        return cfg, errors
+    cfg["mode"] = mode
 
     arche = cfg["project"].get("archetype")
     if arche not in ARCHETYPES:
@@ -216,5 +298,71 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     cfg["_command_warnings"] = [
         name for name in ("test", "lint", "format")
         if not cmds.get(name)]
+
+    # ---- Retrofit-mode: fill defaults + validate retrofit invariants ----- #
+    # Runs only when mode == "retrofit". Greenfield path is byte-identical
+    # because (a) nothing above this point reads cfg["retrofit"], (b) the
+    # `mode` field is the only addition to greenfield cfg and is not read
+    # by any template fn (verified by D2 golden test).
+    if mode == "retrofit":
+        cfg.setdefault("retrofit", {})
+        _deep_default(cfg["retrofit"], RETROFIT_DEFAULTS)
+        r = cfg["retrofit"]
+
+        if r["spec_strategy"] not in RETROFIT_SPEC_STRATEGIES:
+            errors.append(
+                f"retrofit.spec_strategy must be one of "
+                f"{sorted(RETROFIT_SPEC_STRATEGIES)}; got "
+                f"{r['spec_strategy']!r}")
+        if r["pm"]["strategy"] not in RETROFIT_PM_STRATEGIES:
+            errors.append(
+                f"retrofit.pm.strategy must be one of "
+                f"{sorted(RETROFIT_PM_STRATEGIES)}; got "
+                f"{r['pm']['strategy']!r}")
+        if r["pm"]["tool"] not in RETROFIT_PM_TOOLS:
+            errors.append(
+                f"retrofit.pm.tool must be one of "
+                f"{sorted(RETROFIT_PM_TOOLS)}; got {r['pm']['tool']!r}")
+        if r["pm"]["tool_role_after"] not in RETROFIT_PM_TOOL_ROLES_AFTER:
+            errors.append(
+                f"retrofit.pm.tool_role_after must be one of "
+                f"{sorted(RETROFIT_PM_TOOL_ROLES_AFTER)}; got "
+                f"{r['pm']['tool_role_after']!r}")
+        if r["ci_cd_applicability"] not in RETROFIT_CI_CD_APPLICABILITY:
+            errors.append(
+                f"retrofit.ci_cd_applicability must be one of "
+                f"{sorted(RETROFIT_CI_CD_APPLICABILITY)}; got "
+                f"{r['ci_cd_applicability']!r}")
+        if r["archetype_confidence"] not in RETROFIT_ARCHETYPE_CONFIDENCES:
+            errors.append(
+                f"retrofit.archetype_confidence must be one of "
+                f"{sorted(RETROFIT_ARCHETYPE_CONFIDENCES)}; got "
+                f"{r['archetype_confidence']!r}")
+
+        # B5: the runtime *_enabled flags MUST be false at retrofit time
+        # regardless of operator opt-in. The wizard scaffolds but defers.
+        # Enforced here because the installer cannot trust a hand-edited cfg
+        # to honour the rule on its own. (Opt-in intent lives in
+        # cfg["retrofit"]["autonomous_modes"]["*_opted_in"]; enable flags
+        # live in cfg["autonomous_modes"] and must stay false.)
+        for flag in ("loop_mode_enabled", "goal_supervised_mode_enabled",
+                     "queue_mode_enabled"):
+            if cfg["autonomous_modes"].get(flag):
+                errors.append(
+                    f"autonomous_modes.{flag} must be false at retrofit "
+                    f"time (RETROFIT v1.6.2 scaffold-but-defer rule). "
+                    f"Record opt-in intent in "
+                    f"retrofit.autonomous_modes.{flag.replace('_enabled', '_opted_in')} "
+                    f"instead; the operator flips *_enabled post-retrofit "
+                    f"after the brownfield trust milestone is green.")
+
+        # Warn-not-fail: migration spec pattern without a non-empty legacy
+        # allowlist usually means nothing to strangle.
+        cfg["_retrofit_warnings"] = []
+        if r["spec_patterns"]["migration"] and not r["legacy_allowlist"]:
+            cfg["_retrofit_warnings"].append(
+                "retrofit.spec_patterns.migration is true but "
+                "retrofit.legacy_allowlist is empty - migration specs "
+                "usually presuppose legacy code to strangle. Confirm.")
 
     return cfg, errors
