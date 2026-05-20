@@ -197,6 +197,17 @@ def answers_to_config(ans: dict, proposal: dict) -> dict:
             "spec_strategy": ans["spec_strategy"],
             "legacy_allowlist": list(ans["legacy_allowlist"]),
             "retrofit_active": True,
+            # Round-3 review (Lens C1): the decision layer is the writer
+            # for the R0.8 commit gate. answers_to_config is reached only
+            # after the operator either (a) committed at R0.8 → True, or
+            # (b) skipped R0.8 at R0.5 step 7 → skip_decisions.r08 set.
+            # Synthesize ans-driven; default-true reflects the "proceed"
+            # branch (the interactive flow gates on this before reaching
+            # synthesize). The installer's resolve_config gate (Lens C2)
+            # rejects any cfg where this is false and r08 wasn't skipped.
+            "r08_committed": bool(ans.get("r08_committed", True)),
+            "r08_committed_at": ans.get("r08_committed_at"),
+            "skip_decisions": dict(ans.get("skip_decisions", {})),
             "spec_patterns": _derive_spec_patterns(
                 ans["archetype"], ans["spec_strategy"]),
             "pm": {

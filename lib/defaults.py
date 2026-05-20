@@ -129,6 +129,14 @@ RETROFIT_DEFAULTS = {
     "spec_strategy": "forward-only",
     "legacy_allowlist": [],
     "retrofit_active": True,
+    # Round-3 review (Lens C2): R0.8 commit gate. Default false; wizard
+    # sets true after the operator approves the R0.8 preview. The
+    # installer refuses to write artifacts unless this is true OR
+    # skip_decisions.r08 is true (operator opted out of R0.8 at R0.5
+    # step 7). RETROFIT.md R0.8 step 7: "no .claude/ artifacts are
+    # written from this point forward" after cancel.
+    "r08_committed": False,
+    "r08_committed_at": None,
     "spec_patterns": {
         "change": True, "boundary": False, "migration": False,
     },
@@ -415,6 +423,25 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
         if _rf_am.get("goal_supervised_mode_opted_in"):
             if "iteration-summary-enforcement" not in cfg["_resolved_hooks"]:
                 cfg["_resolved_hooks"].append("iteration-summary-enforcement")
+
+        # Round-3 review (Lens C2) — R0.8 commit gate. The spec at
+        # RETROFIT.md R0.8 step 7 forbids any .claude/ artifact write
+        # after operator cancel. The wizard sets cfg.retrofit.r08_committed
+        # = true after R0.5/R0.7/R0.8 reach proceed; the installer
+        # rejects an unconfirmed cfg here. skip_decisions.r08 is the
+        # explicit operator opt-out at R0.5 step 7 (RETROFIT R0.5
+        # skippable-decisions row).
+        if not r.get("skip_decisions", {}).get("r08"):
+            if r.get("r08_committed") is not True:
+                errors.append(
+                    "retrofit.r08_committed must be True before "
+                    "bootstrap-install may write artifacts "
+                    "(RETROFIT R0.8 step 7 — cancel preserves "
+                    "state but writes no .claude/ artifacts). "
+                    "Either set retrofit.r08_committed: true (the "
+                    "wizard does this at R0.8 proceed) or set "
+                    "retrofit.skip_decisions.r08: true (the "
+                    "operator opted out of R0.8 at R0.5 step 7).")
 
         # Round-2 review, Lens 1.3 — R0.7 hybrid_review_date is
         # conditional-required when pm_strategy == "hybrid". RETROFIT.md

@@ -85,6 +85,7 @@ retrofit:
     - "src/**"
     - "tests/**"
   retrofit_active: true
+  r08_committed: true
 """
 
 AGENT_RETROFIT_CFG = """mode: "retrofit"
@@ -109,6 +110,7 @@ retrofit:
     - "src/**"
     - "prompts/**"
   retrofit_active: true
+  r08_committed: true
   archetype_confidence: "high"
   archetype_evidence:
     - "anthropic dep"
@@ -1326,6 +1328,162 @@ check("15.1: legacy_allowlist reorder produces stable plan digest "
 # Even if order-sensitive, two literally-identical cfgs digest equally:
 check("15.2: identical-order plan digests are equal (determinism baseline)",
       plan_digest(cfg15a) == plan_digest(cfg15a))
+
+# Round-3 review (Lens E5): debt entries sort key-deterministically.
+# Two cfgs with the same debt content in different order should produce
+# the SAME debt.md (sort by severity, then discovered, then what).
+# Built in Python (minyaml doesn't support multi-key list items).
+cfg15c, _ = cfg_from(SERVICE_RETROFIT_CFG)
+cfg15d, _ = cfg_from(SERVICE_RETROFIT_CFG)
+cfg15c["retrofit"]["debt"] = {"entries": [
+    {"what": "A bad thing", "severity": "low",
+     "discovered": "2026-01-01"},
+    {"what": "B worse thing", "severity": "high",
+     "discovered": "2026-02-01"},
+]}
+cfg15d["retrofit"]["debt"] = {"entries": [
+    # Same two entries, reverse order.
+    {"what": "B worse thing", "severity": "high",
+     "discovered": "2026-02-01"},
+    {"what": "A bad thing", "severity": "low",
+     "discovered": "2026-01-01"},
+]}
+check("15.3: debt entries reorder -> identical debt.md "
+      "(sort by severity/discovered/what)",
+      plan_digest(cfg15c) == plan_digest(cfg15d))
+# And severity is the primary sort key — high before low.
+_plan_c = build_plan(cfg15c)
+_debt_action_c = next(a for a in _plan_c
+                       if a["path"] == ".claude/debt.md")
+_idx_high = _debt_action_c["body"].find("B worse thing")
+_idx_low = _debt_action_c["body"].find("A bad thing")
+check("15.4: debt.md renders high severity before low (sort key)",
+      0 < _idx_high < _idx_low)
+
+# --------------------------------------------------------------------------- #
+# 16. Round-3 review — r08_committed gate (Lens C2) + dual-shape G1 cases +
+#     scaffold-but-defer wrapper guard (Lens A3+B2) +
+#     bash -n coverage on .claude/*.sh wrappers (Lens E6)
+# --------------------------------------------------------------------------- #
+print("\n=== Section 16: Round-3 r08 gate / G1 extension / wrapper guard ===")
+
+# (16.1) cfg without r08_committed and no skip_decisions.r08 -> REJECTED.
+_no_r08 = SERVICE_RETROFIT_CFG.replace(
+    "  r08_committed: true\n", "")
+_, errs16a = cfg_from(_no_r08)
+check("16.1: cfg without r08_committed (default false) "
+      "-> REJECTED",
+      any("r08_committed" in e and "must be True" in e
+          for e in errs16a))
+
+# (16.2) cfg with skip_decisions.r08: true + r08_committed: false -> VALIDATES.
+_skip_r08 = SERVICE_RETROFIT_CFG.replace(
+    "  r08_committed: true\n",
+    "  r08_committed: false\n  skip_decisions:\n    r08: true\n")
+_, errs16b = cfg_from(_skip_r08)
+check("16.2: skip_decisions.r08: true + r08_committed: false -> VALIDATES",
+      not any("r08_committed" in e for e in errs16b),
+      f"errors={errs16b}")
+
+# (16.3-16.5) G1: dual-shape validator catches *_in_flight + queue_runs_history
+# wrong-shape, extending §14's *_enabled / *_opted_in / brownfield coverage.
+_wrong_in_flight_loop = SERVICE_RETROFIT_CFG.replace(
+    "  r08_committed: true\n",
+    "  r08_committed: true\n  autonomous_modes:\n    loop_in_flight: []\n")
+_, errs16c = cfg_from(_wrong_in_flight_loop)
+check("16.3: nested retrofit.autonomous_modes.loop_in_flight REJECTED "
+      "(wrong-shape; top-level field)",
+      any("wrong-shape" in e and "loop_in_flight" in e for e in errs16c))
+
+_wrong_in_flight_goal = SERVICE_RETROFIT_CFG.replace(
+    "  r08_committed: true\n",
+    "  r08_committed: true\n  autonomous_modes:\n    goal_in_flight: []\n")
+_, errs16d = cfg_from(_wrong_in_flight_goal)
+check("16.4: nested retrofit.autonomous_modes.goal_in_flight REJECTED",
+      any("wrong-shape" in e and "goal_in_flight" in e for e in errs16d))
+
+_wrong_queue_runs = SERVICE_RETROFIT_CFG.replace(
+    "  r08_committed: true\n",
+    "  r08_committed: true\n  autonomous_modes:\n    queue_runs_history: []\n")
+_, errs16e = cfg_from(_wrong_queue_runs)
+check("16.5: nested retrofit.autonomous_modes.queue_runs_history REJECTED",
+      any("wrong-shape" in e and "queue_runs_history" in e
+          for e in errs16e))
+
+# (16.6-16.10) Lens A3+B2: retrofit wrapper transform — state-file swap +
+# scaffold-but-defer guard. Build a retrofit project with all opt-ins and
+# inspect the emitted wrapper scripts.
+cfg_all_opt = SERVICE_RETROFIT_CFG.replace(
+    'retrofit_active: true\n  r08_committed: true',
+    'retrofit_active: true\n  r08_committed: true\n  autonomous_modes:\n'
+    '    loop_mode_opted_in: true\n'
+    '    goal_supervised_mode_opted_in: true\n'
+    '    queue_mode_opted_in: true')
+cfg_ao, _ = cfg_from(cfg_all_opt)
+plan_ao = build_plan(cfg_ao)
+_loop_sh = next(a for a in plan_ao if a["path"] == ".claude/loop.sh")
+_goal_sh = next(a for a in plan_ao
+                 if a["path"] == ".claude/goal-loop.sh")
+_auto_sh = next(a for a in plan_ao if a["path"] == ".claude/auto.sh")
+
+check("16.6: loop.sh references .retrofit-state.json (not .bootstrap-)",
+      ".retrofit-state.json" in _loop_sh["body"]
+      and ".bootstrap-state.json" not in _loop_sh["body"])
+check("16.7: loop.sh has scaffold-but-defer guard refusing "
+      "loop_mode_enabled != true",
+      "REFUSING:" in _loop_sh["body"]
+      and "loop_mode_enabled" in _loop_sh["body"])
+check("16.8: goal-loop.sh references .retrofit-state.json + has guard",
+      ".retrofit-state.json" in _goal_sh["body"]
+      and "REFUSING:" in _goal_sh["body"]
+      and "goal_supervised_mode_enabled" in _goal_sh["body"])
+check("16.9: auto.sh references .retrofit-state.json + has guard",
+      ".retrofit-state.json" in _auto_sh["body"]
+      and "REFUSING:" in _auto_sh["body"]
+      and "queue_mode_enabled" in _auto_sh["body"])
+
+# (16.10-16.13) Lens E6: bash -n coverage on the new .claude/*.sh wrappers.
+# Round-1's W-1c only iterated .claude/hooks/*.sh; the new wrappers live
+# at .claude/*.sh and were not in that loop.
+d = install(cfg_all_opt)
+try:
+    for s in ("loop.sh", "goal-loop.sh", "auto.sh"):
+        path = os.path.join(d, ".claude", s)
+        present = os.path.exists(path)
+        check(f"16.10.{s}: .claude/{s} exists post-install", present)
+        if present:
+            rc = subprocess.run(["bash", "-n", path]).returncode
+            check(f"16.11.{s}: bash -n parses .claude/{s}",
+                  rc == 0)
+            # Verify the guard runs and refuses (mode is still
+            # scaffold-but-defer — *_enabled is false in state).
+            r = subprocess.run(["bash", path, "fixture-task"],
+                                cwd=d, capture_output=True, text=True)
+            check(f"16.12.{s}: scaffold-but-defer guard refuses "
+                  f"with *_enabled false",
+                  r.returncode != 0 and "REFUSING:" in r.stderr)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (16.14-16.16) Lens A1: retrofit spec-decompose skill REPLACES greenfield
+# when any *_opted_in is true and install_skills is true.
+_decompose_action = next(a for a in plan_ao
+                          if a["path"] == ".claude/skills/spec-decompose/SKILL.md")
+check("16.14: spec-decompose is retrofit-flavor when opt-in true",
+      "Retrofit-flavor" in _decompose_action["body"]
+      and "Brownfield-eligibility classifier" in _decompose_action["body"])
+check("16.15: retrofit spec-decompose mentions loop_eligible / "
+      "goal_supervised_eligible classifier",
+      "loop_eligible" in _decompose_action["body"]
+      and "goal_supervised_eligible" in _decompose_action["body"])
+
+# When NO opt-in is true, greenfield spec-decompose is unchanged.
+cfg_no_opt, _ = cfg_from(SERVICE_RETROFIT_CFG)
+plan_no_opt = build_plan(cfg_no_opt)
+_decompose_no_opt = next(a for a in plan_no_opt
+                          if a["path"] == ".claude/skills/spec-decompose/SKILL.md")
+check("16.16: no opt-in -> greenfield spec-decompose, no retrofit flavor",
+      "Retrofit-flavor" not in _decompose_no_opt["body"])
 
 # --------------------------------------------------------------------------- #
 print(f"\n{passed} passed, {failed} failed")
