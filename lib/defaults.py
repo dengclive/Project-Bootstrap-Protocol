@@ -356,6 +356,80 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
                     f"instead; the operator flips *_enabled post-retrofit "
                     f"after the brownfield trust milestone is green.")
 
+        # Round-2 review, Lens 5.1 — structural dual-shape validator. A
+        # contributor adding a new field to the wrong half of the schema
+        # (e.g. *_enabled nested under retrofit, or *_opted_in /
+        # brownfield_milestones top-level) is the failure mode T1 pins
+        # in tests; this validator pins it at runtime too. The contract
+        # is the inverse of the B5 split.
+        _rf_am = r.get("autonomous_modes", {})
+        _top_am = cfg.get("autonomous_modes", {})
+        _wrong_in_nested = [
+            k for k in ("loop_mode_enabled",
+                        "goal_supervised_mode_enabled",
+                        "queue_mode_enabled",
+                        "loop_in_flight", "goal_in_flight",
+                        "queue_runs_history")
+            if k in _rf_am]
+        _wrong_in_top = [
+            k for k in ("loop_mode_opted_in",
+                        "goal_supervised_mode_opted_in",
+                        "queue_mode_opted_in", "brownfield_milestones")
+            if k in _top_am]
+        for k in _wrong_in_nested:
+            errors.append(
+                f"retrofit.autonomous_modes.{k} is wrong-shape: "
+                f"{k!r} belongs at top-level autonomous_modes (B5 "
+                f"dual-shape contract). Nested location is for "
+                f"*_opted_in / brownfield_milestones only.")
+        for k in _wrong_in_top:
+            errors.append(
+                f"autonomous_modes.{k} is wrong-shape: {k!r} belongs "
+                f"nested under retrofit.autonomous_modes (B5 dual-"
+                f"shape contract). Top-level is for *_enabled / "
+                f"*_in_flight / queue_runs_history only.")
+
+        # Round-2 review, Lens 1.1 — R8.I prereq parallel to greenfield's
+        # queue_mode_enabled requires loop or goal_supervised_mode_enabled
+        # (defaults.py line 232 above). Retrofit's opt-in path needs the
+        # same gate or queue scaffolding has nothing to dispatch.
+        if _rf_am.get("queue_mode_opted_in") and not (
+                _rf_am.get("loop_mode_opted_in")
+                or _rf_am.get("goal_supervised_mode_opted_in")):
+            errors.append(
+                "retrofit.autonomous_modes.queue_mode_opted_in requires "
+                "at least one of loop_mode_opted_in or "
+                "goal_supervised_mode_opted_in (RETROFIT R8.I "
+                "prereq — queue dispatches per-task wrappers; with "
+                "none scaffolded there is nothing to dispatch).")
+
+        # Round-2 review, Lens 1.1 — wire the drift-detector loop-
+        # cooperation hook on opt-in (the greenfield gate at line ~268
+        # reads *_enabled, which is pinned false at retrofit time).
+        # Same hook serves R8.G and R8.H per RETROFIT.md R8.G step 1.
+        if (_rf_am.get("loop_mode_opted_in")
+                or _rf_am.get("goal_supervised_mode_opted_in")):
+            if "drift-detector-loop-cooperation" not in cfg["_resolved_hooks"]:
+                cfg["_resolved_hooks"].append(
+                    "drift-detector-loop-cooperation")
+        if _rf_am.get("goal_supervised_mode_opted_in"):
+            if "iteration-summary-enforcement" not in cfg["_resolved_hooks"]:
+                cfg["_resolved_hooks"].append("iteration-summary-enforcement")
+
+        # Round-2 review, Lens 1.3 — R0.7 hybrid_review_date is
+        # conditional-required when pm_strategy == "hybrid". RETROFIT.md
+        # R0.7 schema says it is null if not Strategy C, present if so.
+        # An ISO-format date string is required; basic non-empty check.
+        if r["pm"]["strategy"] == "hybrid":
+            hrd = r["pm"].get("hybrid_review_date")
+            if not hrd or not isinstance(hrd, str):
+                errors.append(
+                    "retrofit.pm.hybrid_review_date is required when "
+                    "retrofit.pm.strategy == 'hybrid' (RETROFIT R0.7 "
+                    "Strategy C — the operator-set review date for "
+                    "the hybrid arrangement). Set it to an ISO date "
+                    "string (YYYY-MM-DD).")
+
         # Warn-not-fail: migration spec pattern without a non-empty legacy
         # allowlist usually means nothing to strangle.
         cfg["_retrofit_warnings"] = []

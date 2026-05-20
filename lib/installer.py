@@ -205,6 +205,43 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
         for cmd, body in TEMPLATES["retrofit_commands"](cfg).items():
             append(f".claude/commands/{cmd}.md", body)
 
+    # ---- R8.G/H/I autonomous-mode scaffolding (Round-2 review, Lens 1.1). #
+    # The greenfield gating in build_plan emits these files when top-level
+    # *_enabled is true; in retrofit mode *_enabled is pinned false (B5),
+    # so the greenfield branch skips them. RETROFIT.md R8.G/H/I requires
+    # the scaffolding to be present-but-default-disabled when the operator
+    # opted in at R0.5 step 7, so the deterministic-installer contract
+    # holds and no second tool invocation is needed post-milestone.
+    #
+    # The scaffolding bodies are the same guarded fail-safe skeletons the
+    # greenfield installer ships (RETROFIT.md R8.G step 1: "Generated as
+    # a guarded fail-safe skeleton exactly as BOOTSTRAP ships it"). The
+    # claude -p iteration loop is operator-completed per the trust ramp.
+    am = r.get("autonomous_modes", {})
+    loop_in = bool(am.get("loop_mode_opted_in"))
+    goal_in = bool(am.get("goal_supervised_mode_opted_in"))
+    queue_in = bool(am.get("queue_mode_opted_in"))
+
+    if loop_in:
+        # R8.G — Autonomous Loop Mode
+        append(".claude/loop.sh", TEMPLATES["loop_sh"](cfg), mode=0o755)
+        append(".claude/loop-config.md", TEMPLATES["loop_config"](cfg))
+    if goal_in:
+        # R8.H — Goal-Supervised Mode
+        append(".claude/goal-loop.sh", TEMPLATES["goal_loop_sh"](cfg),
+               mode=0o755)
+        append(".claude/goal-config.md", TEMPLATES["goal_config"](cfg))
+        # R8.H step 1 calibration ledger (retrofit-specific seed).
+        append("learnings/mode-selection.md",
+               TEMPLATES["retrofit_mode_selection_ledger"](cfg))
+    if queue_in:
+        # R8.I — Autonomous Queue Mode. The R8.I-requires-loop-or-goal
+        # gate is enforced upstream in resolve_config's retrofit branch
+        # (mirroring the existing top-level *_enabled gate in defaults).
+        append(".claude/queue/backlog.md", TEMPLATES["backlog"](cfg))
+        append(".claude/auto-config.md", TEMPLATES["auto_config"](cfg))
+        append(".claude/auto.sh", TEMPLATES["auto_sh"](cfg), mode=0o755)
+
     # Rebuild the plan in a deterministic order: original greenfield
     # entries first (in their existing order, with replacements in place),
     # then new retrofit entries (sorted by path for determinism). This

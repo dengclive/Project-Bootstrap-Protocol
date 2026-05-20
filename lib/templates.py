@@ -1960,8 +1960,60 @@ def _retrofit_commands(cfg) -> dict:
 
 def _retrofit_implementer_agent(cfg):
     """Retrofit-flavor implementer (override of greenfield). Adds pin-
-    first discipline + danger-zone awareness per RETROFIT R8.C."""
+    first discipline + danger-zone awareness per RETROFIT R8.C.
+
+    Round-2 review (Lens 1.1): when `loop_mode_opted_in` or
+    `goal_supervised_mode_opted_in` is true, appends R8.G / R8.H
+    loop-mode-aware variant body per RETROFIT.md R8.G step 1 +
+    R8.H step 1.
+    """
     w = cfg["workflow"]
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    loop_in = bool(rf_am.get("loop_mode_opted_in"))
+    goal_in = bool(rf_am.get("goal_supervised_mode_opted_in"))
+
+    autonomous_section = ""
+    if loop_in or goal_in:
+        modes = []
+        if loop_in:
+            modes.append("loop")
+        if goal_in:
+            modes.append("goal-supervised")
+        modes_str = " / ".join(modes)
+        autonomous_section = (
+            f"\n5. **Autonomous-mode awareness (R8.G/H — "
+            f"{modes_str} opted in, OFF until milestone).**\n"
+            f"   When a task is running under loop or goal-supervised "
+            f"mode (sentinel `.loop-active-<task-id>` or "
+            f"`.goal-active-<task-id>` present):\n"
+            f"   - **Tier-3 self-healing end-of-turn.** Attempt up to "
+            f"three hook fixes within one turn before escalating; the "
+            f"agent owns the iteration budget, not the operator.\n"
+            f"   - **Decision-log protocol.** Non-urgent decisions go "
+            f"to `decisions-log-<task-id>.md`, not in-chat — the loop "
+            f"has no chat surface.\n"
+            f"   - **Urgent-escalation halt.** Any of the seven urgent "
+            f"escalations writes `.loop-halt-<task-id>` with a one-"
+            f"line reason and exits. The operator finds the halt "
+            f"sentinel and decides; the loop does not retry.\n"
+            f"   - **No self-verification shortcut (goal-supervised "
+            f"only).** Iteration summaries are evaluator-read; do not "
+            f"assert your own completion. The evaluator subagent "
+            f"reads `iteration-summary-<task-id>-<iter-n>.md` and "
+            f"writes `evaluator-feedback-<task-id>.md`.\n"
+            f"   - **Mutual exclusion.** A task is in EXACTLY ONE "
+            f"mode's in-flight list. The wrappers enforce this via "
+            f"the sibling-sentinel check; never edit "
+            f"`.retrofit-state.json`'s `*_in_flight` lists by hand.\n"
+            f"   - **Brownfield exclusion.** Tasks touching legacy-"
+            f"allowlist or `inventory/danger-zones.md` files are "
+            f"not-eligible by default — the `spec-decompose` "
+            f"classifier marks them `loop_eligible: false` / "
+            f"`goal_supervised_eligible: false` until the file has a "
+            f"touch-based spec (+ pinning test for danger zones). "
+            f"Operator may override per task with explicit "
+            f"acknowledgment.\n")
+
     return (f"---\nname: implementer\nmodel: {w['implementer_model']}\n"
             f"isolation: worktree\n"
             f"description: Use when an approved spec task is ready for "
@@ -1998,7 +2050,8 @@ def _retrofit_implementer_agent(cfg):
             f"4. **Worktree budget (G16):** consult "
             f"`.claude/hooks/worktree-budget.md` (if present). For "
             f"codebases over 5GB, prefer sequential to parallel "
-            f"worktrees.\n")
+            f"worktrees.\n"
+            f"{autonomous_section}")
 
 
 def _retrofit_reviewer_agent(cfg):
@@ -2034,15 +2087,58 @@ def _retrofit_reviewer_agent(cfg):
 
 def _retrofit_claude_md(cfg):
     """Override of greenfield CLAUDE.md with retrofit-specific escalation
-    criteria + retrofit-specific doc refs. Per RETROFIT R8.E.2."""
-    flags = cfg["autonomous_modes"]
+    criteria + retrofit-specific doc refs. Per RETROFIT R8.E.2.
+
+    Round-2 review (Lens 1.1): autonomous-mode addenda are gated on
+    *_opted_in (nested under cfg.retrofit.autonomous_modes), not on
+    *_enabled (which is pinned false at retrofit time per B5). The
+    pre-fix read of *_enabled meant the queue section never appeared
+    even after the operator opted in.
+    """
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    loop_in = bool(rf_am.get("loop_mode_opted_in"))
+    goal_in = bool(rf_am.get("goal_supervised_mode_opted_in"))
+    queue_in = bool(rf_am.get("queue_mode_opted_in"))
+
+    loop_section = ""
+    if loop_in:
+        loop_section = (
+            "\n## Loop mode (R8.G — scaffold-but-defer)\n\n"
+            "Loop-mode scaffolding (`loop.sh`, `loop-config.md`, the "
+            "drift-detector loop-cooperation hook, the `.loop-active-*` "
+            "session-file convention) is present but **OFF**. "
+            "`loop_mode_enabled: false` in `.retrofit-state.json`. Do "
+            "not flip to true until the R8.G brownfield milestone is "
+            "green: rollout steady-state for spec+test gates AND >=10 "
+            "touch-based specs shipped under blocking gates AND legacy "
+            "allowlist shrunk >=25% from retrofit-time size. See R7 "
+            "handoff for the exact milestone values for this project.\n")
+
+    goal_section = ""
+    if goal_in:
+        goal_section = (
+            "\n## Goal-supervised mode (R8.H — scaffold-but-defer)\n\n"
+            "Goal-supervised scaffolding (`goal-loop.sh`, "
+            "`goal-config.md`, iteration-summary enforcement hook, "
+            "`learnings/mode-selection.md` calibration ledger, the "
+            "`.goal-active-*` session-file convention) is present but "
+            "**OFF**. `goal_supervised_mode_enabled: false`. The R8.H "
+            "milestone is R8.G's three conditions PLUS >=10 real "
+            "brownfield entries in `learnings/mode-selection.md`.\n")
+
     queue_section = ""
-    if flags["queue_mode_enabled"]:
+    if queue_in:
         queue_section = (
-            "\n## Queue mode coordination layer\n\n"
+            "\n## Queue mode coordination layer (R8.I — scaffold-but-defer)\n\n"
             "`.claude/auto.sh` dispatches per-task wrappers from "
             "`.claude/queue/backlog.md`. The runner does not load this "
-            "file; the queue is the coordination surface.\n")
+            "file; the queue is the coordination surface. "
+            "`queue_mode_enabled: false`. The R8.I milestone is "
+            "R8.G's three conditions PLUS all hooks at blocking (not "
+            "just spec+test) PLUS >=4 weeks of real per-task autonomous "
+            "operation post-blocking PLUS at least one of "
+            "loop/goal-supervised actually enabled (not merely "
+            "scaffolded) at the time queue is enabled.\n")
     return f"""# CLAUDE.md (retrofit-flavor)
 
 Thin by design. Steering lives in `.claude/steering/`. Retrofit-specific
@@ -2077,7 +2173,7 @@ categorization in `tech.md` that looks wrong in light of new evidence.
 
 The escalation list is the contract. If the agent escalates outside it,
 fix steering — do not override in-session.
-{queue_section}
+{loop_section}{goal_section}{queue_section}
 ## Retrofit-specific references
 
 - `.claude/debt.md` — known issues registry (R3); retrofit does NOT fix
@@ -2122,11 +2218,49 @@ def _retrofit_gitignore(cfg):
         "inventory/.scan-cache-*",
         "sessions/.bypass-count-*",
     ]
-    if cfg["autonomous_modes"]["queue_mode_enabled"]:
+    # Round-2 review (Lens 1.1): queue scaffolding is emitted on
+    # `queue_mode_opted_in` (retrofit's scaffold-but-defer rule), not on
+    # `queue_mode_enabled` (which is pinned false at retrofit time per B5).
+    # The greenfield read of *_enabled here would have masked the queue
+    # gitignore entries even after the operator opted in, because retrofit
+    # configs always have *_enabled: false.
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    if rf_am.get("queue_mode_opted_in"):
         base += ["queue/.run-active", "queue/.halt", "queue/.resume"]
     out = ["# bootstrap-installer generated (retrofit-flavor)"]
     out.extend(base)
     return "\n".join(out) + "\n"
+
+
+def _retrofit_mode_selection_ledger(cfg):
+    """R8.H scaffolding artifact — the calibration ledger for the goal-
+    supervised classifier's recommendation rule. Per RETROFIT.md R8.H
+    step 1: 'seed it with a header note that, for a brownfield project,
+    the drift-prone-area column should be populated from
+    inventory/danger-zones.md and inventory/tribal-knowledge.md rather
+    than left empty — this codebase already KNOWS its drift-prone
+    areas, unlike greenfield.'
+    """
+    return """# Mode-selection ledger (calibration)
+
+Goal-supervised mode's `spec-decompose` recommendation rule learns from
+this file. Each entry: task id, mode chosen (operator-in-loop / loop /
+goal-supervised), drift-prone area touched (from
+`inventory/danger-zones.md` or `inventory/tribal-knowledge.md`),
+outcome, iteration count.
+
+**Brownfield seed note (RETROFIT R8.H):** the drift-prone-area column
+SHOULD be populated from `inventory/danger-zones.md` and
+`inventory/tribal-knowledge.md` — do not leave empty. The retrofit
+already produced the codebase's drift-prone-area inventory; that is
+the input the calibration rule needs.
+
+The R8.H brownfield milestone gate requires `>= 10` real brownfield
+entries here before `goal_supervised_mode_enabled: true` may be set.
+
+| task | mode | drift-prone area | outcome | iterations |
+|---|---|---|---|---|
+"""
 
 
 # Append all new retrofit entries to TEMPLATES. The greenfield entries
@@ -2177,4 +2311,6 @@ TEMPLATES = {
     "retrofit_reviewer_agent": _retrofit_reviewer_agent,
     "retrofit_claude_md": _retrofit_claude_md,
     "retrofit_gitignore": _retrofit_gitignore,
+    # Round-2 review (Lens 1.1): R8.H scaffolding artifact.
+    "retrofit_mode_selection_ledger": _retrofit_mode_selection_ledger,
 }
