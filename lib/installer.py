@@ -32,7 +32,9 @@ from defaults import resolve_config    # archetype defaults + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
+RETROFIT_STATE = ".claude/.retrofit-state.json"
 PROTOCOL_VERSION = "1.9.0"
+RETROFIT_PROTOCOL_VERSION = "1.6.2"
 INSTALLER_VERSION = "1.0.0"
 
 
@@ -120,7 +122,228 @@ def build_plan(cfg: dict) -> list[dict]:
     # ---- gitignore fragment ----------------------------------------------- #
     add(".claude/.gitignore", TEMPLATES["gitignore"](cfg))
 
+    # ---- Retrofit overlay (single mode-gated branch, per C1) ------------- #
+    # Net AST change in build_plan: this conditional + the helper call.
+    # Greenfield cfgs never reach this branch; D2 golden test confirms
+    # greenfield output is byte-identical post-edit.
+    if cfg.get("mode") == "retrofit":
+        plan = _apply_retrofit_overlay(plan, cfg)
+
     return plan
+
+
+def _retrofit_wrapper_transform(body: str, enabled_key: str) -> str:
+    """Round-3 review (Lens A3 + B2): transform a greenfield autonomous-mode
+    wrapper for retrofit-mode use.
+
+    Two transforms, both required for the scaffold-but-defer invariant:
+
+    1. **State filename swap (A3).** Greenfield wrappers reference
+       `.bootstrap-state.json`; in retrofit projects the runtime state
+       file is `.claude/.retrofit-state.json` (same B5 top-level shape,
+       different filename). Without this swap the wrapper would read
+       (or fail to find) the wrong file when the operator post-milestone
+       flips *_enabled.
+
+    2. **Scaffold-but-defer guard (B2).** RETROFIT R8.G/H/I require
+       the wrappers to be present-but-inert at retrofit time; they
+       may only run after the operator manually sets *_enabled: true
+       post-milestone. We insert a guard that reads the *_enabled
+       flag from .retrofit-state.json and refuses to run if absent
+       or false. This ALSO solves the opt-out-after-opt-in orphan
+       case: a wrapper left on disk after opt-out has *_enabled
+       still false → guard refuses → wrapper is inert.
+
+    The transform composes; greenfield body is otherwise unchanged.
+    """
+    body = body.replace("$PROJ/.claude/.bootstrap-state.json",
+                         "$PROJ/.claude/.retrofit-state.json")
+    guard = (
+        '# Retrofit scaffold-but-defer guard (RETROFIT R8.G/H/I).\n'
+        f'# Refuse to run unless {enabled_key}: true in .retrofit-state.json.\n'
+        f'# Until the brownfield milestone is met, this script is inert.\n'
+        '_RF_STATE="$PROJ/.claude/.retrofit-state.json"\n'
+        'if [ ! -r "$_RF_STATE" ]; then\n'
+        '  echo "REFUSING: .retrofit-state.json missing; scaffold-but-defer rule." >&2\n'
+        '  exit 1\n'
+        'fi\n'
+        f'if ! grep -q \'"{enabled_key}":[[:space:]]*true\' "$_RF_STATE"; then\n'
+        f'  echo "REFUSING: {enabled_key} is not true in .retrofit-state.json." >&2\n'
+        '  echo "This is a scaffold-but-defer skeleton (R8.G/H/I). Flip the flag" >&2\n'
+        '  echo "post-milestone; the wizard never enables modes at retrofit time." >&2\n'
+        '  exit 1\n'
+        'fi\n'
+    )
+    # Insert the guard immediately after the LOG line so PROJ is already
+    # defined (set -u would otherwise trip on $PROJ before assignment).
+    # The LOG=... line is identical across all three wrappers (per
+    # _per_task_wrapper + _auto_sh greenfield templates); the log()
+    # function definition that immediately follows differs by escape
+    # depth (per_task_wrapper is inside .format() so its backslashes
+    # are doubled, auto_sh is not), so we anchor on LOG=... instead.
+    anchor = 'LOG="$PROJ/.claude/logs/hooks.log"'
+    if anchor in body:
+        body = body.replace(anchor, anchor + "\n" + guard, 1)
+    else:
+        # Defensive fallback (should be unreachable): prepend after the
+        # first PROJ assignment so $PROJ is at least defined.
+        proj_anchor = 'PROJ="${CLAUDE_PROJECT_DIR:'
+        idx = body.find(proj_anchor)
+        if idx >= 0:
+            line_end = body.find("\n", idx) + 1
+            body = body[:line_end] + guard + body[line_end:]
+        else:
+            # Final fallback: prepend after set -euo pipefail.
+            body = body.replace("set -euo pipefail\n",
+                                 "set -euo pipefail\n" + guard, 1)
+    return body
+
+
+def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
+    """Retrofit-mode overlay: REPLACE specific greenfield entries with
+    retrofit-flavor bodies (CLAUDE.md, .gitignore, implementer.md,
+    reviewer.md) and APPEND retrofit-only artifacts (debt.md, spec-
+    strategy.md, workflow-source-of-truth.md, rollout-schedule.md, the
+    conditional steering docs, the inventory README pointer, retrofit
+    skills + commands, conditional worktree-budget).
+
+    The retrofit-flavor template functions live in lib/templates.py
+    behind their own `_retrofit_*` names; this function is the single
+    dispatch site per C1. No greenfield template fn is touched."""
+    r = cfg["retrofit"]
+
+    # Build a path -> action map for in-place replacement.
+    by_path = {a["path"]: a for a in plan}
+
+    def replace(path: str, body: str, *, mode: int = 0o644,
+                 kind: str = "file"):
+        action = {"path": path, "body": body, "mode": mode, "kind": kind}
+        by_path[path] = action
+
+    def append(path: str, body: str, *, mode: int = 0o644,
+                kind: str = "file"):
+        # Only append if not already present (idempotent overlay).
+        if path not in by_path:
+            by_path[path] = {"path": path, "body": body, "mode": mode,
+                              "kind": kind}
+
+    # REPLACE: greenfield-emitted files that need retrofit-flavor bodies.
+    replace("CLAUDE.md", TEMPLATES["retrofit_claude_md"](cfg))
+    replace(".claude/.gitignore", TEMPLATES["retrofit_gitignore"](cfg))
+    if cfg["workflow"]["install_agents"]:
+        replace(".claude/agents/implementer.md",
+                TEMPLATES["retrofit_implementer_agent"](cfg))
+        replace(".claude/agents/reviewer.md",
+                TEMPLATES["retrofit_reviewer_agent"](cfg))
+
+    # APPEND: retrofit-only artifacts.
+    append(".claude/debt.md", TEMPLATES["retrofit_debt"](cfg))
+    append(".claude/steering/spec-strategy.md",
+           TEMPLATES["retrofit_spec_strategy"](cfg))
+    append(".claude/steering/workflow-source-of-truth.md",
+           TEMPLATES["retrofit_workflow_sot"](cfg))
+    append(".claude/hooks/rollout-schedule.md",
+           TEMPLATES["retrofit_rollout_schedule"](cfg))
+    # Per OD-5: installer emits the inventory README; decision layer
+    # writes the other 10 inventory files.
+    append(".claude/inventory/README.md",
+           TEMPLATES["retrofit_inventory_readme"](cfg))
+
+    # CONDITIONAL retrofit-only artifacts.
+    if r["spec_patterns"]["boundary"]:
+        append(".claude/steering/contracts.md",
+               TEMPLATES["retrofit_contracts"](cfg))
+    if r["spec_patterns"]["migration"]:
+        append(".claude/steering/migration.md",
+               TEMPLATES["retrofit_migration"](cfg))
+    if r["regulatory_regimes"]:
+        append(".claude/steering/compliance.md",
+               TEMPLATES["retrofit_compliance"](cfg))
+    if r["codebase_size_gb"] and r["codebase_size_gb"] >= 1:
+        append(".claude/hooks/worktree-budget.md",
+               TEMPLATES["retrofit_worktree_budget"](cfg))
+
+    # APPEND retrofit skills + commands (as new files; greenfield's _skills
+    # / _commands are untouched).
+    if cfg["workflow"]["install_skills"]:
+        for skill, body in TEMPLATES["retrofit_skills"](cfg).items():
+            append(f".claude/skills/{skill}/SKILL.md", body)
+    if cfg["workflow"]["install_commands"]:
+        for cmd, body in TEMPLATES["retrofit_commands"](cfg).items():
+            append(f".claude/commands/{cmd}.md", body)
+
+    # ---- R8.G/H/I autonomous-mode scaffolding (Round-2 review, Lens 1.1). #
+    # The greenfield gating in build_plan emits these files when top-level
+    # *_enabled is true; in retrofit mode *_enabled is pinned false (B5),
+    # so the greenfield branch skips them. RETROFIT.md R8.G/H/I requires
+    # the scaffolding to be present-but-default-disabled when the operator
+    # opted in at R0.5 step 7, so the deterministic-installer contract
+    # holds and no second tool invocation is needed post-milestone.
+    #
+    # The scaffolding bodies are the same guarded fail-safe skeletons the
+    # greenfield installer ships (RETROFIT.md R8.G step 1: "Generated as
+    # a guarded fail-safe skeleton exactly as BOOTSTRAP ships it"). The
+    # claude -p iteration loop is operator-completed per the trust ramp.
+    am = r.get("autonomous_modes", {})
+    loop_in = bool(am.get("loop_mode_opted_in"))
+    goal_in = bool(am.get("goal_supervised_mode_opted_in"))
+    queue_in = bool(am.get("queue_mode_opted_in"))
+
+    if loop_in:
+        # R8.G — Autonomous Loop Mode
+        append(".claude/loop.sh",
+               _retrofit_wrapper_transform(TEMPLATES["loop_sh"](cfg),
+                                            "loop_mode_enabled"),
+               mode=0o755)
+        append(".claude/loop-config.md", TEMPLATES["loop_config"](cfg))
+    if goal_in:
+        # R8.H — Goal-Supervised Mode
+        append(".claude/goal-loop.sh",
+               _retrofit_wrapper_transform(TEMPLATES["goal_loop_sh"](cfg),
+                                            "goal_supervised_mode_enabled"),
+               mode=0o755)
+        append(".claude/goal-config.md", TEMPLATES["goal_config"](cfg))
+        # R8.H step 1 calibration ledger (retrofit-specific seed).
+        append("learnings/mode-selection.md",
+               TEMPLATES["retrofit_mode_selection_ledger"](cfg))
+    if queue_in:
+        # R8.I — Autonomous Queue Mode. The R8.I-requires-loop-or-goal
+        # gate is enforced upstream in resolve_config's retrofit branch
+        # (mirroring the existing top-level *_enabled gate in defaults).
+        append(".claude/queue/backlog.md", TEMPLATES["backlog"](cfg))
+        append(".claude/auto-config.md", TEMPLATES["auto_config"](cfg))
+        append(".claude/auto.sh",
+               _retrofit_wrapper_transform(TEMPLATES["auto_sh"](cfg),
+                                            "queue_mode_enabled"),
+               mode=0o755)
+
+    # ---- R3.1 (Lens A1): retrofit-flavor spec-decompose skill ----------- #
+    # The retrofit implementer.md prose tells the operator the spec-decompose
+    # classifier marks danger-zone / legacy-allowlist files not-eligible by
+    # default. Without this template, the classifier doesn't exist; the
+    # implementer would skip pin-first discipline trusting a phantom layer.
+    # Replace the greenfield SKILL.md whenever any autonomous-mode opt-in
+    # is true (it adds the brownfield-eligibility rule to greenfield's
+    # 5-criterion test).
+    if (loop_in or goal_in or queue_in) \
+            and cfg["workflow"]["install_skills"]:
+        replace(".claude/skills/spec-decompose/SKILL.md",
+                TEMPLATES["retrofit_spec_decompose"](cfg))
+
+    # Rebuild the plan in a deterministic order: original greenfield
+    # entries first (in their existing order, with replacements in place),
+    # then new retrofit entries (sorted by path for determinism). This
+    # preserves apply_plan's per-file ordering for greenfield-shared
+    # paths and gives retrofit-only paths a stable position.
+    out = []
+    seen: set = set()
+    for a in plan:
+        out.append(by_path[a["path"]])
+        seen.add(a["path"])
+    for path in sorted(by_path):
+        if path not in seen:
+            out.append(by_path[path])
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -194,7 +417,13 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         })
 
     if not dry:
-        _write_state(root, cfg, manifest)
+        # D6 / C1: single cfg["mode"] dispatch at the state-write site.
+        # _write_state is AST-byte-identical; _write_retrofit_state is a
+        # sibling. Greenfield path is point-equivalent to the prior code.
+        if cfg.get("mode") == "retrofit":
+            _write_retrofit_state(root, cfg, manifest)
+        else:
+            _write_state(root, cfg, manifest)
         (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
 
     return summary
@@ -236,6 +465,149 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     state.setdefault("queue_runs_history", [])
     state.setdefault("deferred_items", {})
     state.setdefault("skippable_phase_decisions", {})
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state, indent=2) + "\n")
+
+
+def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
+    """Write .claude/.retrofit-state.json in the B5-frozen shape from
+    RETROFIT-COMPANION v1.6.2:
+
+    TOP-LEVEL (matching BOOTSTRAP's .bootstrap-state.json shape, so any
+    BOOTSTRAP runtime tooling that reads the state file post-retrofit
+    finds the flags where BOOTSTRAP puts them):
+      - the three *_enabled flags (loop_mode_enabled,
+        goal_supervised_mode_enabled, queue_mode_enabled). These are
+        PINNED FALSE at retrofit time regardless of operator opt-in
+        (resolve_config's retrofit branch rejects any cfg that tries to
+        flip them; this writer enforces the same rule even if a hand-
+        edited cfg slipped past).
+      - the three in-flight lists (loop_in_flight, goal_in_flight,
+        queue_runs_history), initialized once, never clobbered.
+
+    NESTED UNDER `autonomous_modes` (the only RETROFIT-novel fields,
+    with no BOOTSTRAP counterpart):
+      - *_opted_in intent flags
+      - brownfield_milestones object
+
+    Plus retrofit-specific top-level fields from RETROFIT.md
+    R0.5/R0.7/R7: archetype + confidence + evidence, prd_tier_target,
+    ci_cd_applicability, pm_strategy + tool + role + migration
+    disposition, skip_decisions, retrofit_active, retrofit_complete,
+    r08_committed. bootstrap_protocol_version reuses the same constant
+    the greenfield writer uses (OD-4 condition); retrofit_protocol_
+    version records the RETROFIT protocol revision targeted.
+
+    Per C1: this is a SIBLING function. _write_state is NOT modified.
+    The dispatch decision lives at the single cfg["mode"] branch at the
+    apply_plan call site below.
+    """
+    r = cfg.get("retrofit", {})
+    proj = cfg.get("project", {})
+    flags = cfg.get("autonomous_modes", {})
+    pm = r.get("pm", {})
+    am = r.get("autonomous_modes", {})
+
+    state_path = root / RETROFIT_STATE
+    state: dict = {}
+    if state_path.exists():
+        try:
+            state = json.loads(state_path.read_text())
+        except Exception:
+            state = {}
+
+    # B5 rule: *_enabled MUST be false at retrofit time. The wizard
+    # scaffolds but never enables; if a stale state file has them true,
+    # do NOT clobber that runtime decision (an operator may have
+    # post-retrofit flipped them after the brownfield milestone went
+    # green). On first write only, initialize to false.
+    state.setdefault("loop_mode_enabled", False)
+    state.setdefault("goal_supervised_mode_enabled", False)
+    state.setdefault("queue_mode_enabled", False)
+    state.setdefault("loop_in_flight", [])
+    state.setdefault("goal_in_flight", [])
+    state.setdefault("queue_runs_history", [])
+    # R-2 (D5+D6 review): retrofit_active is OPERATOR-RUNTIME state.
+    # R7 sets it to false in state.json to mark retrofit complete; an
+    # installer re-apply must not overwrite that runtime decision from
+    # cfg. Same setdefault pattern as *_enabled: cfg's value is only the
+    # FIRST-WRITE default. Subsequent applies preserve what's in state.
+    state.setdefault("retrofit_active",
+                     bool(r.get("retrofit_active", True)))
+    state.setdefault("retrofit_complete", False)
+    # R-3 (D5+D6 review): R0.8 Preview & Commitment fields. The decision
+    # layer sets r08_committed=true after operator approval; the
+    # installer initializes the slot but does not flip it. Once set by
+    # the decision layer it persists across re-applies (setdefault).
+    # Round-3 review (Lens C2): r08_committed is now a gated cfg field
+    # (resolve_config rejects bootstrap-install runs where it isn't true
+    # AND r0.8 wasn't skipped). Source the initial value from cfg; once
+    # written to state, setdefault preserves operator-runtime decisions
+    # across re-apply.
+    state.setdefault("r08_committed",
+                     bool(r.get("r08_committed", False)))
+    state.setdefault("r08_committed_at", r.get("r08_committed_at"))
+
+    # Versioning per OD-4: both fields, both top-level.
+    state.update({
+        "bootstrap_protocol_version": PROTOCOL_VERSION,
+        "retrofit_protocol_version": RETROFIT_PROTOCOL_VERSION,
+        "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
+        "installed_at": manifest["generated_at"],
+        "deterministic_install": True,
+        # RETROFIT.md R0.5 step 8 schema:
+        "archetype": proj.get("archetype"),
+        "archetype_proposed": proj.get("archetype"),
+        "archetype_confidence": r.get("archetype_confidence", "low"),
+        "archetype_evidence": list(r.get("archetype_evidence", [])),
+        "synthetic_profile": dict(r.get("synthetic_profile", {})),
+        "prd_tier_target": r.get("prd_tier_target", proj.get("prd_tier")),
+        "ci_cd_applicability": r.get("ci_cd_applicability", "unknown"),
+        # RETROFIT.md R0.7 PM strategy fields:
+        "pm_strategy": pm.get("strategy"),
+        "pm_tool": pm.get("tool"),
+        "pm_tool_role_after": pm.get("tool_role_after"),
+        "ticket_migration_disposition":
+            dict(pm.get("ticket_migration", {})),
+        "hybrid_review_date": pm.get("hybrid_review_date"),
+        # NOTE: retrofit_active and retrofit_complete are operator-runtime
+        # state managed via setdefault above (R-2 fix). They are NOT
+        # overwritten by re-apply — that would silently undo R7's
+        # `retrofit_active: false` and any operator post-R7 edits.
+        # RETROFIT.md R0.5 step 7 skippable decisions:
+        "skip_decisions": dict(r.get("skip_decisions", {})),
+    })
+
+    # B5 nested fields: autonomous_modes.*_opted_in + brownfield_milestones.
+    state["autonomous_modes"] = {
+        "loop_mode_opted_in": bool(am.get("loop_mode_opted_in", False)),
+        "goal_supervised_mode_opted_in":
+            bool(am.get("goal_supervised_mode_opted_in", False)),
+        "queue_mode_opted_in":
+            bool(am.get("queue_mode_opted_in", False)),
+        "brownfield_milestones":
+            dict(am.get("brownfield_milestones", {})),
+    }
+
+    # R-1 (D5+D6 review): non-propagation of cfg["autonomous_modes"]
+    # *_enabled flags is guaranteed BY CONSTRUCTION above (state.update
+    # doesn't write those keys; setdefault preserves existing state.json
+    # values; cfg's autonomous_modes is never read for the *_enabled
+    # keys). resolve_config's retrofit branch is the SECOND seam (rejects
+    # cfgs whose *_enabled flags claim true). Should it somehow leak
+    # past both, surface it loudly here rather than silently — the
+    # operator needs to know the cfg is malformed.
+    bad_flags = [k for k in (
+            "loop_mode_enabled", "goal_supervised_mode_enabled",
+            "queue_mode_enabled") if flags.get(k, False)]
+    if bad_flags:
+        print(
+            f"warning: retrofit cfg attempted to enable {bad_flags} "
+            f"(scaffold-but-defer rule violated); state file's "
+            f"*_enabled flags left at their preserved/false values. "
+            f"resolve_config should reject this case — please file a "
+            f"bug if you see this warning.", file=sys.stderr)
+
     state_path.parent.mkdir(parents=True, exist_ok=True)
     state_path.write_text(json.dumps(state, indent=2) + "\n")
 

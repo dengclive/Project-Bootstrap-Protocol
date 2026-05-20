@@ -1131,8 +1131,1242 @@ def _gitignore(cfg):
 
 
 # --------------------------------------------------------------------------- #
-# Registry
+# Retrofit-mode templates (additive; greenfield path is byte-identical).
+#
+# Per OD-1 (bundled freeze exception) + C1, every function above this
+# block is AST-unmodified. The retrofit additions live below as new
+# top-level functions and new TEMPLATES entries; build_plan's single
+# retrofit-overlay branch (in installer.py) calls them when
+# cfg["mode"] == "retrofit". Greenfield cfgs never reach any of this
+# code (D2 golden test confirms byte-identical content tree).
 # --------------------------------------------------------------------------- #
+
+
+# --------------------------------------------------------------------------- #
+# D5 - hook-body retrofit dispatcher + preamble. Per OD-2 (operator-
+# approved): _hook_body and _HOOK_HEADER are AST-byte-identical (NOT
+# modified). _hook_dispatch is the only TEMPLATES["hook"] reassignment.
+# All runtime reads fail toward ENFORCE (T2 contract).
+#
+# Affected hooks (the only ones that need retrofit-flavor per
+# RETROFIT.md R8.A.3):
+#   - spec-gate-commit: exempt all-allowlisted commits; retrofit_active
+#     master switch for .claude/-only commits; rollout-week warn-not-block.
+#   - test-gate: rollout-week warn-not-block. (Grandfather clause for
+#     no-test modules deferred to a follow-up; rollout schedule alone
+#     covers RETROFIT.md R8.A.6 week 1-2 behavior.)
+#   - tdd-gate: exempt allowlisted src/lib paths; rollout-week warn-not-
+#     block.
+# Other hooks (secrets-gate especially): NO retrofit-flavor; greenfield
+# body is used verbatim. Secrets are catastrophic regardless of
+# retrofit status (RETROFIT.md R8.A.3 explicitly forbids retrofit-flavor
+# for secrets-gate).
+# --------------------------------------------------------------------------- #
+_RETROFIT_PREAMBLE = r'''
+# === Retrofit preamble (T2: all error paths fall through to ENFORCE) ===
+# Reads .retrofit-state.json, steering/spec-strategy.md's legacy
+# allowlist, and hooks/rollout-schedule.md's ROLLOUT_WEEK marker AT
+# RUNTIME, so updating those files changes hook behavior without re-
+# running the installer. Fail-safe defaults:
+#   - .retrofit-state.json unreadable -> retrofit_active=false (ENFORCE)
+#   - spec-strategy.md unreadable/no markers -> empty allowlist (ENFORCE)
+#   - rollout-schedule.md unreadable/no marker -> week 4+ (ENFORCE)
+RETROFIT_PROJ="${CLAUDE_PROJECT_DIR:-.}"
+RETROFIT_STATE_FILE="$RETROFIT_PROJ/.claude/.retrofit-state.json"
+RETROFIT_SPEC_STRAT="$RETROFIT_PROJ/.claude/steering/spec-strategy.md"
+RETROFIT_ROLLOUT="$RETROFIT_PROJ/.claude/hooks/rollout-schedule.md"
+
+# 1) retrofit_active — default FALSE on any read/parse failure (ENFORCE).
+RETROFIT_ACTIVE=false
+if [ -r "$RETROFIT_STATE_FILE" ]; then
+  if have_jq; then
+    _val="$(jq -r '.retrofit_active // false' "$RETROFIT_STATE_FILE" 2>/dev/null || true)"
+  else
+    _val="$(STATE_FILE="$RETROFIT_STATE_FILE" python3 - <<'PYEOF' 2>/dev/null || true
+import json, os, sys
+try:
+    with open(os.environ["STATE_FILE"]) as fh:
+        d = json.load(fh)
+    sys.stdout.write(str(bool(d.get("retrofit_active", False))).lower())
+except Exception:
+    pass
+PYEOF
+)"
+  fi
+  if [ "$_val" = "true" ]; then
+    RETROFIT_ACTIVE=true
+  fi
+fi
+
+# 2) ROLLOUT_WEEK — default 4 (steady state, all hooks BLOCK).
+RETROFIT_WEEK=4
+if [ -r "$RETROFIT_ROLLOUT" ]; then
+  _marker="$(grep -oE 'ROLLOUT_WEEK:[[:space:]]*[0-9]+' "$RETROFIT_ROLLOUT" 2>/dev/null | head -1 || true)"
+  if [ -n "$_marker" ]; then
+    _w="${_marker##*:}"
+    _w="${_w// /}"
+    case "$_w" in
+      [0-9]*) RETROFIT_WEEK="$_w" ;;
+    esac
+  fi
+fi
+
+# 3) Legacy allowlist — default empty (no exemptions, ENFORCE).
+RETROFIT_ALLOWLIST_FILE="$(mktemp 2>/dev/null || echo '')"
+if [ -n "$RETROFIT_ALLOWLIST_FILE" ]; then
+  trap 'rm -f "$RETROFIT_ALLOWLIST_FILE"' EXIT
+  if [ -r "$RETROFIT_SPEC_STRAT" ]; then
+    awk '/<!-- LEGACY_ALLOWLIST_BEGIN -->/{f=1;next} /<!-- LEGACY_ALLOWLIST_END -->/{f=0} f' \
+      "$RETROFIT_SPEC_STRAT" 2>/dev/null > "$RETROFIT_ALLOWLIST_FILE" || true
+  fi
+fi
+
+# Helper: is the given path matched by ANY allowlist pattern?
+# Globs use bash case patterns; '**' is normalized to '*' (matches the
+# secrets-gate T-1 fix). Empty path / empty allowlist -> not allowlisted.
+# Pattern semantics (verified safe under hostile inputs in the D5+D6
+# scoped review): `*` and `?` work as glob chars; literal `)` / `;` /
+# `$(...)` are treated as literal pattern content (no syntax error, no
+# command execution); `|` from a variable-expanded pattern is treated
+# as a LITERAL `|` character, NOT as case-statement alternation (bash
+# quirk — alternation only works for inline literal patterns, not for
+# expanded vars). Operator-facing implication: don't put `|` in
+# allowlist patterns; use separate lines for each path.
+retrofit_is_allowlisted() {
+  local p="$1"
+  [ -z "$p" ] && return 1
+  [ -z "$RETROFIT_ALLOWLIST_FILE" ] && return 1
+  [ ! -s "$RETROFIT_ALLOWLIST_FILE" ] && return 1
+  while IFS= read -r _pat; do
+    _pat="${_pat#"${_pat%%[![:space:]]*}"}"
+    _pat="${_pat%"${_pat##*[![:space:]]}"}"
+    [ -z "$_pat" ] && continue
+    _cpat="${_pat//\*\*/*}"
+    case "$p" in
+      $_cpat) return 0 ;;
+    esac
+  done < "$RETROFIT_ALLOWLIST_FILE"
+  return 1
+}
+
+# Helper: should this hook BLOCK under the current ROLLOUT_WEEK?
+#   week 1: nothing blocks (everything warns)
+#   week 2: lint/format block
+#   week 3: + test-gate blocks
+#   week 4+: everything blocks (steady state)
+# Per RETROFIT.md R8.A.6 default schedule. Returns 0=BLOCK, 1=WARN.
+retrofit_should_block() {
+  local hname="$1"
+  case "$RETROFIT_WEEK" in
+    1) return 1 ;;
+    2) case "$hname" in format-lint-gate) return 0 ;; *) return 1 ;; esac ;;
+    3) case "$hname" in format-lint-gate|test-gate) return 0 ;; *) return 1 ;; esac ;;
+    *) return 0 ;;
+  esac
+}
+# === end retrofit preamble ===
+'''
+
+
+def _hook_body_retrofit(name: str, cfg: dict):
+    """Retrofit-flavor wrapper. For affected hooks, prepends the retrofit
+    preamble and early-exit checks to the greenfield body. For everything
+    else, returns the greenfield body unchanged. T2 contract: every
+    failure mode of the preamble reads ENFORCES (falls through to
+    greenfield) — the only paths to early exit 0 are affirmative matches.
+
+    Implementation: strips greenfield's _HOOK_HEADER (to avoid duplicate
+    set -euo pipefail + helper redefinition), then composes
+    [_HOOK_HEADER, retrofit preamble, retrofit checks, greenfield body
+    minus its _HOOK_HEADER]. The greenfield body's logic is preserved
+    verbatim and runs whenever no retrofit check early-exited.
+    """
+    greenfield = _hook_body(name, cfg)
+    if greenfield is None:
+        return None
+
+    # Only three hooks have retrofit-flavor adjustments per RETROFIT.md
+    # R8.A.3. All others pass through unchanged (including secrets-gate,
+    # which is the explicit "no retrofit-flavor" exception).
+    if name not in ("spec-gate-commit", "test-gate", "tdd-gate"):
+        return greenfield
+
+    # Strip the duplicate _HOOK_HEADER from greenfield (we keep ours).
+    if greenfield.startswith(_HOOK_HEADER):
+        gf_body = greenfield[len(_HOOK_HEADER):]
+    else:
+        # Defensive: if _hook_body ever stops prefixing _HOOK_HEADER,
+        # this returns the body unchanged rather than breaking.
+        return greenfield
+
+    if name == "spec-gate-commit":
+        checks = r'''
+HOOK_NAME=spec-gate-commit
+CMD="$(jget '.tool_input.command')"
+case "$CMD" in
+  *"git commit"*)
+    _staged="$(git diff --cached --name-only 2>/dev/null || true)"
+    # Affirmative exemption 1: retrofit_active AND all staged files under .claude/.
+    # This permits .claude/-only commits while the retrofit itself is in flight
+    # (RETROFIT.md R4 retrofit-active mode). R7 sets retrofit_active=false.
+    if [ "$RETROFIT_ACTIVE" = "true" ] && [ -n "$_staged" ]; then
+      _all_claude=true
+      while IFS= read -r _f; do
+        [ -z "$_f" ] && continue
+        case "$_f" in
+          .claude/*) ;;
+          *) _all_claude=false; break ;;
+        esac
+      done <<< "$_staged"
+      if [ "$_all_claude" = "true" ]; then
+        log "spec-gate-commit retrofit_active exempt .claude/-only commit"
+        exit 0
+      fi
+    fi
+    # Affirmative exemption 2: ALL staged files in legacy allowlist.
+    if [ -n "$_staged" ]; then
+      _all_allow=true
+      while IFS= read -r _f; do
+        [ -z "$_f" ] && continue
+        if ! retrofit_is_allowlisted "$_f"; then
+          _all_allow=false; break
+        fi
+      done <<< "$_staged"
+      if [ "$_all_allow" = "true" ]; then
+        log "spec-gate-commit all-allowlisted exempt commit"
+        exit 0
+      fi
+    fi
+    # Affirmative exemption 3: rollout-week says don't block yet.
+    if ! retrofit_should_block spec-gate-commit; then
+      log "spec-gate-commit week $RETROFIT_WEEK warn-only"
+      echo "(retrofit warn-only week $RETROFIT_WEEK) spec-gate-commit \
+would have blocked; see rollout-schedule.md" >&2
+      exit 0
+    fi
+    ;;
+esac
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    elif name == "test-gate":
+        checks = r'''
+HOOK_NAME=test-gate
+CMD="$(jget '.tool_input.command')"
+case "$CMD" in
+  *"git commit"*)
+    # Affirmative exemption: rollout-week says don't block yet
+    # (weeks 1-2 default = warn-only for test-gate).
+    if ! retrofit_should_block test-gate; then
+      log "test-gate week $RETROFIT_WEEK warn-only"
+      echo "(retrofit warn-only week $RETROFIT_WEEK) test-gate would \
+have run/blocked; see rollout-schedule.md" >&2
+      exit 0
+    fi
+    ;;
+esac
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    elif name == "tdd-gate":
+        checks = r'''
+HOOK_NAME=tdd-gate
+TARGET="$(jget '.tool_input.file_path')"
+# Affirmative exemption 1: target path is in legacy allowlist.
+if retrofit_is_allowlisted "$TARGET"; then
+  log "tdd-gate $TARGET legacy-allowlisted exempt"
+  exit 0
+fi
+# Affirmative exemption 2: rollout-week says don't block yet.
+if ! retrofit_should_block tdd-gate; then
+  log "tdd-gate week $RETROFIT_WEEK warn-only"
+  echo "(retrofit warn-only week $RETROFIT_WEEK) tdd-gate would have \
+blocked $TARGET; see rollout-schedule.md" >&2
+  exit 0
+fi
+# Fall through to greenfield body (ENFORCE; T2).
+'''
+    else:
+        # Unreachable given the guard above, but keep defensive.
+        return greenfield
+
+    return _HOOK_HEADER + _RETROFIT_PREAMBLE + checks + gf_body
+
+
+def _hook_dispatch(name: str, cfg: dict):
+    """The single TEMPLATES['hook'] reassignment per OD-2. Greenfield
+    cfgs (mode='bootstrap' or absent) hit the unmodified _hook_body
+    branch — verified byte-identical by D2 golden test."""
+    if cfg.get("mode") == "retrofit":
+        return _hook_body_retrofit(name, cfg)
+    return _hook_body(name, cfg)
+
+
+def _retrofit_inventory_readme(cfg):
+    """Static pointer to the codebase-derived inventory snapshot. Per OD-5
+    + non-blocking note: zero codebase-derived content (only references
+    paths). The other 10 inventory files are written by the decision layer
+    (lib/inventory_scan.py); this README is the installer's responsibility."""
+    return """# .claude/inventory/ — codebase audit (R0)
+
+One-time snapshot of pre-retrofit state, written by
+`bin/retrofit-interview scan` (the decision layer). **Frozen at retrofit
+time** — not maintained going forward. Steering docs supersede the
+inventory; consult inventory for historical context only.
+
+## Files in this directory
+
+| File | Phase | What it captures |
+|---|---|---|
+| `structure.md` | R0 step 3 | Top-level dir tree, file counts |
+| `languages.md` | R0 step 3 | File-extension distribution, manifests |
+| `dependencies.md` | R0 step 3 | Per-manifest declared deps |
+| `testing.md` | R0 step 3 | Test files, name-match coverage, no-test modules |
+| `git-history.md` | R0 step 3 | HEAD SHA, contributors, hotspots, stability cutoff |
+| `conventions.md` | R0 step 3 | Lint/format config presence, async hint |
+| `product-signals.md` | R0 step 4 | README/docs found, inferred project name |
+| `pm-tooling-signals.md` | R0 step 12 | Ticket dirs, CI integrations, commit refs |
+| `existing-claude.md` | R0 step 1 | Prior .claude/ state, archived dirs |
+| `baseline-metrics.md` | R0 step 8 | DORA placeholders for 30/60/90-day comparison |
+| `README.md` | (this file) | Pointer; written by the installer |
+
+## What's NOT here (deferred or optional)
+
+- `tribal-knowledge.md` (R0 step 9) — interactive interview only.
+- `regulatory-context.md` (R0 step 10) — interactive 7-question scan.
+- `danger-zones.md` (R2 step 8) — requires complexity proxy + operator
+  review; produced during R2 conversation, not at scan time.
+- `equivalence-validation.md` (R7) — produced at handoff, not scan.
+
+## How to refresh
+
+The inventory is a frozen historical snapshot. To re-scan (e.g., months
+post-retrofit, to compare against the baseline), run:
+
+    bin/retrofit-interview scan -C .
+
+This OVERWRITES the snapshot files. R7's baseline-metrics review is the
+intended re-scan cadence (30/60/90 days).
+"""
+
+
+def _retrofit_debt(cfg):
+    # Round-3 review (Lens E5): sort entries so the rendered markdown is
+    # order-invariant under cfg-input reordering. Two operator-equivalent
+    # cfgs (same debt content, different YAML order) now produce
+    # byte-identical .claude/debt.md. Sort key prioritizes severity
+    # (high/medium/low/info; unknown last), then discovered timestamp,
+    # then `what` text — a stable composite that matches an operator's
+    # mental triage order.
+    _severity_rank = {"high": 0, "medium": 1, "low": 2, "info": 3}
+    raw_entries = cfg["retrofit"]["debt"]["entries"]
+    entries = sorted(
+        raw_entries,
+        key=lambda e: (_severity_rank.get(str(e.get("severity", "low")), 4),
+                       str(e.get("discovered", "")),
+                       str(e.get("what", ""))))
+    body = ["# Technical debt registry (R3)",
+            "",
+            "> Generated by retrofit-installer from "
+            "bootstrap.config.yaml.",
+            "",
+            "## How to use this file",
+            "",
+            "- Add entries as issues are identified during regular work.",
+            "- Update `Status` to `in-progress` when work begins, "
+            "`resolved` when done.",
+            "- Periodically review and re-prioritize.",
+            "- This file is project-local; not standardized across the "
+            "portfolio.",
+            "",
+            "## Out of scope statement",
+            "",
+            "**The retrofit does not fix any of these items.** Resolution "
+            "is a separate, ongoing effort tracked here. Do not let this "
+            "file's length discourage starting on new feature work.",
+            ""]
+    if not entries:
+        body.append("## Entries")
+        body.append("")
+        body.append("_(none yet — the retrofit detected no debt-shaped "
+                    "signals in the inventory.)_")
+    else:
+        body.append(f"## Entries ({len(entries)} open)")
+        body.append("")
+        body.append("| What | Where | Severity | Discovered | Plan | Status |")
+        body.append("|---|---|---|---|---|---|")
+        for e in entries:
+            body.append(
+                f"| {e.get('what', '')} | {e.get('where', '')} | "
+                f"{e.get('severity', 'low')} | {e.get('discovered', '')} | "
+                f"{e.get('plan', '')} | {e.get('status', 'open')} |")
+    body.append("")
+    return "\n".join(body)
+
+
+def _retrofit_spec_strategy(cfg):
+    """Forward-only / touch-based / bulk decision + legacy allowlist +
+    retrofit-active master switch. The allowlist is enclosed in a marker
+    block the hooks parse at runtime (per the §3 hook-body contract)."""
+    r = cfg["retrofit"]
+    strategy = r["spec_strategy"]
+    allowlist = r["legacy_allowlist"]
+    patterns = r["spec_patterns"]
+
+    pattern_lines = []
+    if patterns["change"]:
+        pattern_lines.append(
+            "- **Change specs** — every modification updates a spec. "
+            "Always applicable.")
+    if patterns["boundary"]:
+        pattern_lines.append(
+            "- **Dependency boundary specs** — machine-readable contracts "
+            "at integration points (OpenAPI / JSON Schema / Protobuf). "
+            "See `contracts.md`.")
+    if patterns["migration"]:
+        pattern_lines.append(
+            "- **Migration specs** — multi-phase architectural change "
+            "with target state + incremental steps + integration layer. "
+            "See `migration.md`.")
+
+    allowlist_inner = "\n".join(allowlist) if allowlist else ""
+
+    return f"""# Spec backfill strategy (R4)
+
+> Generated by retrofit-installer from bootstrap.config.yaml.
+
+## Chosen strategy
+
+**{strategy}** — chosen at retrofit time.
+
+| Strategy | When applies |
+|---|---|
+| `forward-only` | New features get specs; legacy untouched until first edit |
+| `touch-based` | Legacy files get specs the first time they're modified |
+| `bulk` | All legacy files get one-paragraph specs upfront (rarely chosen) |
+
+## Active spec patterns (R4 step 3)
+
+{chr(10).join(pattern_lines) if pattern_lines else "_(only change specs apply for this project)_"}
+
+## Promotion rule
+
+A legacy file becomes spec-covered when first modified after retrofit:
+1. If in `inventory/danger-zones.md` or in the allowlist below, run
+   `legacy-pin-test` first to capture current behavior (pin-first
+   discipline, R2 G6).
+2. Run `/spec-new` for the module to create the change spec
+   (`legacy-spec` skill).
+3. Make the modification; the spec gates now enforce.
+
+## Retrofit-active master switch
+
+`.claude/.retrofit-state.json` carries a `retrofit_active` boolean. While
+true, the spec-gate-commit hook permits writes under `.claude/` so the
+retrofit itself can land. R7 sets `retrofit_active: false` at handoff
+and the gate operates normally from then on.
+
+## Legacy allowlist
+
+Paths in the block below are EXEMPT from the spec gate, test gate, and
+TDD gate (where applicable) until they're touch-based-backfilled. The
+gate scripts read this list at runtime — edit and re-save to update
+without re-running the installer.
+
+To ADD a path: append to the list (broader exemption).
+To REMOVE a path: delete the line (subjects it to spec gating
+immediately — usually only correct once a spec exists for it).
+
+The list shrinks over the project's lifetime; when empty, retrofit is
+fully complete (no special handling for any file).
+
+<!-- LEGACY_ALLOWLIST_BEGIN -->
+{allowlist_inner}
+<!-- LEGACY_ALLOWLIST_END -->
+
+## Pin-first discipline declaration (R2 G6)
+
+For any modification to a file in `inventory/danger-zones.md` or in the
+legacy allowlist above, the **pin → spec → modify** sequence applies:
+a `legacy-pin-test` is generated before the modification; the change
+spec describes the intended delta; the modification is verifiable
+against both. This is enforced by the reviewer agent (`.claude/agents/
+reviewer.md` retrofit-flavor body).
+"""
+
+
+def _retrofit_workflow_sot(cfg):
+    pm = cfg["retrofit"]["pm"]
+    s = pm["strategy"]
+    note = {
+        "spec_canonical": (
+            "Strategy A — specs in `.claude/specs/` are the source of "
+            "truth. Existing tickets archive at retrofit; open tickets "
+            "convert to specs via `ticket-to-spec`. PM tool MCP not "
+            "installed; PM tool, if used at all, is community-facing only."),
+        "pm_canonical": (
+            "Strategy B — tickets in the existing PM tool remain the entry "
+            "point. Specs derive from tickets via `ticket-to-spec`. PM "
+            "tool MCP IS installed; specs reference back to ticket IDs. "
+            "This is an INTENTIONAL VARIATION from BOOTSTRAP's "
+            "specs-are-source-of-truth claim."),
+        "hybrid": (
+            "Strategy C — new initiatives get specs; in-flight tickets "
+            "stay in PM tool until closure; 90-day cutover review. PM "
+            "tool MCP installed for transition window."),
+    }[s]
+    return f"""# Workflow source of truth (R0.7)
+
+> Generated by retrofit-installer from bootstrap.config.yaml.
+
+## Chosen strategy
+
+**Strategy:** `{s}`
+**PM tool:** `{pm["tool"]}`
+**Future role of PM tool:** `{pm["tool_role_after"]}`
+
+{note}
+
+## Hybrid review checkpoint
+
+{("Scheduled for: " + str(pm["hybrid_review_date"])
+  if pm.get("hybrid_review_date") else
+  "_(not scheduled — Strategy "
+  + s + " does not require a 90-day review.)_")}
+
+## Ticket migration disposition
+
+| Disposition | Tickets |
+|---|---|
+| Convert now | {", ".join(pm["ticket_migration"]["convert_now"]) or "_(none)_"} |
+| Defer | {", ".join(pm["ticket_migration"]["defer"]) or "_(none)_"} |
+| Close | {", ".join(pm["ticket_migration"]["close"]) or "_(none)_"} |
+
+Run `ticket-to-spec <id>` for each convert-now ticket post-retrofit
+(see R7 handoff). The migration is QUEUED at retrofit, EXECUTED later.
+"""
+
+
+def _retrofit_contracts(cfg):
+    """Emitted only when spec_patterns.boundary is true."""
+    arche = cfg["project"]["archetype"]
+    return f"""# Contracts steering (R4 G5/G8)
+
+> Generated because `retrofit.spec_patterns.boundary` is true.
+
+Boundary specs formalize the implicit contracts at integration points —
+where this project meets other services, libraries, or downstream
+consumers. Per RETROFIT.md R4 step 3 and the per-archetype patterns:
+
+## For archetype `{arche}`
+
+{("Service/API — OpenAPI YAML per route, plus failure modes / SLOs / "
+  "versioning. Validate against `inventory/traffic-sample.json` if "
+  "captured (G18)."
+  if arche in ("service", "fullstack") else
+  "Library/SDK — the public API surface IS the boundary "
+  "(`__init__.py`, `index.ts`, `*.pyi`). semver discipline on every "
+  "change."
+  if arche == "library" else
+  "Platform — cross-component contract files; consult per-component "
+  "boundary specs."
+  if arche == "platform" else
+  "Generic — list integration points and capture the contract shape "
+  "for each.")}
+
+## Integration points (operator populates)
+
+| # | Integration point | Contract artifact | Spec |
+|---|---|---|---|
+| 1 | _(name)_ | _(OpenAPI / JSON Schema / .proto)_ | _(path to spec)_ |
+
+## How to add a new boundary spec
+
+1. Run `boundary-spec <integration-point>` (Sonnet skill).
+2. Review the generated machine-readable artifact + acceptance criteria
+   (EARS notation recommended).
+3. Validate against captured traffic if available
+   (`inventory/traffic-sample.json`).
+4. Ratify in this file; the cross-component contract gate enforces
+   integrity going forward.
+"""
+
+
+def _retrofit_migration(cfg):
+    """Emitted only when spec_patterns.migration is true."""
+    return """# Migration steering (R4 G7/G8)
+
+> Generated because `retrofit.spec_patterns.migration` is true — this
+> project has an in-flight strangler-fig modernization or operator
+> anticipates one.
+
+## Target state
+
+_(operator populates: what the modernized system looks like)_
+
+## Strangler approach
+
+_(operator populates per the per-archetype table in RETROFIT.md
+§"Project Archetypes": proxy/façade for Service; re-export for Library;
+prompt-version routing for AI/agent; per-component cutover for Platform.)_
+
+## Incremental steps
+
+| # | Step | Independently deployable? | Rollback path | Success criteria |
+|---|---|---|---|---|
+| 1 | _(operator populates)_ | yes/no | _(how)_ | _(criteria)_ |
+
+## Anti-corruption layer (G19)
+
+_(operator populates: where the translation layer lives; how it prevents
+legacy concepts leaking into the new domain model.)_
+
+## How to add migration step specs
+
+Run `migration-plan <step-name>` (Opus skill — judgment work) to
+decompose a deprecated pattern's removal into safe, reversible steps.
+"""
+
+
+def _retrofit_compliance(cfg):
+    """Emitted only when regulatory_regimes is non-empty."""
+    regimes = cfg["retrofit"]["regulatory_regimes"]
+    body = ["# Compliance steering (R5 G20)",
+            "",
+            "> Generated because `retrofit.regulatory_regimes` is non-"
+            "empty:",
+            ""]
+    for r in regimes:
+        body.append(f"- **{r}**")
+    body += [
+        "",
+        "## Applicable controls",
+        "",
+        "_(operator populates per framework. Reference RETROFIT.md R5 "
+        "step 3 + R0 step 10 for the per-framework checklist.)_",
+        "",
+        "## Where compliance artifacts live",
+        "",
+        "| Artifact | Path |",
+        "|---|---|",
+        "| POA&M (FedRAMP) | _(operator populates)_ |",
+        "| DHF (medical device) | _(operator populates)_ |",
+        "| SSP / System Security Plan | _(operator populates)_ |",
+        "| Records of processing (GDPR) | _(operator populates)_ |",
+        "",
+        "## The retrofit as a change-control event",
+        "",
+        "Per RETROFIT.md R7 step 9: the retrofit itself is typically a "
+        "'significant change' / change-control event. Document it in "
+        "the existing change-control system (POA&M update for FedRAMP; "
+        "DHF entry for medical device; ROC update for PCI; records of "
+        "processing update for GDPR; etc.).",
+        "",
+        "## Audit-trail continuity rules",
+        "",
+        "_(operator populates: which actions must be audit-logged; "
+        "audit window length; where logs live.)_",
+        "",
+        "## R8.A.8 hook stubs (documentation only in v1.3 — deferred "
+        "enforcement in v1.4)",
+        "",
+        "- Audit log hook (SOC 2 / HIPAA / FedRAMP)",
+        "- PHI redaction hook (HIPAA)",
+        "- Cardholder data redaction hook (PCI-DSS)",
+        "- EOL dependency block (PCI-DSS Requirement 6)",
+        "- Cross-component safeguard uniformity check (HIPAA)",
+        "",
+        "Rely on operator's existing audit-log infrastructure for v1.3 "
+        "scope. Track gaps as `debt.md` entries.",
+    ]
+    return "\n".join(body) + "\n"
+
+
+def _retrofit_rollout_schedule(cfg):
+    """Default 4-week graduated warn→block schedule per R8.A.6.
+    The hooks parse the ROLLOUT_WEEK marker at runtime to know which
+    week's behavior to apply. The operator updates this file (changing
+    the marker) to advance the rollout."""
+    return """# Hook rollout schedule (R8.A.6, G14)
+
+> Generated by retrofit-installer from bootstrap.config.yaml.
+
+Pre-existing developers have ungated commit habits. Per the MLOps
+Coding Course + GitGuardian: **graduate the rollout warn → block per
+hook over 2-4 weeks**, monitor bypass rates, adjust accordingly.
+
+## Default schedule
+
+| Week | Status | What blocks | What warns |
+|---|---|---|---|
+| Week 1 | All hooks installed | Nothing (warn-only mode) | Everything that would block in steady state |
+| Week 2 | Lint and format hooks block | Lint, format | Spec gate, test gate, TDD gate, eval gate |
+| Week 3 | Test gate blocks | Lint, format, test | Spec gate, TDD gate, eval gate |
+| Week 4+ | Steady state | All hooks | (none) |
+
+## Operator-controlled current week
+
+The hooks read the marker below at runtime to know which week's
+behavior to apply. **To advance the rollout**, edit the integer below
+and re-save. No installer re-run needed.
+
+<!-- ROLLOUT_WEEK: 1 -->
+
+(Valid values: 1 | 2 | 3 | 4+; 4+ is steady state — all hooks block.)
+
+## Bypass-rate monitoring (G14)
+
+Track `--no-verify` usage. Reasonable target per DevSecOps Now:
+**90%+ pass rate** on each hook. Sustained >10% bypass means the hook
+is too strict, buggy, or the rollout schedule needs adjustment.
+Don't tune by tightening; tune by understanding why bypasses happen.
+
+## Notes
+
+- Operator can extend the schedule (e.g., for projects with low pre-
+  existing test coverage, extend Week 3 longer).
+- Operator can compress the schedule (e.g., for projects with high
+  spec discipline already, jump from Week 1 to Week 4 directly).
+- The fail-safe default is **steady state** (week 4+): if the hooks
+  cannot read this file at runtime they assume steady state and
+  ENFORCE every gate. Removing this file or making it unreadable
+  does NOT degrade to warn-only.
+"""
+
+
+def _retrofit_worktree_budget(cfg):
+    """Emitted only when codebase_size_gb >= 1 (RETROFIT.md R8.A.7)."""
+    size_gb = cfg["retrofit"]["codebase_size_gb"]
+    return f"""# Worktree resource budget (R8.A.7, G16)
+
+> Generated because `retrofit.codebase_size_gb` is {size_gb} (≥ 1).
+
+Per Augment Code 2026: a 2GB codebase consumes ~10GB of disk in a
+20-minute multi-worktree session. For this codebase:
+
+## Expected resource use
+
+- **Per-worktree disk usage:** ~{size_gb * 5} GB (5x codebase size).
+- **Per-worktree database instance:** name with per-worktree-uuid prefix.
+- **Per-worktree Docker volume:** name with per-worktree-uuid prefix.
+
+## Recommended posture
+
+{("Codebase exceeds 5GB — recommend **sequential worktrees over "
+  "parallel** unless operator has substantial disk headroom."
+  if size_gb > 5 else
+  "Codebase between 1GB and 5GB — parallel worktrees acceptable; "
+  "monitor disk usage during long sessions.")}
+
+## Implementer subagent
+
+The implementer subagent body references this budget; for sequential
+worktrees, the operator configures `implementer` invocations to avoid
+parallel dispatch (no spec-decompose parallelism map).
+"""
+
+
+def _retrofit_skill_body(name: str, desc: str, model: str,
+                          extra: str = "") -> str:
+    """Faithful stub per OD-6 (greenfield standard: frontmatter + intent
+    + 2-4 sentence behavior summary). Operator completes deep prompt
+    engineering separately from the structural scaffolding."""
+    return (f"---\nname: {name}\nmodel: {model}\n"
+            f"description: {desc}\n---\n\n# {name}\n\n{desc}\n"
+            + (extra + "\n" if extra else ""))
+
+
+def _retrofit_skills(cfg) -> dict:
+    """Retrofit-only skills. Standard greenfield skills come from the
+    unmodified _skills() — these are net new files for retrofit. Model
+    assignments per RETROFIT-COMPANION's Model Assignment Strategy."""
+    arche = cfg["project"]["archetype"]
+    out: dict[str, str] = {
+        "legacy-spec": _retrofit_skill_body(
+            "legacy-spec",
+            "Generate a brief change spec for a legacy module being "
+            "modified for the first time. Output is "
+            ".claude/specs/<slug>/requirements.md documenting current "
+            "behavior plus the change being made. Used in touch-based "
+            "backfill.",
+            "sonnet"),
+        "legacy-pin-test": _retrofit_skill_body(
+            "legacy-pin-test",
+            "Generate a characterization test for a legacy module before "
+            "modification. Captures current observable behavior (input/"
+            "output, golden output, snapshot) so unintended changes "
+            "surface. Per Feathers' pinning-test technique.",
+            "sonnet",
+            "> Used by R2/R6/R8.A whenever code in `inventory/"
+            "danger-zones.md` or in the legacy allowlist is about to be "
+            "modified."),
+        "boundary-spec": _retrofit_skill_body(
+            "boundary-spec",
+            "Generate a dependency boundary spec (OpenAPI / JSON Schema "
+            "/ Protobuf) for a service contract or public API surface. "
+            "Validates against inventory/traffic-sample.json if "
+            "available (G18).",
+            "sonnet"),
+        "migration-plan": _retrofit_skill_body(
+            "migration-plan",
+            "Decompose a deprecated pattern's removal into safe, "
+            "reversible steps. Judgment work — use when R5/R7 generated "
+            "concrete migration plans.",
+            "opus"),
+        "inventory-scan": _retrofit_skill_body(
+            "inventory-scan",
+            "Walk the repo and produce .claude/inventory/*.md (R0). "
+            "Pattern work — file-tree walking, language detection, "
+            "dependency parsing.",
+            "sonnet"),
+        "prior-art-audit": _retrofit_skill_body(
+            "prior-art-audit",
+            "Read existing .claude/ agents, roles, CLAUDE.md sections, "
+            "ad-hoc workflow docs and judge 'what is this trying to do, "
+            "what should it become.' Judgment-heavy.",
+            "opus"),
+        "convention-categorize": _retrofit_skill_body(
+            "convention-categorize",
+            "The single highest-leverage call in the protocol. Decide "
+            "Canonical / Deprecated / Intentional Variation / Modernize "
+            "for each observed pattern. A bad call here ships flawed "
+            "steering for the lifetime of the project.",
+            "opus"),
+        "debt-classify": _retrofit_skill_body(
+            "debt-classify",
+            "Mechanical categorization of debt entries against known "
+            "templates (severity by impact, source citation). Operator-"
+            "confirmed.",
+            "sonnet"),
+        "ticket-to-spec": _retrofit_skill_body(
+            "ticket-to-spec",
+            "Convert an existing ticket (Linear / Jira / GitHub Issues / "
+            "in-repo tickets/) into a requirements.md spec stub with "
+            "original-ticket frontmatter. Pattern work.",
+            "sonnet"),
+    }
+    # Archetype-specific retrofit skills.
+    if arche == "ai-agent":
+        out["prompt-pinning-eval"] = _retrofit_skill_body(
+            "prompt-pinning-eval",
+            "Generate a characterization eval (golden-dataset baseline) "
+            "for a prompt before modification. The AI/agent equivalent "
+            "of a pinning test.",
+            "sonnet")
+    if arche == "data-ml":
+        out["dataset-pin-test"] = _retrofit_skill_body(
+            "dataset-pin-test",
+            "Generate reproducibility-validation tests for a data "
+            "pipeline stage (dataset version, env, seed, output "
+            "checksum). The data-pipeline equivalent of a pinning test.",
+            "sonnet")
+    return out
+
+
+def _retrofit_commands(cfg) -> dict:
+    """Slash-command pointers for the retrofit skills."""
+    out: dict[str, str] = {}
+    for name in _retrofit_skills(cfg).keys():
+        out[name] = (
+            f"---\ndescription: Invoke the `{name}` retrofit skill.\n"
+            f"---\n\nInvoke the `{name}` skill.\n")
+    return out
+
+
+def _retrofit_implementer_agent(cfg):
+    """Retrofit-flavor implementer (override of greenfield). Adds pin-
+    first discipline + danger-zone awareness per RETROFIT R8.C.
+
+    Round-2 review (Lens 1.1): when `loop_mode_opted_in` or
+    `goal_supervised_mode_opted_in` is true, appends R8.G / R8.H
+    loop-mode-aware variant body per RETROFIT.md R8.G step 1 +
+    R8.H step 1.
+    """
+    w = cfg["workflow"]
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    loop_in = bool(rf_am.get("loop_mode_opted_in"))
+    goal_in = bool(rf_am.get("goal_supervised_mode_opted_in"))
+
+    autonomous_section = ""
+    if loop_in or goal_in:
+        modes = []
+        if loop_in:
+            modes.append("loop")
+        if goal_in:
+            modes.append("goal-supervised")
+        modes_str = " / ".join(modes)
+        autonomous_section = (
+            f"\n5. **Autonomous-mode awareness (R8.G/H — "
+            f"{modes_str} opted in, OFF until milestone).**\n"
+            f"   When a task is running under loop or goal-supervised "
+            f"mode (sentinel `.loop-active-<task-id>` or "
+            f"`.goal-active-<task-id>` present):\n"
+            f"   - **Tier-3 self-healing end-of-turn.** Attempt up to "
+            f"three hook fixes within one turn before escalating; the "
+            f"agent owns the iteration budget, not the operator.\n"
+            f"   - **Decision-log protocol.** Non-urgent decisions go "
+            f"to `decisions-log-<task-id>.md`, not in-chat — the loop "
+            f"has no chat surface.\n"
+            f"   - **Urgent-escalation halt.** Any of the seven urgent "
+            f"escalations writes `.loop-halt-<task-id>` with a one-"
+            f"line reason and exits. The operator finds the halt "
+            f"sentinel and decides; the loop does not retry.\n"
+            f"   - **No self-verification shortcut (goal-supervised "
+            f"only).** Iteration summaries are evaluator-read; do not "
+            f"assert your own completion. The evaluator subagent "
+            f"reads `iteration-summary-<task-id>-<iter-n>.md` and "
+            f"writes `evaluator-feedback-<task-id>.md`.\n"
+            f"   - **Mutual exclusion.** A task is in EXACTLY ONE "
+            f"mode's in-flight list. The wrappers enforce this via "
+            f"the sibling-sentinel check; never edit "
+            f"`.retrofit-state.json`'s `*_in_flight` lists by hand.\n"
+            f"   - **Brownfield exclusion.** Tasks touching legacy-"
+            f"allowlist or `inventory/danger-zones.md` files are "
+            f"not-eligible by default — the `spec-decompose` "
+            f"classifier marks them `loop_eligible: false` / "
+            f"`goal_supervised_eligible: false` until the file has a "
+            f"touch-based spec (+ pinning test for danger zones). "
+            f"Operator may override per task with explicit "
+            f"acknowledgment.\n")
+
+    return (f"---\nname: implementer\nmodel: {w['implementer_model']}\n"
+            f"isolation: worktree\n"
+            f"description: Use when an approved spec task is ready for "
+            f"implementation. Reads .claude/specs/<slug>/tasks/<id>.md. "
+            f"Retrofit-flavor: honors pin-first discipline (G6) on "
+            f"danger-zone and legacy-allowlist files.\n---\n\n"
+            f"# implementer (retrofit-flavor)\n\n"
+            f"Self-contained: subagents do not inherit the default system "
+            f"prompt. Read steering + spec + task, implement, run gates, "
+            f"commit, log decisions via decision-log.\n\n"
+            f"## Retrofit-specific behavior\n\n"
+            f"1. **Legacy allowlist (touch-based backfill).** When the "
+            f"task touches a file in `.claude/steering/spec-strategy.md`'s "
+            f"legacy allowlist:\n"
+            f"   - Read the file to understand current state.\n"
+            f"   - Run `/spec-new` for the module via the `legacy-spec` "
+            f"skill (touch-based backfill).\n"
+            f"   - The spec is brief — current behavior + the change.\n"
+            f"   - After modification, remove the file from the legacy "
+            f"allowlist (it now has a spec).\n\n"
+            f"2. **Pin-first discipline (G6).** When the task touches a "
+            f"file in `inventory/danger-zones.md` OR in the legacy "
+            f"allowlist, run `legacy-pin-test` BEFORE any modification:\n"
+            f"   - The pinning test must pass against current unchanged "
+            f"code.\n"
+            f"   - If not, PAUSE and surface 'current behavior is "
+            f"different from what the test captures — operator review "
+            f"needed' (decision-required alarm).\n"
+            f"   - Per Feathers' pinning-test technique.\n\n"
+            f"3. **AI/agent archetype:** when the task modifies a prompt "
+            f"file, run `prompt-pinning-eval` first (analogous to "
+            f"`legacy-pin-test` for code) to capture current behavior on "
+            f"a golden dataset.\n\n"
+            f"4. **Worktree budget (G16):** consult "
+            f"`.claude/hooks/worktree-budget.md` (if present). For "
+            f"codebases over 5GB, prefer sequential to parallel "
+            f"worktrees.\n"
+            f"{autonomous_section}")
+
+
+def _retrofit_reviewer_agent(cfg):
+    """Retrofit-flavor reviewer (override of greenfield). Adds danger-zone
+    rule (G10) + pin-first verification (G6) per RETROFIT R8.C."""
+    w = cfg["workflow"]
+    return (f"---\nname: reviewer\nmodel: {w['reviewer_model']}\n"
+            f"effort: high\ntools: Read, Grep, Glob, Bash\n"
+            f"description: Use after implementer commits a task. Reviews "
+            f"diff against spec's acceptance criteria and principles.md. "
+            f"Retrofit-flavor: enforces danger-zone rule (G10) + pin-"
+            f"first verification (G6).\n---\n\n# reviewer (retrofit-flavor)\n\n"
+            f"Read-only by construction (no Edit/Write). Return issues or "
+            f"approval.\n\n"
+            f"## Retrofit-specific behavior\n\n"
+            f"1. **Legacy file review.** When reviewing a diff against a "
+            f"file in the legacy allowlist, check the change against the "
+            f"new spec, NOT against all current principles (legacy code "
+            f"may not conform — that's tracked in `debt.md`).\n\n"
+            f"2. **Danger-zone rule (G10).** When reviewing a diff against "
+            f"a file in `inventory/danger-zones.md`, ENFORCE: **no "
+            f"architectural change in the same PR as a behavior change**. "
+            f"If the diff combines both, REQUEST the operator split the "
+            f"PR. Per Tornhill via Fowler 2026: AI-modified unhealthy "
+            f"code carries ~30% higher defect risk; combining "
+            f"architectural and behavioral changes in unhealthy zones is "
+            f"the riskiest pattern.\n\n"
+            f"3. **Pin-first verification (G6).** When reviewing a diff "
+            f"against a danger-zone or legacy-allowlist file, verify a "
+            f"pinning test exists IN THE DIFF. If absent, REQUEST it "
+            f"before approval.\n")
+
+
+def _retrofit_claude_md(cfg):
+    """Override of greenfield CLAUDE.md with retrofit-specific escalation
+    criteria + retrofit-specific doc refs. Per RETROFIT R8.E.2.
+
+    Round-2 review (Lens 1.1): autonomous-mode addenda are gated on
+    *_opted_in (nested under cfg.retrofit.autonomous_modes), not on
+    *_enabled (which is pinned false at retrofit time per B5). The
+    pre-fix read of *_enabled meant the queue section never appeared
+    even after the operator opted in.
+    """
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    loop_in = bool(rf_am.get("loop_mode_opted_in"))
+    goal_in = bool(rf_am.get("goal_supervised_mode_opted_in"))
+    queue_in = bool(rf_am.get("queue_mode_opted_in"))
+
+    loop_section = ""
+    if loop_in:
+        loop_section = (
+            "\n## Loop mode (R8.G — scaffold-but-defer)\n\n"
+            "Loop-mode scaffolding (`loop.sh`, `loop-config.md`, the "
+            "drift-detector loop-cooperation hook, the `.loop-active-*` "
+            "session-file convention) is present but **OFF**. "
+            "`loop_mode_enabled: false` in `.retrofit-state.json`. Do "
+            "not flip to true until the R8.G brownfield milestone is "
+            "green: rollout steady-state for spec+test gates AND >=10 "
+            "touch-based specs shipped under blocking gates AND legacy "
+            "allowlist shrunk >=25% from retrofit-time size. See R7 "
+            "handoff for the exact milestone values for this project.\n")
+
+    goal_section = ""
+    if goal_in:
+        goal_section = (
+            "\n## Goal-supervised mode (R8.H — scaffold-but-defer)\n\n"
+            "Goal-supervised scaffolding (`goal-loop.sh`, "
+            "`goal-config.md`, iteration-summary enforcement hook, "
+            "`learnings/mode-selection.md` calibration ledger, the "
+            "`.goal-active-*` session-file convention) is present but "
+            "**OFF**. `goal_supervised_mode_enabled: false`. The R8.H "
+            "milestone is R8.G's three conditions PLUS >=10 real "
+            "brownfield entries in `learnings/mode-selection.md`.\n")
+
+    queue_section = ""
+    if queue_in:
+        queue_section = (
+            "\n## Queue mode coordination layer (R8.I — scaffold-but-defer)\n\n"
+            "`.claude/auto.sh` dispatches per-task wrappers from "
+            "`.claude/queue/backlog.md`. The runner does not load this "
+            "file; the queue is the coordination surface. "
+            "`queue_mode_enabled: false`. The R8.I milestone is "
+            "R8.G's three conditions PLUS all hooks at blocking (not "
+            "just spec+test) PLUS >=4 weeks of real per-task autonomous "
+            "operation post-blocking PLUS at least one of "
+            "loop/goal-supervised actually enabled (not merely "
+            "scaffolded) at the time queue is enabled.\n")
+    return f"""# CLAUDE.md (retrofit-flavor)
+
+Thin by design. Steering lives in `.claude/steering/`. Retrofit-specific
+context lives in `.claude/debt.md`, `.claude/inventory/`, and
+`.claude/steering/spec-strategy.md`.
+
+## Workflow
+
+Per-task lifecycle: spec-review -> spec-decompose -> plan-review -> implement
+(decisions logged continuously) -> local gates -> code-review ->
+spec-validate -> pr-author.
+
+For LEGACY files (in the allowlist or in danger-zones): pin → spec → modify
+(see `spec-strategy.md`).
+
+## Urgent escalations (AI stops and asks)
+
+1. **🔔** A do-not-touch / never-read path needs access or modification.
+2. **🔔** A secret or credential is encountered.
+3. **🔔** A hook blocks and the fix is not obvious within one attempt.
+4. **🔔** A dependency not on the `deps.md` approved list is needed.
+5. **🔔** Implementation reveals the spec was wrong.
+6. **🔔** Modifying a file in the legacy allowlist WITHOUT first creating
+   a spec via touch-based backfill.
+7. **🔔** Modifying a file in `inventory/danger-zones.md` WITHOUT first
+   generating a `legacy-pin-test` (or for AI/agent prompt files, a
+   `prompt-pinning-eval`).
+
+Non-urgent (in-chat only): ambiguous acceptance criteria, two reasonable
+approaches with material tradeoffs, spec version drift mid-task, a
+categorization in `tech.md` that looks wrong in light of new evidence.
+
+The escalation list is the contract. If the agent escalates outside it,
+fix steering — do not override in-session.
+{loop_section}{goal_section}{queue_section}
+## Retrofit-specific references
+
+- `.claude/debt.md` — known issues registry (R3); retrofit does NOT fix
+  these. Add entries as new debt is identified.
+- `.claude/steering/spec-strategy.md` — forward-only / touch-based /
+  bulk decision + legacy allowlist + retrofit-active master switch.
+- `.claude/steering/workflow-source-of-truth.md` — PM artifact strategy
+  (A/B/C) and ticket migration disposition.
+- `.claude/hooks/rollout-schedule.md` — graduated warn→block schedule.
+  Update the `<!-- ROLLOUT_WEEK: N -->` marker to advance the rollout.
+- `.claude/inventory/` — codebase audit at retrofit time (frozen).
+- `.claude/.retrofit-state.json` — retrofit progress + brownfield
+  milestone tracking. **Autonomous modes opted-in here SCAFFOLD but do
+  NOT enable**; flip `*_enabled` only after the brownfield milestone
+  is green (RETROFIT.md §"Autonomous Modes in Retrofit").
+
+## Retrofit completion (R7)
+
+When `retrofit_active: false` in `.retrofit-state.json`, retrofit is
+complete: the spec-gate-commit hook operates normally (no more
+allowlisting `.claude/` writes for the retrofit itself); the brownfield
+trust milestones for autonomous modes start ticking.
+"""
+
+
+def _retrofit_gitignore(cfg):
+    """Override of greenfield .claude/.gitignore with retrofit-specific
+    patterns. Per RETROFIT R8.C."""
+    base = [
+        "logs/", ".last-test-pass", ".last-eval-pass",
+        "sessions/.session-*", "sessions/.drift-*",
+        "sessions/.decision-pending-*", "sessions/.quiet-*",
+        "sessions/.loop-active-*", "sessions/.goal-active-*",
+        "sessions/.loop-complete-*", "sessions/.loop-halt-*",
+        "sessions/.iteration-summary-*", "sessions/.evaluator-feedback-*",
+        ".installer-manifest.json", ".bootstrap-state.json",
+        ".bootstrap-state.json.lock", ".bootstrap-incomplete",
+        # Retrofit-specific (per RETROFIT R8.C gitignore block):
+        ".retrofit-state.json",
+        ".bootstrap-state.json.pre-1.7", ".bootstrap-state.json.pre-1.8",
+        ".bootstrap-state.json.pre-1.9",
+        "inventory/.scan-cache-*",
+        "sessions/.bypass-count-*",
+    ]
+    # Round-2 review (Lens 1.1): queue scaffolding is emitted on
+    # `queue_mode_opted_in` (retrofit's scaffold-but-defer rule), not on
+    # `queue_mode_enabled` (which is pinned false at retrofit time per B5).
+    # The greenfield read of *_enabled here would have masked the queue
+    # gitignore entries even after the operator opted in, because retrofit
+    # configs always have *_enabled: false.
+    rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
+    if rf_am.get("queue_mode_opted_in"):
+        base += ["queue/.run-active", "queue/.halt", "queue/.resume"]
+    out = ["# bootstrap-installer generated (retrofit-flavor)"]
+    out.extend(base)
+    return "\n".join(out) + "\n"
+
+
+def _retrofit_spec_decompose(cfg):
+    """Round-3 review (Lens A1) — the brownfield-eligibility classifier
+    extension that the retrofit-flavor implementer.md prose advertises
+    (RETROFIT.md R8.G step 1 + R8.H step 1). Without this skill the
+    classifier doesn't exist and danger-zone files are silently
+    loop_eligible: true; the implementer would skip pin-first
+    discipline trusting a classifier that wasn't shipped.
+
+    Replaces greenfield's `spec-decompose` skill in retrofit mode when
+    any autonomous-mode opt-in is true. The greenfield-equivalent
+    behavior is preserved verbatim (turn a spec into atomic vertical-
+    slice tasks); the retrofit addendum below adds the eligibility
+    classifier rule.
+    """
+    return ("---\nname: spec-decompose\n"
+            "description: Turn a spec into atomic vertical-slice tasks "
+            "with a parallelism map. Retrofit-flavor: includes the "
+            "brownfield-eligibility classifier "
+            "(`loop_eligible` / `goal_supervised_eligible` fields).\n"
+            "---\n\n"
+            "# spec-decompose (retrofit-flavor)\n\n"
+            "Turn a spec into atomic vertical-slice tasks with a "
+            "parallelism map. Each task entry gets the standard "
+            "fields PLUS the autonomous-mode eligibility flags below.\n\n"
+            "## Brownfield-eligibility classifier (R8.G step 1, R8.H "
+            "step 1)\n\n"
+            "When emitting each task, decide `loop_eligible` and "
+            "`goal_supervised_eligible` per the rules below. **Default "
+            "to false** for any task that touches the legacy allowlist "
+            "or `inventory/danger-zones.md` until that file's "
+            "preconditions are cleared.\n\n"
+            "### Inputs read\n\n"
+            "1. `.claude/steering/spec-strategy.md` — extract the legacy "
+            "allowlist between `<!-- LEGACY_ALLOWLIST_BEGIN -->` and "
+            "`<!-- LEGACY_ALLOWLIST_END -->` markers (line-by-line "
+            "globs).\n"
+            "2. `.claude/inventory/danger-zones.md` (if present) — the "
+            "operator-curated drift-prone-area list.\n\n"
+            "### Rule (verbatim per R8.G step 1)\n\n"
+            "> The classifier additionally marks any task touching a "
+            "file in the legacy allowlist or `inventory/danger-zones.md` "
+            "as **not loop-eligible / not goal-supervised-eligible by "
+            "default** until that file has a touch-based spec and (for "
+            "danger zones) a pinning test — the ungated-habit risk plus "
+            "an unpinned danger-zone file is not a combination an "
+            "unattended loop should ever pick up. Operator can override "
+            "per task with explicit acknowledgment.\n\n"
+            "### Eligibility decision (apply per task)\n\n"
+            "| Touches | spec exists | pinning test exists "
+            "| `loop_eligible` | `goal_supervised_eligible` |\n"
+            "|---|---|---|---|---|\n"
+            "| Neither allowlist nor danger-zone | n/a | n/a "
+            "| **true** | **true** |\n"
+            "| Legacy allowlist only | yes | n/a "
+            "| **true** | **true** |\n"
+            "| Legacy allowlist only | no | n/a "
+            "| **false** (touch-based-spec required) "
+            "| **false** |\n"
+            "| Danger zone | yes | yes "
+            "| **true** | **true** |\n"
+            "| Danger zone | yes | no "
+            "| **false** (pinning test required) "
+            "| **false** |\n"
+            "| Danger zone | no | any "
+            "| **false** (spec + pinning required) "
+            "| **false** |\n\n"
+            "### Operator override\n\n"
+            "Operator may mark a task `loop_eligible: true` or "
+            "`goal_supervised_eligible: true` explicitly in the task "
+            "file even when the classifier defaulted to false. The "
+            "override SHOULD include a one-line rationale (the loop "
+            "and goal wrappers read these flags; they refuse to run if "
+            "the flag is false but do not validate the rationale).\n\n"
+            "### Queue mode (R8.I)\n\n"
+            "When `queue_mode_opted_in: true` and at least one of "
+            "loop/goal opt-in is true: tasks with `loop_eligible: "
+            "false` AND `goal_supervised_eligible: false` are placed "
+            "in the **Operator-only** section of "
+            "`.claude/queue/backlog.md` (skipped by the runner, never "
+            "auto-dispatched) until the precondition that drove the "
+            "false eligibility is cleared.\n\n"
+            "## Greenfield-equivalent behavior\n\n"
+            "Everything else (5-criterion eligibility test, "
+            "parallelism map, completion-criteria checks, atomic "
+            "vertical-slice rule) is the standard BOOTSTRAP Phase 9.5 "
+            "behavior — the retrofit addendum above is purely an "
+            "ADDITIONAL exclusion layer, not a replacement.\n")
+
+
+def _retrofit_mode_selection_ledger(cfg):
+    """R8.H scaffolding artifact — the calibration ledger for the goal-
+    supervised classifier's recommendation rule. Per RETROFIT.md R8.H
+    step 1: 'seed it with a header note that, for a brownfield project,
+    the drift-prone-area column should be populated from
+    inventory/danger-zones.md and inventory/tribal-knowledge.md rather
+    than left empty — this codebase already KNOWS its drift-prone
+    areas, unlike greenfield.'
+    """
+    return """# Mode-selection ledger (calibration)
+
+Goal-supervised mode's `spec-decompose` recommendation rule learns from
+this file. Each entry: task id, mode chosen (operator-in-loop / loop /
+goal-supervised), drift-prone area touched (from
+`inventory/danger-zones.md` or `inventory/tribal-knowledge.md`),
+outcome, iteration count.
+
+**Brownfield seed note (RETROFIT R8.H):** the drift-prone-area column
+SHOULD be populated from `inventory/danger-zones.md` and
+`inventory/tribal-knowledge.md` — do not leave empty. The retrofit
+already produced the codebase's drift-prone-area inventory; that is
+the input the calibration rule needs.
+
+The R8.H brownfield milestone gate requires `>= 10` real brownfield
+entries here before `goal_supervised_mode_enabled: true` may be set.
+
+| task | mode | drift-prone area | outcome | iterations |
+|---|---|---|---|---|
+"""
+
+
+# Append all new retrofit entries to TEMPLATES. The greenfield entries
+# above are AST-unmodified (D2 golden test gates this).
 TEMPLATES = {
     "product": _product,
     "tech": _tech,
@@ -1143,7 +2377,11 @@ TEMPLATES = {
     "cicd": _cicd,
     "cicd_optout": _cicd_optout,
     "tools": _tools,
-    "hook": _hook_body,
+    # D5 / OD-2: dispatch hook between greenfield and retrofit by cfg["mode"].
+    # _hook_body is preserved AST-identical; _hook_dispatch falls through
+    # to _hook_body for mode != "retrofit", so greenfield output stays
+    # byte-identical (D2 golden test confirms).
+    "hook": _hook_dispatch,
     "settings_json": _settings_json,
     "audio_config": _audio_config,
     "skills": _skills,
@@ -1159,4 +2397,27 @@ TEMPLATES = {
     "claude_md": _claude_md,
     "specs_index": _specs_index,
     "gitignore": _gitignore,
+    # Retrofit additions (new template fns; greenfield never reaches these).
+    "retrofit_inventory_readme": _retrofit_inventory_readme,
+    "retrofit_debt": _retrofit_debt,
+    "retrofit_spec_strategy": _retrofit_spec_strategy,
+    "retrofit_workflow_sot": _retrofit_workflow_sot,
+    "retrofit_contracts": _retrofit_contracts,
+    "retrofit_migration": _retrofit_migration,
+    "retrofit_compliance": _retrofit_compliance,
+    "retrofit_rollout_schedule": _retrofit_rollout_schedule,
+    "retrofit_worktree_budget": _retrofit_worktree_budget,
+    "retrofit_skills": _retrofit_skills,
+    "retrofit_commands": _retrofit_commands,
+    "retrofit_implementer_agent": _retrofit_implementer_agent,
+    "retrofit_reviewer_agent": _retrofit_reviewer_agent,
+    "retrofit_claude_md": _retrofit_claude_md,
+    "retrofit_gitignore": _retrofit_gitignore,
+    # Round-2 review (Lens 1.1): R8.H scaffolding artifact.
+    "retrofit_mode_selection_ledger": _retrofit_mode_selection_ledger,
+    # Round-3 review (Lens A1): brownfield-eligibility classifier the
+    # retrofit implementer prose advertises; without this skill the
+    # classifier doesn't exist and danger-zone files are silently
+    # auto-dispatchable.
+    "retrofit_spec_decompose": _retrofit_spec_decompose,
 }
