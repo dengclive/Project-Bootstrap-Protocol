@@ -217,7 +217,14 @@ def answers_to_config(ans: dict, proposal: dict) -> dict:
                 "ticket_migration": {
                     "convert_now": [], "defer": [], "close": [],
                 },
-                "hybrid_review_date": None,
+                # Round-3-followup: source from ans (interactive flow
+                # prompts when strategy == "hybrid"; other strategies
+                # leave it None per R0.7 schema). Treat empty string as
+                # None so the downstream validator's "must be non-empty
+                # string" check fires on an operator who skipped the
+                # prompt rather than silently writing "".
+                "hybrid_review_date": (ans.get("hybrid_review_date")
+                                       or None),
             },
             "regulatory_regimes": [],
             "codebase_size_gb": 0,
@@ -734,6 +741,26 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
             o("  (end of input; accepting 'spec_canonical')\n")
             break
         o(f"  must be one of {sorted(RETROFIT_PM_STRATEGIES)}.\n")
+
+    # Round-3-followup: prompt for hybrid_review_date when pm_strategy is
+    # hybrid. RETROFIT R0.7 schema says it is null if not Strategy C,
+    # required if so. Without this prompt, picking hybrid would emit a
+    # cfg that fails resolve_config's Round-2 Lens-1.3 gate — UX dead-
+    # end. Default is the cfg's existing value (None) so an explicit
+    # date must be entered; on EOF without input, the gate downstream
+    # surfaces the error rather than the interactive flow silently
+    # writing a half-baked cfg.
+    if ans["pm_strategy"] == "hybrid":
+        show("Hybrid review date (R0.7 Strategy C)",
+             "Hybrid PM strategy requires an operator-set review date "
+             "(YYYY-MM-DD) — the planned cut-over from spec-canonical "
+             "to PM-canonical operation. RETROFIT R0.7 schema says "
+             "hybrid_review_date is non-null only when strategy == "
+             "'hybrid'.")
+        ans["hybrid_review_date"] = _ask(
+            "Hybrid review date (YYYY-MM-DD)",
+            ans.get("hybrid_review_date") or "",
+            instream=instream, outstream=outstream, eof=eof)
 
     show("CI/CD applicability", p["ci_cd_applicability"]["rationale"])
     while True:

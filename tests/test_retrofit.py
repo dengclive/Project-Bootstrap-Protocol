@@ -1486,5 +1486,248 @@ check("16.16: no opt-in -> greenfield spec-decompose, no retrofit flavor",
       "Retrofit-flavor" not in _decompose_no_opt["body"])
 
 # --------------------------------------------------------------------------- #
+# 17. Interactive walkthrough — `bin/retrofit-interview interactive`
+# --------------------------------------------------------------------------- #
+# Post-merge follow-up #1 from `project_post_retrofit_tasks.md`: the
+# operator-flagged "highest-value gap" was that only `scan` / `analyze` /
+# `synthesize` subcommands had end-to-end coverage. The interactive flow
+# is the path most operators take — every retrofit project runs through
+# it once. A stdin-fed harness exercises the prompt order, default-
+# acceptance behavior, EOF-fallback, and the produced cfg's validity.
+print("\n=== Section 17: interactive walkthrough (stdin-fed) ===")
+
+
+def _mkproj(d: str) -> None:
+    """Create a minimal but realistic Python project under d so
+    scan_repo finds source files, tests, and a manifest to inventory."""
+    os.makedirs(os.path.join(d, "src"), exist_ok=True)
+    os.makedirs(os.path.join(d, "tests"), exist_ok=True)
+    with open(os.path.join(d, "src", "main.py"), "w") as fh:
+        fh.write("def hello(): return 1\n")
+    with open(os.path.join(d, "tests", "test_main.py"), "w") as fh:
+        fh.write("def test_hello(): assert True\n")
+    with open(os.path.join(d, "pyproject.toml"), "w") as fh:
+        fh.write('[project]\nname = "demo"\nversion = "0.1.0"\n'
+                  'dependencies = ["requests>=2.0"]\n')
+    subprocess.run(["git", "init", "-q"], cwd=d, check=False)
+    subprocess.run(["git", "config", "user.email", "t@e.x"], cwd=d,
+                    check=False)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=d, check=False)
+    subprocess.run(["git", "add", "-A"], cwd=d, check=False,
+                    capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=d,
+                    check=False, capture_output=True)
+
+
+def _interactive(d: str, stdin_lines: list[str]) -> tuple[int, str, str]:
+    """Run the interactive subcommand with a canned stdin script."""
+    r = subprocess.run(
+        [sys.executable, BIN_INTERVIEW, "interactive", "-C", d],
+        input="\n".join(stdin_lines) + "\n",
+        capture_output=True, text=True, timeout=30)
+    return r.returncode, r.stdout, r.stderr
+
+
+# Prompt order from run_interactive (lib/retrofit_interview.py):
+#   1. project_name
+#   2. archetype
+#   3. prd_tier_target
+#   4. principles (semi-colon list)
+#   5. tdd_policy
+#   6. spec_strategy
+#   7. pm_strategy
+#   8. ci_cd_applicability
+#   9. loop_mode_opted_in
+#  10. goal_supervised_mode_opted_in
+#  11. queue_mode_opted_in
+#  12-16. commands.{test,lint,format,typecheck,ci_local}
+# 16 prompts total. Empty answer accepts the default.
+
+# (17.1) All-defaults walkthrough — 16 empty lines.
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    rc, stdout, stderr = _interactive(d, [""] * 16)
+    check("17.1: all-defaults interactive flow exits 0",
+          rc == 0, f"rc={rc}\nstderr={stderr[-500:]}")
+    check("17.2: all-defaults flow writes bootstrap.config.yaml",
+          os.path.exists(os.path.join(d, "bootstrap.config.yaml")))
+    if os.path.exists(os.path.join(d, "bootstrap.config.yaml")):
+        with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+            cfg_text = fh.read()
+        check("17.3: written cfg has mode: retrofit",
+              'mode: "retrofit"' in cfg_text)
+        check("17.4: written cfg validates via resolve_config "
+              "(r08_committed gate passes via decision-layer default)",
+              not validate_config_dict(load_yaml(cfg_text)),
+              f"errors={validate_config_dict(load_yaml(cfg_text))}")
+        check("17.5: written cfg has scaffold-but-defer baseline "
+              "(no autonomous opt-ins by default)",
+              "loop_mode_opted_in: false" in cfg_text
+              or "loop_mode_opted_in: \"false\"" in cfg_text)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (17.6) Override walkthrough — operator picks non-default values
+# including loop + goal opt-in. Pin that opt-in flows through to cfg.
+# Note: skipping hybrid PM (would also require hybrid_review_date which
+# the interactive flow doesn't currently prompt for — a known gap).
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    answers = [
+        "my-project",        # 1. project_name
+        "service",           # 2. archetype
+        "full",              # 3. prd_tier_target
+        "",                  # 4. principles (accept default)
+        "required",          # 5. tdd_policy
+        "touch-based",       # 6. spec_strategy
+        "spec_canonical",    # 7. pm_strategy (avoid hybrid gap)
+        "yes",               # 8. ci_cd_applicability
+        "true",              # 9. loop_mode_opted_in
+        "true",              # 10. goal_supervised_mode_opted_in
+        "false",             # 11. queue_mode_opted_in
+        "pytest -q",         # 12. test
+        "ruff check .",      # 13. lint
+        "ruff format .",     # 14. format
+        "mypy src",          # 15. typecheck
+        "make ci-local",     # 16. ci_local
+    ]
+    rc, stdout, stderr = _interactive(d, answers)
+    check("17.6: override interactive flow exits 0",
+          rc == 0, f"rc={rc}\nstderr={stderr[-500:]}")
+    with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+        cfg_text = fh.read()
+    cfg_obj = load_yaml(cfg_text)
+    check("17.7: archetype override (service) lands in cfg",
+          cfg_obj["project"]["archetype"] == "service")
+    check("17.8: prd_tier override (full) lands",
+          cfg_obj["project"]["prd_tier"] == "full")
+    check("17.9: tdd_policy override (required) lands",
+          cfg_obj["principles"]["tdd_policy"] == "required")
+    check("17.10: spec_strategy override (touch-based) lands",
+          cfg_obj["retrofit"]["spec_strategy"] == "touch-based")
+    check("17.11: loop opt-in true lands in nested cfg "
+          "(B5 dual-shape preserved)",
+          cfg_obj["retrofit"]["autonomous_modes"]["loop_mode_opted_in"]
+          is True)
+    check("17.12: goal opt-in true lands in nested cfg",
+          cfg_obj["retrofit"]["autonomous_modes"]
+          ["goal_supervised_mode_opted_in"] is True)
+    check("17.13: queue opt-in stays false (operator answered false)",
+          cfg_obj["retrofit"]["autonomous_modes"]
+          ["queue_mode_opted_in"] is False)
+    check("17.14: B5 scaffold-but-defer: top-level *_enabled all false "
+          "even with opt-ins true",
+          all(cfg_obj["autonomous_modes"][k] is False for k in (
+              "loop_mode_enabled", "goal_supervised_mode_enabled",
+              "queue_mode_enabled")))
+    check("17.15: commands override (test=pytest -q) lands",
+          cfg_obj["commands"]["test"] == "pytest -q")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (17.16) Invalid archetype re-prompts; then EOF accepts default.
+# After the EOF, every subsequent _ask returns its default — so the
+# rest of the flow runs with defaults and produces a valid cfg.
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    # 1: project name (default)
+    # 2: archetype — "nonsense" -> rejected -> EOF -> accept default
+    rc, stdout, stderr = _interactive(d, [
+        "",         # project_name default
+        "nonsense", # archetype invalid
+        # then stdin runs dry. EOF flag flips; remaining prompts accept
+        # default. The flow does NOT abort on EOF.
+    ])
+    check("17.16: invalid archetype re-prompts (loop-on-invalid)",
+          "is not a valid archetype" in stdout
+          or "must be" in stdout)
+    check("17.17: invalid archetype + EOF accepts default and continues",
+          rc == 0, f"rc={rc}\nstderr={stderr[-300:]}")
+    check("17.18: EOF-fallback cfg still validates",
+          os.path.exists(os.path.join(d, "bootstrap.config.yaml"))
+          and not validate_config_dict(load_yaml(
+              open(os.path.join(d, "bootstrap.config.yaml")).read())))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (17.21) Round-3-followup: pm_strategy=hybrid prompts for
+# hybrid_review_date so the operator can satisfy R0.7 Strategy C without
+# a UX dead-end. Pre-fix, picking hybrid would produce a cfg that
+# resolve_config rejects with no chance to set the date.
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    rc, stdout, stderr = _interactive(d, [
+        "", "", "", "", "", "",        # 1-6 defaults
+        "hybrid",                       # 7. pm_strategy hybrid
+        "2026-08-04",                   # NEW: hybrid_review_date prompt
+        "", "", "", "",                 # 8-11
+        "", "", "", "", "",             # 12-16 commands
+    ])
+    check("17.21: pm_strategy=hybrid + valid hybrid_review_date -> "
+          "exit 0",
+          rc == 0, f"rc={rc}\nstderr={stderr[-500:]}")
+    check("17.22: prompt for hybrid_review_date fired",
+          "Hybrid review date" in stdout)
+    with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+        cfg_obj = load_yaml(fh.read())
+    check("17.23: hybrid_review_date lands in cfg.retrofit.pm",
+          cfg_obj["retrofit"]["pm"]["hybrid_review_date"]
+          == "2026-08-04")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (17.24) pm_strategy=hybrid without a date entered -> resolve_config
+# rejects (the Round-2 Lens-1.3 gate fires; the operator sees the error
+# rather than the cfg silently shipping with hybrid_review_date: null).
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    rc, stdout, stderr = _interactive(d, [
+        "", "", "", "", "", "",        # 1-6
+        "hybrid",                       # 7. pm_strategy hybrid
+        "",                             # 8. hybrid_review_date empty (oops)
+        "", "", "", "",                 # 9-11 opt-ins
+        "", "", "", "", "",             # 12-16
+    ])
+    check("17.24: pm_strategy=hybrid + empty date -> exit 2 "
+          "(downstream validator catches via Round-2 Lens-1.3 gate)",
+          rc == 2,
+          f"rc={rc}\nstdout_tail={stdout[-300:]}")
+    check("17.25: error mentions hybrid_review_date",
+          "hybrid_review_date" in stdout
+          and "required" in stdout)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# (17.19) R8.I prereq: queue opt-in without loop or goal gets warned and
+# disabled by the interactive flow itself (the resolve_config gate would
+# also catch it, but the interactive flow is the friendlier UX path).
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    rc, stdout, stderr = _interactive(d, [
+        "", "", "", "", "", "", "", "",   # accept defaults thru 8
+        "false",  # loop opt-in
+        "false",  # goal opt-in
+        "true",   # queue opt-in — but no per-task mode!
+        "", "", "", "", "",
+    ])
+    check("17.19: queue opt-in without loop/goal -> interactive warns "
+          "and disables (R8.I prereq UX seam)",
+          "Queue mode requires loop or goal" in stdout
+          or "Disabling queue" in stdout)
+    with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+        cfg_obj = load_yaml(fh.read())
+    check("17.20: queue_mode_opted_in coerced to false in written cfg",
+          cfg_obj["retrofit"]["autonomous_modes"]
+          ["queue_mode_opted_in"] is False)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
