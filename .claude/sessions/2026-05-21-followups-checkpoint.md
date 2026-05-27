@@ -1,9 +1,9 @@
 # Post-merge follow-ups — Session Checkpoint
 
-**Date:** 2026-05-21 (created) / 2026-05-22 (updated post self-apply)
-**Branch:** `interactive-walkthrough-test` (1 commit ahead of `main`)
-**Main last commit:** `6d278c0` (this checkpoint commit on `origin/main`; PR #1 merged at `2bc915a` on 2026-05-20)
-**Status:** PR #2 open, 435/435 tests green, self-apply validation complete (2 real findings for v1.6.3), queue intact.
+**Date:** 2026-05-21 (created) / 2026-05-22 (self-apply) / **2026-05-27 (refreshed)**
+**Branch:** `fix/self-apply-sa1-sa2` (1 commit ahead of `main`, pushed)
+**Main last commit:** `332590e` (synced with `origin/main`; PR #1 merged at `2bc915a`, PR #2 merged at `ce21d60`)
+**Status:** PR #2 **MERGED**. PR #3 **OPEN** (SA1+SA2 fixes). 443/443 tests green on the fix branch. SA3 still pending (doc-only).
 
 ---
 
@@ -11,13 +11,15 @@
 
 ```bash
 cd /home/dengc/Documents/Projects/Project-Bootstrap-Protocol
-git checkout interactive-walkthrough-test
-for t in tests/test_*.py; do python "$t"; done   # expect 435 passed total
-gh pr view 2 --json state,reviewDecision         # check PR #2 status
-git log --oneline main..HEAD                      # expect 1 commit: b38769f
+git checkout fix/self-apply-sa1-sa2
+for t in tests/test_*.py; do python "$t"; done   # expect 6/118/66/253 = 443
+gh pr view 3 --json state,reviewDecision         # check PR #3 status
+git log --oneline main..HEAD                      # expect 1 commit: a8a7db7
 ```
 
-If those four commands match, state is intact. Pick up from "Active queue" below or "If PR #2 needs revisions" below.
+If those match, state is intact. Pick up from "Active queue" or "If PR #3 needs revisions" below.
+
+**Note on this file's history:** earlier revisions described PR #2 as open and named `interactive-walkthrough-test` as the working branch. Both are now stale — PR #2 merged, and the current working branch is `fix/self-apply-sa1-sa2`. This refresh supersedes those instructions.
 
 ---
 
@@ -29,123 +31,85 @@ If those four commands match, state is intact. Pick up from "Active queue" below
 | 2026-05-20 | Round-3 review applied (spec-decompose, wrapper guards, r08 gate, debt sort) | `3c039a6` |
 | 2026-05-20 | PR #1 merged | `2bc915a` |
 | 2026-05-21 | PR #2 opened (interactive walkthrough test + hybrid_review_date prompt) | `b38769f` |
-| 2026-05-22 | Self-apply step 1 performed against a `/tmp` clone — full end-to-end validation of the retrofit mechanics on a real codebase | — |
-| 2026-05-22 | This checkpoint pushed to origin/main | `6d278c0` |
+| 2026-05-22 | Self-apply step 1 against a `/tmp` clone — end-to-end retrofit validation on a real codebase | — |
+| 2026-05-22 | Checkpoint pushed to origin/main | `6d278c0` |
+| (≤2026-05-27) | **PR #2 merged** | `ce21d60` |
+| (≤2026-05-27) | Checkpoint update: self-apply findings + SA1/SA2/SA3 recorded | `332590e` |
+| **2026-05-27** | **PR #3 opened — SA1 + SA2 fixes** | `a8a7db7` |
 
-PR #1 went through three adversarial review rounds: scoped C2 (pre-PR), Round-2, Round-3. Final state: 10 commits, 410/410 tests, all rounds folded in.
+PR #1 went through three adversarial review rounds (scoped C2 pre-PR, Round-2, Round-3): 10 commits, all rounds folded in.
 
 ---
 
-## PR #2 open — interactive walkthrough test
+## PR #3 OPEN — SA1 + SA2 self-apply fixes
 
-**URL:** https://github.com/dengclive/Project-Bootstrap-Protocol/pull/2
-**Branch:** `interactive-walkthrough-test`
-**Commit:** `b38769f` — "Interactive walkthrough test + hybrid_review_date prompt"
-**Scope:** `lib/retrofit_interview.py` (+29 lines), `tests/test_retrofit.py` (+243 lines)
+**URL:** https://github.com/dengclive/Project-Bootstrap-Protocol/pull/3
+**Branch:** `fix/self-apply-sa1-sa2` (`a8a7db7`, pushed, 1 commit ahead of `main`)
+**Scope:** `lib/inventory_scan.py`, `lib/retrofit_interview.py`, `tests/test_retrofit.py` (3 files, +162/-5)
 
-**What's in it:**
-- Section 17 added to `tests/test_retrofit.py` — 25 stdin-fed checks covering the full 16-prompt interactive walkthrough.
-- Bug fix surfaced by the test: `hybrid_review_date` prompt added to `run_interactive` and sourced from `ans` in `answers_to_config`. Pre-fix, picking `pm_strategy: hybrid` was a UX dead-end (Round-2 Lens-1.3 gate would reject the cfg with no path to set the date).
+**SA1 — extension-less shebang scripts now count as source.**
+`inventory_scan.py` keyed source detection on file suffix only, so `bin/` scripts with `#!/usr/bin/env python3` and no `.py` counted as 0 (self-apply showed "bin: 0 source files"). Added a shared `_source_ext()` predicate + `_shebang_ext()` (reads only first 256 bytes); wired into `scan_structure`, `scan_languages` (buckets under `.py`/`.sh`/…), `scan_testing`. On this repo `bin/` goes 0 → 3.
 
-**Test breakdown (Section 17):**
+**SA2 — hybrid PM proposal no longer dead-ends accept-all-defaults.**
+When the heuristic proposes `pm_strategy: hybrid`, `run_interactive` now seeds `hybrid_review_date = today + 90 days` (the "90-day cutover review" the rationale cites). Placed in `run_interactive`, **NOT** `default_answers`, so `render_interview` (analyze path) stays a clock-free deterministic function of the inventory — preserving the "identical inventory ⇒ identical interview file" contract. Operator-*switched* hybrid (overriding a non-hybrid proposal at the prompt) is intentionally NOT auto-dated, preserving the loud-fail safety net (test 17.24).
 
-| Checks | What |
-|---|---|
-| 17.1-17.5 | All-defaults walkthrough → exit 0, cfg validates, scaffold-but-defer baseline |
-| 17.6-17.15 | Override walkthrough → archetype/prd_tier/tdd_policy/spec_strategy/commands land; loop+goal opt-in nested; B5 preserved |
-| 17.16-17.18 | Invalid-input loop + EOF fallback — flow accepts default and continues |
-| 17.19-17.20 | R8.I prereq UX seam — queue opt-in without loop/goal warned and disabled |
-| 17.21-17.23 | `pm_strategy: hybrid` + valid date → exit 0, prompt fires, date lands |
-| 17.24-17.25 | `pm_strategy: hybrid` + empty date → exit 2, error mentions `hybrid_review_date` + "required" |
+**Tests:** +8 Section-18 checks (18.1–18.8). `test_retrofit` 245 → 253; suite total 443. SA1 includes a non-shebang control file; SA2 fixture is guarded by an 18.5 "proposes hybrid" assertion before exercising the flow.
 
-**Test gauntlet on PR #2:**
+**Test gauntlet on PR #3:**
 | Suite | Count |
 |---|---|
 | `tests/test_greenfield_golden.py` | 6 |
 | `tests/test_installer.py` | 118 (frozen, zero-diff vs main) |
 | `tests/test_interview.py` | 66 |
-| `tests/test_retrofit.py` | 245 (was 220 on main; +25 §17) |
-| **Total** | **435** |
+| `tests/test_retrofit.py` | 253 (was 245 on main; +8 §18) |
+| **Total** | **443** |
 
-Frozen files zero-diff vs main on all 5 (`lib/minyaml.py`, `bin/bootstrap-install`, `tests/test_installer.py`, `bootstrap.config.yaml`, `BOOTSTRAP.md`).
-
----
-
-## Self-apply step 1 — 2026-05-22
-
-Cloned the repo to `/tmp/retrofit-self-apply` and ran the full retrofit flow end-to-end. The working repo was untouched throughout (cf. `git status` clean except for `.claude/logs/` and `__pycache__/`).
-
-**What worked (validates the mechanics on a real codebase):**
-- Inventory scan wrote 10 files; correctly counted 15 `.py` files / 4 test files / 9 no-test modules / 0 manifests / 1 commit with `github_issue_ref`.
-- Heuristics proposed archetype "library" (close call vs "cli", flagged as contested confidence — correct operator-discretion surface).
-- Interactive walkthrough ran clean through all 17 prompts; the PR #2 `hybrid_review_date` prompt fired exactly when needed.
-- 77-file install plan emitted; all created with correct retrofit-flavor content. State file has correct B5 shape (`*_enabled` top-level false, `r08_committed: true`, versions stamped).
-- `spec-gate-commit` retrofit_active exemption fired on 86-file `.claude/`-only commit (exit 0, log "retrofit_active exempt .claude/-only commit").
-- Mixed commit at week 1 → rollout-week warn-only.
-- `ROLLOUT_WEEK: 1` → `4` runtime edit picked up immediately by next hook invocation (D5 runtime-read contract verified).
-- Week 4 + empty `commands.test` → loud-TODO blocks commit (OD-3 working).
-- R7 simulation (flip `retrofit_active: false` in state file) → master-switch exemption stops firing.
-
-**Real findings surfaced (for v1.6.3 cleanup):**
-
-1. **Inventory scan misses extension-less Python scripts in `bin/`.** Scan only counts `.py` files; the repo's executable Python scripts use shebang without extension. Output showed "bin: 0 source files" despite three actual Python scripts. Fix: include extension-less files with `#!/usr/bin/env python*` shebang in the source-file count.
-
-2. **All-defaults flow fails when heuristics propose `hybrid` PM strategy.** Operator-hostile UX: enter-enter-enter through all prompts produces an invalid cfg because the new Round-3 `hybrid_review_date` gate requires a date the operator must explicitly provide. The PR #2 prompt catches this gracefully, but the *heuristic* shouldn't propose `hybrid` unless it can also propose a reasonable default date. Fix options: (a) demote `hybrid` to "recommended alternative; default `spec_canonical`"; (b) heuristic provides `today + 90 days` as the proposed `hybrid_review_date` default.
-
-3. **Post-R7 `.claude/` commits are spec-gated.** Working as designed per spec — once `retrofit_active: false`, all `.claude/` writes need to be specced like everything else. **Not a bug,** but worth surfacing in R7 handoff text to avoid surprising operators who want to tweak CLAUDE.md without a formal spec process.
-
-**What the self-apply does NOT validate:**
-- Whether the produced `.claude/` is actually useful for development. That requires running Claude Code against the produced project for a real session and observing whether the steering docs guide useful AI behavior. Empirical "Step 3" — operator judgment, not engineering test.
-
-**Engineering bar verdict: DONE.** Product bar (real-day-to-day usefulness) is operator-discretion after running it on a project they care about.
+Frozen files zero-diff vs main on all 5 (`lib/minyaml.py`, `bin/bootstrap-install`, `tests/test_installer.py`, `bootstrap.config.yaml`, `BOOTSTRAP.md`). Determinism (Section 2) + greenfield golden (D2 byte-identity 6/6) green.
 
 ---
 
-## If PR #2 needs revisions
+## Self-apply step 1 — 2026-05-22 (history)
 
-The PR is fresh — no review yet. If review feedback comes:
-- The pattern from PR #1 review rounds applies: read the review doc, verify findings against actual code (some may dissolve), triage by severity, fix blockers + high + medium that are in-scope, defer advisory with explicit rationale.
-- The standing lesson: re-read each fix's own diff before committing. C2 introduced regressions on Round-1 because that step was skipped.
+Cloned the repo to `/tmp/retrofit-self-apply` and ran the full retrofit flow end-to-end; working repo untouched throughout.
+
+**What worked:** inventory scan (10 files), heuristics (archetype "library", contested vs "cli"), interactive walkthrough through all prompts (PR #2 `hybrid_review_date` fired when needed), 77-file install plan with correct B5 state shape, `spec-gate-commit` retrofit_active exemption on `.claude/`-only commit, rollout-week warn-only at week 1, `ROLLOUT_WEEK` runtime-read (D5), week-4 empty `commands.test` loud-TODO block (OD-3), R7 master-switch exemption stops firing when `retrofit_active: false`.
+
+**Findings surfaced → now resolved/triaged:**
+1. **SA1** — inventory misses extension-less `bin/` Python scripts. → **FIXED on PR #3.**
+2. **SA2** — accept-all-defaults fails when heuristic proposes `hybrid` (no date default). → **FIXED on PR #3.**
+3. **SA3** — post-R7 `.claude/` commits are spec-gated (working as designed); should be surfaced in R7 handoff text. → **STILL PENDING (doc-only).**
+
+**Not validated by self-apply:** whether the produced `.claude/` actually guides useful AI behavior in a real dev session (empirical "Step 3", operator judgment).
+
+---
+
+## If PR #3 needs revisions
+
+No review yet. If feedback comes, the PR #1 pattern applies: read the review, verify findings against actual code (some dissolve), triage by severity, fix blockers/high/medium in-scope, defer advisory with rationale. Standing lesson: re-read each fix's own diff before committing (C2 regressed on Round-1 because that step was skipped).
 
 ---
 
 ## Active queue (from `~/.claude/projects/.../memory/project_post_retrofit_tasks.md`)
 
-Item #1 — interactive walkthrough test — is **in progress on PR #2**. Items #2-#6 remain:
+Item #1 (interactive walkthrough) **MERGED** via PR #2. SA1/SA2 **fixed on PR #3**. Remaining:
 
-2. **E2E CLI smoke** — shell script invoking `python -m installer --dry-run` against real greenfield + retrofit example projects. Asserts apply summary non-empty + exit 0. Catches argparse-layer breakage the unit tests bypass.
-3. **Cross-mode regression matrix** — install retrofit-mode onto fixture A, then run greenfield 118-check suite against fixture B in same process. Proves no global-state leakage.
+- **SA3** — R7 handoff text: surface that post-`retrofit_active=false` `.claude/` commits are spec-gated like normal source (working as designed per spec; doc note in `_retrofit_claude_md`'s R7 completion section).
+2. **E2E CLI smoke** — shell script invoking the installer `--dry-run` against real greenfield + retrofit example projects. Asserts apply summary non-empty + exit 0. Catches argparse-layer breakage the unit tests bypass.
+3. **Cross-mode regression matrix** — install retrofit-mode onto fixture A, then run the greenfield 118-check suite against fixture B in the same process. Proves no global-state leakage.
 4. **`bin/run-tests` / `make test`** — wrapper replacing the manual `for t in tests/test_*.py; do python "$t"; done` loop.
 5. **CI configuration** — none exists. GitHub Actions workflow running the script-style suites + smoke layer on PR.
 6. **`tests/smoke/` layout** — fixture repos + golden-tree diff against checked-in expected output.
 
-**Lower-priority items still pending from the 2026-05-19 checkpoint:**
+**Lower-priority (from 2026-05-19 checkpoint):**
 - test-gate grandfather clause (per-module exemption from `inventory/testing.md` no-test list)
 - Widen `inventory_scan.py` pyproject regex (misses bare `fastapi` w/o version)
 - Refactor `propose_commands` to take a root path instead of `os.getcwd()`
 
-**New findings from 2026-05-22 self-apply (v1.6.3 cleanup):**
-- **SA1** — `inventory_scan.py` extension-less script detection. Counts only `.py` files; misses Python scripts in `bin/` that use shebang without extension. Bug, easy fix.
-- **SA2** — Heuristics over-propose `hybrid` PM strategy without a date default. Combined with PR #2's `hybrid_review_date` gate, this makes "accept-all-defaults" interactive flow fail when the repo trips the multi-contributor + PM-tooling signal heuristic. Two-line fix in `retrofit_heuristics.py` (demote hybrid OR auto-default the date).
-- **SA3** — R7 handoff text doesn't surface that post-`retrofit_active=false` commits to `.claude/` are spec-gated like normal source. Working as designed per spec, but worth a doc note in `_retrofit_claude_md`'s R7 completion section.
-
 **Deferred from Round-3 adversarial review (v1.6.3 cleanup):**
-- A4 parallel templates docstring/test
-- A5 mode-selection drift-prone-area enforcement (R7 handoff)
-- B1 `--force` per-file scope
-- B3 legacy_allowlist sort-before-emit
-- D1 T2 AD class expansion
-- D2 FS5 disambig comment
-- F1 `bootstrap_protocol_version` runtime reader
-- F2 RETROFIT-COMPANION migration-path paragraph
-- G2 validator/B5 error-message coupling
+A4 parallel templates docstring/test · A5 mode-selection drift-prone-area enforcement (R7 handoff) · B1 `--force` per-file scope · B3 legacy_allowlist sort-before-emit · D1 T2 AD class expansion · D2 FS5 disambig comment · F1 `bootstrap_protocol_version` runtime reader · F2 RETROFIT-COMPANION migration-path paragraph · G2 validator/B5 error-message coupling
 
 **Deferred from Round-2 review (still defensible post-Round-3):**
-- 4.2 `r08_committed` writer-side semantic (cfg-side gate works now)
-- 5.2 Protocol-version lifecycle
-- 3.1 jq-garbage discrimination
-- 3.3 Two-seam true independence
-- 2.2 TEMPLATES dict cardinality arithmetic
+4.2 `r08_committed` writer-side semantic · 5.2 Protocol-version lifecycle · 3.1 jq-garbage discrimination · 3.3 Two-seam true independence · 2.2 TEMPLATES dict cardinality arithmetic
 
 ---
 
@@ -163,52 +127,50 @@ These bind ALL future `mode: retrofit` work on `main`. Breaking them silently re
 
 Wrapper transform contract: `_retrofit_wrapper_transform` (in `lib/installer.py`) MUST do both (1) swap `.bootstrap-state.json` → `.retrofit-state.json` and (2) insert `REFUSING:` guard reading state. Anchor is the `LOG="$PROJ/.claude/logs/hooks.log"` line (identical across all three wrappers).
 
+**SA2 addendum (PR #3):** the hybrid date auto-default lives ONLY in `run_interactive` (the explicitly non-deterministic front-end), never in `default_answers`/`build_retrofit_proposal`/`render_interview`. Moving it upstream would break the "identical inventory ⇒ identical interview file" determinism contract (`lib/retrofit_interview.py` docstring lines 22–25).
+
 ---
 
 ## How to verify state on resume
 
 ```bash
 cd /home/dengc/Documents/Projects/Project-Bootstrap-Protocol
-git checkout interactive-walkthrough-test
+git checkout fix/self-apply-sa1-sa2
 
-# 1. Branch is correct and 1 commit ahead of main
+# 1. Branch is 1 commit ahead of main
 git log --oneline main..HEAD | wc -l   # expect 1
 
-# 2. Last commit is the interactive walkthrough work
-git log -1 --oneline                    # expect b38769f Interactive walkthrough test...
+# 2. Last commit is the SA1+SA2 work
+git log -1 --oneline                    # expect a8a7db7 Fix SA1 ... + SA2 ...
 
 # 3. All four suites pass
-for t in tests/test_*.py; do python "$t" 2>&1 | tail -2; done
-# expect: 6 passed / 118 passed / 66 passed / 245 passed
+for t in tests/test_*.py; do python "$t" 2>&1 | tail -1; done
+# expect: 6 passed / 118 passed / 66 passed / 253 passed
 
 # 4. Frozen files zero-diff vs main
 git diff main -- lib/minyaml.py bin/bootstrap-install tests/test_installer.py bootstrap.config.yaml BOOTSTRAP.md
 # (empty)
 
-# 5. PR #2 still open
-gh pr view 2 --json state,title --jq '.state + ": " + .title'
+# 5. PR #3 still open
+gh pr view 3 --json state,title --jq '.state + ": " + .title'
 
-# 6. (optional) self-apply re-validation
-CLONE=/tmp/retrofit-self-apply-resume
-rm -rf "$CLONE" && git clone -q /home/dengc/Documents/Projects/Project-Bootstrap-Protocol "$CLONE"
-cd "$CLONE" && mv bootstrap.config.yaml bootstrap.config.yaml.snap
-{ echo ""; echo ""; echo ""; echo ""; echo ""; echo ""; echo ""; \
-  echo "2026-08-22"; echo ""; echo ""; echo ""; echo ""; \
-  echo ""; echo ""; echo ""; echo ""; echo ""; } \
-  | python bin/retrofit-interview interactive 2>&1 | tail -3
-python bin/bootstrap-install --dry-run 2>&1 | tail -2   # expect: create=77
+# 6. (optional) SA1 spot-check on this repo
+python -c "import sys; sys.path.insert(0,'lib'); from pathlib import Path; \
+from inventory_scan import scan_structure; \
+print(scan_structure(Path('.'))['top_level_dirs'].get('bin'))"   # expect source_files: 3
 ```
-
-If all five (or six) check out, you're exactly where this session ended.
 
 ---
 
 ## Local repo state
 
-- `main`: `6d278c0` (this checkpoint commit; synced with `origin/main`)
-- `interactive-walkthrough-test`: `b38769f` (synced with `origin/interactive-walkthrough-test`); 1 commit ahead of main excluding the checkpoint
-- `retrofit-installer` (old, merged): `3c039a6` local; `origin/retrofit-installer` also exists. Safe to delete (work landed on main via `2bc915a`); not deleted yet pending operator go-ahead.
-- Self-apply scratch: `/tmp/retrofit-self-apply` (clone with retrofit installed and state edited; ephemeral, not preserved across reboots).
+- `main`: `332590e` (synced with `origin/main`)
+- `fix/self-apply-sa1-sa2`: `a8a7db7` (synced with origin; 1 commit ahead of main) — **current working branch, PR #3**
+- `interactive-walkthrough-test`: `b38769f` — **MERGED via PR #2 (`ce21d60`); safe to delete (local + origin) pending operator go-ahead**
+- `retrofit-installer` (old): `3c039a6` local + `origin/retrofit-installer` — **MERGED via PR #1 (`2bc915a`); safe to delete pending operator go-ahead**
+- Self-apply scratch: `/tmp/retrofit-self-apply` (ephemeral, not preserved across reboots)
+
+**Branch cleanup offered, not yet done:** `interactive-walkthrough-test` and `retrofit-installer` are both fully merged and deletable on operator go-ahead.
 
 ---
 
@@ -218,7 +180,7 @@ If all five (or six) check out, you're exactly where this session ended.
 - `test_harness.md` — tests are scripts (not pytest), run with `python tests/<file>.py`
 - `project_retrofit_installer.md` — PR #1 merged at `2bc915a`; architectural invariants for `mode: retrofit` work on main
 - `feedback_frozen_files.md` — 5 files stayed byte-identical across PR #1; post-merge norm
-- `project_post_retrofit_tasks.md` — active follow-up queue (item #1 in flight on PR #2)
+- `project_post_retrofit_tasks.md` — active follow-up queue; updated 2026-05-27 (item #1 merged via PR #2; SA1/SA2 on PR #3; SA3 + items #2–#6 open)
 
 ---
 
@@ -229,4 +191,5 @@ If all five (or six) check out, you're exactly where this session ended.
 - Round-3 review doc: `~/Downloads/PR1-adversarial-review-r3.md`
 - Spec: `RETROFIT.md` v1.6.2, `RETROFIT-COMPANION.md` v1.6.2 (committed in `145dcc2`)
 - PR #1 (merged): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/1
-- PR #2 (open): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/2
+- PR #2 (merged): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/2
+- PR #3 (open): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/3
