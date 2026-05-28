@@ -31,6 +31,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import retrofit_heuristics as RH
@@ -639,6 +640,19 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     p = RH.build_retrofit_proposal(
         inv, project_fallback=repo_root.name or "my-project")
     ans = default_answers(p)
+    # SA2: when the heuristic itself proposes Strategy C (hybrid), seed a
+    # default cut-over review date (today + 90 days — the "90-day cutover
+    # review" the rationale already cites) so the accept-all-defaults
+    # walkthrough produces a cfg that passes the R0.7 Lens-1.3 gate instead
+    # of dead-ending on a required-but-empty field. Kept out of
+    # default_answers so render_interview stays a clock-free, deterministic
+    # function of the inventory. Operator-chosen hybrid (overriding a
+    # non-hybrid proposal at the prompt) is intentionally NOT auto-dated:
+    # ans has no hybrid_review_date, so the prompt still requires an explicit
+    # date and the loud-fail safety net (resolve_config gate) is preserved.
+    if p["pm"]["strategy"] == "hybrid":
+        ans["hybrid_review_date"] = (
+            date.today() + timedelta(days=90)).isoformat()
     eof = _EOF()
     o = outstream.write
 

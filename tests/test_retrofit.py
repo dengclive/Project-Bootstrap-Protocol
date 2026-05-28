@@ -1729,5 +1729,102 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
+print("\n=== Section 18: Self-apply regressions (SA1 shebang, SA2 hybrid) ===")
+from pathlib import Path          # noqa: E402  (also leaked from §9; explicit)
+from datetime import date, timedelta  # noqa: E402
+
+# SA1 — extension-less Python/shell scripts (shebang, no suffix) must count
+# as source. Pre-fix, scan_structure reported "0 source files" for a bin/-
+# style directory of executable scripts, hiding them from every downstream
+# heuristic.
+d = tempfile.mkdtemp()
+try:
+    os.makedirs(os.path.join(d, "tools"))
+    with open(os.path.join(d, "tools", "mycli"), "w") as fh:
+        fh.write("#!/usr/bin/env python3\nprint('hi')\n")   # shebang py
+    with open(os.path.join(d, "tools", "deploy"), "w") as fh:
+        fh.write("#!/bin/bash\necho hi\n")                   # shebang sh
+    with open(os.path.join(d, "tools", "NOTES"), "w") as fh:
+        fh.write("plain notes, no shebang\n")                # NOT source
+    with open(os.path.join(d, "tools", "lib.py"), "w") as fh:
+        fh.write("X = 1\n")                                  # normal .py
+    inv = scan_repo(Path(d))
+    tools = inv["structure"]["top_level_dirs"].get("tools", {})
+    check("18.1: scan_structure counts shebang scripts + .py, skips the "
+          "non-shebang file (3 of 4)",
+          tools.get("source_files") == 3,
+          f"got={tools.get('source_files')}")
+    check("18.2: scan_languages buckets shebang python under .py (>=2)",
+          inv["languages"]["files_by_extension"].get(".py", 0) >= 2,
+          f"got={inv['languages']['files_by_extension']}")
+    check("18.3: scan_languages buckets shebang shell under .sh (>=1)",
+          inv["languages"]["files_by_extension"].get(".sh", 0) >= 1,
+          f"got={inv['languages']['files_by_extension']}")
+    check("18.4: scan_testing source_file_count includes shebang scripts",
+          inv["testing"]["source_file_count"] >= 3,
+          f"got={inv['testing']['source_file_count']}")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# SA2 — when the heuristic itself proposes hybrid PM strategy, the accept-
+# all-defaults interactive walkthrough must produce a VALID cfg (today+90
+# default review date) rather than dead-ending on the required-but-empty
+# hybrid_review_date gate.
+d = tempfile.mkdtemp()
+try:
+    os.makedirs(os.path.join(d, "src"))
+    os.makedirs(os.path.join(d, "tests"))
+    with open(os.path.join(d, "src", "main.py"), "w") as fh:
+        fh.write("def hello(): return 1\n")
+    with open(os.path.join(d, "tests", "test_main.py"), "w") as fh:
+        fh.write("def test_hello(): assert True\n")
+    with open(os.path.join(d, "pyproject.toml"), "w") as fh:
+        fh.write('[project]\nname = "demo"\nversion = "0.1.0"\n')
+
+    def _git(*a):
+        subprocess.run(["git", *a], cwd=d, check=False, capture_output=True)
+    # Two contributors + ticket-ref commit messages -> propose_pm_strategy
+    # takes its multi_owner branch and proposes hybrid.
+    _git("init", "-q")
+    _git("config", "user.email", "alice@e.x")
+    _git("config", "user.name", "alice")
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "PROJ-1 initial work")
+    _git("config", "user.email", "bob@e.x")
+    _git("config", "user.name", "bob")
+    with open(os.path.join(d, "src", "main.py"), "a") as fh:
+        fh.write("# more\n")
+    _git("add", "-A")
+    _git("commit", "-q", "-m", "fix #2 bug")
+
+    # Guard: confirm the fixture actually trips the hybrid branch (so the
+    # SA2 assertions below are not silently exercising spec_canonical).
+    _prop = build_retrofit_proposal(scan_repo(Path(d)), project_fallback="demo")
+    check("18.5: fixture (multi-owner + PM signal) -> heuristic proposes "
+          "hybrid",
+          _prop["pm"]["strategy"] == "hybrid",
+          f"got={_prop['pm']['strategy']}")
+
+    # Accept-all-defaults: 18 empty lines (the extra hybrid_review_date
+    # prompt is pre-seeded with today+90 by run_interactive, so Enter takes
+    # the default).
+    rc, stdout, stderr = _interactive(d, [""] * 18)
+    check("18.6: accept-all-defaults with a hybrid proposal exits 0 "
+          "(no UX dead-end)",
+          rc == 0, f"rc={rc}\nstderr={stderr[-400:]}")
+    _expected = (date.today() + timedelta(days=90)).isoformat()
+    with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+        cfg_obj = load_yaml(fh.read())
+    check("18.7: hybrid_review_date auto-defaulted to today+90",
+          cfg_obj["retrofit"]["pm"].get("hybrid_review_date") == _expected,
+          f"got={cfg_obj['retrofit']['pm'].get('hybrid_review_date')} "
+          f"expected={_expected}")
+    check("18.8: auto-defaulted hybrid cfg validates (R0.7 gate satisfied)",
+          not validate_config_dict(cfg_obj),
+          f"errors={validate_config_dict(cfg_obj)}")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

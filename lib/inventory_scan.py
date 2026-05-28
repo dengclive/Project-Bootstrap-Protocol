@@ -93,6 +93,48 @@ def _has_tool(name: str) -> bool:
                            capture_output=True).returncode == 0
 
 
+# Shebang interpreters that mark an extension-less file as source, mapped to
+# the source pseudo-extension it is counted under. SA1: executable scripts in
+# bin/ commonly carry a `#!/usr/bin/env python3` shebang and no `.py` suffix,
+# so a suffix-only source check counts them as zero ("bin: 0 source files").
+_SHEBANG_EXT = [
+    (re.compile(r"\bpython[0-9.]*\b"), ".py"),
+    (re.compile(r"\b(?:ba|z|d|k)?sh\b"), ".sh"),
+    (re.compile(r"\bnode\b"), ".js"),
+    (re.compile(r"\bruby\b"), ".rb"),
+]
+
+
+def _shebang_ext(abs_path: str) -> str | None:
+    """Source pseudo-extension for an extension-less file based on its
+    interpreter shebang, else None. Reads only the first line."""
+    try:
+        with open(abs_path, "rb") as fh:
+            first = fh.readline(256)
+    except OSError:
+        return None
+    if not first.startswith(b"#!"):
+        return None
+    line = first.decode("utf-8", errors="replace")
+    for rx, ext in _SHEBANG_EXT:
+        if rx.search(line):
+            return ext
+    return None
+
+
+def _source_ext(rel: str, abs_path: str) -> str | None:
+    """Effective source extension for a file: its real suffix when that is a
+    recognized source extension, else a shebang-derived pseudo-extension for
+    extension-less scripts (SA1), else None. Single source-eligibility
+    predicate shared by the structure / languages / testing scanners."""
+    suffix = Path(rel).suffix
+    if suffix in SOURCE_EXTENSIONS:
+        return suffix
+    if suffix == "":
+        return _shebang_ext(abs_path)
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Per-dimension scanners
 # --------------------------------------------------------------------------- #
@@ -111,11 +153,11 @@ def scan_structure(root: Path) -> dict:
             for base, dirs, files in os.walk(abs_p):
                 dirs[:] = [d for d in dirs if d not in DEFAULT_EXCLUDE_DIRS]
                 for fn in files:
-                    if Path(fn).suffix in SOURCE_EXTENSIONS:
+                    abs_fn = os.path.join(base, fn)
+                    if _source_ext(fn, abs_fn) is not None:
                         count += 1
                         try:
-                            with open(os.path.join(base, fn),
-                                       errors="replace") as fh:
+                            with open(abs_fn, errors="replace") as fh:
                                 loc += sum(1 for _ in fh)
                         except OSError:
                             pass
@@ -139,6 +181,10 @@ def scan_languages(root: Path) -> dict:
     dockerfile_count = 0
     for rel, abs_p in _walk_source(root):
         ext = Path(rel).suffix
+        if not ext:
+            # SA1: bucket extension-less shebang scripts under their language
+            # pseudo-extension so the breakdown matches the source counts.
+            ext = _shebang_ext(abs_p) or ""
         if ext:
             by_ext[ext] = by_ext.get(ext, 0) + 1
         name = os.path.basename(rel)
@@ -212,10 +258,10 @@ def scan_testing(root: Path) -> dict:
     test_files = []
     source_files = []
     source_modules: set[str] = set()
-    for rel, _ in _walk_source(root):
+    for rel, abs_p in _walk_source(root):
         if any(p.search(rel) for p in TEST_FILE_PATTERNS):
             test_files.append(rel)
-        elif Path(rel).suffix in SOURCE_EXTENSIONS:
+        elif _source_ext(rel, abs_p) is not None:
             source_files.append(rel)
             stem = Path(rel).stem
             if stem and not stem.startswith("__"):
