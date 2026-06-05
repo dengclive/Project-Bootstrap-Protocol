@@ -421,6 +421,28 @@ try:
           ".claude/debt.md" in claude_md
           and ".claude/steering/spec-strategy.md" in claude_md)
 
+    # SA3 — R7 completion text MUST surface that the retrofit-time
+    # `.claude/`-only commit exemption goes away when retrofit_active
+    # flips false, AND name the forward workflow. Pre-fix the handoff
+    # text hinted at this only with a parenthetical, surprising operators
+    # who tried to tweak CLAUDE.md and got bounced by spec-gate-commit.
+    check("5.8a SA3: R7 handoff makes the post-active exemption-gone "
+          "consequence explicit",
+          "retrofit-time" in claude_md
+          and "exemption" in claude_md
+          and "GONE" in claude_md)
+    check("5.8b SA3: R7 handoff names .claude/ artifact classes covered",
+          "CLAUDE.md" in claude_md
+          and "steering docs" in claude_md
+          and "hooks" in claude_md)
+    check("5.8c SA3: R7 handoff points operator at /spec-new workflow "
+          "for post-R7 steering edits",
+          "/spec-new" in claude_md
+          and "Phase 7.5" in claude_md)
+    check("5.8d SA3: R7 handoff frames the rule honestly "
+          "(steering is not a back-door)",
+          "back-door" in claude_md)
+
     # .gitignore has retrofit patterns
     gi = open(os.path.join(d, ".claude", ".gitignore")).read()
     check("5.9: .gitignore includes .retrofit-state.json",

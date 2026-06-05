@@ -2206,9 +2206,23 @@ fix steering — do not override in-session.
 ## Retrofit completion (R7)
 
 When `retrofit_active: false` in `.retrofit-state.json`, retrofit is
-complete: the spec-gate-commit hook operates normally (no more
-allowlisting `.claude/` writes for the retrofit itself); the brownfield
-trust milestones for autonomous modes start ticking.
+complete:
+
+- The `spec-gate-commit` hook operates normally. The retrofit-time
+  exemption for `.claude/`-only commits is GONE — `.claude/` (including
+  `CLAUDE.md`, steering docs, hooks, skills, commands) is now treated
+  like any other source. A casual edit ("tweak a sentence in
+  `CLAUDE.md`") will be rejected on commit unless it is covered by an
+  active spec, or the file is on the legacy allowlist in
+  `spec-strategy.md`. This is the same bar applied to product code:
+  steering is not a back-door.
+- To change a steering doc post-R7, run `/spec-new` for the change,
+  take it through the per-task lifecycle (spec-review → decompose →
+  implement → code-review → spec-validate), and commit the resulting
+  diff. For trivial wording fixes a brief patch-bump spec is enough
+  (see Phase 7.5 spec versioning).
+- The brownfield trust milestones for autonomous modes start ticking
+  (see the R8.G/H/I milestone conditions above).
 """
 
 
