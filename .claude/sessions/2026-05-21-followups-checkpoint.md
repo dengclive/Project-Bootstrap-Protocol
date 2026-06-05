@@ -1,9 +1,9 @@
 # Post-merge follow-ups — Session Checkpoint
 
-**Date:** 2026-05-21 (created) / 2026-05-22 (self-apply) / **2026-05-27 (refreshed)**
-**Branch:** `fix/self-apply-sa1-sa2` (1 commit ahead of `main`, pushed)
-**Main last commit:** `332590e` (synced with `origin/main`; PR #1 merged at `2bc915a`, PR #2 merged at `ce21d60`)
-**Status:** PR #2 **MERGED**. PR #3 **OPEN** (SA1+SA2 fixes). 443/443 tests green on the fix branch. SA3 still pending (doc-only).
+**Date:** 2026-05-21 (created) / 2026-05-22 (self-apply) / 2026-05-27 (refresh) / **2026-06-05 (refreshed)**
+**Branch:** `doc/sa3-r7-handoff-spec-gating` (1 commit ahead of `main` after SA3 commit; checkpoint + push handled together)
+**Main last commit:** `3251aa2` (PR #3 merge; synced with `origin/main`)
+**Status:** PR #1, PR #2, PR #3 all **MERGED**. SA3 in flight as PR #4. 447/447 tests green on the SA3 branch. Three merged feature branches deleted (local + origin).
 
 ---
 
@@ -11,15 +11,15 @@
 
 ```bash
 cd /home/dengc/Documents/Projects/Project-Bootstrap-Protocol
-git checkout fix/self-apply-sa1-sa2
-for t in tests/test_*.py; do python "$t"; done   # expect 6/118/66/253 = 443
-gh pr view 3 --json state,reviewDecision         # check PR #3 status
-git log --oneline main..HEAD                      # expect 1 commit: a8a7db7
+git checkout doc/sa3-r7-handoff-spec-gating
+for t in tests/test_*.py; do python "$t"; done   # expect 6/118/66/257 = 447
+gh pr view 4 --json state,reviewDecision         # check PR #4 status
+git log --oneline main..HEAD                      # expect SA3 commit(s)
 ```
 
-If those match, state is intact. Pick up from "Active queue" or "If PR #3 needs revisions" below.
+If those match, state is intact. Pick up from "Active queue" below or "If PR #4 needs revisions."
 
-**Note on this file's history:** earlier revisions described PR #2 as open and named `interactive-walkthrough-test` as the working branch. Both are now stale — PR #2 merged, and the current working branch is `fix/self-apply-sa1-sa2`. This refresh supersedes those instructions.
+**Note on prior revisions of this file:** earlier refreshes named `interactive-walkthrough-test` then `fix/self-apply-sa1-sa2` as the working branch. Both PRs (#2, #3) are merged and both branches were deleted on 2026-06-05. The current working branch is `doc/sa3-r7-handoff-spec-gating`; PR #4 covers SA3 + this checkpoint refresh.
 
 ---
 
@@ -27,73 +27,70 @@ If those match, state is intact. Pick up from "Active queue" or "If PR #3 needs 
 
 | Date | Event | Commit / Ref |
 |---|---|---|
-| 2026-05-20 | Round-2 review applied (R8.G/H/I scaffolding + validators) | `db694c4` |
-| 2026-05-20 | Round-3 review applied (spec-decompose, wrapper guards, r08 gate, debt sort) | `3c039a6` |
-| 2026-05-20 | PR #1 merged | `2bc915a` |
+| 2026-05-20 | PR #1 merged (retrofit installer; three review rounds folded in) | `2bc915a` |
 | 2026-05-21 | PR #2 opened (interactive walkthrough test + hybrid_review_date prompt) | `b38769f` |
-| 2026-05-22 | Self-apply step 1 against a `/tmp` clone — end-to-end retrofit validation on a real codebase | — |
-| 2026-05-22 | Checkpoint pushed to origin/main | `6d278c0` |
-| (≤2026-05-27) | **PR #2 merged** | `ce21d60` |
+| 2026-05-22 | Self-apply step 1 against `/tmp` clone — end-to-end retrofit validation | — |
+| 2026-05-22 | Checkpoint update pushed to origin/main | `6d278c0` |
+| (≤2026-05-27) | PR #2 merged | `ce21d60` |
 | (≤2026-05-27) | Checkpoint update: self-apply findings + SA1/SA2/SA3 recorded | `332590e` |
-| **2026-05-27** | **PR #3 opened — SA1 + SA2 fixes** | `a8a7db7` |
-
-PR #1 went through three adversarial review rounds (scoped C2 pre-PR, Round-2, Round-3): 10 commits, all rounds folded in.
+| 2026-05-27 | PR #3 opened — SA1 + SA2 fixes | `a8a7db7` |
+| 2026-05-27 | Checkpoint refresh joined PR #3 | `38fc024` |
+| **2026-05-28** | **PR #3 merged** | `3251aa2` |
+| **2026-06-05** | Three merged branches deleted (local + origin): `fix/self-apply-sa1-sa2`, `interactive-walkthrough-test`, `retrofit-installer` | — |
+| **2026-06-05** | **PR #4 opened — SA3 doc note (R7 handoff spec-gating)** | (this branch) |
 
 ---
 
-## PR #3 OPEN — SA1 + SA2 self-apply fixes
+## PR #4 OPEN — SA3 R7 handoff spec-gating doc note
 
-**URL:** https://github.com/dengclive/Project-Bootstrap-Protocol/pull/3
-**Branch:** `fix/self-apply-sa1-sa2` (`a8a7db7`, pushed, 1 commit ahead of `main`)
-**Scope:** `lib/inventory_scan.py`, `lib/retrofit_interview.py`, `tests/test_retrofit.py` (3 files, +162/-5)
+**Branch:** `doc/sa3-r7-handoff-spec-gating` (off `main` at `3251aa2`)
+**Scope:** `lib/templates.py` (R7 completion section in `_retrofit_claude_md`), `tests/test_retrofit.py` (+4 checks 5.8a–5.8d), this checkpoint refresh
 
-**SA1 — extension-less shebang scripts now count as source.**
-`inventory_scan.py` keyed source detection on file suffix only, so `bin/` scripts with `#!/usr/bin/env python3` and no `.py` counted as 0 (self-apply showed "bin: 0 source files"). Added a shared `_source_ext()` predicate + `_shebang_ext()` (reads only first 256 bytes); wired into `scan_structure`, `scan_languages` (buckets under `.py`/`.sh`/…), `scan_testing`. On this repo `bin/` goes 0 → 3.
+**The finding (working as designed, but the surprise was real):**
+The `spec-gate-commit` hook has an affirmative `.claude/`-only commit exemption that fires **only while `retrofit_active=true`** (`lib/templates.py:1312-1325`). Once R7 flips `retrofit_active=false`, that branch goes silent and `.claude/` files rejoin the normal source population — any commit touching them must be backed by an active spec or be on the legacy allowlist. Pre-SA3 the R7 completion text in CLAUDE.md only hinted at this with a parenthetical ("no more allowlisting `.claude/` writes for the retrofit itself"), surprising operators who wanted to tweak `CLAUDE.md` casually.
 
-**SA2 — hybrid PM proposal no longer dead-ends accept-all-defaults.**
-When the heuristic proposes `pm_strategy: hybrid`, `run_interactive` now seeds `hybrid_review_date = today + 90 days` (the "90-day cutover review" the rationale cites). Placed in `run_interactive`, **NOT** `default_answers`, so `render_interview` (analyze path) stays a clock-free deterministic function of the inventory — preserving the "identical inventory ⇒ identical interview file" contract. Operator-*switched* hybrid (overriding a non-hybrid proposal at the prompt) is intentionally NOT auto-dated, preserving the loud-fail safety net (test 17.24).
+**The fix:**
+- Expanded `_retrofit_claude_md`'s "Retrofit completion (R7)" section into a 3-bullet list naming the consequence ("the retrofit-time exemption for `.claude/`-only commits is GONE"), enumerating the artifact classes covered (CLAUDE.md, steering docs, hooks, skills, commands), framing it honestly ("steering is not a back-door"), and pointing at the forward workflow (`/spec-new` → per-task lifecycle; trivial wording fixes can use a patch-bump spec per Phase 7.5).
+- Zero behavior change. Pure text in a template. Frozen files untouched.
 
-**Tests:** +8 Section-18 checks (18.1–18.8). `test_retrofit` 245 → 253; suite total 443. SA1 includes a non-shebang control file; SA2 fixture is guarded by an 18.5 "proposes hybrid" assertion before exercising the flow.
-
-**Test gauntlet on PR #3:**
+**Test gauntlet on PR #4:**
 | Suite | Count |
 |---|---|
 | `tests/test_greenfield_golden.py` | 6 |
 | `tests/test_installer.py` | 118 (frozen, zero-diff vs main) |
 | `tests/test_interview.py` | 66 |
-| `tests/test_retrofit.py` | 253 (was 245 on main; +8 §18) |
-| **Total** | **443** |
+| `tests/test_retrofit.py` | 257 (was 253 on main; +4 §5 SA3 checks 5.8a–5.8d) |
+| **Total** | **447** |
 
-Frozen files zero-diff vs main on all 5 (`lib/minyaml.py`, `bin/bootstrap-install`, `tests/test_installer.py`, `bootstrap.config.yaml`, `BOOTSTRAP.md`). Determinism (Section 2) + greenfield golden (D2 byte-identity 6/6) green.
+Frozen files zero-diff vs main on all 5. Determinism (Section 2) + greenfield golden (D2 byte-identity 6/6) green.
 
 ---
 
-## Self-apply step 1 — 2026-05-22 (history)
+## Self-apply findings — final triage
 
-Cloned the repo to `/tmp/retrofit-self-apply` and ran the full retrofit flow end-to-end; working repo untouched throughout.
+The 2026-05-22 `/tmp` clone retrofit produced three real findings; all three are now resolved or in flight:
 
-**What worked:** inventory scan (10 files), heuristics (archetype "library", contested vs "cli"), interactive walkthrough through all prompts (PR #2 `hybrid_review_date` fired when needed), 77-file install plan with correct B5 state shape, `spec-gate-commit` retrofit_active exemption on `.claude/`-only commit, rollout-week warn-only at week 1, `ROLLOUT_WEEK` runtime-read (D5), week-4 empty `commands.test` loud-TODO block (OD-3), R7 master-switch exemption stops firing when `retrofit_active: false`.
-
-**Findings surfaced → now resolved/triaged:**
-1. **SA1** — inventory misses extension-less `bin/` Python scripts. → **FIXED on PR #3.**
-2. **SA2** — accept-all-defaults fails when heuristic proposes `hybrid` (no date default). → **FIXED on PR #3.**
-3. **SA3** — post-R7 `.claude/` commits are spec-gated (working as designed); should be surfaced in R7 handoff text. → **STILL PENDING (doc-only).**
+1. **SA1** — inventory missed extension-less `bin/` Python scripts. → **MERGED via PR #3 (`3251aa2`).**
+2. **SA2** — accept-all-defaults dead-ended when heuristic proposed `hybrid` (no date default). → **MERGED via PR #3 (`3251aa2`).**
+3. **SA3** — R7 handoff text didn't surface post-`retrofit_active=false` `.claude/` spec-gating. → **PR #4 IN FLIGHT (this branch).**
 
 **Not validated by self-apply:** whether the produced `.claude/` actually guides useful AI behavior in a real dev session (empirical "Step 3", operator judgment).
 
+**Engineering bar:** DONE through SA1–SA3.
+**Product bar:** still operator-discretion on a real project.
+
 ---
 
-## If PR #3 needs revisions
+## If PR #4 needs revisions
 
-No review yet. If feedback comes, the PR #1 pattern applies: read the review, verify findings against actual code (some dissolve), triage by severity, fix blockers/high/medium in-scope, defer advisory with rationale. Standing lesson: re-read each fix's own diff before committing (C2 regressed on Round-1 because that step was skipped).
+No review yet. Same pattern as PR #1–#3: read the review, verify findings against actual code (some dissolve), triage by severity, defer advisory with rationale. SA3 is doc-only / pure text in a template, so revision cost should be minimal; the test assertions are anchored on stable phrases (`"GONE"`, `"back-door"`, `"/spec-new"`, `"Phase 7.5"`) so wording tweaks need at most a parallel test update.
 
 ---
 
 ## Active queue (from `~/.claude/projects/.../memory/project_post_retrofit_tasks.md`)
 
-Item #1 (interactive walkthrough) **MERGED** via PR #2. SA1/SA2 **fixed on PR #3**. Remaining:
+Item #1 (interactive walkthrough) merged via PR #2. SA1/SA2 merged via PR #3. SA3 in flight via PR #4. The remaining queue:
 
-- **SA3** — R7 handoff text: surface that post-`retrofit_active=false` `.claude/` commits are spec-gated like normal source (working as designed per spec; doc note in `_retrofit_claude_md`'s R7 completion section).
 2. **E2E CLI smoke** — shell script invoking the installer `--dry-run` against real greenfield + retrofit example projects. Asserts apply summary non-empty + exit 0. Catches argparse-layer breakage the unit tests bypass.
 3. **Cross-mode regression matrix** — install retrofit-mode onto fixture A, then run the greenfield 118-check suite against fixture B in the same process. Proves no global-state leakage.
 4. **`bin/run-tests` / `make test`** — wrapper replacing the manual `for t in tests/test_*.py; do python "$t"; done` loop.
@@ -129,48 +126,50 @@ Wrapper transform contract: `_retrofit_wrapper_transform` (in `lib/installer.py`
 
 **SA2 addendum (PR #3):** the hybrid date auto-default lives ONLY in `run_interactive` (the explicitly non-deterministic front-end), never in `default_answers`/`build_retrofit_proposal`/`render_interview`. Moving it upstream would break the "identical inventory ⇒ identical interview file" determinism contract (`lib/retrofit_interview.py` docstring lines 22–25).
 
+**SA3 addendum (PR #4):** the post-R7 spec-gating consequence MUST be surfaced in `_retrofit_claude_md`'s R7 completion section, not hidden in a parenthetical. The honest framing ("steering is not a back-door") is the contract: any future weakening of the post-R7 gate must be a deliberate spec change, not a quiet template edit. Test anchors in §5.8a–5.8d enforce the wording's key claims (`GONE`, artifact class list, `/spec-new`, Phase 7.5, `back-door`).
+
 ---
 
 ## How to verify state on resume
 
 ```bash
 cd /home/dengc/Documents/Projects/Project-Bootstrap-Protocol
-git checkout fix/self-apply-sa1-sa2
+git checkout doc/sa3-r7-handoff-spec-gating
 
-# 1. Branch is 1 commit ahead of main
-git log --oneline main..HEAD | wc -l   # expect 1
+# 1. Branch ahead of main
+git log --oneline main..HEAD | wc -l   # expect 1+ (SA3 commit, possibly + checkpoint)
 
-# 2. Last commit is the SA1+SA2 work
-git log -1 --oneline                    # expect a8a7db7 Fix SA1 ... + SA2 ...
-
-# 3. All four suites pass
+# 2. All four suites pass
 for t in tests/test_*.py; do python "$t" 2>&1 | tail -1; done
-# expect: 6 passed / 118 passed / 66 passed / 253 passed
+# expect: 6 passed / 118 passed / 66 passed / 257 passed
 
-# 4. Frozen files zero-diff vs main
+# 3. Frozen files zero-diff vs main
 git diff main -- lib/minyaml.py bin/bootstrap-install tests/test_installer.py bootstrap.config.yaml BOOTSTRAP.md
 # (empty)
 
-# 5. PR #3 still open
-gh pr view 3 --json state,title --jq '.state + ": " + .title'
+# 4. PR #4 still open
+gh pr view 4 --json state,title --jq '.state + ": " + .title'
 
-# 6. (optional) SA1 spot-check on this repo
-python -c "import sys; sys.path.insert(0,'lib'); from pathlib import Path; \
-from inventory_scan import scan_structure; \
-print(scan_structure(Path('.'))['top_level_dirs'].get('bin'))"   # expect source_files: 3
+# 5. Generated CLAUDE.md contains the new SA3 wording
+python -c "
+import sys; sys.path.insert(0,'lib')
+from templates import _retrofit_claude_md
+cfg = {'retrofit': {'autonomous_modes': {}}}
+md = _retrofit_claude_md(cfg)
+for key in ('GONE', 'back-door', '/spec-new', 'Phase 7.5'):
+    assert key in md, key
+print('SA3 anchors present')
+"
 ```
 
 ---
 
 ## Local repo state
 
-- `main`: `332590e` (synced with `origin/main`)
-- `fix/self-apply-sa1-sa2`: `a8a7db7` (synced with origin; 1 commit ahead of main) — **current working branch, PR #3**
-- `interactive-walkthrough-test`: `b38769f` — **MERGED via PR #2 (`ce21d60`); safe to delete (local + origin) pending operator go-ahead**
-- `retrofit-installer` (old): `3c039a6` local + `origin/retrofit-installer` — **MERGED via PR #1 (`2bc915a`); safe to delete pending operator go-ahead**
+- `main`: `3251aa2` (synced with `origin/main`; PR #3 merge commit)
+- `doc/sa3-r7-handoff-spec-gating`: **current working branch, PR #4**
+- All other local + origin feature branches: **deleted** (`fix/self-apply-sa1-sa2`, `interactive-walkthrough-test`, `retrofit-installer`). History preserved by their PR merge commits.
 - Self-apply scratch: `/tmp/retrofit-self-apply` (ephemeral, not preserved across reboots)
-
-**Branch cleanup offered, not yet done:** `interactive-walkthrough-test` and `retrofit-installer` are both fully merged and deletable on operator go-ahead.
 
 ---
 
@@ -180,7 +179,7 @@ print(scan_structure(Path('.'))['top_level_dirs'].get('bin'))"   # expect source
 - `test_harness.md` — tests are scripts (not pytest), run with `python tests/<file>.py`
 - `project_retrofit_installer.md` — PR #1 merged at `2bc915a`; architectural invariants for `mode: retrofit` work on main
 - `feedback_frozen_files.md` — 5 files stayed byte-identical across PR #1; post-merge norm
-- `project_post_retrofit_tasks.md` — active follow-up queue; updated 2026-05-27 (item #1 merged via PR #2; SA1/SA2 on PR #3; SA3 + items #2–#6 open)
+- `project_post_retrofit_tasks.md` — active follow-up queue; updated 2026-05-28 (PR #2 merged, SA1/SA2 merged via PR #3); needs a 2026-06-05 bump for SA3-in-flight on PR #4 (todo this session)
 
 ---
 
@@ -192,4 +191,5 @@ print(scan_structure(Path('.'))['top_level_dirs'].get('bin'))"   # expect source
 - Spec: `RETROFIT.md` v1.6.2, `RETROFIT-COMPANION.md` v1.6.2 (committed in `145dcc2`)
 - PR #1 (merged): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/1
 - PR #2 (merged): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/2
-- PR #3 (open): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/3
+- PR #3 (merged): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/3
+- PR #4 (open): https://github.com/dengclive/Project-Bootstrap-Protocol/pull/4
