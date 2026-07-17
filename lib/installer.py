@@ -2,7 +2,7 @@
 """
 Deterministic Bootstrap Protocol installer.
 
-Reads a bootstrap.config.yaml (the frozen output of the BOOTSTRAP.md wizard's
+Reads a bootstrap.config.yaml (the frozen output of the Bootstrap-Protocol-v2-0-0.md wizard's
 decision phases) and emits the complete .claude/ tree. Properties:
 
   * Deterministic   - identical config in => identical tree out.
@@ -33,7 +33,7 @@ from defaults import resolve_config    # archetype defaults + validation
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "1.9.0"
+PROTOCOL_VERSION = "2.0.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
 INSTALLER_VERSION = "1.0.0"
 
@@ -94,7 +94,7 @@ def build_plan(cfg: dict) -> list[dict]:
             add(f".claude/agents/{agent}.md", body)
 
     # ---- Per-task autonomous wrappers (Phase 9.5 / 9.6) ------------------- #
-    # BOOTSTRAP.md Phase 9.5 "What the wizard generates when loop mode is
+    # Bootstrap-Protocol-v2-0-0.md Phase 9.5 "What the wizard generates when loop mode is
     # opted in" and Phase 9.6 (goal-supervised) mandate these whenever the
     # *mode* is opted in - independent of queue mode. auto.sh dispatches
     # them, so they must exist for the queue=>loop|goal invariant to hold at
@@ -121,6 +121,19 @@ def build_plan(cfg: dict) -> list[dict]:
 
     # ---- gitignore fragment ----------------------------------------------- #
     add(".claude/.gitignore", TEMPLATES["gitignore"](cfg))
+
+    # ---- IC-2 root-sentinel gitignore managed block [SR-17 decision (a)] -- #
+    # The root sentinels /.halt and /.halt-hard only act on the autonomous
+    # wrappers, so the PROJECT-ROOT .gitignore block is emitted exactly when
+    # at least one wrapper is. This is a deliberate write surface outside
+    # .claude/, surfaced in --dry-run / the Phase 0.5 preview via this plan
+    # entry; apply_plan gives kind "gitignore_root" merge semantics (create
+    # whole file when absent; otherwise manage only the marker-delimited
+    # block and never touch or digest-track operator content).
+    if (flags["loop_mode_enabled"] or flags["goal_supervised_mode_enabled"]
+            or flags["queue_mode_enabled"]):
+        add(".gitignore", TEMPLATES["gitignore_root"](cfg),
+            kind="gitignore_root")
 
     # ---- Retrofit overlay (single mode-gated branch, per C1) ------------- #
     # Net AST change in build_plan: this conditional + the helper call.
@@ -317,6 +330,17 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
                                             "queue_mode_enabled"),
                mode=0o755)
 
+    # ---- IC-2 root-sentinel gitignore managed block (review finding 2) -- #
+    # The R8.G/H/I wrappers scaffolded above honour the root /.halt and
+    # /.halt-hard sentinels, so the project-root .gitignore managed block
+    # must ship whenever any of them does. The greenfield gate in
+    # build_plan reads the top-level *_enabled flags, which B5 pins false
+    # in retrofit mode - so the overlay (the single retrofit dispatch site
+    # per C1) appends the same action for the opt-in case.
+    if loop_in or goal_in or queue_in:
+        append(".gitignore", TEMPLATES["gitignore_root"](cfg),
+               kind="gitignore_root")
+
     # ---- R3.1 (Lens A1): retrofit-flavor spec-decompose skill ----------- #
     # The retrofit implementer.md prose tells the operator the spec-decompose
     # classifier marks danger-zone / legacy-allowlist files not-eligible by
@@ -349,6 +373,42 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # Apply / diff
 # --------------------------------------------------------------------------- #
+# IC-7 (seam SS7.2): machine-readable hand-edit tiers. Membership is
+# CONTRACT-LEVEL - adding or removing a hook from the security-critical set
+# is a seam_version event, never a quiet edit. These lists are the shell-era
+# baseline, not a frozen ceiling: the Milestone-B substrate release extends
+# the security-critical set with .claude/sdk_gates/gates.py under the seam
+# MAJOR (seam SS9). spec-gate-entry is DELIBERATELY non-critical (warn-tier
+# by the protocol's own entry-warn/commit-block split).
+TIER_SECURITY = "security-critical"
+TIER_AUTONOMY = "autonomy-critical"
+TIER_NON = "non-critical"
+SECURITY_CRITICAL_HOOKS = frozenset({
+    "secrets-gate", "spec-gate-commit", "dependency-gate", "test-gate",
+    "eval-gate", "tdd-gate", "format-lint-gate",
+})
+AUTONOMY_CRITICAL_HOOKS = frozenset({
+    "drift-detector-loop-cooperation", "iteration-summary-enforcement",
+})
+
+
+def _hook_tier(action: dict) -> str:
+    """Tier for a plan action per seam SS7.2. settings.json is a member of
+    the security-critical set; every other non-hook manifest entry is
+    non-critical (a digest mismatch there is a legitimate L-1 hand-edit)."""
+    if action["kind"] == "settings":
+        return TIER_SECURITY
+    if action["kind"] == "hook":
+        name = Path(action["path"]).name
+        if name.endswith(".sh"):
+            name = name[:-3]
+        if name in SECURITY_CRITICAL_HOOKS:
+            return TIER_SECURITY
+        if name in AUTONOMY_CRITICAL_HOOKS:
+            return TIER_AUTONOMY
+    return TIER_NON
+
+
 def _digest(body: str) -> str:
     return hashlib.sha256(body.encode()).hexdigest()[:16]
 
@@ -376,6 +436,13 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     prev_files = {f["path"]: f for f in prev.get("files", [])} if prev else {}
 
     for action in plan:
+        # IC-2 [SR-17 decision (a)]: the project-root .gitignore is co-owned
+        # with the operator - managed-block merge semantics, never the
+        # whole-file overwrite/skip logic below.
+        if action["kind"] == "gitignore_root":
+            _apply_root_gitignore(root, action, manifest, summary, dry=dry)
+            continue
+
         verdict = _classify(root, action)
         target = root / action["path"]
 
@@ -390,7 +457,8 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                       f"use --force to overwrite)")
                 manifest["files"].append(
                     {"path": action["path"], "digest": on_disk,
-                     "state": "skipped-local-edit"})
+                     "state": "skipped-local-edit",
+                     "tier": _hook_tier(action)})
                 continue
 
         summary[verdict] += 1
@@ -414,6 +482,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             "digest": _digest(action["body"]),
             "mode": oct(action["mode"]),
             "kind": action["kind"],
+            "tier": _hook_tier(action),
         })
 
     if not dry:
@@ -429,8 +498,110 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     return summary
 
 
+def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
+                          summary: dict, *, dry: bool) -> None:
+    """IC-2 [SR-17 decision (a)] - manage the root-sentinel block in the
+    PROJECT-ROOT .gitignore.
+
+    Semantics (owner-decided, spec bootstrap-v2 R-4):
+      * File absent (greenfield): create it containing exactly the managed
+        block - fully deterministic, digest-tracked normally in the manifest
+        (uninstall removes it iff unmodified, like any generated file).
+      * File present and byte-identical to the block: still wholly
+        installer-authored - normal digest tracking, no write.
+      * File present with operator content: the installer owns ONLY the
+        marker-delimited block. Append it once if absent; refresh it in
+        place if it drifted; NEVER touch bytes outside the markers. The
+        manifest entry carries state "managed-block-appended" with a
+        block_digest but NO whole-file digest, so operator edits outside
+        the block never fire hand-edit warnings and uninstall keeps the
+        co-owned file.
+      * Torn block (begin marker without end marker): fail loud, skip.
+    """
+    from templates import GITIGNORE_BLOCK_BEGIN, GITIGNORE_BLOCK_END
+
+    target = root / action["path"]
+    block = action["body"]
+
+    def _atomic_write(text: str) -> None:
+        # Co-ownership extends to metadata (review finding 7): when the
+        # file already exists, preserve the operator's mode - the
+        # installer owns only the marker block, never the permissions.
+        # (The inode still changes; atomicity of the content write wins
+        # over inode stability for a gitignore.)
+        mode = (stat.S_IMODE(target.stat().st_mode) if target.exists()
+                else action["mode"])
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(text)
+        tmp.chmod(mode)
+        os.replace(tmp, target)
+
+    tracked = {
+        "path": action["path"],
+        "digest": _digest(block),
+        "mode": oct(action["mode"]),
+        "kind": action["kind"],
+        "tier": TIER_NON,
+    }
+    co_owned = {
+        "path": action["path"],
+        "kind": action["kind"],
+        "state": "managed-block-appended",
+        "block_digest": _digest(block),
+        "tier": TIER_NON,
+    }
+
+    if not target.exists():
+        summary["create"] += 1
+        print(f"  CREATE {action['path']}  "
+              f"(project-root write: root-sentinel managed block)")
+        if not dry:
+            _atomic_write(block)
+        manifest["files"].append(tracked)
+        return
+
+    text = target.read_text()
+    if text == block:
+        summary["unchanged"] += 1
+        print(f"    ok   {action['path']}")
+        manifest["files"].append(tracked)
+        return
+
+    if GITIGNORE_BLOCK_BEGIN in text:
+        start = text.index(GITIGNORE_BLOCK_BEGIN)
+        end = text.find(GITIGNORE_BLOCK_END, start)
+        if end == -1:
+            summary["skipped"] += 1
+            print(f"  SKIP   {action['path']}  (managed block is torn - "
+                  f"begin marker without end marker; repair it manually)")
+            co_owned["state"] = "managed-block-torn"
+            manifest["files"].append(co_owned)
+            return
+        end += len(GITIGNORE_BLOCK_END)
+        if end < len(text) and text[end] == "\n":
+            end += 1
+        if text[start:end] == block:
+            summary["unchanged"] += 1
+            print(f"    ok   {action['path']}  (managed block current; "
+                  f"operator content untouched)")
+        else:
+            summary["update"] += 1
+            print(f"  UPDATE {action['path']}  (managed block refreshed; "
+                  f"operator content untouched)")
+            if not dry:
+                _atomic_write(text[:start] + block + text[end:])
+    else:
+        summary["update"] += 1
+        print(f"  UPDATE {action['path']}  (project-root write: managed "
+              f"block appended; operator content untouched)")
+        if not dry:
+            sep = "" if text.endswith("\n") else "\n"
+            _atomic_write(text + sep + block)
+    manifest["files"].append(co_owned)
+
+
 def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
-    """Write .claude/.bootstrap-state.json honouring the BOOTSTRAP.md
+    """Write .claude/.bootstrap-state.json honouring the Bootstrap-Protocol-v2-0-0.md
     Phase 0 / Recovery-and-State schema (archetype, PRD path, CI/CD opt-out,
     the three autonomous-mode flags, the three tracking lists). Preserves any
     pre-existing keys (e.g. completed_phases written by a live wizard)."""
@@ -438,17 +609,37 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     flags = cfg.get("autonomous_modes", {})
     state_path = root / STATE
     state: dict = {}
+    raw = None
     if state_path.exists():
         try:
-            state = json.loads(state_path.read_text())
+            raw = state_path.read_text()
         except Exception:
-            state = {}
+            raw = None
+        if raw is not None:
+            try:
+                state = json.loads(raw)
+            except Exception:
+                state = {}
+    # --- IC-3 migration (Companion "Migration notes"): any pre-2.0.0 state
+    # file - INCLUDING one too corrupt to parse, exactly the case a backup
+    # exists for - is backed up once before being rewritten. The backup is
+    # the same single read the migration classified (byte-identical, no
+    # second-read window).
+    if raw and "gate_substrate" not in state:
+        backup = state_path.with_name(state_path.name + ".pre-2.0.0")
+        if not backup.exists():
+            backup.write_text(raw)
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
+        # IC-3: the installed enforcement substrate. This installer emits the
+        # shell hook suite, so the only value it ever writes is "shell";
+        # "sdk-callable" is reserved for the >= 2.1.0 substrate release and
+        # is gated on the IC-1..IC-7 self-checks (lib/ic_checks.py).
+        "gate_substrate": "shell",
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],
         "deterministic_install": True,
-        # --- BOOTSTRAP.md Phase 0 required classification fields ---
+        # --- Bootstrap-Protocol-v2-0-0.md Phase 0 required classification fields ---
         "archetype": proj.get("archetype"),
         "prd_path": proj.get("prd_path"),
         "prd_tier": proj.get("prd_tier"),
@@ -551,6 +742,13 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
     # Versioning per OD-4: both fields, both top-level.
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
+        # IC-3 parity with _write_state: retrofit installs ship the same
+        # 2.0.0 wrapper bodies and the same shell gate suite, so the state
+        # file carries the same substrate signal (the 2.1.0 ic_checks /
+        # seam consumers key off this field; its absence would misclassify
+        # a retrofit project as pre-2.0.0). "sdk-callable" is never
+        # written here for the same reasons as the greenfield writer.
+        "gate_substrate": "shell",
         "retrofit_protocol_version": RETROFIT_PROTOCOL_VERSION,
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],

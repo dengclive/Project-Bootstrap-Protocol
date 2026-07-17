@@ -831,10 +831,13 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '1.9.0' literally",
-          state["bootstrap_protocol_version"] == "1.9.0")
+    check("8.3: bootstrap_protocol_version matches '2.0.0' literally",
+          state["bootstrap_protocol_version"] == "2.0.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
+    check("8.5: gate_substrate 'shell' present (IC-3 parity with the "
+          "greenfield writer; review finding 10)",
+          state.get("gate_substrate") == "shell")
 
     # B5 schema completeness (R0.5 step 8)
     required_top_level = (

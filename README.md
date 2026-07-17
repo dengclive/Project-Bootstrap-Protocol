@@ -1,6 +1,6 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-This answers the question: *"Can BOOTSTRAP.md be a Claude Code plugin, or
+This answers the question: *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
 deterministic code that configures Claude Code with all the hooks, commands,
 etc.?"*
 
@@ -8,7 +8,7 @@ etc.?"*
 
 ## The two layers
 
-`BOOTSTRAP.md` mixes two fundamentally different things:
+`Bootstrap-Protocol-v2-0-0.md` mixes two fundamentally different things:
 
 | Layer | Examples | Can it be deterministic? |
 |---|---|---|
@@ -41,7 +41,7 @@ and edit before it is ever used.
 It **proposes, never silently decides.** Where the PRD is ambiguous (contested
 archetype, no recognizable signal) it surfaces an explicit OPEN QUESTION rather
 than guessing. It maps PRD content to archetype and PRD tier using the
-BOOTSTRAP.md Project Archetypes table and PRD-tier definitions, and it reuses
+Bootstrap-Protocol-v2-0-0.md Project Archetypes table and PRD-tier definitions, and it reuses
 the archetype principle starter sets from `lib/defaults.py` verbatim
 (`PRINCIPLE_STARTERS` is imported, not re-listed) — the interview only proposes
 *deltas* from those defaults. It **never guesses** `commands.test/lint/format`
@@ -62,7 +62,7 @@ Two front-ends over one pure proposal core:
   identical interview file ⇒ identical config (digest-stable, like the
   installer).
 - **`interactive`** — a live one-question-at-a-time stdin Q&A over the same
-  core, honoring BOOTSTRAP.md's "show before writing" and "one open-ended
+  core, honoring Bootstrap-Protocol-v2-0-0.md's "show before writing" and "one open-ended
   question at a time": each prompt shows the proposal and rationale, Enter
   accepts it, nothing is written until the config validates. This front-end is
   intentionally the only non-deterministic surface (like a live wizard) and is
@@ -140,7 +140,7 @@ bootstrap-installer/
   digests) and skipped, not clobbered. `--force` overrides.
 - **Reversible** — `--uninstall` removes exactly what it created.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
-- **Faithful to BOOTSTRAP.md** — encodes the skip-policy invariants
+- **Faithful to Bootstrap-Protocol-v2-0-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
   starter sets, the conditional hook set (eval-gate only for ai-agent,
   tdd-gate only when TDD is required, loop-cooperation hooks only when an
@@ -192,19 +192,35 @@ deterministic installer).
   silently passing — by design.
 - `auto.sh` is scaffolded as a guarded skeleton. The full Phase 9.7 dispatch
   loop is intentionally left for the operator to complete before unattended
-  use, matching BOOTSTRAP.md's own trust-ramp guidance.
+  use, matching Bootstrap-Protocol-v2-0-0.md's own trust-ramp guidance.
 - The emitted skill/command/agent bodies are faithful stubs (frontmatter +
   intent). They are correct and load, but the deep prompt engineering for
   each skill is a separate effort from the structural scaffolding.
 
 ## Tests
 
+Standalone scripts — run each directly (not via pytest):
+
 ```bash
-python3 tests/test_installer.py     # 34 passed, 0 failed
-python3 tests/test_interview.py     # 46 passed, 0 failed
+python3 tests/test_installer.py           # 135 checks - plan, e2e, AC-A0, R-6
+python3 tests/test_interview.py           # 66 checks  - parser round-trips
+python3 tests/test_retrofit.py            # 253 checks - retrofit track
+python3 tests/test_greenfield_golden.py   # golden digests (GOLDEN_UPDATE=1 to re-baseline)
+python3 tests/test_gate_substrate.py      # 12 checks  - IC-3 state field + migration
+python3 tests/test_validate_only.py       # 10 checks  - IC-1 --validate-only
+python3 tests/test_advisor_model.py       # 15 checks  - IC-4 advisor default + fallback
+python3 tests/test_root_sentinels.py      # 28 checks  - IC-2 dual-honor + root gitignore
+python3 tests/test_hook_tiers.py          # 9 checks   - IC-7 manifest tiers
+python3 tests/test_goal_evaluator_keys.py # 13 checks  - Phase 9.6 goal-config keys
+python3 tests/test_auto_run_sentinel.py   # 16 checks  - Phase 9.7 .run-active race safety
 ```
 
 ## Review history
+
+> **Note (2026-07-17):** entries below predate the 2.0.0 rename
+> (`BOOTSTRAP.md` -> `Bootstrap-Protocol-v2-0-0.md`); historical
+> filenames are preserved as written, per the same archival principle
+> applied to the frozen RETROFIT-track documents.
 
 A multi-lens, multi-round review was performed (correctness, security,
 determinism, BOOTSTRAP.md fidelity). Findings fixed and now covered by

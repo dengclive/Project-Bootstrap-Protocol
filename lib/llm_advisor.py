@@ -82,8 +82,12 @@ def _get_client():
 
     def _call(prompt: str) -> str:  # pragma: no cover - needs live creds
         client = anthropic.Anthropic(api_key=key)
+        # IC-4: default is the current Sonnet alias (a dateless pinned
+        # snapshot, verified against platform.claude.com models overview
+        # 2026-07-17). The previous dated Sonnet-4 default is retired.
+        # Operators override via BOOTSTRAP_INTERVIEW_LLM_MODEL.
         model = os.environ.get("BOOTSTRAP_INTERVIEW_LLM_MODEL",
-                               "claude-sonnet-4-20250514")
+                               "claude-sonnet-5")
         msg = client.messages.create(
             model=model, max_tokens=1024,
             messages=[{"role": "user", "content": prompt}])
@@ -172,7 +176,7 @@ def _merge(det: dict, parsed: dict, notices: list[str]) -> dict:
             out["archetype"]["open_question"] = {
                 "id": "archetype",
                 "prompt": ("LLM was not confident on the archetype. Which "
-                           "BOOTSTRAP.md archetype fits?"),
+                           "Bootstrap-Protocol-v2-0-0.md archetype fits?"),
                 "options": sorted(ARCHETYPES),
                 "default": av,
             }

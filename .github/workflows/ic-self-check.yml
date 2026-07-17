@@ -1,0 +1,39 @@
+# ic-self-check — runs every standalone test suite on pushes to main and on PRs.
+#
+# PR5-06 (adversarial review of PR #5): the repo's 600+ checks were
+# honor-system; Milestone B (the enforcement-substrate flip) must not land
+# on a repo with zero CI. This is the Bootstrap-side minimal workflow; the
+# seam-mandated `protocol-compatibility` job (seam contract §8.2) is a
+# separate, cross-repo concern that layers on top at pin-bump time.
+#
+# The suites are standalone scripts that call sys.exit() — run each file
+# directly with python3, never via pytest (see tests/ and README §Tests).
+name: ic-self-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  suites:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run all standalone suites
+        run: |
+          set -euo pipefail
+          rc=0
+          for t in tests/test_*.py; do
+            echo "::group::$t"
+            if ! python3 "$t"; then
+              echo "::error file=$t::suite failed"
+              rc=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$rc"

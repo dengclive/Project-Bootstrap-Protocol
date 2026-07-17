@@ -6,7 +6,7 @@ reads PRD text and proposes the non-mechanical decisions the installer needs:
 archetype, PRD tier, principle deltas, secrets/deps posture, TDD policy, and
 autonomous-mode recommendations.
 
-Design rules (mirroring BOOTSTRAP.md "Protocol rules for the AI" and the
+Design rules (mirroring Bootstrap-Protocol-v2-0-0.md "Protocol rules for the AI" and the
 session constraints):
 
   * It PROPOSES, never silently decides. Every proposal carries a rationale
@@ -22,7 +22,7 @@ session constraints):
     loud-failing empty-command gates.
 
 The archetype table, PRD-tier definitions, and skip-policy invariant encoded
-below are taken from the bundled BOOTSTRAP.md (Project Archetypes table,
+below are taken from the bundled Bootstrap-Protocol-v2-0-0.md (Project Archetypes table,
 "PRD tiers" list, Skip Policy, Phase 0/4/9.5/9.6/9.7).
 """
 
@@ -97,7 +97,7 @@ ARCHETYPE_KEYWORDS: dict[str, list[tuple[str, int]]] = {
     ],
 }
 
-# Required PRD tier per archetype, verbatim from BOOTSTRAP.md Project
+# Required PRD tier per archetype, verbatim from Bootstrap-Protocol-v2-0-0.md Project
 # Archetypes table.  "other" defaults to standard.
 ARCHETYPE_REQUIRED_TIER: dict[str, str] = {
     "cli": "micro",
@@ -160,7 +160,7 @@ def propose_archetype(prd_text: str) -> dict:
       {value, confidence, rationale, alternatives:[...], open_question?:{...}}
     If the signal is weak or contested, confidence == CONF_OPEN and an
     open_question is attached enumerating the realistic options - the tool
-    does NOT pick silently (BOOTSTRAP.md: "Halt and ask if anything is
+    does NOT pick silently (Bootstrap-Protocol-v2-0-0.md: "Halt and ask if anything is
     ambiguous").
     """
     ranked = score_archetypes(prd_text)
@@ -175,13 +175,13 @@ def propose_archetype(prd_text: str) -> dict:
                 "No archetype keywords matched the PRD. The project may be a "
                 "browser extension, game, firmware, plugin, or hybrid system "
                 "- all of which map to 'other' with a synthetic profile in "
-                "BOOTSTRAP.md Phase 0. Human must confirm."),
+                "Bootstrap-Protocol-v2-0-0.md Phase 0. Human must confirm."),
             "alternatives": [a for a, _ in ranked[:3]],
             "open_question": {
                 "id": "archetype",
                 "prompt": (
                     "The PRD did not contain recognizable archetype signals. "
-                    "Which BOOTSTRAP.md archetype best fits this project?"),
+                    "Which Bootstrap-Protocol-v2-0-0.md archetype best fits this project?"),
                 "options": sorted(ARCHETYPES),
                 "default": "other",
             },
@@ -195,7 +195,7 @@ def propose_archetype(prd_text: str) -> dict:
             "rationale": (
                 f"Archetype is ambiguous: '{top}' (score {top_score}) and "
                 f"'{second}' (score {second_score}) are within the "
-                f"{ARCHETYPE_MARGIN}-point decision margin. BOOTSTRAP.md "
+                f"{ARCHETYPE_MARGIN}-point decision margin. Bootstrap-Protocol-v2-0-0.md "
                 f"requires classifying before configuring, so this is "
                 f"surfaced for an explicit human choice rather than guessed."),
             "alternatives": [a for a, s in ranked[:3] if s > 0],
@@ -203,7 +203,7 @@ def propose_archetype(prd_text: str) -> dict:
                 "id": "archetype",
                 "prompt": (
                     f"Archetype is contested between '{top}' and '{second}'. "
-                    f"Which fits? (See BOOTSTRAP.md Project Archetypes table.)"),
+                    f"Which fits? (See Bootstrap-Protocol-v2-0-0.md Project Archetypes table.)"),
                 "options": [a for a, s in ranked if s > 0] or sorted(ARCHETYPES),
                 "default": top,
             },
@@ -225,7 +225,7 @@ def propose_archetype(prd_text: str) -> dict:
 # PRD tier
 # --------------------------------------------------------------------------- #
 # Signals that justify *upgrading* above the archetype-required tier. We never
-# downgrade (BOOTSTRAP.md Phase 0 step 7: "Operator can request a higher tier
+# downgrade (Bootstrap-Protocol-v2-0-0.md Phase 0 step 7: "Operator can request a higher tier
 # but not a lower one").
 TIER_UPGRADE_SIGNALS = [
     (r"competitive (analysis|landscape)", "full", "competitive analysis"),
@@ -262,13 +262,13 @@ def propose_prd_tier(prd_text: str, archetype: str) -> dict:
     if final == base:
         rationale = (
             f"Archetype '{archetype}' requires the '{base}' PRD tier "
-            f"(BOOTSTRAP.md Project Archetypes table). No PRD signals "
+            f"(Bootstrap-Protocol-v2-0-0.md Project Archetypes table). No PRD signals "
             f"justified an upgrade.")
         conf = CONF_HIGH
     else:
         rationale = (
             f"Archetype '{archetype}' requires at least '{base}', but the "
-            f"PRD shows {', '.join(sorted(set(reasons)))}, which BOOTSTRAP.md "
+            f"PRD shows {', '.join(sorted(set(reasons)))}, which Bootstrap-Protocol-v2-0-0.md "
             f"associates with the '{final}' tier. Upgraded (never "
             f"downgraded). The human may request an even higher tier.")
         conf = CONF_MEDIUM
@@ -327,7 +327,7 @@ def propose_principles(prd_text: str, archetype: str) -> dict:
         "confidence": CONF_MEDIUM if additions else CONF_HIGH,
         "rationale": (
             f"Starter set for '{archetype}' taken verbatim from "
-            f"lib/defaults.PRINCIPLE_STARTERS (BOOTSTRAP.md Phase 4 step 2). "
+            f"lib/defaults.PRINCIPLE_STARTERS (Bootstrap-Protocol-v2-0-0.md Phase 4 step 2). "
             + (f"PRD signals justified proposing {len(additions)} addition(s); "
                f"these are proposals for human ranking, not silent edits."
                if additions else
@@ -355,7 +355,7 @@ def propose_tdd_policy(prd_text: str) -> dict:
             "confidence": CONF_LOW,
             "rationale": (
                 "PRD signals a quality emphasis but does not mandate TDD. "
-                "Proposing 'encouraged' (the BOOTSTRAP.md/installer default). "
+                "Proposing 'encouraged' (the Bootstrap-Protocol-v2-0-0.md/installer default). "
                 "Human may escalate to 'required'."),
         }
     return {
@@ -364,7 +364,7 @@ def propose_tdd_policy(prd_text: str) -> dict:
         "rationale": (
             "No TDD signal in the PRD. Proposing the installer default "
             "'encouraged'. TDD policy is a human workflow decision "
-            "(BOOTSTRAP.md Phase 4 step 6), surfaced for confirmation."),
+            "(Bootstrap-Protocol-v2-0-0.md Phase 4 step 6), surfaced for confirmation."),
     }
 
 
@@ -402,7 +402,7 @@ def propose_secrets(prd_text: str) -> dict:
         "enabled": True,
         "confidence": CONF_LOW,
         "rationale": (
-            "No explicit secrets signal, but BOOTSTRAP.md Skip Policy keeps "
+            "No explicit secrets signal, but Bootstrap-Protocol-v2-0-0.md Skip Policy keeps "
             "Phase 2.7 ON unless the project handles NO secrets at all. "
             "Proposing enabled with defaults; human may disable if truly "
             "secret-free."),
@@ -420,7 +420,7 @@ def propose_deps(prd_text: str) -> dict:
             "confidence": CONF_MEDIUM,
             "rationale": (
                 "PRD states a stdlib-only / no-dependency posture. "
-                "BOOTSTRAP.md Skip Policy allows skipping Phase 2.5 when the "
+                "Bootstrap-Protocol-v2-0-0.md Skip Policy allows skipping Phase 2.5 when the "
                 "archetype has no external deps. Proposing deps policy "
                 "DISABLED; human confirms."),
         }
@@ -439,7 +439,7 @@ def propose_deps(prd_text: str) -> dict:
 # Autonomous modes - always conservative; queue can never imply an invalid cfg
 # --------------------------------------------------------------------------- #
 def propose_autonomous_modes(prd_text: str) -> dict:
-    """All three default OFF, citing BOOTSTRAP.md trust-ramp / defer guidance.
+    """All three default OFF, citing Bootstrap-Protocol-v2-0-0.md trust-ramp / defer guidance.
 
     Crucially, queue mode is never proposed True unless loop|goal is also
     proposed True, so a generated draft can never violate the
@@ -450,7 +450,7 @@ def propose_autonomous_modes(prd_text: str) -> dict:
         r"autonomous|unattended|overnight|self[- ]driving|run.*without "
         r"(a )?human|hands[- ]off", norm)
     rationale_common = (
-        "BOOTSTRAP.md Phase 0/9.5/9.6/9.7 set all autonomous modes to "
+        "Bootstrap-Protocol-v2-0-0.md Phase 0/9.5/9.6/9.7 set all autonomous modes to "
         "DEFAULT SKIP (opt-in) and recommend deferring them until the "
         "project has shipped operator-in-the-loop tasks (5-10 for loop, "
         "10-20 for goal-supervised, 4+ weeks before queue). The PRD is not "
@@ -465,7 +465,7 @@ def propose_autonomous_modes(prd_text: str) -> dict:
             "id": "autonomous_modes",
             "prompt": (
                 "The PRD mentions autonomous operation. Enable any autonomous "
-                "modes now? (BOOTSTRAP.md strongly recommends deferring; "
+                "modes now? (Bootstrap-Protocol-v2-0-0.md strongly recommends deferring; "
                 "queue mode requires loop or goal mode.)"),
             "options": [
                 "None now (recommended; defer per trust ramp)",

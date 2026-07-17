@@ -6,7 +6,7 @@ Run: python3 tests/test_interview.py
 Mirrors tests/test_installer.py's harness (check(name, cond), final tally,
 exit code). Covers the session constraints explicitly:
   * proposes / never silently decides (ambiguity -> OPEN QUESTION)
-  * archetype + PRD-tier mapping from BOOTSTRAP.md tables
+  * archetype + PRD-tier mapping from Bootstrap-Protocol-v2-0-0.md tables
   * tier upgrade-not-downgrade
   * principles SOURCED from defaults (not duplicated)
   * commands.* always emitted empty + flagged

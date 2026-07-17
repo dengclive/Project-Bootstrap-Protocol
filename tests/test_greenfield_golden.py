@@ -122,14 +122,88 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
-    "default": "fc139d43688b67a3f78ae1e7de8fdf8e65a1d2aa2a3403dfdee6b4591a1a6f55",
+    # [2.0.0 R-0 freeze-exception] Re-baselined from the 1.9.0 digests for
+    # exactly two byte classes (verified by HEAD-vs-worktree plan diff):
+    #   1. settings.json `_generatedBy`: "protocol 1.9.0" -> "protocol 2.0.0"
+    #   2. protocol-document citations in emitted hook/wrapper/config bodies:
+    #      "BOOTSTRAP.md" -> "Bootstrap-Protocol-v2-0-0.md" (doc rename)
+    # default: 12 files changed; full_autonomous: 21 files changed.
+    #
+    # [2.0.0 R-4 freeze-exception] full_autonomous re-baselined again for
+    # IC-2 root-sentinel dual-honor (verified by plan diff; default fixture
+    # untouched by R-4 - its digest is the R-0 value):
+    #   1. loop.sh / goal-loop.sh / auto.sh gain the ROOT_HALT /
+    #      ROOT_HALT_HARD guards (permanent dual-honor; wrapper never
+    #      signals in-flight claude -p).
+    #   2. ONE new action: project-root ".gitignore" managed block
+    #      (kind gitignore_root, SR-17 decision (a)) - hence 65 -> 66.
+    #
+    # [2.0.0 R-6/AC-6-4 freeze-exception] full_autonomous re-baselined for
+    # exactly one file: auto-config.md gains the Companion-mandated
+    # queue-summary-synthesis surface (summary_synthesis_enabled: true,
+    # summary_synthesis_model: haiku - Model Assignment Strategy table).
+    # This is the AC-6-4 "only-if-diff" case: the subagent frontmatter
+    # itself was assertion-only, zero diff, as the spec predicted.
+    #
+    # [2.0.0 Finding-1 freeze-exception (PR #5 review)] full_autonomous
+    # re-baselined for the Phase 9.6 goal-config conformance fix - exactly
+    # two files (loop.sh verified byte-identical):
+    #   1. goal-config.md: judge_model -> evaluator_model (normative key,
+    #      Bootstrap-Protocol-v2-0-0.md:1336); adds the missing
+    #      evaluator_disagreement_threshold: 3 and
+    #      evaluator_feedback_history_depth: 2; documents the
+    #      unnamed-key Phase 9.6 items in comments.
+    #   2. goal-loop.sh: dual-reads judge_model as a DEPRECATED alias,
+    #      honoured only when evaluator_model is absent, loudly.
+    #
+    # [2.0.0 Finding-2 freeze-exception (PR #5 review)] full_autonomous
+    # re-baselined for the Phase 9.7 .run-active race-safety fix - exactly
+    # one file, auto.sh: CLAIMED guard (a refusing loser never deletes the
+    # winner's sentinel), PID-liveness startup check (kill -0 + /proc),
+    # operator-confirmed stale clearing with re-verify-before-clear, and
+    # the O_CREAT|O_EXCL claim ("abort ... rather than overwriting").
+    #
+    # [2.0.0 freeze-exception no. 6 (PR5-04 hardening)] full_autonomous
+    # re-baselined for exactly one file, auto.sh:
+    #   1. liveness probe kill -0 + /proc -> portable `ps -p` (EPERM-immune,
+    #      no Linux-only /proc dependence; cannot-determine still refuses);
+    #   2. stale-clear prompt tty-guarded ([ -t 0 ]): non-tty auto-answers
+    #      No BEFORE any stdin read (F-2 hang class closed);
+    #      BOOTSTRAP_TEST_FORCE_PROMPT=1 is a documented TEST-ONLY override
+    #      that can enable asking, never clearing.
+    #
+    # [2.0.0 freeze-exception no. 7 (adversarial-review fixes, auto.sh
+    # race class)] full_autonomous re-baselined for two files:
+    #   1. auto.sh: startup check-clear-claim now under flock (dual-'y'
+    #      race closed); three-state pid_alive (ps -p self-probe, kill -0
+    #      fallback, cannot-determine refuses); errexit-proof run_pid/
+    #      run_start helpers; prompt read time-bounded
+    #      (BOOTSTRAP_PROMPT_TIMEOUT, default 60s).
+    #   2. .claude/.gitignore fragment: + queue/.run-active.lock
+    #      (queue-gated, so the default fixture is unchanged).
+    #
+    # [2.0.0 freeze-exception no. 8 (adversarial-review fixes, gitignore
+    # class)] BOTH fixtures re-baselined for exactly one file each:
+    # .claude/.gitignore gains the ".bootstrap-state.json.pre-*" pattern
+    # so migration backups (e.g. .pre-2.0.0) are never committable. (The
+    # retrofit-mode root-.gitignore emission and the co-owned mode
+    # preservation in the same commit are apply()/overlay-time - outside
+    # this surface.)
+    #
+    # [2.0.0 freeze-exception no. 9 (adversarial-review fixes, goal-config
+    # parse class)] full_autonomous re-baselined for exactly one file,
+    # goal-loop.sh: goal_cfg_value() sanitizes operator-shaped edits
+    # (inline comment, matching quotes, surrounding whitespace) before
+    # exporting EVALUATOR_MODEL, survives sed failure under
+    # errexit+pipefail, and logs the resolved value for observability.
+    "default": "b6a3224491b89a306660d45f9d945a91e28d1f7aab122cf0beea9925e0d96412",
     "full_autonomous":
-        "78055b69b256d0f2929cbb251e6a0867be2ea826f7ae0f4b719526dc4155c283",
+        "a6883702f79a224faf0409e58c8f03ee1bba112f5cda1571855f72fa3a0e3744",
 }
 
 EXPECTED_ACTION_COUNTS = {
     "default": 54,
-    "full_autonomous": 65,
+    "full_autonomous": 66,
 }
 
 
