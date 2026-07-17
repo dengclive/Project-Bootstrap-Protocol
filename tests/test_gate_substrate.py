@@ -113,6 +113,34 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
+# Review fix (finding 3): a CORRUPT pre-2.0.0 state file is still backed
+# up (raw bytes) before the migration rewrites it - the corrupt-file case
+# is exactly what a non-destructive backup exists for.
+# --------------------------------------------------------------------------- #
+d = tempfile.mkdtemp()
+try:
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(CFG)
+    _install(d)
+    state_path = os.path.join(d, STATE_REL)
+    corrupt = '{"bootstrap_protocol_version": "1.9.0", "completed_pha'
+    open(state_path, "w").write(corrupt)          # truncated mid-write
+    os.remove(os.path.join(d, BACKUP_REL)) if os.path.exists(
+        os.path.join(d, BACKUP_REL)) else None
+    r = _install(d)
+    check("corrupt-state: re-install over a corrupt state file succeeds",
+          r.returncode == 0, r.stderr)
+    backup_path = os.path.join(d, BACKUP_REL)
+    check("corrupt-state: .pre-2.0.0 backup written with the raw corrupt "
+          "bytes", os.path.exists(backup_path)
+          and open(backup_path).read() == corrupt)
+    state = json.load(open(state_path))
+    check("corrupt-state: rewritten state is valid with gate_substrate "
+          "'shell'", state.get("gate_substrate") == "shell"
+          and state.get("bootstrap_protocol_version") == "2.0.0")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
 # AC-1-3: the writer never emits "sdk-callable" in Milestone A. There is no
 # code path that can produce it: assert the literal appears in no write
 # statement in lib/installer.py (Milestone B replaces this source-level

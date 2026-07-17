@@ -591,18 +591,26 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     flags = cfg.get("autonomous_modes", {})
     state_path = root / STATE
     state: dict = {}
+    raw = None
     if state_path.exists():
         try:
-            state = json.loads(state_path.read_text())
+            raw = state_path.read_text()
         except Exception:
-            state = {}
-    # --- IC-3 migration (Companion "Migration notes"): a state file written
-    # before 2.0.0 lacks gate_substrate. Non-destructive: back the original
-    # up to .bootstrap-state.json.pre-2.0.0 once, then stamp "shell".
-    if state and "gate_substrate" not in state:
+            raw = None
+        if raw is not None:
+            try:
+                state = json.loads(raw)
+            except Exception:
+                state = {}
+    # --- IC-3 migration (Companion "Migration notes"): any pre-2.0.0 state
+    # file - INCLUDING one too corrupt to parse, exactly the case a backup
+    # exists for - is backed up once before being rewritten. The backup is
+    # the same single read the migration classified (byte-identical, no
+    # second-read window).
+    if raw and "gate_substrate" not in state:
         backup = state_path.with_name(state_path.name + ".pre-2.0.0")
         if not backup.exists():
-            backup.write_text(state_path.read_text())
+            backup.write_text(raw)
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
         # IC-3: the installed enforcement substrate. This installer emits the
@@ -716,6 +724,13 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
     # Versioning per OD-4: both fields, both top-level.
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
+        # IC-3 parity with _write_state: retrofit installs ship the same
+        # 2.0.0 wrapper bodies and the same shell gate suite, so the state
+        # file carries the same substrate signal (the 2.1.0 ic_checks /
+        # seam consumers key off this field; its absence would misclassify
+        # a retrofit project as pre-2.0.0). "sdk-callable" is never
+        # written here for the same reasons as the greenfield writer.
+        "gate_substrate": "shell",
         "retrofit_protocol_version": RETROFIT_PROTOCOL_VERSION,
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],

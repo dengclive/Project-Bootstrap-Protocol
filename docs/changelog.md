@@ -279,6 +279,27 @@ already declared protocol v2.0.0 — reviewer item PR5-05).
 `tests/test_auto_run_sentinel.py` grows to 26 checks (dual-invocation
 lock refusal, directory sentinel, broken-ps dead/live cases, hang bound).
 
+**Class 2 — state-file migration & retrofit parity** (review findings 3,
+10; plus the double-read TOCTOU noted by the verifiers):
+
+1. **Corrupt-state backup.** The IC-3 migration now reads the pre-2.0.0
+   state file ONCE and backs up those raw bytes even when the file is too
+   corrupt to parse — previously a truncated state file skipped the
+   backup and was clobbered (verifier-reproduced data loss). The
+   single-read design also removes the parse-vs-backup second-read
+   window, so the `.pre-2.0.0` backup is byte-identical to what the
+   migration classified.
+2. **Retrofit `gate_substrate` parity.** `_write_retrofit_state` now
+   emits `gate_substrate: "shell"` alongside `bootstrap_protocol_version`
+   — retrofit installs ship the same 2.0.0 wrappers and shell gate suite,
+   and the 2.1.0 `ic_checks`/seam consumers key off the field.
+   (Additive top-level key; B5 shape and the C1 sibling-function
+   discipline preserved — `_write_state` untouched by this half.)
+
+No golden impact (state files are `apply()`-time artifacts).
+Tests: `tests/test_gate_substrate.py` → 15 checks (corrupt-file case);
+`tests/test_retrofit.py` → 254 (8.5 parity assertion).
+
 ### Milestone B (reserved)
 
 IC-5 (SDK `PreToolUse` callables per seam §9, Tessera-owned runner,
