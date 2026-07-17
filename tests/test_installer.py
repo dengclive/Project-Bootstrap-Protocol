@@ -650,8 +650,9 @@ check("AC-6-2: reviewer model is opus",
       "\nmodel: opus\n" in agents[".claude/agents/reviewer.md"])
 check("AC-6-2: integrator model is explicitly inherit",
       "\nmodel: inherit\n" in agents[".claude/agents/integrator.md"])
-check("AC-6-2: goal-config judge default is haiku",
-      "judge_model: haiku" in bodies[".claude/goal-config.md"])
+check("AC-6-2: goal-config judge default is haiku "
+      "(Phase 9.6 normative key evaluator_model)",
+      "evaluator_model: haiku" in bodies[".claude/goal-config.md"])
 check("AC-6-2: auto-config summary-synthesis default is haiku",
       "summary_synthesis_model: haiku" in bodies[".claude/auto-config.md"]
       and "summary_synthesis_enabled" in bodies[".claude/auto-config.md"])

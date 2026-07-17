@@ -131,21 +131,48 @@ Companion-mandated queue-summary-synthesis surface
 Model Assignment Strategy table names `.claude/auto-config.md` as its
 configuration surface; the 1.9.0 template omitted it).
 
-### Flagged to the owner (not changed)
+### Finding 1 (PR #5 review) — goal-config keys vs Phase 9.6 (code moves)
 
-1. **`judge_model` vs `evaluator_model`:** the Companion's table says the
-   goal-supervised judge is "configurable in `.claude/goal-config.md` via
-   `evaluator_model`", but the emitted key is `judge_model` (value `haiku`
-   matches). Renaming an operator-facing config key is a golden +
-   config-surface change not enumerated in the spec — needs an owner call
-   (rename the emitted key, or correct the Companion prose).
-2. **Pre-existing `auto.sh` bug (not introduced here, not fixed):** when
-   `auto.sh` refuses to start because another run's `.run-active` exists,
-   its EXIT trap still runs `rm -f "$RUN"` unguarded — deleting the
-   *active* run's sentinel. The per-task wrappers guard this with
-   `CLAIMED=1`; `auto.sh` does not. The new halt checks were deliberately
-   placed *before* the trap so they don't trigger it, but the underlying
-   path remains. Recommend fixing under its own freeze-exception.
+Owner ruling: the discrepancy is code-vs-normative-spec — Phase 9.6
+enumerates the goal-config surface with `evaluator_model` in the
+`evaluator_*` family (Bootstrap-Protocol-v2-0-0.md:1336, :1382). Sweep of
+the emitted `goal-config.md` against the full normative list:
+
+| Phase 9.6 item | 1.9.0/2.0.0-A emission | Action |
+|---|---|---|
+| `max_iterations` (10) | ✓ present, correct | none |
+| `evaluator_model` (haiku) | ✗ MISNAMED `judge_model` (value correct) | renamed; alias dual-read added |
+| `evaluator_disagreement_threshold` (3) | ✗ MISSING (zero hits) | added |
+| `evaluator_feedback_history_depth` (2) | ✗ MISSING (zero hits) | added |
+| judge-API-failure retry posture (retry-once-then-halt) | ✗ missing; **doc names no config key** | documented in emitted comments; key naming needs an owner/spec decision |
+| completion-criteria checklist | partial (`require_completion_sentinel: true`); no normative key names for the full checklist | kept; documented; naming needs spec decision |
+| classifier thresholds | partial (`summary_failure_halt_threshold: 3` — the malformed-summary threshold); others unnamed in doc | kept; documented |
+| audio-cue overrides | ✗ missing; no key names in doc | documented; naming needs spec decision |
+
+Extras retained (not in the enumeration, protocol-consistent):
+`infra_retry_seconds`, `infra_max_consecutive_failures` (transient
+`claude -p` posture, mirrors loop-config), `investigate_disagreement`
+(the Phase 9.6 `--investigate-disagreement` opt-in). `judge_model` was
+the ONLY misnamed key found — no other aliases needed.
+
+**Deprecated alias:** `goal-loop.sh` resolves `evaluator_model` from
+`goal-config.md`; `judge_model` is honoured only when `evaluator_model`
+is absent, with a loud stderr warning and a `hooks.log` entry. Exported
+as `EVALUATOR_MODEL` for the operator-completed judge call.
+
+**FREEZE-EXCEPTION (golden re-baseline #4, full_autonomous only).**
+Exactly two files: `goal-config.md` (rename + two added keys +
+documentation comments) and `goal-loop.sh` (alias resolution block).
+`loop.sh` verified byte-identical. Tests:
+`tests/test_goal_evaluator_keys.py` (13 checks).
+
+**Migration note:** operators with a pre-2.0.0 `goal-config.md` keep a
+working setup — the `judge_model` alias is honoured with a deprecation
+warning until they rename the key; new emissions use `evaluator_model`.
+
+### Finding 2 (PR #5 review) — `auto.sh` `.run-active` conformance defect
+
+*(entry added with the fix commit)*
 
 ### Migration note (operators)
 

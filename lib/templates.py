@@ -975,7 +975,7 @@ HALT="$PROJ/.claude/queue/.halt"       # legacy queue-scoped halt (remains)
 # ROOT_HALT/HALT as a graceful stop at each iteration boundary.
 ROOT_HALT="$PROJ/.halt"
 ROOT_HALT_HARD="$PROJ/.halt-hard"
-
+{judge_resolution}
 CLAIMED=0
 EXIT_REASON="infrastructure-failure"   # pessimistic; set on clean paths
 cleanup(){{
@@ -1057,7 +1057,38 @@ exit 0
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"
                                             else "goal-loop.sh"),
            active=active, sibling=sibling, my_list=my_list,
-           elig=elig, kind=kind)
+           elig=elig, kind=kind,
+           judge_resolution=(_JUDGE_RESOLUTION if kind == "goal" else ""))
+
+
+# Phase 9.6 judge-model resolution, goal-loop.sh only. Injected verbatim
+# (NOT re-.format-ed), so shell braces here are single, not doubled.
+# `evaluator_model` is the normative goal-config.md key; `judge_model`
+# (pre-2.0.0 emissions) is a DEPRECATED alias honoured only when
+# `evaluator_model` is absent, with a loud warning.
+_JUDGE_RESOLUTION = '''
+# Phase 9.6 judge-model resolution: `evaluator_model` is the normative
+# goal-config.md key. `judge_model` (pre-2.0.0 emissions) is honoured as a
+# DEPRECATED alias only when `evaluator_model` is absent. Rename the key in
+# goal-config.md; the alias will be removed in a future release.
+GOAL_CFG="$PROJ/.claude/goal-config.md"
+EVALUATOR_MODEL=""
+if [ -f "$GOAL_CFG" ]; then
+  EVALUATOR_MODEL="$(sed -n 's/^evaluator_model:[[:space:]]*//p' "$GOAL_CFG" | head -1)"
+  if [ -z "$EVALUATOR_MODEL" ]; then
+    LEGACY_JUDGE_MODEL="$(sed -n 's/^judge_model:[[:space:]]*//p' "$GOAL_CFG" | head -1)"
+    if [ -n "$LEGACY_JUDGE_MODEL" ]; then
+      EVALUATOR_MODEL="$LEGACY_JUDGE_MODEL"
+      echo "DEPRECATED: goal-config.md sets 'judge_model'; rename it to" >&2
+      echo "'evaluator_model' (Phase 9.6 normative key). Honouring the alias" >&2
+      echo "for this run." >&2
+      log "goal-loop.sh deprecated judge_model alias honoured (task=$TASK_ID)"
+    fi
+  fi
+fi
+EVALUATOR_MODEL="${EVALUATOR_MODEL:-haiku}"
+export EVALUATOR_MODEL   # consumed by the operator-completed judge call
+'''
 
 
 def _loop_sh(cfg):
@@ -1092,12 +1123,26 @@ def _goal_config(cfg):
 max_iterations: 10
 infra_retry_seconds: 30
 infra_max_consecutive_failures: 2
-judge_model: haiku
+# Judge model (Phase 9.6 normative key). Pre-2.0.0 emissions named this
+# `judge_model`; goal-loop.sh honours that as a DEPRECATED alias only when
+# `evaluator_model` is absent.
+evaluator_model: haiku
+# Halt when the judge and the deterministic gates stably disagree
+# (Phase 9.6, default 3).
+evaluator_disagreement_threshold: 3
+# Evaluator-feedback entries included in each iteration's priming context
+# (Phase 9.6, default 2).
+evaluator_feedback_history_depth: 2
 # Three consecutive malformed/missing iteration summaries => goal-condition
 # -suspect-class halt (parallels persistent-evaluator-disagreement).
 summary_failure_halt_threshold: 3
 require_completion_sentinel: true
 investigate_disagreement: false
+# Phase 9.6 additionally lists among the generated defaults: the
+# judge-API-failure retry posture (retry-once-then-halt), the
+# completion-criteria checklist, and audio-cue overrides. The protocol
+# document names no config keys for these; they remain wrapper-implemented
+# defaults pending normative key names (see docs/changelog.md).
 """
 
 
