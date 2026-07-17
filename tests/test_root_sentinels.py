@@ -220,5 +220,107 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+# --------------------------------------------------------------------- #
+# Review fix (finding 7): co-ownership extends to metadata - an operator
+# .gitignore with a non-default mode keeps it across the managed-block
+# append and refresh paths.
+# --------------------------------------------------------------------- #
+d = tempfile.mkdtemp()
+try:
+    gi = os.path.join(d, ".gitignore")
+    open(gi, "w").write("node_modules/\n")
+    os.chmod(gi, 0o664)
+    r = _install(d)
+    check("mode: operator .gitignore mode preserved on append",
+          r.returncode == 0
+          and (os.stat(gi).st_mode & 0o777) == 0o664,
+          oct(os.stat(gi).st_mode & 0o777))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------- #
+# Review fix (finding 8): the .pre-* state-backup pattern is in the
+# emitted .claude/.gitignore fragment, so migration backups are never
+# committable.
+# --------------------------------------------------------------------- #
+d = tempfile.mkdtemp()
+try:
+    _install(d)
+    frag = open(os.path.join(d, ".claude", ".gitignore")).read()
+    check("fragment: .bootstrap-state.json.pre-* pattern present",
+          ".bootstrap-state.json.pre-*" in frag)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------- #
+# Review fix (finding 2): RETROFIT installs with autonomous opt-ins get
+# the same root .gitignore managed block their scaffolded wrappers need
+# (the greenfield gate reads *_enabled, pinned false in retrofit; the
+# overlay appends the action for the opt-in case).
+# --------------------------------------------------------------------- #
+RETROFIT_CFG = """mode: "retrofit"
+project:
+  name: r-sentinels
+  archetype: ai-agent
+  prd_tier: "standard"
+principles:
+  tdd_policy: "required"
+secrets:
+  enabled: true
+deps:
+  enabled: true
+  approved: []
+commands:
+  test: "pytest"
+  lint: "ruff check ."
+  format: "ruff format ."
+retrofit:
+  spec_strategy: "touch-based"
+  legacy_allowlist:
+    - "src/**"
+  retrofit_active: true
+  r08_committed: true
+  archetype_confidence: "high"
+  archetype_evidence:
+    - "anthropic dep"
+  spec_patterns:
+    change: true
+    boundary: false
+    migration: false
+  codebase_size_gb: 1
+  autonomous_modes:
+    loop_mode_opted_in: true
+    goal_supervised_mode_opted_in: false
+    queue_mode_opted_in: false
+"""
+d = tempfile.mkdtemp()
+try:
+    r = _install(d, cfg=RETROFIT_CFG)
+    check("retrofit: install with loop opt-in succeeds",
+          r.returncode == 0, r.stderr)
+    loop_sh = os.path.join(d, ".claude", "loop.sh")
+    check("retrofit: scaffolded wrapper honours the root sentinels",
+          os.path.exists(loop_sh)
+          and "ROOT_HALT_HARD" in open(loop_sh).read())
+    gi = os.path.join(d, ".gitignore")
+    check("retrofit: root .gitignore managed block emitted with the "
+          "wrappers", os.path.exists(gi)
+          and GITIGNORE_BLOCK_BEGIN in open(gi).read()
+          and "/.halt-hard\n" in open(gi).read())
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# Retrofit WITHOUT any opt-in: no root .gitignore (scope unchanged).
+d = tempfile.mkdtemp()
+try:
+    no_optin = RETROFIT_CFG.replace("loop_mode_opted_in: true",
+                                    "loop_mode_opted_in: false")
+    r = _install(d, cfg=no_optin)
+    check("retrofit: no opt-ins -> no root .gitignore",
+          r.returncode == 0
+          and not os.path.exists(os.path.join(d, ".gitignore")))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -181,9 +181,17 @@ EXPECTED_DIGESTS = {
     #      (BOOTSTRAP_PROMPT_TIMEOUT, default 60s).
     #   2. .claude/.gitignore fragment: + queue/.run-active.lock
     #      (queue-gated, so the default fixture is unchanged).
-    "default": "cd050038ad0a79f924b96a770fd98e6fba4a6dcd2bc3599f574bdfff573d5a73",
+    #
+    # [2.0.0 freeze-exception no. 8 (adversarial-review fixes, gitignore
+    # class)] BOTH fixtures re-baselined for exactly one file each:
+    # .claude/.gitignore gains the ".bootstrap-state.json.pre-*" pattern
+    # so migration backups (e.g. .pre-2.0.0) are never committable. (The
+    # retrofit-mode root-.gitignore emission and the co-owned mode
+    # preservation in the same commit are apply()/overlay-time - outside
+    # this surface.)
+    "default": "b6a3224491b89a306660d45f9d945a91e28d1f7aab122cf0beea9925e0d96412",
     "full_autonomous":
-        "9b2d26d26f1025aa0948e4762bf5d5488daee635991a7619c97e43791bca0ba3",
+        "04153baa3d6190f09b4ca6ccea0976e48b345a397d09add1c601ca96226232c6",
 }
 
 EXPECTED_ACTION_COUNTS = {

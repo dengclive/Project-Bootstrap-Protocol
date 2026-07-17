@@ -1342,7 +1342,8 @@ def _gitignore(cfg):
         "sessions/.loop-complete-*", "sessions/.loop-halt-*",
         "sessions/.iteration-summary-*", "sessions/.evaluator-feedback-*",
         ".installer-manifest.json", ".bootstrap-state.json",
-        ".bootstrap-state.json.lock", ".bootstrap-incomplete",
+        ".bootstrap-state.json.lock", ".bootstrap-state.json.pre-*",
+        ".bootstrap-incomplete",
     ]
     if cfg["autonomous_modes"]["queue_mode_enabled"]:
         base += ["queue/.run-active", "queue/.run-active.lock",
@@ -2448,7 +2449,7 @@ def _retrofit_gitignore(cfg):
         # Retrofit-specific (per RETROFIT R8.C gitignore block):
         ".retrofit-state.json",
         ".bootstrap-state.json.pre-1.7", ".bootstrap-state.json.pre-1.8",
-        ".bootstrap-state.json.pre-1.9",
+        ".bootstrap-state.json.pre-1.9", ".bootstrap-state.json.pre-*",
         "inventory/.scan-cache-*",
         "sessions/.bypass-count-*",
     ]

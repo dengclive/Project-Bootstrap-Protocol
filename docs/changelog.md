@@ -300,6 +300,32 @@ No golden impact (state files are `apply()`-time artifacts).
 Tests: `tests/test_gate_substrate.py` → 15 checks (corrupt-file case);
 `tests/test_retrofit.py` → 254 (8.5 parity assertion).
 
+**Class 3 — gitignore surfaces** (review findings 2, 7, 8):
+
+1. **Retrofit root-`.gitignore` emission.** `_apply_retrofit_overlay` (the
+   single retrofit dispatch site per C1) now appends the `gitignore_root`
+   managed-block action whenever any autonomous opt-in scaffolds a
+   wrapper — the greenfield gate reads top-level `*_enabled` flags, which
+   B5 pins false in retrofit mode, so retrofit projects previously got
+   root-sentinel-honoring wrappers with committable sentinels (AC-4-5
+   violated on that path; verifier-reproduced). No opt-ins → no root
+   write, scope unchanged.
+2. **Co-owned metadata preserved.** The managed-block append/refresh
+   paths now keep the operator's existing file mode instead of resetting
+   to 0644 (the inode still changes — content-write atomicity wins over
+   inode stability for a gitignore).
+3. **Migration backups never committable.** Both emitted `.claude/
+   .gitignore` fragments gain the `.bootstrap-state.json.pre-*` pattern,
+   covering the new `.pre-2.0.0` backup and every future one (the
+   retrofit fragment's per-version entries stay for back-compat).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 8, BOTH fixtures, one file
+each).** `.claude/.gitignore` gains the `pre-*` pattern — the first
+default-fixture change since R-0; items 1 and 2 are overlay/apply-time,
+outside the golden surface. Tests: `tests/test_root_sentinels.py` → 34
+checks (retrofit emission + no-opt-in scope guard, mode preservation,
+fragment pattern).
+
 ### Milestone B (reserved)
 
 IC-5 (SDK `PreToolUse` callables per seam §9, Tessera-owned runner,

@@ -330,6 +330,17 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
                                             "queue_mode_enabled"),
                mode=0o755)
 
+    # ---- IC-2 root-sentinel gitignore managed block (review finding 2) -- #
+    # The R8.G/H/I wrappers scaffolded above honour the root /.halt and
+    # /.halt-hard sentinels, so the project-root .gitignore managed block
+    # must ship whenever any of them does. The greenfield gate in
+    # build_plan reads the top-level *_enabled flags, which B5 pins false
+    # in retrofit mode - so the overlay (the single retrofit dispatch site
+    # per C1) appends the same action for the opt-in case.
+    if loop_in or goal_in or queue_in:
+        append(".gitignore", TEMPLATES["gitignore_root"](cfg),
+               kind="gitignore_root")
+
     # ---- R3.1 (Lens A1): retrofit-flavor spec-decompose skill ----------- #
     # The retrofit implementer.md prose tells the operator the spec-decompose
     # classifier marks danger-zone / legacy-allowlist files not-eligible by
@@ -513,9 +524,16 @@ def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
     block = action["body"]
 
     def _atomic_write(text: str) -> None:
+        # Co-ownership extends to metadata (review finding 7): when the
+        # file already exists, preserve the operator's mode - the
+        # installer owns only the marker block, never the permissions.
+        # (The inode still changes; atomicity of the content write wins
+        # over inode stability for a gitignore.)
+        mode = (stat.S_IMODE(target.stat().st_mode) if target.exists()
+                else action["mode"])
         tmp = target.with_suffix(target.suffix + ".tmp")
         tmp.write_text(text)
-        tmp.chmod(action["mode"])
+        tmp.chmod(mode)
         os.replace(tmp, target)
 
     tracked = {
