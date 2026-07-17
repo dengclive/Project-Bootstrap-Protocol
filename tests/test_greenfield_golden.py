@@ -162,9 +162,18 @@ EXPECTED_DIGESTS = {
     # winner's sentinel), PID-liveness startup check (kill -0 + /proc),
     # operator-confirmed stale clearing with re-verify-before-clear, and
     # the O_CREAT|O_EXCL claim ("abort ... rather than overwriting").
+    #
+    # [2.0.0 freeze-exception no. 6 (PR5-04 hardening)] full_autonomous
+    # re-baselined for exactly one file, auto.sh:
+    #   1. liveness probe kill -0 + /proc -> portable `ps -p` (EPERM-immune,
+    #      no Linux-only /proc dependence; cannot-determine still refuses);
+    #   2. stale-clear prompt tty-guarded ([ -t 0 ]): non-tty auto-answers
+    #      No BEFORE any stdin read (F-2 hang class closed);
+    #      BOOTSTRAP_TEST_FORCE_PROMPT=1 is a documented TEST-ONLY override
+    #      that can enable asking, never clearing.
     "default": "cd050038ad0a79f924b96a770fd98e6fba4a6dcd2bc3599f574bdfff573d5a73",
     "full_autonomous":
-        "234bec0067e4aaf9e2a3c74291572eab1e3da3cbde823f9350cde217f4db4975",
+        "73f1ff657727b6038479e1fd20750353d13bebd36f977e6c6f3ad0dde219dd79",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -79,13 +79,24 @@ try:
     env = dict(os.environ)
     env["CLAUDE_PROJECT_DIR"] = d
 
-    def run_auto(stdin_text=""):
+    def run_auto(stdin_text="", force_prompt=False):
+        e = dict(env)
+        if force_prompt:
+            # TEST-ONLY override: forces the prompt path on a non-tty; it
+            # can only enable ASKING (answer still read from stdin,
+            # default No) - never clearing.
+            e["BOOTSTRAP_TEST_FORCE_PROMPT"] = "1"
         return subprocess.run(["bash", auto], input=stdin_text,
-                              capture_output=True, text=True, env=env)
+                              capture_output=True, text=True, env=e)
 
     body = open(auto).read()
     check("static: O_CREAT|O_EXCL claim of .run-active (set -C)",
           'set -C; printf' in body and '>"$RUN"' in body)
+    check("static: portable ps -p liveness probe (no kill -0/EPERM or "
+          "/proc dependence)", 'ps -p "$OLD_PID"' in body
+          and '/proc/$OLD_PID' not in body)
+    check("static: prompt is tty-guarded before any stdin read",
+          '[ -t 0 ] || [ "${BOOTSTRAP_TEST_FORCE_PROMPT:-0}" = 1 ]' in body)
     check("static: cleanup removes the sentinel only when CLAIMED",
           '[ "$CLAIMED" = 1 ] && rm -f "$RUN"' in body)
 
@@ -122,17 +133,26 @@ try:
     # ----------------------------------------------------------------- #
     stale = f"pid={dead_pid()} start=2026-07-16T00:00:00Z\n"
     open(run_path, "w").write(stale)
-    r = run_auto()          # EOF on stdin -> defaults to No
-    check("(ii) stale + non-interactive (EOF) refuses",
-          r.returncode != 0 and "Stale .run-active" in r.stderr, r.stderr)
+    r = run_auto()          # non-tty stdin -> auto-No before any read
+    check("(ii) stale + non-interactive refuses without prompting",
+          r.returncode != 0 and "Stale .run-active" in r.stderr
+          and "Non-interactive invocation" in r.stderr, r.stderr)
     check("(ii) refusal leaves the stale sentinel in place",
           open(run_path).read() == stale)
 
-    r = run_auto(stdin_text="n\n")
+    # tty-guard: a non-tty 'y' WITHOUT the test override must never clear -
+    # stdin is not even read (F-2 class: inherited pipes cannot drive
+    # clearing, and an open-but-silent pipe cannot hang the prompt).
+    r = run_auto(stdin_text="y\n")
+    check("(ii) non-tty 'y' without override refuses, sentinel intact",
+          r.returncode != 0 and open(run_path).read() == stale
+          and "Non-interactive invocation" in r.stderr, r.stderr)
+
+    r = run_auto(stdin_text="n\n", force_prompt=True)
     check("(ii) stale + explicit 'n' refuses, sentinel intact",
           r.returncode != 0 and open(run_path).read() == stale)
 
-    r = run_auto(stdin_text="y\n")
+    r = run_auto(stdin_text="y\n", force_prompt=True)
     check("(ii) stale + 'y' alerts with recorded start, clears, and runs",
           r.returncode == 0
           and "2026-07-16T00:00:00Z" in r.stderr, r.stderr)
@@ -151,9 +171,11 @@ try:
     open(run_path, "w").write(f"pid={dead_pid()} start=2026-07-15T00:00:00Z\n")
     err_path = os.path.join(d, "loser.stderr")
     with open(err_path, "w") as errf:
+        race_env = dict(env)
+        race_env["BOOTSTRAP_TEST_FORCE_PROMPT"] = "1"
         p = subprocess.Popen(["bash", auto], stdin=subprocess.PIPE,
                              stdout=subprocess.DEVNULL, stderr=errf,
-                             text=True, env=env)
+                             text=True, env=race_env)
         # Wait until the loser is parked at the confirmation prompt.
         deadline = time.time() + 10
         while time.time() < deadline:

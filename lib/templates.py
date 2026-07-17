@@ -910,19 +910,30 @@ if [ -e "$RUN" ]; then
     EXIT_REASON="manual-halt-sentinel"
     exit 1
   fi
-  # kill -0 alone misreads EPERM (live process, other user) as dead; the
-  # /proc check covers that on Linux.
-  if kill -0 "$OLD_PID" 2>/dev/null || [ -e "/proc/$OLD_PID" ]; then
+  # Portable liveness probe: ps -p reports existence regardless of owner
+  # (kill -0 misreads EPERM - a live process under another user - as dead,
+  # and /proc is Linux-only). Cannot-determine still lands on refuse.
+  if ps -p "$OLD_PID" >/dev/null 2>&1; then
     echo "A queue run is already active (pid=$OLD_PID, $RUN). Refusing to start." >&2
     EXIT_REASON="manual-halt-sentinel"
     exit 1
   fi
   # Stale sentinel from a crashed prior run: alert with the recorded start
-  # timestamp and ask before clearing (Phase 9.7). Non-interactive
-  # invocations (EOF on stdin) refuse - fail safe, side-effect-free.
+  # timestamp and ask before clearing (Phase 9.7). The prompt is offered
+  # only on an interactive terminal - a non-tty stdin auto-answers No
+  # BEFORE any read, so an inherited open-but-silent pipe can never hang
+  # here (F-2 class). BOOTSTRAP_TEST_FORCE_PROMPT=1 is a TEST-ONLY
+  # override that forces the prompt path on a non-tty; it can only enable
+  # ASKING (the answer is still read from stdin, default No) - it can
+  # never clear the sentinel by itself.
   echo "Stale .run-active: pid=$OLD_PID is not alive (started ${OLD_START:-unknown})." >&2
-  printf 'Clear the stale sentinel and continue? [y/N] ' >&2
-  IFS= read -r REPLY || REPLY=""
+  if [ -t 0 ] || [ "${BOOTSTRAP_TEST_FORCE_PROMPT:-0}" = 1 ]; then
+    printf 'Clear the stale sentinel and continue? [y/N] ' >&2
+    IFS= read -r REPLY || REPLY=""
+  else
+    echo "Non-interactive invocation: not clearing the stale sentinel." >&2
+    REPLY=""
+  fi
   case "$REPLY" in
     y|Y) ;;
     *)

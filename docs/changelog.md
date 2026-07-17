@@ -217,6 +217,33 @@ autonomous-mode installs only, the managed root-`.gitignore` block keeping
 those sentinels uncommittable. The shell gate suite is unchanged and
 remains fully operative; fail-loud-on-empty-commands holds.
 
+### PR5-04 hardening (adversarial review of PR #5)
+
+Two hardening items on the Finding-2 startup sequence, verified against
+the review's assertions (trap ordering was confirmed already correct —
+`CLAIMED=0` precedes `trap cleanup EXIT`):
+
+1. **Portable liveness probe:** `kill -0` + `/proc` fallback replaced by
+   `ps -p` — immune to the EPERM misclassification (a live process under
+   another user) and free of the Linux-only `/proc` dependence; a
+   cannot-determine result still lands on refuse.
+2. **tty-guarded prompt:** the stale-clear question is asked only when
+   stdin is a terminal; a non-tty invocation auto-answers No *before any
+   stdin read*, so an inherited open-but-silent pipe can never hang the
+   runner (the F-2 hang class). `BOOTSTRAP_TEST_FORCE_PROMPT=1` is a
+   documented TEST-ONLY override that forces the prompt path on a
+   non-tty — it can only enable *asking* (the answer is still read from
+   stdin, default No), never clearing.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 6, full_autonomous only).**
+Exactly one file: `auto.sh`. Tests: `tests/test_auto_run_sentinel.py`
+grows to 19 checks (adds the ps-p/tty-guard statics and the
+non-tty-'y'-without-override case).
+
+Also in this change: `plugin/plugin.json` bumps its own `version` field
+`1.0.0` → `2.0.0` (the plugin is a distribution surface; its description
+already declared protocol v2.0.0 — reviewer item PR5-05).
+
 ### Milestone B (reserved)
 
 IC-5 (SDK `PreToolUse` callables per seam §9, Tessera-owned runner,
