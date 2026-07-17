@@ -155,9 +155,16 @@ EXPECTED_DIGESTS = {
     #      unnamed-key Phase 9.6 items in comments.
     #   2. goal-loop.sh: dual-reads judge_model as a DEPRECATED alias,
     #      honoured only when evaluator_model is absent, loudly.
+    #
+    # [2.0.0 Finding-2 freeze-exception (PR #5 review)] full_autonomous
+    # re-baselined for the Phase 9.7 .run-active race-safety fix - exactly
+    # one file, auto.sh: CLAIMED guard (a refusing loser never deletes the
+    # winner's sentinel), PID-liveness startup check (kill -0 + /proc),
+    # operator-confirmed stale clearing with re-verify-before-clear, and
+    # the O_CREAT|O_EXCL claim ("abort ... rather than overwriting").
     "default": "cd050038ad0a79f924b96a770fd98e6fba4a6dcd2bc3599f574bdfff573d5a73",
     "full_autonomous":
-        "2fa08fac68a381834f0a8826cba713111b61e7fa5f2296cf8045ee698cf6cc07",
+        "234bec0067e4aaf9e2a3c74291572eab1e3da3cbde823f9350cde217f4db4975",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -104,11 +104,15 @@ try:
               f"rc={r.returncode} stderr={r.stderr!r}")
         body = open(os.path.join(d, ".claude", script)).read()
         import re
+        # `kill -0` is exempt: signal 0 sends nothing - it is the Phase 9.7
+        # PID-liveness probe ("e.g., kill -0 <pid> on POSIX"), not a signal.
         kill_lines = [ln for ln in body.splitlines()
                       if re.search(r"(?<![\w-])(kill|pkill|killall)\b",
-                                   ln.split("#")[0])]
+                                   ln.split("#")[0])
+                      and not re.search(r"(?<![\w-])kill\s+-0\b",
+                                        ln.split("#")[0])]
         check(f"AC-4-2: {script} never signals processes "
-              f"(no kill invocation in body)", kill_lines == [],
+              f"(no signal-sending kill in body)", kill_lines == [],
               repr(kill_lines))
     check("AC-4-2: hard-halt exit leaves no claim sentinel behind",
           not any(f.startswith((".loop-active", ".goal-active"))

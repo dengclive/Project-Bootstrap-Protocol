@@ -170,9 +170,41 @@ documentation comments) and `goal-loop.sh` (alias resolution block).
 working setup — the `judge_model` alias is honoured with a deprecation
 warning until they rename the key; new emissions use `evaluator_model`.
 
-### Finding 2 (PR #5 review) — `auto.sh` `.run-active` conformance defect
+### Finding 2 (PR #5 review) — `auto.sh` `.run-active` race safety (fixed)
 
-*(entry added with the fix commit)*
+Classified as a pre-existing conformance defect against Phase 9.7's
+race-safety ("abort ... rather than overwriting",
+Bootstrap-Protocol-v2-0-0.md:1455): the refuse-to-start path's EXIT trap
+ran `rm -f "$RUN"` unguarded, deleting the *winner's* sentinel — which
+would let a third invocation start a concurrent runner past the
+combined-concurrency cap. Fixed in `auto.sh`:
+
+1. **CLAIMED guard** exactly as the per-task wrappers: cleanup removes
+   the sentinel only if this process claimed it.
+2. **PID-liveness startup check** (Phase 9.7: "sentinel-presence alone is
+   not a sufficient check"): `kill -0` plus a `/proc` fallback (so EPERM
+   on another user's live process is not misread as dead). Unparseable
+   sentinel → fail-safe refusal, untouched.
+3. **Stale sentinel** (recorded PID dead): alert with the recorded start
+   timestamp and ask before clearing; EOF/non-interactive defaults to No
+   (side-effect-free refusal). Cleared-and-continue is logged.
+4. **Re-verify before clear**: if the sentinel changed while waiting at
+   the prompt, another runner claimed it — abort without touching it.
+5. **O_CREAT|O_EXCL claim** (`set -C`), per the Phase 9.7 idiom the
+   per-task wrappers already used; a failed claim aborts non-zero.
+
+**FREEZE-EXCEPTION (golden re-baseline #5, full_autonomous only).**
+Exactly one file: `auto.sh`. Tests: `tests/test_auto_run_sentinel.py`
+(16 checks — live-PID refusal intact-sentinel, stale-cleared path,
+race-loser intact-sentinel, normal-run self-cleanup, plus fail-safe
+branches).
+
+**Migration note:** `auto.sh` refusal is now **side-effect-free** — a
+refusing invocation never deletes another run's `.run-active`.
+Previously any existing sentinel caused refusal; now a live-PID sentinel
+refuses, a stale one offers an operator-confirmed clear (non-interactive
+invocations still refuse), so unattended behavior is unchanged except
+that refusals no longer corrupt state.
 
 ### Migration note (operators)
 

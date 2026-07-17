@@ -882,9 +882,14 @@ fi
 
 EXIT_REASON="infrastructure-failure"   # pessimistic default; set on clean paths
 
+CLAIMED=0
 cleanup(){
   rc=$?
-  rm -f "$RUN"
+  # Only remove the sentinel if WE claimed it (never yank another runner's).
+  # Phase 9.7: a refusing loser must leave the winner's sentinel intact -
+  # a deleted winner sentinel would let a third invocation start a
+  # concurrent runner past the combined-concurrency cap.
+  [ "$CLAIMED" = 1 ] && rm -f "$RUN"
   log "auto.sh exit reason=$EXIT_REASON rc=$rc"
   # NOTE: a complete implementation updates the dangling queue_runs_history
   # entry here with end_timestamp and exit_reason before exiting.
@@ -894,12 +899,60 @@ on_signal(){ EXIT_REASON="signal-interrupt"; exit 130; }
 trap cleanup EXIT
 trap on_signal INT TERM
 
+# Phase 9.7 startup check: sentinel-presence alone is not a sufficient
+# check - PID-liveness is the actual signal.
 if [ -e "$RUN" ]; then
-  echo "A queue run is already active ($RUN). Refusing to start." >&2
+  OLD_PID="$(sed -n 's/^pid=\\([0-9]\\{1,\\}\\).*/\\1/p' "$RUN" 2>/dev/null | head -1)"
+  OLD_START="$(sed -n 's/^.*start=//p' "$RUN" 2>/dev/null | head -1)"
+  if [ -z "$OLD_PID" ]; then
+    echo "Found $RUN but could not read a PID from it. Refusing to start;" >&2
+    echo "inspect it and remove it manually if the prior run is gone." >&2
+    EXIT_REASON="manual-halt-sentinel"
+    exit 1
+  fi
+  # kill -0 alone misreads EPERM (live process, other user) as dead; the
+  # /proc check covers that on Linux.
+  if kill -0 "$OLD_PID" 2>/dev/null || [ -e "/proc/$OLD_PID" ]; then
+    echo "A queue run is already active (pid=$OLD_PID, $RUN). Refusing to start." >&2
+    EXIT_REASON="manual-halt-sentinel"
+    exit 1
+  fi
+  # Stale sentinel from a crashed prior run: alert with the recorded start
+  # timestamp and ask before clearing (Phase 9.7). Non-interactive
+  # invocations (EOF on stdin) refuse - fail safe, side-effect-free.
+  echo "Stale .run-active: pid=$OLD_PID is not alive (started ${OLD_START:-unknown})." >&2
+  printf 'Clear the stale sentinel and continue? [y/N] ' >&2
+  IFS= read -r REPLY || REPLY=""
+  case "$REPLY" in
+    y|Y) ;;
+    *)
+      echo "Leaving the stale sentinel in place; remove $RUN manually to proceed." >&2
+      EXIT_REASON="manual-halt-sentinel"
+      exit 1
+      ;;
+  esac
+  # Re-verify before clearing: if the sentinel changed while we waited at
+  # the prompt, another runner claimed it - abort rather than damaging the
+  # winner's sentinel.
+  NOW_PID="$(sed -n 's/^pid=\\([0-9]\\{1,\\}\\).*/\\1/p' "$RUN" 2>/dev/null | head -1)"
+  if [ "$NOW_PID" != "$OLD_PID" ]; then
+    echo "The sentinel changed while waiting for confirmation (pid=${NOW_PID:-gone})." >&2
+    echo "Another runner claimed it. Aborting without touching it." >&2
+    EXIT_REASON="manual-halt-sentinel"
+    exit 1
+  fi
+  rm -f "$RUN"
+  log "auto.sh cleared stale .run-active (pid=$OLD_PID start=${OLD_START:-unknown})"
+fi
+# Race protection (Phase 9.7): O_CREAT|O_EXCL claim. A failure means a
+# concurrent runner won the race - abort with a clear message and exit
+# non-zero rather than overwriting.
+if ! ( set -C; printf 'pid=%s start=%s\\n' "$$" "$(date -u +%FT%TZ)" >"$RUN" ) 2>/dev/null; then
+  echo "Another runner won the .run-active race ($RUN). Aborting." >&2
   EXIT_REASON="manual-halt-sentinel"
   exit 1
 fi
-printf 'pid=%s start=%s\\n' "$$" "$(date -u +%FT%TZ)" >"$RUN"
+CLAIMED=1
 log "auto.sh started (skeleton)."
 
 echo "Queue runner skeleton installed. Implement the dispatch loop per" \\
