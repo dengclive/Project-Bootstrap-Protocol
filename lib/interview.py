@@ -218,7 +218,7 @@ def validate_config_dict(cfg: dict) -> list[str]:
 
     resolve_config (frozen, installer-shared) enforces archetype membership,
     the queue=>loop|goal skip-policy invariant, and the TDD enum. It does
-    NOT enforce BOOTSTRAP.md Phase 0 step 7 ("operator can request a higher
+    NOT enforce Bootstrap-Protocol-v2-0-0.md Phase 0 step 7 ("operator can request a higher
     PRD tier but not a lower one"): the archetype's required tier is a
     *decision-layer* contract, not a mechanical one, so a hand-edited
     interview file could otherwise set `prd_tier` below the archetype floor
@@ -236,7 +236,7 @@ def validate_config_dict(cfg: dict) -> list[str]:
         if H.TIER_ORDER[tier] < H.TIER_ORDER[floor]:
             errors.append(
                 f"project.prd_tier '{tier}' is below the required floor "
-                f"'{floor}' for archetype '{arche}' (BOOTSTRAP.md Phase 0 "
+                f"'{floor}' for archetype '{arche}' (Bootstrap-Protocol-v2-0-0.md Phase 0 "
                 f"step 7: a higher tier may be requested, never a lower "
                 f"one). Raise prd_tier to at least '{floor}'.")
     return errors
@@ -320,7 +320,7 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         p["prd_tier"]["rationale"],
         "",
         "_You may raise the tier but not lower it below the floor "
-        "(BOOTSTRAP.md Phase 0)._",
+        "(Bootstrap-Protocol-v2-0-0.md Phase 0)._",
     ])
 
     pr = p["principles"]
@@ -364,7 +364,7 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         am["rationale"],
         "",
         "_Constraint: queue mode requires loop or goal mode "
-        "(BOOTSTRAP.md Phase 9.7). The tool will not emit an invalid combo._",
+        "(Bootstrap-Protocol-v2-0-0.md Phase 9.7). The tool will not emit an invalid combo._",
     ])
     section("Project commands — HUMAN-REQUIRED (left empty by design)", [
         "`commands.test`, `commands.lint`, `commands.format`, "
@@ -580,7 +580,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
             # stdin exhausted. The proposed default can be BELOW the floor
             # if the human overrode the archetype upward (review finding
             # I-1); clamp UP to the floor rather than spin forever. Never
-            # below the floor (BOOTSTRAP.md Phase 0: higher allowed, lower
+            # below the floor (Bootstrap-Protocol-v2-0-0.md Phase 0: higher allowed, lower
             # never).
             cur = H.TIER_ORDER.get(v if v in H.TIER_ORDER
                                    else ans["prd_tier"], -1)
@@ -646,7 +646,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
     # Enforce the skip-policy invariant interactively rather than emit invalid.
     if ans["queue_mode_enabled"] and not (
             ans["loop_mode_enabled"] or ans["goal_supervised_mode_enabled"]):
-        o("\n  ! Queue mode requires loop or goal mode (BOOTSTRAP.md 9.7). "
+        o("\n  ! Queue mode requires loop or goal mode (Bootstrap-Protocol-v2-0-0.md 9.7). "
           "Disabling queue mode.\n")
         ans["queue_mode_enabled"] = False
 
@@ -729,6 +729,10 @@ def main(argv: list[str]) -> int:
                         help="bootstrap.interview.md -> bootstrap.config.yaml")
     s.add_argument("-i", "--interview", default=INTERVIEW_DEFAULT)
     s.add_argument("-o", "--out", default=CONFIG_DEFAULT)
+    s.add_argument("--validate-only", action="store_true",
+                   help="IC-1: parse the interview, run the resolve_config "
+                        "invariants, report violations to stderr, and write "
+                        "NO output file. Exit 0 = valid, non-zero = invalid.")
 
     it = sub.add_parser("interactive",
                         help="PRD -> live stdin Q&A -> bootstrap.config.yaml")
@@ -771,6 +775,18 @@ def main(argv: list[str]) -> int:
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
+        if args.validate_only:
+            # IC-1: validation only - no file is ever written on this path.
+            cfg = answers_to_config(answers)
+            errs = validate_config_dict(cfg)
+            if errs:
+                print("validate-only: config INVALID "
+                      "(resolve_config invariant violations):", file=sys.stderr)
+                for e in errs:
+                    print(f"  - {e}", file=sys.stderr)
+                return 2
+            print("validate-only: config valid (no file written).")
+            return 0
         return _finalize(answers, Path(args.out), outstream=sys.stdout)
 
     if args.cmd == "interactive":

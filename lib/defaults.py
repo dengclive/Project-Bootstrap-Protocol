@@ -2,9 +2,9 @@
 Config resolution & validation.
 
 Takes the raw parsed config and:
-  1. fills archetype-derived defaults (BOOTSTRAP.md Phase 0/4/6 logic),
+  1. fills archetype-derived defaults (Bootstrap-Protocol-v2-0-0.md Phase 0/4/6 logic),
   2. resolves the conditional hook set (Phase 6 + autonomous-mode flags),
-  3. enforces the BOOTSTRAP.md skip-policy invariants,
+  3. enforces the Bootstrap-Protocol-v2-0-0.md skip-policy invariants,
 returning (resolved_cfg, errors). errors non-empty => installer aborts.
 """
 
@@ -17,7 +17,7 @@ ARCHETYPES = {
     "data-ml", "ai-agent", "platform", "other",
 }
 
-# Phase 4 step 2 starter principle sets, verbatim intent from BOOTSTRAP.md.
+# Phase 4 step 2 starter principle sets, verbatim intent from Bootstrap-Protocol-v2-0-0.md.
 PRINCIPLE_STARTERS = {
     "cli": [
         "Predictable behavior over feature breadth",
@@ -236,13 +236,13 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
 
     flags = cfg["autonomous_modes"]
 
-    # ---- BOOTSTRAP.md skip-policy invariant: queue requires loop|goal ----- #
+    # ---- Bootstrap-Protocol-v2-0-0.md skip-policy invariant: queue requires loop|goal ----- #
     if flags["queue_mode_enabled"] and not (
             flags["loop_mode_enabled"] or flags["goal_supervised_mode_enabled"]):
         errors.append(
             "autonomous_modes.queue_mode_enabled requires at least one of "
             "loop_mode_enabled or goal_supervised_mode_enabled "
-            "(BOOTSTRAP.md Phase 9.7 / skip policy).")
+            "(Bootstrap-Protocol-v2-0-0.md Phase 9.7 / skip policy).")
 
     # ---- Principles: fill starter set if empty (Phase 4) ------------------ #
     if not cfg["principles"]["ranked"]:

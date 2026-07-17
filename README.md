@@ -1,6 +1,6 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-This answers the question: *"Can BOOTSTRAP.md be a Claude Code plugin, or
+This answers the question: *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
 deterministic code that configures Claude Code with all the hooks, commands,
 etc.?"*
 
@@ -8,7 +8,7 @@ etc.?"*
 
 ## The two layers
 
-`BOOTSTRAP.md` mixes two fundamentally different things:
+`Bootstrap-Protocol-v2-0-0.md` mixes two fundamentally different things:
 
 | Layer | Examples | Can it be deterministic? |
 |---|---|---|
@@ -41,7 +41,7 @@ and edit before it is ever used.
 It **proposes, never silently decides.** Where the PRD is ambiguous (contested
 archetype, no recognizable signal) it surfaces an explicit OPEN QUESTION rather
 than guessing. It maps PRD content to archetype and PRD tier using the
-BOOTSTRAP.md Project Archetypes table and PRD-tier definitions, and it reuses
+Bootstrap-Protocol-v2-0-0.md Project Archetypes table and PRD-tier definitions, and it reuses
 the archetype principle starter sets from `lib/defaults.py` verbatim
 (`PRINCIPLE_STARTERS` is imported, not re-listed) — the interview only proposes
 *deltas* from those defaults. It **never guesses** `commands.test/lint/format`
@@ -62,7 +62,7 @@ Two front-ends over one pure proposal core:
   identical interview file ⇒ identical config (digest-stable, like the
   installer).
 - **`interactive`** — a live one-question-at-a-time stdin Q&A over the same
-  core, honoring BOOTSTRAP.md's "show before writing" and "one open-ended
+  core, honoring Bootstrap-Protocol-v2-0-0.md's "show before writing" and "one open-ended
   question at a time": each prompt shows the proposal and rationale, Enter
   accepts it, nothing is written until the config validates. This front-end is
   intentionally the only non-deterministic surface (like a live wizard) and is
@@ -140,7 +140,7 @@ bootstrap-installer/
   digests) and skipped, not clobbered. `--force` overrides.
 - **Reversible** — `--uninstall` removes exactly what it created.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
-- **Faithful to BOOTSTRAP.md** — encodes the skip-policy invariants
+- **Faithful to Bootstrap-Protocol-v2-0-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
   starter sets, the conditional hook set (eval-gate only for ai-agent,
   tdd-gate only when TDD is required, loop-cooperation hooks only when an
@@ -192,7 +192,7 @@ deterministic installer).
   silently passing — by design.
 - `auto.sh` is scaffolded as a guarded skeleton. The full Phase 9.7 dispatch
   loop is intentionally left for the operator to complete before unattended
-  use, matching BOOTSTRAP.md's own trust-ramp guidance.
+  use, matching Bootstrap-Protocol-v2-0-0.md's own trust-ramp guidance.
 - The emitted skill/command/agent bodies are faithful stubs (frontmatter +
   intent). They are correct and load, but the deep prompt engineering for
   each skill is a separate effort from the structural scaffolding.
@@ -207,11 +207,11 @@ python3 tests/test_interview.py     # 46 passed, 0 failed
 ## Review history
 
 A multi-lens, multi-round review was performed (correctness, security,
-determinism, BOOTSTRAP.md fidelity). Findings fixed and now covered by
+determinism, Bootstrap-Protocol-v2-0-0.md fidelity). Findings fixed and now covered by
 regression tests:
 
 - **S-1 (Critical)** — the shared hook preamble used `eval()` (a direct
-  BOOTSTRAP.md §6.D violation) and re-read already-consumed stdin, so on any
+  Bootstrap-Protocol-v2-0-0.md §6.D violation) and re-read already-consumed stdin, so on any
   machine without `jq` the secrets/spec/dependency/test gates silently
   allowed everything. Preamble rewritten: no `eval`, input passed via the
   environment with explicit key traversal.
@@ -222,14 +222,14 @@ regression tests:
 - **S-5 (High)** — config values were interpolated unescaped into shell
   `case` patterns; a stray `)` produced a broken security hook. Values now
   emitted via quoted heredoc lists, never into shell syntax.
-- **F-1 (High)** — generated state file lacked BOOTSTRAP.md-required fields
+- **F-1 (High)** — generated state file lacked Bootstrap-Protocol-v2-0-0.md-required fields
   (archetype, PRD path, CI/CD opt-out, the three autonomous-mode flags),
   breaking the Phase 10 "enable later" flow. Config is now threaded into
   the state writer.
 - **F-2 (Medium, + follow-up)** — `auto.sh` inherited hook stdin
   boilerplate (hung when run from a terminal) and assumed the invocation
   cwd was the project root. It now self-locates from `BASH_SOURCE` and has
-  a BOOTSTRAP.md-aligned exit-reason trap.
+  a Bootstrap-Protocol-v2-0-0.md-aligned exit-reason trap.
 - **C-1 (Medium)** — `_deep_default` had an operator-precedence defect
   (latent); rewritten with explicit intent.
 - **Y-1 (Medium)** — `minyaml` silently mis-parsed tab indentation; now
@@ -243,7 +243,7 @@ Investigated and dismissed as non-issues: C-2, C-3, S-4, D-1, D-3.
 
 ### Decision-layer tool (`bootstrap-interview`) review
 
-The same multi-lens review (correctness, security, BOOTSTRAP.md fidelity,
+The same multi-lens review (correctness, security, Bootstrap-Protocol-v2-0-0.md fidelity,
 schema-validity) was run on the new decision-layer tool. Findings:
 
 - **R-1 (Medium)** — `configemit` mapped config-parser-unsafe characters
@@ -285,7 +285,7 @@ with no priors, seam-first (PRD → heuristics/LLM → proposal → interview fi
 findings; all fixed and regression-tested. Only `lib/configemit.py`,
 `lib/interview.py`, and `tests/test_interview.py` were touched — every
 "frozen" file (`installer.py`, `defaults.py`, `templates.py`, `minyaml.py`,
-`bin/bootstrap-install`, `tests/test_installer.py`, `BOOTSTRAP.md`) and the
+`bin/bootstrap-install`, `tests/test_installer.py`, `Bootstrap-Protocol-v2-0-0.md`) and the
 committed `bootstrap.config.yaml` (108 lines) remain byte-identical to the
 upload.
 
@@ -314,7 +314,7 @@ upload.
   shared across prompts; on EOF each validated loop falls back to a
   guaranteed-valid value (archetype/TDD accept the always-valid proposed
   default; the tier loop clamps **up** to the floor, never below, per
-  BOOTSTRAP.md Phase 0 step 7). Regression-tested (previously-hanging
+  Bootstrap-Protocol-v2-0-0.md Phase 0 step 7). Regression-tested (previously-hanging
   scenarios now terminate; all-defaults and queue-self-correct unchanged).
 - **F-3 (Medium)** — the `analyze`→`synthesize` path did not enforce the
   archetype's required PRD-tier floor. `resolve_config` (frozen,
@@ -324,7 +324,7 @@ upload.
   `prd_tier` below the floor and pass both gates and be written —
   contradicting the round-1 claim that hand-edited invalid combos are
   rejected. Fixed without touching the frozen installer: the interview
-  tool's own `validate_config_dict` now adds the BOOTSTRAP.md Phase 0
+  tool's own `validate_config_dict` now adds the Bootstrap-Protocol-v2-0-0.md Phase 0
   step 7 floor check on top of `resolve_config`, so a sub-floor config is
   refused with no file written, mirroring what the interactive front-end
   already enforced. Legitimate upgrades and at-floor configs still pass.
@@ -358,7 +358,7 @@ and the committed config verified byte-identical to the upload.
 Verified and not changed: PRD text is still only a regex *target*, never a
 compiled pattern (no ReDoS-by-PRD), confirmed against regex-metacharacter
 PRDs; the archetype→required-tier table and principle starter sets remain
-verbatim-faithful to BOOTSTRAP.md / `lib/defaults.py`; ambiguous/contested
+verbatim-faithful to Bootstrap-Protocol-v2-0-0.md / `lib/defaults.py`; ambiguous/contested
 archetype signal still degrades to an OPEN QUESTION; the proposal core is
 deterministic across `PYTHONHASHSEED`; the `--llm` prompt still fences the
 PRD as untrusted data, never sends/reads `commands.*`, never leaks the API
@@ -378,7 +378,7 @@ freeze exception) and regression-tested in `tests/test_installer.py`.
   pattern only as a shell `case` **prefix** glob, so `.env*` blocked `.env`,
   `.env.production`, and `*/​.env` but **not** the extremely common
   `<name>.env` form (`config.env`, `prod.env`, `staging.env`) — a fail-open
-  in the one hook BOOTSTRAP.md §6.D requires to fail loudly. Matching was
+  in the one hook Bootstrap-Protocol-v2-0-0.md §6.D requires to fail loudly. Matching was
   also case-sensitive, so `app.KEY` / `.ENV` slipped. Pre-existing in the
   frozen template (the installer's own default `never_read_paths`); the
   existing S-1 test only ever exercised the canonical `/x/.env`, so the
@@ -393,7 +393,7 @@ freeze exception) and regression-tested in `tests/test_installer.py`.
   gate is exactly the class the prior session itself patched (S-1/S-3/S-5);
   shipping it knowingly under a freeze label would be the wrong call. Only
   the `secrets-gate` branch changed; the other ~20 hook bodies and every
-  other frozen file (incl. `BOOTSTRAP.md`, `defaults.py`, `installer.py`,
+  other frozen file (incl. `Bootstrap-Protocol-v2-0-0.md`, `defaults.py`, `installer.py`,
   the committed config) remain byte-identical to the upload.
 - **T-1 follow-up (caught by re-review of the fix's own diff)** — the first
   T-1 patch used `tr` for lowercasing; under the test's restricted no-`jq`
@@ -466,7 +466,7 @@ below); every other frozen file and the committed `bootstrap.config.yaml`
   `removed=/kept=` summary. Regression-tested.
 - **W-1 (Critical)** — `loop.sh`, `loop-config.md`, `goal-loop.sh`, and
   `goal-config.md` were **never generated by any template or `build_plan`
-  branch**. BOOTSTRAP.md Phase 9.5/9.6 "What the wizard generates" mandate
+  branch**. Bootstrap-Protocol-v2-0-0.md Phase 9.5/9.6 "What the wizard generates" mandate
   all four whenever the respective *mode* is opted in. The consequences:
   (a) `auto.sh` dispatched per-task wrappers that did not exist, breaking
   the queue⇒loop|goal invariant *at the file level* (it held only
@@ -477,7 +477,7 @@ below); every other frozen file and the committed `bootstrap.config.yaml`
   as T-1: a mandated-artifact omission that defeats a documented protocol
   invariant): added `loop.sh`/`goal-loop.sh` as **guarded fail-safe
   skeletons** modelled on the proven `auto.sh` skeleton — they perform the
-  BOOTSTRAP.md Phase 9.5 step-2 race-safe claim (O_CREAT|O_EXCL active
+  Bootstrap-Protocol-v2-0-0.md Phase 9.5 step-2 race-safe claim (O_CREAT|O_EXCL active
   sentinel, `flock` on the state file, sibling-sentinel cross-mode
   mutual-exclusion check), self-locate via `BASH_SOURCE`, honour the
   `.halt` sentinel, refuse on missing/ineligible task, and **dispatch no
@@ -493,7 +493,7 @@ below); every other frozen file and the committed `bootstrap.config.yaml`
   with exit 1, not 0/127 — the exact T-1-follow-up regression class).
 - **G-1 (Medium)** — the generated `.claude/.gitignore` listed
   `.installer-manifest.json` but omitted `.bootstrap-state.json` and the
-  per-iteration scratch sentinels, contradicting BOOTSTRAP.md's "state
+  per-iteration scratch sentinels, contradicting Bootstrap-Protocol-v2-0-0.md's "state
   files use the dotfile convention precisely so they can be gitignored as
   a group" and the line-825 enumeration. Committing the timestamped,
   in-flight-list-bearing state file produces spurious diffs and merge
@@ -547,14 +547,14 @@ operator-in-loop path** — author/generate `bootstrap.config.yaml`, `apply`,
 re-`apply`, hand-edit, `--uninstall`, re-`apply` — across all nine
 archetypes and all autonomous-mode flag combinations. The lifecycle is
 idempotent, non-destructive (the L-1/L-2/L-3 data-loss class is closed and
-regression-locked), reversible, and faithful to the BOOTSTRAP.md
+regression-locked), reversible, and faithful to the Bootstrap-Protocol-v2-0-0.md
 conditional hook/file/wiring rules. *Not certified:* the
 **unattended/autonomous execution path**. The per-task agent loops
 (`loop.sh`/`goal-loop.sh`) and the `auto.sh` dispatch loop now ship as
 correct, fail-safe, contract-honouring skeletons — but the `claude -p`
 iteration loops, the `*_in_flight` state-list accounting, the
 `queue_runs_history` lifecycle, and the PID-liveness double-start guard
-are intentionally operator-completed per BOOTSTRAP.md's own trust ramp.
+are intentionally operator-completed per Bootstrap-Protocol-v2-0-0.md's own trust ramp.
 Unattended overnight use remains out of scope by construction and must not
 be certified until those loops are implemented and smoke-tested per
 Phase 9 stages 4–6.

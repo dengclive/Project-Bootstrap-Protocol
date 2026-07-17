@@ -1,7 +1,7 @@
 {
   "name": "bootstrap-protocol",
   "version": "1.0.0",
-  "description": "Deterministically configure Claude Code from a bootstrap.config.yaml (Project Bootstrap Protocol v1.9.0). Bundles a PRD-driven decision-layer interview tool (proposes a validated config for human approval) and the deterministic installer as the mechanical layer.",
+  "description": "Deterministically configure Claude Code from a bootstrap.config.yaml (Project Bootstrap Protocol v2.0.0). Bundles a PRD-driven decision-layer interview tool (proposes a validated config for human approval) and the deterministic installer as the mechanical layer.",
   "author": "Project Bootstrap Protocol",
   "commands": "./commands",
   "homepage": "https://example.invalid/bootstrap-protocol"

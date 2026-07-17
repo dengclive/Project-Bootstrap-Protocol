@@ -122,14 +122,36 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
-    "default": "fc139d43688b67a3f78ae1e7de8fdf8e65a1d2aa2a3403dfdee6b4591a1a6f55",
+    # [2.0.0 R-0 freeze-exception] Re-baselined from the 1.9.0 digests for
+    # exactly two byte classes (verified by HEAD-vs-worktree plan diff):
+    #   1. settings.json `_generatedBy`: "protocol 1.9.0" -> "protocol 2.0.0"
+    #   2. protocol-document citations in emitted hook/wrapper/config bodies:
+    #      "BOOTSTRAP.md" -> "Bootstrap-Protocol-v2-0-0.md" (doc rename)
+    # default: 12 files changed; full_autonomous: 21 files changed.
+    #
+    # [2.0.0 R-4 freeze-exception] full_autonomous re-baselined again for
+    # IC-2 root-sentinel dual-honor (verified by plan diff; default fixture
+    # untouched by R-4 - its digest is the R-0 value):
+    #   1. loop.sh / goal-loop.sh / auto.sh gain the ROOT_HALT /
+    #      ROOT_HALT_HARD guards (permanent dual-honor; wrapper never
+    #      signals in-flight claude -p).
+    #   2. ONE new action: project-root ".gitignore" managed block
+    #      (kind gitignore_root, SR-17 decision (a)) - hence 65 -> 66.
+    #
+    # [2.0.0 R-6/AC-6-4 freeze-exception] full_autonomous re-baselined for
+    # exactly one file: auto-config.md gains the Companion-mandated
+    # queue-summary-synthesis surface (summary_synthesis_enabled: true,
+    # summary_synthesis_model: haiku - Model Assignment Strategy table).
+    # This is the AC-6-4 "only-if-diff" case: the subagent frontmatter
+    # itself was assertion-only, zero diff, as the spec predicted.
+    "default": "cd050038ad0a79f924b96a770fd98e6fba4a6dcd2bc3599f574bdfff573d5a73",
     "full_autonomous":
-        "78055b69b256d0f2929cbb251e6a0867be2ea826f7ae0f4b719526dc4155c283",
+        "26f62e5707c875575fb2a8279613d99dacc81b02ff8fb65916ac4a0466e7424a",
 }
 
 EXPECTED_ACTION_COUNTS = {
     "default": 54,
-    "full_autonomous": 65,
+    "full_autonomous": 66,
 }
 
 

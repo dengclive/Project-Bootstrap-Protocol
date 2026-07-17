@@ -52,7 +52,7 @@ project's test/lint/format commands; and it validates its own output with
 ## Fallback: conduct it by hand
 
 If the tool cannot run (no PRD, or the operator wants to drive every decision
-conversationally), conduct the interview phases from `BOOTSTRAP.md` that
+conversationally), conduct the interview phases from `Bootstrap-Protocol-v2-0-0.md` that
 produce *decisions* (not files):
 
 - **Phase 0** — classify the project (archetype, shell, PRD tier, CI/CD

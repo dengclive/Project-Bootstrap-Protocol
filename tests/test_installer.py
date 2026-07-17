@@ -272,7 +272,7 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
-# F-1: state file carries BOOTSTRAP.md-required fields
+# F-1: state file carries Bootstrap-Protocol-v2-0-0.md-required fields
 d = _install("""project:
   name: r
   archetype: ai-agent
@@ -484,7 +484,7 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # G-1: generated .gitignore covers .bootstrap-state.json and the
-# per-iteration scratch sentinels (BOOTSTRAP.md line 825 / state-naming).
+# per-iteration scratch sentinels (Bootstrap-Protocol-v2-0-0.md line 825 / state-naming).
 d = tempfile.mkdtemp()
 try:
     open(os.path.join(d, "bootstrap.config.yaml"), "w").write("""project:
@@ -595,6 +595,84 @@ principles:
     check("W-1c: every generated script is valid bash", bad == [])
 finally:
     shutil.rmtree(d, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# R-0 (spec bootstrap-v2): protocol 2.0.0 version identity (AC-A0-1..3)
+# ---------------------------------------------------------------------------
+import installer as _installer_mod          # noqa: E402
+import templates as _templates_mod          # noqa: E402
+
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.0.0",
+      _installer_mod.PROTOCOL_VERSION == "2.0.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.0.0",
+      _templates_mod.PROTOCOL_VERSION == "2.0.0")
+check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
+      _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
+
+d = _install(FULL)
+try:
+    state = _json.load(open(os.path.join(d, ".claude",
+                                         ".bootstrap-state.json")))
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.0.0",
+          state.get("bootstrap_protocol_version") == "2.0.0")
+    settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.0.0",
+          settings.get("_generatedBy")
+          == "bootstrap-installer (protocol 2.0.0)")
+    manifest = _json.load(open(os.path.join(d, ".claude",
+                                            ".installer-manifest.json")))
+    check("AC-A0-3: manifest records protocol_version 2.0.0",
+          manifest.get("protocol_version") == "2.0.0")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# R-6 (spec bootstrap-v2): model remap on subagent frontmatter — assertion,
+# not assumed diff (AC-6-1..AC-6-5). Aliases resolve platform-side (managed
+# drift per the Companion guardrail); this locks the emitted assignments to
+# the Model Assignment Strategy table.
+# ---------------------------------------------------------------------------
+from templates import TEMPLATES as _T                 # noqa: E402
+
+cfg_full, _errs = cfg_from(FULL)
+assert _errs == []
+plan_full = build_plan(cfg_full)
+bodies = {a["path"]: a["body"] for a in plan_full}
+
+agents = {p: b for p, b in bodies.items()
+          if p.startswith(".claude/agents/")}
+check("AC-6-1: three subagents emitted", len(agents) == 3)
+check("AC-6-1: every emitted subagent carries an explicit model: field",
+      all("\nmodel: " in b for b in agents.values()))
+check("AC-6-2: implementer model is sonnet",
+      "\nmodel: sonnet\n" in agents[".claude/agents/implementer.md"])
+check("AC-6-2: reviewer model is opus",
+      "\nmodel: opus\n" in agents[".claude/agents/reviewer.md"])
+check("AC-6-2: integrator model is explicitly inherit",
+      "\nmodel: inherit\n" in agents[".claude/agents/integrator.md"])
+check("AC-6-2: goal-config judge default is haiku",
+      "judge_model: haiku" in bodies[".claude/goal-config.md"])
+check("AC-6-2: auto-config summary-synthesis default is haiku",
+      "summary_synthesis_model: haiku" in bodies[".claude/auto-config.md"]
+      and "summary_synthesis_enabled" in bodies[".claude/auto-config.md"])
+check("AC-6-3: no emitted file references Fable",
+      all("fable" not in b.lower() for b in bodies.values()))
+# AC-6-5 (owner-reworded): effort: is ALREADY emitted and IS a documented
+# subagent-frontmatter key (verified against code.claude.com/docs/en/
+# sub-agents 2026-07-17: "Effort level when this subagent is active...
+# low|medium|high|xhigh|max"). Assert the emitted value matches the
+# Companion table (reviewer = high) and greenfield/retrofit stay consistent.
+check("AC-6-5: greenfield reviewer emits effort: high",
+      "\neffort: high\n" in agents[".claude/agents/reviewer.md"])
+_rf_reviewer = _T["retrofit_reviewer_agent"](
+    {"workflow": {"reviewer_model": "opus"}})
+check("AC-6-5: retrofit reviewer consistent (model: opus + effort: high)",
+      "\nmodel: opus\n" in _rf_reviewer
+      and "\neffort: high\n" in _rf_reviewer)
+check("AC-6-5: effort: appears only on the reviewer (table has no other "
+      "effort annotation)",
+      all("\neffort:" not in agents[p] for p in agents
+          if p != ".claude/agents/reviewer.md"))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
