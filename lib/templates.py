@@ -1182,11 +1182,29 @@ _JUDGE_RESOLUTION = '''
 # DEPRECATED alias only when `evaluator_model` is absent. Rename the key in
 # goal-config.md; the alias will be removed in a future release.
 GOAL_CFG="$PROJ/.claude/goal-config.md"
+# goal_cfg_value KEY: extract a config value with the tolerances an
+# operator-edited file legitimately produces - inline `# comment`
+# stripped (model IDs never contain #), surrounding matching quotes
+# removed, leading/trailing whitespace trimmed. `|| true` keeps a sed
+# failure (unreadable file) from tripping errexit+pipefail; empty means
+# absent. Without this, `evaluator_model: sonnet  # note` would export
+# the comment into the judge invocation verbatim.
+goal_cfg_value(){
+  v="$({ sed -n "s/^$1:[[:space:]]*//p" "$GOAL_CFG" 2>/dev/null || true; } | head -1)"
+  v="${v%%#*}"
+  v="$(printf '%s' "$v" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  q="'"
+  case "$v" in
+    '"'*'"') v="${v#?}"; v="${v%?}";;
+    "$q"*"$q") v="${v#?}"; v="${v%?}";;
+  esac
+  printf '%s\\n' "$v"
+}
 EVALUATOR_MODEL=""
 if [ -f "$GOAL_CFG" ]; then
-  EVALUATOR_MODEL="$(sed -n 's/^evaluator_model:[[:space:]]*//p' "$GOAL_CFG" | head -1)"
+  EVALUATOR_MODEL="$(goal_cfg_value evaluator_model)"
   if [ -z "$EVALUATOR_MODEL" ]; then
-    LEGACY_JUDGE_MODEL="$(sed -n 's/^judge_model:[[:space:]]*//p' "$GOAL_CFG" | head -1)"
+    LEGACY_JUDGE_MODEL="$(goal_cfg_value judge_model)"
     if [ -n "$LEGACY_JUDGE_MODEL" ]; then
       EVALUATOR_MODEL="$LEGACY_JUDGE_MODEL"
       echo "DEPRECATED: goal-config.md sets 'judge_model'; rename it to" >&2
@@ -1198,6 +1216,7 @@ if [ -f "$GOAL_CFG" ]; then
 fi
 EVALUATOR_MODEL="${EVALUATOR_MODEL:-haiku}"
 export EVALUATOR_MODEL   # consumed by the operator-completed judge call
+log "goal-loop.sh evaluator_model=$EVALUATOR_MODEL (task=$TASK_ID)"
 '''
 
 

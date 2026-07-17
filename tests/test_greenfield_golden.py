@@ -189,9 +189,16 @@ EXPECTED_DIGESTS = {
     # retrofit-mode root-.gitignore emission and the co-owned mode
     # preservation in the same commit are apply()/overlay-time - outside
     # this surface.)
+    #
+    # [2.0.0 freeze-exception no. 9 (adversarial-review fixes, goal-config
+    # parse class)] full_autonomous re-baselined for exactly one file,
+    # goal-loop.sh: goal_cfg_value() sanitizes operator-shaped edits
+    # (inline comment, matching quotes, surrounding whitespace) before
+    # exporting EVALUATOR_MODEL, survives sed failure under
+    # errexit+pipefail, and logs the resolved value for observability.
     "default": "b6a3224491b89a306660d45f9d945a91e28d1f7aab122cf0beea9925e0d96412",
     "full_autonomous":
-        "04153baa3d6190f09b4ca6ccea0976e48b345a397d09add1c601ca96226232c6",
+        "a6883702f79a224faf0409e58c8f03ee1bba112f5cda1571855f72fa3a0e3744",
 }
 
 EXPECTED_ACTION_COUNTS = {

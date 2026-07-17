@@ -326,6 +326,25 @@ outside the golden surface. Tests: `tests/test_root_sentinels.py` → 34
 checks (retrofit emission + no-opt-in scope guard, mode preservation,
 fragment pattern).
 
+**Class 4 — goal-config value parsing** (review finding 9):
+
+`goal-loop.sh` gains `goal_cfg_value()`: inline `# comment` stripped,
+matching surrounding quotes removed, whitespace trimmed, sed failure
+survived under errexit+pipefail — so an operator edit like
+`evaluator_model: sonnet  # harder criteria` resolves to `sonnet`
+instead of exporting the comment into the judge invocation verbatim
+(probe-confirmed failure mode). The resolved value is logged
+(`evaluator_model=<value>`) for observability; both the normative key
+and the deprecated `judge_model` alias go through the same sanitizer.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 9, full_autonomous only,
+goal-loop.sh).** Tests: `tests/test_goal_evaluator_keys.py` → 18 checks.
+
+*Recorded, not fixed (out of review scope):* the per-task wrappers'
+`log()` emits a literal `\n` (a `.format`-doubling quirk), so their
+hooks.log entries share one physical line — `auto.sh`'s log() is
+unaffected. Worth its own small freeze-exception later.
+
 ### Milestone B (reserved)
 
 IC-5 (SDK `PreToolUse` callables per seam §9, Tessera-owned runner,

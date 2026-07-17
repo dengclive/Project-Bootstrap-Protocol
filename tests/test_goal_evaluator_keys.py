@@ -124,6 +124,40 @@ try:
     r = run_goal()
     check("alias: absent both keys -> no deprecation warning",
           "DEPRECATED" not in r.stderr, r.stderr)
+
+    # ----------------------------------------------------------------- #
+    # Review fix (finding 9): operator-shaped edits are sanitized before
+    # the value is exported - inline comments, quotes, trailing space.
+    # The resolved value is observable via the hooks.log line.
+    # ----------------------------------------------------------------- #
+    log_path = os.path.join(d, ".claude", "logs", "hooks.log")
+
+    def resolved_model():
+        # NB: the per-task wrappers' log() emits a LITERAL backslash-n
+        # (pre-existing template quirk), so entries share one physical
+        # line - take the LAST occurrence, not the last line.
+        content = open(log_path).read()
+        if "evaluator_model=" not in content:
+            return None
+        return content.split("evaluator_model=")[-1].split(" (task=")[0]
+
+    cases = [
+        ("evaluator_model: sonnet  # harder criteria\n", "sonnet",
+         "inline comment stripped"),
+        ('evaluator_model: "haiku"\n', "haiku",
+         "double quotes stripped"),
+        ("evaluator_model: 'haiku'\n", "haiku",
+         "single quotes stripped"),
+        ("evaluator_model: opus   \n", "opus",
+         "trailing whitespace trimmed"),
+        ("judge_model: sonnet  # via alias\n", "sonnet",
+         "alias path sanitized too"),
+    ]
+    for body, want, label in cases:
+        open(gc_path, "w").write("max_iterations: 10\n" + body)
+        run_goal()
+        check(f"sanitize: {label}", resolved_model() == want,
+              repr(resolved_model()))
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
