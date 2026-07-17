@@ -92,9 +92,14 @@ try:
     body = open(auto).read()
     check("static: O_CREAT|O_EXCL claim of .run-active (set -C)",
           'set -C; printf' in body and '>"$RUN"' in body)
-    check("static: portable ps -p liveness probe (no kill -0/EPERM or "
-          "/proc dependence)", 'ps -p "$OLD_PID"' in body
-          and '/proc/$OLD_PID' not in body)
+    check("static: three-state pid_alive probe (ps -p self-probed, "
+          "kill -0 fallback, cannot-determine refuses)",
+          'pid_alive(){' in body and 'ps -p $$' in body
+          and 'return 2' in body and '/proc/$OLD_PID' not in body)
+    check("static: startup check-clear-claim runs under flock",
+          'exec 8>"$RUN.lock"' in body and 'flock -n 8' in body)
+    check("static: prompt read is time-bounded",
+          'read -r -t "${BOOTSTRAP_PROMPT_TIMEOUT:-60}"' in body)
     check("static: prompt is tty-guarded before any stdin read",
           '[ -t 0 ] || [ "${BOOTSTRAP_TEST_FORCE_PROMPT:-0}" = 1 ]' in body)
     check("static: cleanup removes the sentinel only when CLAIMED",
@@ -118,6 +123,52 @@ try:
           r.returncode != 0 and "already active" in r.stderr, r.stderr)
     check("(i) winner's sentinel intact and byte-identical",
           os.path.exists(run_path) and open(run_path).read() == winner)
+
+    # Sentinel is a DIRECTORY: sed fails; helpers must yield empty and
+    # reach the fail-safe branch instead of dying via errexit+pipefail.
+    os.remove(run_path)
+    os.mkdir(run_path)
+    r = run_auto()
+    check("fail-safe: sentinel-as-directory refuses via the "
+          "could-not-read-PID branch (no silent errexit death)",
+          r.returncode != 0 and "could not read a PID" in r.stderr,
+          f"rc={r.returncode} stderr={r.stderr!r}")
+    os.rmdir(run_path)
+
+    # Broken ps (busybox-class: ps lacks -p entirely). pid_alive must NOT
+    # classify cannot-determine as dead: dead pid -> refuse loudly.
+    fake_bin = os.path.join(d, "fakebin")
+    os.makedirs(fake_bin, exist_ok=True)
+    fake_ps = os.path.join(fake_bin, "ps")
+    open(fake_ps, "w").write("#!/bin/sh\necho 'ps: unrecognized option' >&2\nexit 1\n")
+    os.chmod(fake_ps, 0o755)
+
+    def run_auto_brokenps(stdin_text="", extra=None):
+        e = dict(env)
+        e["PATH"] = fake_bin + os.pathsep + e["PATH"]
+        if extra:
+            e.update(extra)
+        return subprocess.run(["bash", auto], input=stdin_text,
+                              capture_output=True, text=True, env=e)
+
+    dead_sentinel = f"pid={dead_pid()} start=2026-07-14T00:00:00Z\n"
+    open(run_path, "w").write(dead_sentinel)
+    r = run_auto_brokenps()
+    check("cannot-determine: broken ps + dead pid refuses (never offers "
+          "stale-clear)", r.returncode != 0
+          and "Cannot determine" in r.stderr
+          and open(run_path).read() == dead_sentinel,
+          f"rc={r.returncode} stderr={r.stderr!r}")
+
+    live_sentinel = f"pid={os.getpid()} start=2026-07-14T01:00:00Z\n"
+    open(run_path, "w").write(live_sentinel)
+    r = run_auto_brokenps()
+    check("cannot-determine fallback: broken ps + LIVE pid still refuses "
+          "as active (kill -0 success proves aliveness)",
+          r.returncode != 0 and "already active" in r.stderr
+          and open(run_path).read() == live_sentinel,
+          f"rc={r.returncode} stderr={r.stderr!r}")
+    os.remove(run_path)
 
     # Unparseable sentinel: fail safe, no damage.
     open(run_path, "w").write("garbage, no pid here\n")
@@ -162,6 +213,28 @@ try:
     check("(ii) stale clearing is logged",
           "cleared stale .run-active" in log)
 
+    # Forced prompt on an open-but-silent pipe must NOT hang: the read is
+    # time-bounded, timeout falls through to No, sentinel intact.
+    hang_sentinel = f"pid={dead_pid()} start=2026-07-13T00:00:00Z\n"
+    open(run_path, "w").write(hang_sentinel)
+    henv = dict(env)
+    henv["BOOTSTRAP_TEST_FORCE_PROMPT"] = "1"
+    henv["BOOTSTRAP_PROMPT_TIMEOUT"] = "1"
+    hp = subprocess.Popen(["bash", auto], stdin=subprocess.PIPE,
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.PIPE, text=True, env=henv)
+    try:
+        _, herr = hp.communicate(timeout=8)   # stdin open, never written
+        check("hang-bound: forced prompt on silent pipe times out to No",
+              hp.returncode != 0
+              and "Leaving the stale sentinel" in herr
+              and open(run_path).read() == hang_sentinel, herr)
+    except subprocess.TimeoutExpired:
+        hp.kill()
+        check("hang-bound: forced prompt on silent pipe times out to No",
+              False, "read blocked past the timeout bound")
+    os.remove(run_path)
+
     # ----------------------------------------------------------------- #
     # (iii) race-loser: another runner claims the sentinel while this one
     # waits at the stale-clear prompt -> abort, winner untouched. (The
@@ -185,6 +258,15 @@ try:
         else:
             p.kill()
             raise AssertionError("loser never reached the prompt")
+        # DUAL-Y RACE regression: while the first invocation is parked at
+        # the prompt it holds the startup flock, so a second invocation
+        # must refuse instantly - two operators can never both reach the
+        # clear step for the same stale sentinel.
+        r2 = subprocess.run(["bash", auto], input="y\n",
+                            capture_output=True, text=True, env=race_env)
+        check("dual-y: second invocation refuses while first holds the "
+              "startup lock", r2.returncode != 0
+              and "mid-startup" in r2.stderr, r2.stderr)
         # A winner claims the sentinel while the loser is parked.
         winner = f"pid={os.getpid()} start=2026-07-17T09:00:00Z\n"
         open(run_path, "w").write(winner)

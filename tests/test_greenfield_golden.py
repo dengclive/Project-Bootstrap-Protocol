@@ -171,9 +171,19 @@ EXPECTED_DIGESTS = {
     #      No BEFORE any stdin read (F-2 hang class closed);
     #      BOOTSTRAP_TEST_FORCE_PROMPT=1 is a documented TEST-ONLY override
     #      that can enable asking, never clearing.
+    #
+    # [2.0.0 freeze-exception no. 7 (adversarial-review fixes, auto.sh
+    # race class)] full_autonomous re-baselined for two files:
+    #   1. auto.sh: startup check-clear-claim now under flock (dual-'y'
+    #      race closed); three-state pid_alive (ps -p self-probe, kill -0
+    #      fallback, cannot-determine refuses); errexit-proof run_pid/
+    #      run_start helpers; prompt read time-bounded
+    #      (BOOTSTRAP_PROMPT_TIMEOUT, default 60s).
+    #   2. .claude/.gitignore fragment: + queue/.run-active.lock
+    #      (queue-gated, so the default fixture is unchanged).
     "default": "cd050038ad0a79f924b96a770fd98e6fba4a6dcd2bc3599f574bdfff573d5a73",
     "full_autonomous":
-        "73f1ff657727b6038479e1fd20750353d13bebd36f977e6c6f3ad0dde219dd79",
+        "9b2d26d26f1025aa0948e4762bf5d5488daee635991a7619c97e43791bca0ba3",
 }
 
 EXPECTED_ACTION_COUNTS = {

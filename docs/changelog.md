@@ -244,6 +244,41 @@ Also in this change: `plugin/plugin.json` bumps its own `version` field
 `1.0.0` → `2.0.0` (the plugin is a distribution surface; its description
 already declared protocol v2.0.0 — reviewer item PR5-05).
 
+### Adversarial code review of the branch — fixes (four classes)
+
+**Class 1 — `auto.sh` startup race safety & portability** (review findings
+1, 4, 5, 6; all empirically reproduced by the verifiers before fixing):
+
+1. **Dual-'y' race closed with a startup lock.** The whole
+   check → operator-confirmed clear → O_CREAT|O_EXCL claim sequence now
+   runs under `flock` on `queue/.run-active.lock`; a second invocation
+   refuses instantly instead of racing the clear (previously two
+   interactive operators could both pass re-verify and the loser's `rm`
+   deleted the winner's fresh sentinel — reproduced). flock was already a
+   hard requirement of the per-task wrappers; `auto.sh` now shares that
+   posture (refuses if flock is unavailable). The re-verify stays as
+   defense-in-depth against non-`auto.sh` sentinel writers. The lock file
+   joins both gitignore fragments.
+2. **Errexit-proof sentinel parsing.** `run_pid`/`run_start` helpers
+   swallow sed failures (`|| true` inside the pipeline), so an unreadable
+   sentinel or sentinel-as-directory reaches the loud fail-safe branches
+   instead of dying silently via `set -euo pipefail` (previously rc 2/4
+   with no message and a wrong infrastructure-failure exit reason).
+3. **Three-state liveness.** `pid_alive` self-probes `ps -p $$` first; on
+   platforms whose ps lacks `-p` (verified on BusyBox v1.37.0) it falls
+   back to `kill -0`, whose success proves aliveness and whose failure is
+   **cannot-determine → refuse** — never "dead". A live run's sentinel can
+   no longer be offered for clearing on busybox-class systems.
+4. **Prompt read time-bounded** (`read -t`, `BOOTSTRAP_PROMPT_TIMEOUT`
+   default 60s): even a forced prompt on an open-but-silent pipe (the
+   `BOOTSTRAP_TEST_FORCE_PROMPT` leak scenario, reproduced as an
+   indefinite hang) now falls through to No at the bound.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 7, full_autonomous only).**
+`auto.sh` + the queue-gated gitignore fragment line. Tests:
+`tests/test_auto_run_sentinel.py` grows to 26 checks (dual-invocation
+lock refusal, directory sentinel, broken-ps dead/live cases, hang bound).
+
 ### Milestone B (reserved)
 
 IC-5 (SDK `PreToolUse` callables per seam §9, Tessera-owned runner,

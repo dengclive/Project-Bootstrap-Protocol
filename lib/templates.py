@@ -899,37 +899,81 @@ on_signal(){ EXIT_REASON="signal-interrupt"; exit 130; }
 trap cleanup EXIT
 trap on_signal INT TERM
 
+# Sentinel-parse helpers. The `|| true` inside the pipelines keeps a sed
+# failure (unreadable sentinel, sentinel-is-a-directory, file racing away
+# mid-read) from killing the script via errexit+pipefail before the
+# fail-safe branches below can classify it - the helpers yield empty.
+run_pid(){ { sed -n 's/^pid=\\([0-9]\\{1,\\}\\).*/\\1/p' "$RUN" 2>/dev/null || true; } | head -1; }
+run_start(){ { sed -n 's/^.*start=//p' "$RUN" 2>/dev/null || true; } | head -1; }
+# Three-state liveness: 0=alive, 1=dead, 2=cannot-determine. `ps -p` is
+# probed against our own PID first: on a platform whose ps lacks -p
+# (busybox), the self-probe fails and we fall back to kill -0, whose
+# SUCCESS proves aliveness but whose failure may be EPERM (live process,
+# other user) - that is cannot-determine, never "dead". Fail-safe
+# direction: cannot-determine lands on refuse, never on stale-clear.
+pid_alive(){
+  if ps -p $$ >/dev/null 2>&1; then
+    if ps -p "$1" >/dev/null 2>&1; then return 0; else return 1; fi
+  fi
+  kill -0 "$1" 2>/dev/null && return 0
+  return 2
+}
+
+# Startup mutual exclusion (Phase 9.7: "Two auto.sh processes started
+# within the same second must not both pass this check"): the whole
+# check -> operator-confirmed clear -> O_CREAT|O_EXCL claim sequence runs
+# under flock, so two interactive invocations can never both clear the
+# same stale sentinel - the second refuses instantly instead of racing.
+# flock is already a hard requirement of the per-task wrappers; same
+# fail-safe posture here.
+if ! command -v flock >/dev/null 2>&1; then
+  echo "flock unavailable - cannot make the sentinel check-and-claim atomic." >&2
+  EXIT_REASON="infrastructure-failure"
+  exit 1
+fi
+exec 8>"$RUN.lock"
+if ! flock -n 8; then
+  echo "Another auto.sh invocation is mid-startup ($RUN.lock). Refusing to start." >&2
+  EXIT_REASON="manual-halt-sentinel"
+  exit 1
+fi
+
 # Phase 9.7 startup check: sentinel-presence alone is not a sufficient
 # check - PID-liveness is the actual signal.
 if [ -e "$RUN" ]; then
-  OLD_PID="$(sed -n 's/^pid=\\([0-9]\\{1,\\}\\).*/\\1/p' "$RUN" 2>/dev/null | head -1)"
-  OLD_START="$(sed -n 's/^.*start=//p' "$RUN" 2>/dev/null | head -1)"
+  OLD_PID="$(run_pid)"
+  OLD_START="$(run_start)"
   if [ -z "$OLD_PID" ]; then
     echo "Found $RUN but could not read a PID from it. Refusing to start;" >&2
     echo "inspect it and remove it manually if the prior run is gone." >&2
     EXIT_REASON="manual-halt-sentinel"
     exit 1
   fi
-  # Portable liveness probe: ps -p reports existence regardless of owner
-  # (kill -0 misreads EPERM - a live process under another user - as dead,
-  # and /proc is Linux-only). Cannot-determine still lands on refuse.
-  if ps -p "$OLD_PID" >/dev/null 2>&1; then
+  pid_alive "$OLD_PID" && LIVE=0 || LIVE=$?
+  if [ "$LIVE" = 0 ]; then
     echo "A queue run is already active (pid=$OLD_PID, $RUN). Refusing to start." >&2
+    EXIT_REASON="manual-halt-sentinel"
+    exit 1
+  fi
+  if [ "$LIVE" = 2 ]; then
+    echo "Cannot determine whether pid=$OLD_PID is alive on this platform." >&2
+    echo "Refusing to start; verify the prior run and remove $RUN manually." >&2
     EXIT_REASON="manual-halt-sentinel"
     exit 1
   fi
   # Stale sentinel from a crashed prior run: alert with the recorded start
   # timestamp and ask before clearing (Phase 9.7). The prompt is offered
   # only on an interactive terminal - a non-tty stdin auto-answers No
-  # BEFORE any read, so an inherited open-but-silent pipe can never hang
-  # here (F-2 class). BOOTSTRAP_TEST_FORCE_PROMPT=1 is a TEST-ONLY
-  # override that forces the prompt path on a non-tty; it can only enable
-  # ASKING (the answer is still read from stdin, default No) - it can
-  # never clear the sentinel by itself.
+  # BEFORE any read - and the read itself is time-bounded, so even a
+  # forced prompt on an open-but-silent pipe cannot hang (F-2 class):
+  # timeout and EOF both fall through to No. BOOTSTRAP_TEST_FORCE_PROMPT=1
+  # is a TEST-ONLY override that forces the prompt path on a non-tty; it
+  # can only enable ASKING (the answer is still read from stdin, default
+  # No) - it can never clear the sentinel by itself.
   echo "Stale .run-active: pid=$OLD_PID is not alive (started ${OLD_START:-unknown})." >&2
   if [ -t 0 ] || [ "${BOOTSTRAP_TEST_FORCE_PROMPT:-0}" = 1 ]; then
     printf 'Clear the stale sentinel and continue? [y/N] ' >&2
-    IFS= read -r REPLY || REPLY=""
+    IFS= read -r -t "${BOOTSTRAP_PROMPT_TIMEOUT:-60}" REPLY || REPLY=""
   else
     echo "Non-interactive invocation: not clearing the stale sentinel." >&2
     REPLY=""
@@ -942,10 +986,11 @@ if [ -e "$RUN" ]; then
       exit 1
       ;;
   esac
-  # Re-verify before clearing: if the sentinel changed while we waited at
-  # the prompt, another runner claimed it - abort rather than damaging the
-  # winner's sentinel.
-  NOW_PID="$(sed -n 's/^pid=\\([0-9]\\{1,\\}\\).*/\\1/p' "$RUN" 2>/dev/null | head -1)"
+  # Re-verify before clearing: auto.sh contenders are already excluded by
+  # the startup lock; this guards against NON-auto.sh writers (e.g. a
+  # dispatch layer that owns the sentinel path) replacing the sentinel
+  # while the operator sat at the prompt.
+  NOW_PID="$(run_pid)"
   if [ "$NOW_PID" != "$OLD_PID" ]; then
     echo "The sentinel changed while waiting for confirmation (pid=${NOW_PID:-gone})." >&2
     echo "Another runner claimed it. Aborting without touching it." >&2
@@ -964,6 +1009,7 @@ if ! ( set -C; printf 'pid=%s start=%s\\n' "$$" "$(date -u +%FT%TZ)" >"$RUN" ) 2
   exit 1
 fi
 CLAIMED=1
+exec 8>&-                               # release the startup lock
 log "auto.sh started (skeleton)."
 
 echo "Queue runner skeleton installed. Implement the dispatch loop per" \\
@@ -1299,7 +1345,8 @@ def _gitignore(cfg):
         ".bootstrap-state.json.lock", ".bootstrap-incomplete",
     ]
     if cfg["autonomous_modes"]["queue_mode_enabled"]:
-        base += ["queue/.run-active", "queue/.halt", "queue/.resume"]
+        base += ["queue/.run-active", "queue/.run-active.lock",
+                 "queue/.halt", "queue/.resume"]
         # NOTE: backlog.md and run-summary-*.md are intentionally NOT ignored.
     return "# bootstrap-installer generated\n" + "\n".join(base) + "\n"
 
@@ -2413,7 +2460,8 @@ def _retrofit_gitignore(cfg):
     # configs always have *_enabled: false.
     rf_am = cfg.get("retrofit", {}).get("autonomous_modes", {})
     if rf_am.get("queue_mode_opted_in"):
-        base += ["queue/.run-active", "queue/.halt", "queue/.resume"]
+        base += ["queue/.run-active", "queue/.run-active.lock",
+                 "queue/.halt", "queue/.resume"]
     out = ["# bootstrap-installer generated (retrofit-flavor)"]
     out.extend(base)
     return "\n".join(out) + "\n"
