@@ -225,9 +225,19 @@ EXPECTED_DIGESTS = {
     #     membership from config; skip-dot-dir corpus).
     #   full_autonomous: the above + loop.sh/goal-loop.sh (IC-6 worktree
     #     .git/info/exclude guidance; reworded dispatch echo).
-    "default": "70fd0ffe97923bfc54a6dad5e5b6cf4def0c65d7121cf6a495cafc798f1188ee",
+    #
+    # [2.1.0 freeze-exception no. 14 (re-sweep regression fixes)] Emitted-
+    # byte changes from fixing regressions the no. 13 fixes introduced,
+    # diff-verified vs the prior head (zero files added/removed):
+    #   default: .claude/sdk_gates/gates.py (empty-_resolved_hooks
+    #     fallback; pip[0-9.]* versioned-pip; per-line dependency scan;
+    #     _proj().resolve()).
+    #   full_autonomous: the above + loop.sh/goal-loop.sh (worktree
+    #     .git/info/exclude comment de-mangled — the backslash line-
+    #     continuation was collapsing the example).
+    "default": "df461145c5f87c478ef13076244458f784c9ffb51d6c0f86e42b7849c01dbfd1",
     "full_autonomous":
-        "d06e6cddf2631a45d2f2798072879a34c1f56dc26b737ccfedc3884570f4d9fe",
+        "2b9e54229ebd0eb5c5576ba9e45453f50fd783ca8d61b44392025feb423ac707",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -1070,14 +1070,12 @@ def _per_task_wrapper(kind: str) -> str:
 # covers worktree creation, entry, and clean-worktree auto-cleanup (the
 # seam runtime floor >= 2.1.210 subsumes native worktree support). A
 # worktree is a drift-prevention boundary, NOT a security boundary.
-# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: add
-# `.claude/worktrees/` to .git/info/exclude (local, per-clone), e.g.
-#   git config --local --get core.excludesFile >/dev/null 2>&1
-#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null \
-#     || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
-# Do NOT add it to a COMMITTED .gitignore: `git worktree add` refuses to
-# create inside an ignored directory, so committing that rule breaks
-# worktree creation for every clone (Claude Code issue #57512).
+# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: append
+# `.claude/worktrees/` to .git/info/exclude (local, per-clone). One-liner:
+#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
+# Do NOT add it to a COMMITTED .gitignore: the native mechanism refuses to
+# create a worktree inside an ignored directory, so committing that rule
+# breaks worktree creation for every clone (Claude Code issue #57512).
 #
 # Usage: {self} <task-id> [spec-id]
 set -euo pipefail

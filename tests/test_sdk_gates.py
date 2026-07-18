@@ -373,18 +373,55 @@ except NameError as e:
     check("fix: bool/None config renders valid Python", False, str(e))
 
 # ---- fix: build_hooks membership follows the passed config --------------- #
-# A config warranting MORE gates than the emission snapshot enlarges the
-# set (never capped at the frozen GATES list).
-big = dict(gates_mod.RESOLVED_CONFIG)
-big["_resolved_hooks"] = list(gates_mod._GATE_FACTORIES)   # all 7
-hm_big = gates_mod.build_hooks(big)
-check("fix: build_hooks enlarges membership from config (7 gates)",
-      sum(len(v) for v in hm_big.values()) == 7)
-small = dict(gates_mod.RESOLVED_CONFIG)
+# Render from a SUBSET config (service, no tdd/eval) so the emission-time
+# GATES is a strict subset of all 7 - only then can "enlarge" distinguish
+# the fix (reads config) from the old code (frozen GATES).
+cfg_sub, _e = resolve_config(load_yaml(
+    "project:\n  name: sub\n  archetype: service\n"
+    "commands:\n  test: \"true\"\n  lint: \"true\"\n"))
+assert not _e, _e
+body_sub = templates.TEMPLATES["sdk_gates"](cfg_sub)
+g_sub = {}
+exec(compile(body_sub, "gsub", "exec"), g_sub)
+n_emitted = len(g_sub["GATES"])
+check("fix: subset fixture emits FEWER than 7 gates (precondition)",
+      0 < n_emitted < 7, f"GATES={g_sub['GATES']}")
+# Enlarge: pass a config warranting all 7 -> build_hooks must exceed the
+# emission snapshot (proves membership tracks config, not frozen GATES).
+big = dict(g_sub["RESOLVED_CONFIG"])
+big["_resolved_hooks"] = list(g_sub["_GATE_FACTORIES"])   # all 7
+hm_big = g_sub["build_hooks"](big)
+check("fix: build_hooks ENLARGES membership beyond emission GATES",
+      sum(len(v) for v in hm_big.values()) == 7 and n_emitted < 7)
+small = dict(g_sub["RESOLVED_CONFIG"])
 small["_resolved_hooks"] = ["secrets-gate"]
-hm_small = gates_mod.build_hooks(small)
 check("fix: build_hooks shrinks membership from config (1 gate)",
-      sum(len(v) for v in hm_small.values()) == 1)
+      sum(len(v) for v in g_sub["build_hooks"](small).values()) == 1)
+# B1: an EMPTY _resolved_hooks must NOT silently disable all gates -
+# it falls back to the emission GATES (a security substrate never builds
+# zero gates from a stray []).
+empty = dict(g_sub["RESOLVED_CONFIG"])
+empty["_resolved_hooks"] = []
+check("fix: empty _resolved_hooks falls back to GATES (not zero)",
+      sum(len(v) for v in g_sub["build_hooks"](empty).values())
+      == n_emitted)
+
+# ---- B3/B4: versioned pip + cross-line verb-merge -------------------------#
+gdep = gates_mod._GATE_FACTORIES["dependency-gate"](
+    {"deps": {"approved": ["requests"]},
+     "secrets": {"never_read_paths": []}, "commands": {}})
+def _dep(c):
+    return asyncio.run(gdep({"tool_input": {"command": c}}, "t", None))
+check("fix: dependency-gate blocks versioned `pip3.11 install`",
+      is_deny(_dep("pip3.11 install evil")), repr(_dep("pip3.11 install evil")))
+check("fix: dependency-gate does NOT merge a verb split across lines",
+      _dep("echo npm\ninstall foo") == {}, repr(_dep("echo npm\ninstall foo")))
+
+# ---- B2: worktree comment renders as valid, un-mangled guidance ---------- #
+wbody = templates.TEMPLATES["loop_sh"](cfg)
+check("fix: worktree guidance one-liner is intact (not backslash-collapsed)",
+      "|| echo '.claude/worktrees/' >>" in wbody
+      and " \\\n" not in wbody.split("info/exclude", 1)[0][-200:])
 
 # ---- AC-7-5: reason literals appear in the emitted SHELL gate bodies ----- #
 # (message parity, modulo the documented interpolation sites: the {target}/
@@ -483,6 +520,41 @@ try:
           in {a["path"] for a in _inst.build_plan(cfg)})
 finally:
     shutil.rmtree(d, ignore_errors=True)
+
+# ---- fix (eval-gate): whole outgoing @{u}..HEAD range, not just HEAD~1 ---- #
+# A prompt change buried 2 commits back (behind a later non-prompt commit)
+# must still gate a push. The old HEAD~1-only check missed it; this proves
+# the @{u}..HEAD range fix. Requires an upstream, so set one up.
+ev = tempfile.mkdtemp()
+bare = tempfile.mkdtemp()
+try:
+    def _git(*a, cwd=ev):
+        subprocess.run(["git", *a], cwd=cwd, check=True,
+                       capture_output=True, text=True)
+    subprocess.run(["git", "init", "--bare", "-q", bare], check=True,
+                   capture_output=True)
+    _git("init", "-q")
+    _git("config", "user.email", "t@t"); _git("config", "user.name", "t")
+    open(os.path.join(ev, "readme.md"), "w").write("x\n")
+    _git("add", "-A"); _git("commit", "-qm", "base")
+    _git("remote", "add", "origin", bare)
+    _git("push", "-q", "-u", "origin", "HEAD")
+    # commit 1 (2 back after the next): a PROMPT change
+    open(os.path.join(ev, "prompts.md"), "w").write("system prompt\n")
+    _git("add", "-A"); _git("commit", "-qm", "prompt change")
+    # commit 2 (newest): unrelated code, so HEAD~1 alone would miss prompts
+    open(os.path.join(ev, "code.txt"), "w").write("y\n")
+    _git("add", "-A"); _git("commit", "-qm", "code fix")
+    os.environ["CLAUDE_PROJECT_DIR"] = ev
+    egate = gates_mod._GATE_FACTORIES["eval-gate"](gates_mod.RESOLVED_CONFIG)
+    rr = asyncio.run(egate({"tool_input": {"command": "git push"}},
+                           "t", None))
+    check("fix: eval-gate gates a prompt change buried 2 commits back",
+          is_deny(rr), repr(rr))
+    del os.environ["CLAUDE_PROJECT_DIR"]
+finally:
+    shutil.rmtree(ev, ignore_errors=True)
+    shutil.rmtree(bare, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

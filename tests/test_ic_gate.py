@@ -308,5 +308,72 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+# Stale-file cleanup coverage (retrofit-over-greenfield): gates.py is
+# unlinked from disk, leaves the manifest, the state is reconciled to
+# shell, and a hand-edited stale file is PRESERVED (L-1).
+d = tempfile.mkdtemp()
+try:
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(SDK)
+    subprocess.run([sys.executable, BIN, "-C", d],
+                   capture_output=True, text=True)
+    gp = os.path.join(d, ".claude", "sdk_gates", "gates.py")
+    assert os.path.isfile(gp), "greenfield should emit gates.py"
+    # Hand-edit a droppable non-security file to prove L-1 preservation.
+    handedit = os.path.join(d, ".claude", "loop-config.md")
+    open(handedit, "a").write("\n# operator note\n")
+    RETRO = """mode: "retrofit"
+project:
+  name: x
+  archetype: ai-agent
+secrets:
+  enabled: true
+deps:
+  enabled: true
+  approved: []
+commands: {test: "true", lint: "true"}
+retrofit:
+  spec_strategy: forward-only
+  legacy_allowlist: ["src/**"]
+  retrofit_active: true
+  r08_committed: true
+"""
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(RETRO)
+    r = subprocess.run([sys.executable, BIN, "-C", d],
+                       capture_output=True, text=True)
+    check("fix: stale gates.py unlinked from disk on retrofit re-apply",
+          not os.path.isfile(gp))
+    man = json.load(open(os.path.join(d, ".claude",
+                                      ".installer-manifest.json")))
+    check("fix: gates.py leaves the manifest (no orphan)",
+          not any("sdk_gates" in f["path"] for f in man["files"]))
+    check("fix: removed count reported", "removed=" in r.stdout
+          and "removed=0" not in r.stdout)
+    st = json.load(open(os.path.join(d, ".claude",
+                                     ".bootstrap-state.json")))
+    check("fix: orphaned sdk-callable state reconciled to shell",
+          st["gate_substrate"] == "shell")
+    check("fix: hand-edited dropped file PRESERVED (L-1)",
+          os.path.isfile(handedit)
+          and "operator note" in open(handedit).read())
+    # --dry-run previews the removal without deleting.
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(SDK)
+    subprocess.run([sys.executable, BIN, "-C", d],
+                   capture_output=True, text=True)   # restore greenfield
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(RETRO)
+    r = subprocess.run([sys.executable, BIN, "-C", d, "--dry-run"],
+                       capture_output=True, text=True)
+    check("fix: --dry-run PREVIEWS the removal, does not delete",
+          "REMOVE (dry run)" in r.stdout
+          and os.path.isfile(gp))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# AC-9-4 anchoring: a banner-preamble version must not fool the parse.
+r = install_with_fake_claude("Update available 9.9.9 -> 10.0.0\n"
+                             "2.1.100 (Claude Code)")
+check("fix: runtime-floor parse ignores an update-banner version",
+      "Claude Code runtime detected: 2.1.100" in r.stdout
+      and "BELOW the seam runtime floor" in r.stderr, r.stdout + r.stderr)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

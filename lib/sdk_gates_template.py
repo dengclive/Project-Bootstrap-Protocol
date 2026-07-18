@@ -90,7 +90,11 @@ _STATIC_BODY = '''
 
 def _proj() -> Path:
     # Same project-root resolution as the shell suite (F-2 idiom).
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".")
+    # Resolved to an ABSOLUTE path so path-relative logic (tdd-gate) is
+    # computed against a stable root rather than the runner's cwd. The
+    # consumer's subprocess runner is expected to set CLAUDE_PROJECT_DIR
+    # (seam §9); absent it, this falls back to the resolved cwd.
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
 
 
 def _deny(reason: str) -> dict:
@@ -200,7 +204,7 @@ def _spec_gate_commit(config):
 
 
 _INSTALL_VERBS = re.compile(
-    r" (?:python[0-9]* -m pip install|pip[0-9]* install|pipx install"
+    r" (?:python[0-9.]* -m pip install|pip[0-9.]* install|pipx install"
     r"|npm install|npm i|yarn add|pnpm add) ")
 _VALUE_FLAGS = frozenset({
     "-r", "--requirement", "-e", "--editable", "-c", "--constraint",
@@ -224,29 +228,16 @@ def _dependency_gate(config):
     async def dependency_gate(input_data, tool_use_id, context):
         # Block package installs not on the approved list. Every token
         # after the install/add verb is inspected (shell S-2 semantics);
-        # value-taking flags consume the next token. Whitespace is
-        # collapsed first so tab-separated or multi-space invocations
-        # (and `python -m pip install`) cannot slip past the verb match.
+        # value-taking flags consume the next token. Spaces/tabs are
+        # collapsed so tab-separated or multi-space invocations (and
+        # `python -m pip install`) cannot slip past the verb match -
+        # but NEWLINES are preserved (collapsing them would merge a
+        # multi-line command whose message merely mentions an install
+        # verb across a line break, false-blocking a legitimate commit).
         cmd = _tool_input(input_data).get("command") or ""
-        norm = " " + " ".join(cmd.split()) + " "
-        m = _INSTALL_VERBS.search(norm)
-        if not m:
-            return {}
-        rest = norm[m.end():]
         blocked = ""
-        skip_next = False
-        for tok in rest.split():
-            if skip_next:
-                skip_next = False
-                continue
-            if tok in _VALUE_FLAGS:
-                skip_next = True
-                continue
-            if tok.startswith("-"):
-                continue
-            name_only = _pkg_name(tok)
-            if name_only and name_only not in approved:
-                blocked += " " + name_only
+        for line in cmd.splitlines() or [cmd]:
+            blocked += _scan_install_line(line, approved)
         if blocked:
             return _deny("Dependency gate: not in deps.md approved list:"
                          + blocked
@@ -254,6 +245,31 @@ def _dependency_gate(config):
                            ".claude/steering/deps.md.")
         return {}
     return dependency_gate
+
+
+def _scan_install_line(line, approved):
+    # Returns a space-prefixed string of unapproved package names on this
+    # single command line (empty if none / not an install command).
+    norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
+    m = _INSTALL_VERBS.search(norm)
+    if not m:
+        return ""
+    rest = norm[m.end():]
+    blocked = ""
+    skip_next = False
+    for tok in rest.split():
+        if skip_next:
+            skip_next = False
+            continue
+        if tok in _VALUE_FLAGS:
+            skip_next = True
+            continue
+        if tok.startswith("-"):
+            continue
+        name_only = _pkg_name(tok)
+        if name_only and name_only not in approved:
+            blocked += " " + name_only
+    return blocked
 
 
 def _test_gate(config):
@@ -435,11 +451,15 @@ def _enabled_gates(config):
     # Membership tracks the CALLER's config, not the emission-time GATES
     # snapshot: a config that now warrants more gates than at emission
     # (tdd_policy flipped to required, eval-gate turned on) gets them. A
-    # config carrying `_resolved_hooks` (a full resolved project config,
-    # e.g. Tessera's or the emitted RESOLVED_CONFIG) is authoritative;
-    # absent that key, fall back to the emission-time GATES list.
+    # config carrying a NON-EMPTY `_resolved_hooks` (a full resolved
+    # project config, e.g. Tessera's or the emitted RESOLVED_CONFIG) is
+    # authoritative. A missing OR EMPTY `_resolved_hooks` falls back to
+    # the emission-time GATES - never to the empty set: a security
+    # substrate silently building ZERO gates from a stray `[]` would be
+    # the opposite of fail-loud. (When the project genuinely enables no
+    # SDK gates, GATES itself is empty, so the result is still empty.)
     hooks = config.get("_resolved_hooks")
-    if hooks is not None:
+    if hooks:
         active = set(hooks)
         return [g for g in _GATE_ORDER if g in active]
     return [g for g in _GATE_ORDER if g in set(GATES)]

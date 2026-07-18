@@ -46,34 +46,42 @@ def _resolved_fixture():
 
 def _ic1_validate_only() -> tuple[bool, str]:
     """IC-1: `bootstrap-interview synthesize --validate-only` is real -
-    verified BEHAVIORALLY (a source grep would false-green on the flag
-    surviving in a docstring while the wiring is gone). Drives
-    interview.main and asserts the flag reaches the synthesize handler
-    (an unwired flag argparse-errors with SystemExit) and writes no
-    output file."""
+    verified BEHAVIORALLY end-to-end (a source grep, or a probe against a
+    missing file that returns before the validate-only branch, would both
+    false-green while the actual validate logic is gutted). Builds a
+    complete interview via `analyze`, runs `synthesize --validate-only`
+    on it, and asserts it reaches the branch: exit 0 (valid config) AND
+    no output file written."""
     import contextlib
     import io
     import interview
     with tempfile.TemporaryDirectory() as d:
-        missing = os.path.join(d, "no-such-interview.md")
+        prd = os.path.join(d, "PRD.md")
+        iv = os.path.join(d, "iv.md")
         out = os.path.join(d, "should-not-be-written.yaml")
+        open(prd, "w").write(
+            "# Demo Service\nA REST API service for managing widgets.\n")
         buf = io.StringIO()
         try:
             with contextlib.redirect_stderr(buf), \
                     contextlib.redirect_stdout(buf):
+                rc_a = interview.main(["analyze", "--prd", prd, "-o", iv])
+                if rc_a != 0 or not os.path.exists(iv):
+                    return False, ("could not build a fixture interview "
+                                   f"(analyze rc={rc_a})")
+                before = sorted(os.listdir(d))
                 rc = interview.main(
-                    ["synthesize", "-i", missing, "-o", out,
-                     "--validate-only"])
+                    ["synthesize", "-i", iv, "-o", out, "--validate-only"])
         except SystemExit:
-            # argparse rejected the flag -> not wired to the handler.
             return False, ("--validate-only is not a wired synthesize "
                            "flag (argparse rejected it)")
-        if not isinstance(rc, int):
-            return False, f"synthesize handler returned {rc!r}, not an exit code"
-        if os.path.exists(out):
-            return False, "--validate-only wrote an output file (must not)"
-    return True, ("synthesize --validate-only is wired and writes no "
-                  "output file")
+        if rc != 0:
+            return False, (f"--validate-only rejected a valid interview "
+                           f"(rc={rc}; stderr tail: {buf.getvalue()[-200:]})")
+        if os.path.exists(out) or sorted(os.listdir(d)) != before:
+            return False, "--validate-only wrote a file (must write none)"
+    return True, ("synthesize --validate-only validates a real interview "
+                  "and writes no output file")
 
 
 def _ic2_root_sentinels() -> tuple[bool, str]:
@@ -129,7 +137,13 @@ def _ic5_sdk_gates() -> tuple[bool, str]:
     builder, parseable Python, security-critical tier)."""
     import installer
     cfg = _resolved_fixture()
-    plan = installer.build_plan(cfg)
+    try:
+        plan = installer.build_plan(cfg)
+    except RuntimeError as e:
+        # build_plan asserts the tier partition; a partition break is
+        # IC-7's concern, not gates.py emission. Defer rather than
+        # misattribute the failure to this check.
+        return False, f"deferred to IC-7 (build_plan refused): {e}"
     entry = next((a for a in plan
                   if a["path"] == ".claude/sdk_gates/gates.py"), None)
     if entry is None:

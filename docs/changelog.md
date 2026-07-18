@@ -572,3 +572,51 @@ Tests: +25 regression checks across `test_sdk_gates.py` (57) and
 byte changes: `.claude/.gitignore` + `.claude/sdk_gates/gates.py` (both
 fixtures); `.claude/loop.sh` + `.claude/goal-loop.sh` (full_autonomous).
 Diff-verified vs the pre-fix head: zero files added, zero removed.
+
+### Adversarial re-sweep — regressions the fix pass introduced
+
+A second max-effort sweep over the fix commit found regressions the fixes
+themselves created; all fixed here, each now with a non-tautological
+regression test:
+- **`build_hooks` empty-set trap:** an empty `_resolved_hooks` (`[]`) fell
+  through to zero gates — a security substrate silently disabling all
+  enforcement. Now a missing OR empty value falls back to the emission
+  `GATES` (never the empty set).
+- **`gates.py` orphan, sharpened:** the new stale-file cleanup deleted
+  `gates.py` on a greenfield-sdk-callable → retrofit re-apply, but the
+  retrofit state writer (a separate `.retrofit-state.json`) left
+  `.bootstrap-state.json` still advertising `sdk-callable`.
+  `_reconcile_orphaned_substrate` now downgrades it to `shell` loudly when
+  the module is no longer emitted.
+- **`--dry-run` now previews removals** (`REMOVE (dry run)` + counted) so
+  the preview is faithful for the destructive re-apply case.
+- **Dependency-gate:** versioned `pip3.11 install` matched (`pip[0-9.]*`);
+  whitespace collapse no longer merges a verb split across NEWLINES
+  (per-line scan) — that would false-block a commit whose message merely
+  mentions an install verb.
+- **tdd-gate `_proj()` resolves** to an absolute root so the
+  absolute-path relativization is stable.
+- **IC-1 is genuinely end-to-end:** it builds a real interview via
+  `analyze` and drives `synthesize --validate-only` to the validate
+  branch (the prior probe returned at file-not-found, before the branch —
+  a vacuous check); **IC-5** defers to IC-7 instead of misattributing a
+  partition break; runtime-floor parse also matches a `version`-keyword
+  form.
+- **Worktree comment de-mangled:** the `.git/info/exclude` example used a
+  shell line-continuation backslash that Python collapsed inside the
+  non-raw template string, corrupting the emitted one-liner; rewritten as
+  a single line.
+
+Also proven (previously untested): stale-file cleanup end-to-end (unlink
++ manifest-orphan removal + L-1 hand-edit preservation + state
+reconcile), runtime-floor banner anchoring, `build_hooks` enlargement
+from a genuine subset fixture, eval-gate `@{u}..HEAD` whole-range with an
+upstream.
+
+Tests: 726 checks green / 13 files (`test_sdk_gates.py` 63,
+`test_ic_gate.py` 44).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 14, both fixtures).** Emitted-
+byte changes: `.claude/sdk_gates/gates.py` (both); `.claude/loop.sh` +
+`.claude/goal-loop.sh` (full_autonomous, worktree comment). Diff-verified
+vs the prior head: zero files added, zero removed.

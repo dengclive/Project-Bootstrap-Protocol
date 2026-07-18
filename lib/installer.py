@@ -566,25 +566,37 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     # A hand-edited stale file (digest drift) is preserved and reported,
     # never silently deleted (L-1 contract); the co-owned root .gitignore
     # is managed by its own block logic and never file-deleted here.
-    if not dry:
-        for path, known in prev_files.items():
-            if path in planned_paths or known.get("kind") == "gitignore_root":
-                continue
-            target = root / path
-            if not target.exists():
-                continue
-            try:
-                on_disk = _digest(target.read_text())
-            except OSError:
-                on_disk = None
-            if on_disk is not None and known.get("digest") == on_disk \
-                    and known.get("state") != "skipped-local-edit":
+    # --dry-run PREVIEWS the removals (prints + counts them) without
+    # unlinking, so the preview is faithful for exactly the destructive
+    # case this cleanup introduced.
+    for path, known in prev_files.items():
+        if path in planned_paths or known.get("kind") == "gitignore_root":
+            continue
+        target = root / path
+        if not target.exists():
+            continue
+        try:
+            on_disk = _digest(target.read_text())
+        except OSError:
+            on_disk = None
+        if on_disk is not None and known.get("digest") == on_disk \
+                and known.get("state") != "skipped-local-edit":
+            if not dry:
                 target.unlink()
-                summary["removed"] += 1
-                print(f"  REMOVE {path}  (dropped from plan on re-apply)")
-            else:
-                print(f"  KEEP   {path}  (dropped from plan but locally "
-                      f"modified; left in place)", file=sys.stderr)
+            summary["removed"] += 1
+            tag = "REMOVE (dry run)" if dry else "REMOVE"
+            print(f"  {tag} {path}  (dropped from plan on re-apply)")
+        else:
+            print(f"  KEEP   {path}  (dropped from plan but locally "
+                  f"modified; left in place)", file=sys.stderr)
+
+    # If the SDK gate module is not being emitted this run (retrofit
+    # overlay drop, or a shell reconfigure) but a greenfield state file
+    # still advertises "sdk-callable", reconcile it to "shell": the module
+    # that field refers to is gone, and a consumer keying dispatch off the
+    # state must not believe the SDK substrate is active.
+    if not dry and ".claude/sdk_gates/gates.py" not in planned_paths:
+        _reconcile_orphaned_substrate(root)
 
     if not dry:
         # D6 / C1: single cfg["mode"] dispatch at the state-write site.
@@ -699,6 +711,28 @@ def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
             sep = "" if text.endswith("\n") else "\n"
             _atomic_write(text + sep + block)
     manifest["files"].append(co_owned)
+
+
+def _reconcile_orphaned_substrate(root: Path) -> None:
+    """Downgrade a greenfield state file's gate_substrate to "shell" when
+    the SDK gate module it refers to is no longer emitted (e.g. a
+    greenfield sdk-callable install re-applied in retrofit mode, whose
+    separate .retrofit-state.json never touches .bootstrap-state.json).
+    Without this the state advertises "sdk-callable" while gates.py has
+    been stale-deleted from disk - a silent enforcement gap."""
+    sp = root / STATE
+    if not sp.exists():
+        return
+    try:
+        st = json.loads(sp.read_text())
+    except Exception:
+        return
+    if st.get("gate_substrate") == "sdk-callable":
+        st["gate_substrate"] = "shell"
+        sp.write_text(json.dumps(st, indent=2) + "\n")
+        print('WARNING: .bootstrap-state.json advertised gate_substrate '
+              '"sdk-callable" but the SDK gate module is no longer emitted '
+              'by this install; reconciled to "shell".', file=sys.stderr)
 
 
 def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
@@ -1047,7 +1081,13 @@ def _runtime_floor_check() -> None:
             # "(Claude Code)" marker, else a version at the start of a
             # line (optionally 'v'-prefixed).
             out = (r.stdout or "") + "\n" + (r.stderr or "")
+            # Anchor priority so an update-notifier banner or node-version
+            # line can't be mistaken for the CLI version: (1) adjacent to
+            # the "(Claude Code)" marker; (2) after a "version" keyword;
+            # (3) a version at the start of a line.
             m = (re.search(r"(\d+)\.(\d+)\.(\d+)\s*\(Claude Code\)", out)
+                 or re.search(r"(?i)version[^\d\n]*?(\d+)\.(\d+)\.(\d+)",
+                              out)
                  or re.search(r"(?m)^\s*v?(\d+)\.(\d+)\.(\d+)\b", out))
             if m:
                 detected = tuple(int(g) for g in m.groups())
