@@ -66,7 +66,7 @@ try:
     check("AC-1-1: fresh install writes no .pre-2.0.0 backup",
           not os.path.exists(os.path.join(d, BACKUP_REL)))
     check("AC-1-1: version field alongside substrate field",
-          state.get("bootstrap_protocol_version") == "2.0.0")
+          state.get("bootstrap_protocol_version") == "2.1.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -94,8 +94,8 @@ try:
     state = json.load(open(state_path))
     check("AC-1-2: migrated state has gate_substrate == 'shell'",
           state.get("gate_substrate") == "shell")
-    check("AC-1-2: migrated state version bumped to 2.0.0",
-          state.get("bootstrap_protocol_version") == "2.0.0")
+    check("AC-1-2: migrated state version bumped to 2.1.0",
+          state.get("bootstrap_protocol_version") == "2.1.0")
     check("AC-1-2: pre-existing keys preserved (non-destructive)",
           state.get("completed_phases") == ["0", "1", "2"])
     backup_path = os.path.join(d, BACKUP_REL)
@@ -136,21 +136,30 @@ try:
     state = json.load(open(state_path))
     check("corrupt-state: rewritten state is valid with gate_substrate "
           "'shell'", state.get("gate_substrate") == "shell"
-          and state.get("bootstrap_protocol_version") == "2.0.0")
+          and state.get("bootstrap_protocol_version") == "2.1.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
-# AC-1-3: the writer never emits "sdk-callable" in Milestone A. There is no
-# code path that can produce it: assert the literal appears in no write
-# statement in lib/installer.py (Milestone B replaces this source-level
-# tripwire with the lib/ic_checks.py gate test).
+# AC-1-3 (Milestone-B form, the DELIBERATE tripwire replacement the
+# Milestone-A comment promised): "sdk-callable" is now writable, but ONLY
+# through the R-9 IC gate. Source-level assertion here: main() runs
+# ic_checks and refuses before build_plan; the state writer takes the
+# value from the already-gated cfg, never a bare literal. Behavioral
+# coverage (refusal, grant, retention of "shell") lives in
+# tests/test_ic_gate.py.
 # --------------------------------------------------------------------------- #
 src = open(os.path.join(ROOT, "lib", "installer.py")).read()
-writes = [ln for ln in src.splitlines()
-          if '"sdk-callable"' in ln and not ln.lstrip().startswith("#")]
-check("AC-1-3: no non-comment 'sdk-callable' literal in installer source",
-      writes == [], repr(writes))
+check("AC-1-3(B): installer gates sdk-callable through ic_checks",
+      "ic_checks.run_ic_checks()" in src
+      and 'cfg.get("gate_substrate") == "sdk-callable"' in src
+      and "Install REFUSED" in src)
+writer_literals = [
+    ln for ln in src.splitlines()
+    if '"gate_substrate": "sdk-callable"' in ln
+    and not ln.lstrip().startswith("#")]
+check("AC-1-3(B): state writer never hardcodes 'sdk-callable'",
+      writer_literals == [], repr(writer_literals))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

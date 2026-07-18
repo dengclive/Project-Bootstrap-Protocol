@@ -244,6 +244,23 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
             "loop_mode_enabled or goal_supervised_mode_enabled "
             "(Bootstrap-Protocol-v2-0-0.md Phase 9.7 / skip policy).")
 
+    # ---- R-9: requested enforcement substrate (Milestone B) --------------- #
+    # Top-level scalar, default "shell" (byte-identity for every existing
+    # config). "sdk-callable" is a REQUEST: the installer grants it only
+    # when every IC-1..IC-7 self-check passes (lib/ic_checks.py), else the
+    # install is refused loudly (AC-9-1).
+    substrate = cfg.get("gate_substrate", "shell")
+    if substrate not in ("shell", "sdk-callable"):
+        errors.append('gate_substrate must be "shell" or "sdk-callable"; '
+                      f"got {substrate!r}")
+    elif substrate == "sdk-callable" and mode == "retrofit":
+        errors.append(
+            "gate_substrate: sdk-callable is not available in retrofit "
+            "mode - the retrofit track is shell-era "
+            "(RETROFIT_PROTOCOL_VERSION) and the overlay drops the SDK "
+            "gate module.")
+    cfg["gate_substrate"] = substrate
+
     # ---- Principles: fill starter set if empty (Phase 4) ------------------ #
     if not cfg["principles"]["ranked"]:
         cfg["principles"]["ranked"] = list(PRINCIPLE_STARTERS[arche])

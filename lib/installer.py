@@ -33,9 +33,16 @@ from defaults import resolve_config    # archetype defaults + validation
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "2.0.0"
+PROTOCOL_VERSION = "2.1.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
-INSTALLER_VERSION = "1.0.0"
+# Seam binds floor (SEAM-CONTRACT v1.2.0, claude_code_runtime; confirmed
+# against the official changelog 2026-07-18): below 2.1.210 a PreToolUse
+# hook timeout is misreported as a user rejection instead of failing
+# closed. AC-9-4: startup logs the detected CLI version and warns loudly
+# below this floor (or when undetectable); the install itself proceeds -
+# the floor binds DISPATCH, not emission.
+RUNTIME_FLOOR = "2.1.210"
+INSTALLER_VERSION = "1.1.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -689,11 +696,12 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
             backup.write_text(raw)
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
-        # IC-3: the installed enforcement substrate. This installer emits the
-        # shell hook suite, so the only value it ever writes is "shell";
-        # "sdk-callable" is reserved for the >= 2.1.0 substrate release and
-        # is gated on the IC-1..IC-7 self-checks (lib/ic_checks.py).
-        "gate_substrate": "shell",
+        # IC-3: the installed enforcement substrate. R-9: "sdk-callable"
+        # is written ONLY when the config requests it AND every IC-1..IC-7
+        # self-check passed - main() refuses the install before reaching
+        # this writer otherwise (AC-9-1/9-2), so the value here is the
+        # already-gated request.
+        "gate_substrate": cfg.get("gate_substrate", "shell"),
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],
         "deterministic_install": True,
@@ -937,6 +945,44 @@ def uninstall(root: Path) -> None:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def _runtime_floor_check() -> None:
+    """AC-9-4: log the detected Claude Code CLI version; warn LOUDLY when
+    it is below the seam binds floor (RUNTIME_FLOOR) or undetectable.
+    Never fatal - the floor binds dispatch behavior (fail-closed
+    PreToolUse timeouts), not emission - but never silent either."""
+    import re
+    import shutil
+    import subprocess
+    exe = shutil.which("claude")
+    detected = None
+    if exe:
+        try:
+            out = subprocess.run([exe, "--version"], capture_output=True,
+                                 text=True, timeout=15).stdout
+            m = re.search(r"(\d+)\.(\d+)\.(\d+)", out or "")
+            if m:
+                detected = tuple(int(g) for g in m.groups())
+        except Exception:
+            detected = None
+    floor = tuple(int(p) for p in RUNTIME_FLOOR.split("."))
+    if detected is None:
+        print(f"WARNING: Claude Code CLI version undetectable - the seam "
+              f"runtime floor >= {RUNTIME_FLOOR} (fail-closed PreToolUse "
+              f"timeouts) cannot be confirmed. Unattended dispatch below "
+              f"the floor can stall on a gate-hook timeout.",
+              file=sys.stderr)
+        return
+    ver = ".".join(map(str, detected))
+    print(f"Claude Code runtime detected: {ver} "
+          f"(seam floor >= {RUNTIME_FLOOR})")
+    if detected < floor:
+        print(f"WARNING: Claude Code {ver} is BELOW the seam runtime "
+              f"floor {RUNTIME_FLOOR}: a PreToolUse gate-hook timeout is "
+              f"misreported as a user rejection below the floor, stalling "
+              f"unattended sessions. Upgrade before any autonomous "
+              f"dispatch.", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         prog="bootstrap-install",
@@ -953,9 +999,20 @@ def main(argv: list[str]) -> int:
                     help="Remove everything the installer created.")
     ap.add_argument("--print-config", action="store_true",
                     help="Print the fully-resolved config and exit.")
+    ap.add_argument("--ic-checks", action="store_true",
+                    help="Run the IC-1..IC-7 self-checks, print the "
+                         "checklist as JSON, exit non-zero on any "
+                         "failure (AC-9-3; asserted by the seam "
+                         "protocol-compatibility job).")
     args = ap.parse_args(argv)
 
     root = Path(args.dir).resolve()
+
+    if args.ic_checks:
+        import ic_checks
+        results = ic_checks.run_ic_checks()
+        print(json.dumps(results, indent=2))
+        return 0 if ic_checks.all_passed(results) else 1
 
     if args.uninstall:
         uninstall(root)
@@ -980,9 +1037,32 @@ def main(argv: list[str]) -> int:
         print(json.dumps(cfg, indent=2, default=str))
         return 0
 
+    # ---- R-9: the IC gate on the sdk-callable substrate (AC-9-1/9-2) ---- #
+    # Runs for --dry-run too (a preview of a refused install would be
+    # misleading). Refusal is loud, lists every failing check, and writes
+    # nothing - an existing state file therefore retains "shell".
+    if cfg.get("gate_substrate") == "sdk-callable":
+        import ic_checks
+        results = ic_checks.run_ic_checks()
+        failing = {ic: r for ic, r in results.items() if not r["passed"]}
+        if failing:
+            print('Install REFUSED: gate_substrate: "sdk-callable" '
+                  "requested but the IC self-checks are not green:",
+                  file=sys.stderr)
+            for ic, r in failing.items():
+                print(f"  - {ic} ({r['title']}): {r['detail']}",
+                      file=sys.stderr)
+            print("The state file retains its current substrate. Fix the "
+                  "failing checks or request gate_substrate: shell.",
+                  file=sys.stderr)
+            return 2
+        print("IC gate: all IC-1..IC-7 self-checks passed - "
+              'gate_substrate: "sdk-callable" granted.')
+
     plan = build_plan(cfg)
     print(f"Bootstrap installer {INSTALLER_VERSION} "
           f"(protocol {PROTOCOL_VERSION})")
+    _runtime_floor_check()
     print(f"Archetype: {cfg['project']['archetype']}  |  "
           f"loop={cfg['autonomous_modes']['loop_mode_enabled']} "
           f"goal={cfg['autonomous_modes']['goal_supervised_mode_enabled']} "

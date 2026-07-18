@@ -208,9 +208,15 @@ EXPECTED_DIGESTS = {
     # hand-rolled `git worktree add`) and the RETAINED-case documentation
     # on the claim/sentinel + cross-mode accounting block. Diff-verified
     # vs HEAD: zero added, zero removed.
-    "default": "e6edc6227d0c113c90c887a84dd7ab094aea4d749bf1f17a077b2b2396b1c90a",
+    # [2.1.0 freeze-exception no. 12 (R-9/AC-9-5, release identity)] BOTH
+    # fixtures re-baselined for exactly ONE file each: settings.json
+    # `_generatedBy` "protocol 2.0.0" -> "protocol 2.1.0". Emitted doc
+    # citations are untouched (the protocol document keeps its versioned
+    # v2-0-0 self-name; 2.1.0 is code-side release identity). Diff-
+    # verified vs HEAD: zero added, zero removed, no other file changed.
+    "default": "2a369c4984530ddb63800bb9249c5a4e43e33b9df582b61ccd23663388a1beb1",
     "full_autonomous":
-        "ed835679bd063f0ba667eddbafe7e52bcf90baee5117dceb37fe6ffe415e6fc3",
+        "d486b909d722f94344efe68106f39fdfad061c729394d271c98e52de84ace983",
 }
 
 EXPECTED_ACTION_COUNTS = {

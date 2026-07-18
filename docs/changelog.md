@@ -451,3 +451,50 @@ Diff-verified vs HEAD: zero existing files changed, zero removed.
 **FREEZE-EXCEPTION (golden re-baseline no. 11, full_autonomous only,
 loop.sh + goal-loop.sh).** Diff-verified vs HEAD: exactly two files
 changed, zero added, zero removed; default fixture byte-identical.
+
+### R-9 — the IC gate + 2.1.0 release identity
+
+- New `lib/ic_checks.py`: deterministic, self-contained IC-1..IC-7
+  self-checks against the live emission surface (validate-only surface,
+  wrapper sentinel dual-honor, state-writer behavioral probe, advisor
+  default, SDK-gate module contract incl. single-public-builder AST
+  check, native worktree routing, tier partition).
+  `BOOTSTRAP_IC_FORCE_FAIL=<IC>` is a documented TEST-ONLY override that
+  can only force REFUSING (the BOOTSTRAP_TEST_FORCE_PROMPT asymmetry).
+- New config surface: top-level `gate_substrate: "shell" | "sdk-callable"`
+  (default `"shell"`, byte-identity for existing configs; refused in
+  retrofit mode). `"sdk-callable"` is a REQUEST: the installer refuses
+  the install loudly — listing every failing check, writing nothing, an
+  existing state file therefore retaining `"shell"` — unless all seven
+  checks pass (AC-9-1); on green checks the state writer records the
+  granted value (AC-9-2). The refusal applies under `--dry-run` too.
+- `bootstrap-install --ic-checks` prints the checklist as JSON, exit
+  non-zero on any failure — the CI-assertable form for the seam §8.2
+  `protocol-compatibility` job (AC-9-3).
+- AC-9-4 runtime-floor startup check: `_runtime_floor_check()` logs the
+  detected Claude Code CLI version and warns LOUDLY below the seam floor
+  ≥ 2.1.210 (confirmed against the official changelog 2026-07-18 —
+  resolving the spec's "confirm the exact floor" note) or when
+  undetectable; never fatal (the floor binds dispatch, not emission),
+  never silent.
+- Release identity (AC-9-5): `PROTOCOL_VERSION` → `"2.1.0"` in
+  `lib/installer.py` + `lib/templates.py`; `INSTALLER_VERSION` → 1.1.0;
+  `RETROFIT_PROTOCOL_VERSION` stays 1.6.2. The protocol document's
+  conformance note gains the marked **[2.1.0 update — substrate
+  OPERATIVE]** addition (incl. the recorded IC-6 caveat: `--worktree`
+  confirmed in official docs, introduction release unverifiable,
+  subsumed by the runtime floor).
+- Deliberate test re-pins: `test_gate_substrate.py` AC-1-3 tripwire
+  replaced with its promised Milestone-B form (sdk-callable writable
+  ONLY via the ic_checks gate; writer never hardcodes it); version
+  literals 2.0.0 → 2.1.0 in `test_installer.py` (AC-A0),
+  `test_gate_substrate.py`, `test_retrofit.py` (8.3).
+- Tests: `tests/test_ic_gate.py` (28 checks: gate refusal/grant/JSON
+  checklist, config enum + retrofit exclusion, floor-warn via
+  PATH-injected fake `claude`, release identity).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 12, both fixtures).** Exactly
+ONE file each: settings.json `_generatedBy` "protocol 2.0.0" →
+"protocol 2.1.0" (emitted doc citations untouched — the protocol document
+keeps its versioned v2-0-0 self-name). Diff-verified vs HEAD: zero added,
+zero removed, no other file changed.
