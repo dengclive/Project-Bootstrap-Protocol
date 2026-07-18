@@ -374,13 +374,21 @@ owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
   PreToolUse hook timeout at 2.1.210; worktree-entry consent 2.1.206;
   exact-match hyphen matchers 2.1.195 — all subsumed by the floor). The
   seam's `[TODO: confirm]` on `claude_code_runtime` is resolvable
-  seam-side with no value change.
-- **`claude-agent-sdk` feature floor = v0.1.2** (earliest release with
-  the exact seam §4.1 deny shape — `hookSpecificOutput` with
-  `permissionDecision: "deny"` + `permissionDecisionReason`, types.py
-  source evidence — plus `HookMatcher` (≥0.1.0) and
-  `ResultMessage.total_cost_usd` (rename at 0.0.13)). Replaces the
-  provisional ceiling-as-floor `>=0.2.114`; the seam patch is owner-side.
+  seam-side with no value change. *Owner accepted 2026-07-18; the TODO
+  drops as confirmed in the owner's seam patch.*
+- **`claude-agent-sdk` feature floor = v0.1.60** (owner correction
+  2026-07-18, re-verified at the tags). The basic §4.1 deny shape
+  (`hookSpecificOutput` + `permissionDecision: "deny"` +
+  `permissionDecisionReason`) exists from v0.1.2 tagged source, but the
+  load-bearing dependencies land later: `dontAsk` absent from the SDK's
+  `PermissionMode` until **0.1.51** (#719; the seam §3.1 mandated
+  dispatch posture), and `setting_sources=[]` silently dropped until
+  **0.1.60** (#822) — R-7's SessionStart/SessionEnd shell retention
+  relies on `setting_sources=["project"]`. `additionalContext` on the
+  PreToolUse output is 0.1.29 (subsumed). Floor = **0.1.60**, replacing
+  the provisional ceiling-as-floor `>=0.2.114`. The `"defer"` decision
+  value (0.1.74) is a FORWARD OPTION, deliberately not required. The
+  seam patch is owner-side.
 - **Native worktree flag `--worktree`/`-w` confirmed in official docs**
   (worktrees at `.claude/worktrees/<name>/`, branch `worktree-<name>`,
   `worktree.baseRef`, `.worktreeinclude`); its introduction version is
