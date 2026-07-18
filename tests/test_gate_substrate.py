@@ -152,8 +152,14 @@ finally:
 src = open(os.path.join(ROOT, "lib", "installer.py")).read()
 check("AC-1-3(B): installer gates sdk-callable through ic_checks",
       "ic_checks.run_ic_checks()" in src
-      and 'cfg.get("gate_substrate") == "sdk-callable"' in src
+      and "_substrate_gate(cfg)" in src
       and "Install REFUSED" in src)
+# Write-side enforcement: _write_state persists "sdk-callable" only when
+# the config was gate-cleared IN THIS PROCESS - so no caller (test,
+# plugin, library) can stamp an ungated substrate by bypassing main().
+check("AC-1-3(B): _write_state enforces the gate at the write",
+      'requested == "sdk-callable" and not cfg.get("_ic_gate_cleared")'
+      in src)
 writer_literals = [
     ln for ln in src.splitlines()
     if '"gate_substrate": "sdk-callable"' in ln

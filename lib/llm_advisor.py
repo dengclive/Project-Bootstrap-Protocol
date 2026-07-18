@@ -42,6 +42,13 @@ import prd_heuristics as H
 from defaults import ARCHETYPES, PRINCIPLE_STARTERS
 
 ENABLE_ENV = "BOOTSTRAP_INTERVIEW_LLM"
+MODEL_ENV = "BOOTSTRAP_INTERVIEW_LLM_MODEL"
+# IC-4: default advisor model - the current Sonnet alias (a dateless
+# pinned snapshot, verified against platform.claude.com models overview
+# 2026-07-17; the previous dated Sonnet-4 default is retired). Hoisted to
+# a module constant so IC-4 can assert it by attribute rather than
+# grepping source text. Operators override via MODEL_ENV.
+DEFAULT_ADVISOR_MODEL = "claude-sonnet-5"
 
 # The advisor only ever adjusts these fields, and only within the bounds the
 # deterministic layer already validates.
@@ -82,12 +89,9 @@ def _get_client():
 
     def _call(prompt: str) -> str:  # pragma: no cover - needs live creds
         client = anthropic.Anthropic(api_key=key)
-        # IC-4: default is the current Sonnet alias (a dateless pinned
-        # snapshot, verified against platform.claude.com models overview
-        # 2026-07-17). The previous dated Sonnet-4 default is retired.
-        # Operators override via BOOTSTRAP_INTERVIEW_LLM_MODEL.
-        model = os.environ.get("BOOTSTRAP_INTERVIEW_LLM_MODEL",
-                               "claude-sonnet-5")
+        # Default hoisted to DEFAULT_ADVISOR_MODEL (see module top);
+        # operators override via MODEL_ENV.
+        model = os.environ.get(MODEL_ENV, DEFAULT_ADVISOR_MODEL)
         msg = client.messages.create(
             model=model, max_tokens=1024,
             messages=[{"role": "user", "content": prompt}])

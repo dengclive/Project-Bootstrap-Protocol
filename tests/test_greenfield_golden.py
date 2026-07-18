@@ -214,9 +214,20 @@ EXPECTED_DIGESTS = {
     # citations are untouched (the protocol document keeps its versioned
     # v2-0-0 self-name; 2.1.0 is code-side release identity). Diff-
     # verified vs HEAD: zero added, zero removed, no other file changed.
-    "default": "2a369c4984530ddb63800bb9249c5a4e43e33b9df582b61ccd23663388a1beb1",
+    #
+    # [2.1.0 freeze-exception no. 13 (code-review fix pass)] Emitted-byte
+    # changes from the adversarial-review fixes, diff-verified vs the
+    # pre-fix head (zero files added/removed):
+    #   default: .claude/.gitignore (+ sdk_gates/__pycache__ ignore) and
+    #     .claude/sdk_gates/gates.py (async subprocess; tdd absolute-path
+    #     normalization; scoped-pkg/verb dependency parsing; secrets
+    #     negated-class over-match; str-coerced snapshot; build_hooks
+    #     membership from config; skip-dot-dir corpus).
+    #   full_autonomous: the above + loop.sh/goal-loop.sh (IC-6 worktree
+    #     .git/info/exclude guidance; reworded dispatch echo).
+    "default": "70fd0ffe97923bfc54a6dad5e5b6cf4def0c65d7121cf6a495cafc798f1188ee",
     "full_autonomous":
-        "d486b909d722f94344efe68106f39fdfad061c729394d271c98e52de84ace983",
+        "d06e6cddf2631a45d2f2798072879a34c1f56dc26b737ccfedc3884570f4d9fe",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -49,15 +49,40 @@ SEV-1 manual path (seam §7.5); this module does not replace it.
 """
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import os
 import re
-import subprocess
 from pathlib import Path
 
 from claude_agent_sdk import HookMatcher
 
 __all__ = ["build_hooks"]
+
+
+async def _run(cmd, *, cwd, shell, merge=False):
+    """Run a subprocess WITHOUT blocking the SDK event loop. Hook
+    callbacks are awaited directly on the consumer's single-threaded
+    asyncio loop (no executor), so a synchronous subprocess.run would
+    freeze every other task - stream pumping, other hooks, the very
+    cancellation the HookMatcher timeout relies on - for the whole child
+    lifetime. Returns (returncode, stdout, stderr) as decoded text; when
+    merge=True, stderr is folded into stdout in chronological order (as
+    the shell gate's `2>&1` does) and the returned stderr is empty."""
+    err_dst = (asyncio.subprocess.STDOUT if merge
+               else asyncio.subprocess.PIPE)
+    if shell:
+        proc = await asyncio.create_subprocess_shell(
+            cmd, cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE, stderr=err_dst)
+    else:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE, stderr=err_dst)
+    out, err = await proc.communicate()
+    return (proc.returncode,
+            (out or b"").decode(errors="replace"),
+            (err or b"").decode(errors="replace"))
 
 '''
 
@@ -81,22 +106,34 @@ def _tool_input(input_data) -> dict:
     return ti if isinstance(ti, dict) else {}
 
 
+def _norm_pat(pat):
+    # Normalize a shell-case deny-list glob into an fnmatch pattern that
+    # preserves DENY-LIST BIAS (over-match, never under-match): '**'->'*'
+    # (fnmatch has no '**'), and bash negated classes '[^...]' -> fnmatch
+    # '[!...]' (fnmatch reads '[^' as a POSITIVE class containing '^',
+    # which under-matches - the T-1 fail-open this closes). Lowercased for
+    # case-insensitive matching.
+    return pat.replace("**", "*").replace("[^", "[!").lower()
+
+
 def _secrets_gate(config):
-    patterns = [p for p in config["secrets"]["never_read_paths"] if p]
+    # Precompute the normalized pattern once (config-constant) rather than
+    # per PreToolUse event - this is the hottest matcher in a session.
+    patterns = [(p, _norm_pat(p))
+                for p in config["secrets"]["never_read_paths"] if p]
 
     async def secrets_gate(input_data, tool_use_id, context):
         # Hard-block never-read paths. Blocks mid-plan by design (secret
         # exposure is catastrophic). Deny-list bias: over-match, never
         # under-match (shell T-1 semantics) - each pattern is tried
         # as-given AND with an implicit leading '*', case-insensitively,
-        # against both basename and full path; '**' normalizes to '*'.
+        # against both basename and full path.
         target = _tool_input(input_data).get("file_path") or ""
         if not target:
             return {}
         base = os.path.basename(target).lower()
         full = target.lower()
-        for pat in patterns:
-            cpat = pat.replace("**", "*").lower()
+        for pat, cpat in patterns:
             if (fnmatch.fnmatchcase(base, cpat)
                     or fnmatch.fnmatchcase(base, "*" + cpat)
                     or fnmatch.fnmatchcase(full, cpat)
@@ -118,9 +155,9 @@ def _spec_gate_commit(config):
             return {}
         proj = _proj()
         try:
-            staged_raw = subprocess.run(
+            _, staged_raw, _ = await _run(
                 ["git", "diff", "--cached", "--name-only"],
-                capture_output=True, text=True, cwd=proj).stdout
+                cwd=proj, shell=False)
         except OSError:
             staged_raw = ""            # mirrors shell `2>/dev/null || true`
         staged = [f for f in staged_raw.splitlines() if f.strip()]
@@ -131,10 +168,14 @@ def _spec_gate_commit(config):
         if index.is_file():
             corpus_files.append(index)
         specs_dir = proj / ".claude" / "specs"
+        # Skip dot-dirs/dotfiles so the corpus matches the shell globs
+        # `specs/*/tasks/` and `"$d"*` (which never expand dot-entries) -
+        # a Python glob superset would let commits pass the shell blocks.
         for tasks_dir in sorted(specs_dir.glob("*/tasks")):
-            if tasks_dir.is_dir():
+            if tasks_dir.is_dir() and not tasks_dir.parent.name.startswith("."):
                 corpus_files.extend(
-                    p for p in sorted(tasks_dir.iterdir()) if p.is_file())
+                    p for p in sorted(tasks_dir.iterdir())
+                    if p.is_file() and not p.name.startswith("."))
         if not corpus_files:
             return _deny("Commit blocked: no active spec/task files exist "
                          "yet.\\nRun /spec-new before committing.")
@@ -159,11 +200,22 @@ def _spec_gate_commit(config):
 
 
 _INSTALL_VERBS = re.compile(
-    r" (?:npm install|npm i|pip install|pip3 install|yarn add|pnpm add) ")
+    r" (?:python[0-9]* -m pip install|pip[0-9]* install|pipx install"
+    r"|npm install|npm i|yarn add|pnpm add) ")
 _VALUE_FLAGS = frozenset({
     "-r", "--requirement", "-e", "--editable", "-c", "--constraint",
     "-t", "--target", "--prefix", "--root", "-d", "--dest",
 })
+
+
+def _pkg_name(tok):
+    # Package name minus version/spec. npm SCOPED packages start with '@'
+    # (@scope/pkg[@ver]); splitting on '@' first would blank the whole
+    # token and fail open, so the leading scope '@' is preserved and only
+    # a LATER version separator is stripped.
+    if tok.startswith("@"):
+        return "@" + re.split(r"[<>=@~ ]", tok[1:], maxsplit=1)[0]
+    return re.split(r"[<>=@~ ]", tok, maxsplit=1)[0]
 
 
 def _dependency_gate(config):
@@ -172,12 +224,15 @@ def _dependency_gate(config):
     async def dependency_gate(input_data, tool_use_id, context):
         # Block package installs not on the approved list. Every token
         # after the install/add verb is inspected (shell S-2 semantics);
-        # value-taking flags consume the next token.
+        # value-taking flags consume the next token. Whitespace is
+        # collapsed first so tab-separated or multi-space invocations
+        # (and `python -m pip install`) cannot slip past the verb match.
         cmd = _tool_input(input_data).get("command") or ""
-        m = _INSTALL_VERBS.search(f" {cmd} ")
+        norm = " " + " ".join(cmd.split()) + " "
+        m = _INSTALL_VERBS.search(norm)
         if not m:
             return {}
-        rest = f" {cmd} "[m.end():]
+        rest = norm[m.end():]
         blocked = ""
         skip_next = False
         for tok in rest.split():
@@ -189,7 +244,7 @@ def _dependency_gate(config):
                 continue
             if tok.startswith("-"):
                 continue
-            name_only = re.split(r"[<>=@~ ]", tok, maxsplit=1)[0]
+            name_only = _pkg_name(tok)
             if name_only and name_only not in approved:
                 blocked += " " + name_only
         if blocked:
@@ -215,10 +270,17 @@ def _test_gate(config):
         stale = True
         if mark.is_file():
             m_mtime = mark.stat().st_mtime
-            src = proj / "src"
-            stale = src.is_dir() and any(
-                p.is_file() and p.stat().st_mtime > m_mtime
-                for p in src.rglob("*"))
+            # Source lives under src/ OR lib/ (parity with tdd_gate's
+            # source definition); a lib/-only project must still
+            # invalidate the mark on edits.
+            stale = False
+            for sub in ("src", "lib"):
+                d = proj / sub
+                if d.is_dir() and any(
+                        p.is_file() and p.stat().st_mtime > m_mtime
+                        for p in d.rglob("*")):
+                    stale = True
+                    break
         if not stale:
             return {}
         if not test_cmd:
@@ -227,9 +289,8 @@ def _test_gate(config):
             # exit 1" (AC-7-2) - deny, never allow-by-omission.
             return _deny("TODO: commands.test unset\\n"
                          "Commit blocked: tests failing.")
-        r = subprocess.run(test_cmd, shell=True, cwd=proj,
-                           capture_output=True, text=True)
-        if r.returncode == 0:
+        rc, _, _ = await _run(test_cmd, cwd=proj, shell=True)
+        if rc == 0:
             mark.parent.mkdir(parents=True, exist_ok=True)
             mark.touch()
             return {}
@@ -245,12 +306,21 @@ def _eval_gate(config):
         if "git push" not in cmd:
             return {}
         proj = _proj()
-        try:
-            diff = subprocess.run(
-                ["git", "diff", "--name-only", "HEAD~1"],
-                capture_output=True, text=True, cwd=proj).stdout
-        except OSError:
-            diff = ""                  # mirrors shell `2>/dev/null`
+        # Inspect the WHOLE outgoing range, not just the newest commit:
+        # a push can carry many commits, and a prompt change two commits
+        # back must still gate. Prefer @{u}..HEAD (what will actually be
+        # pushed); fall back to HEAD~1 when no upstream is configured.
+        diff = ""
+        for rng in ("@{u}..HEAD", "HEAD~1"):
+            try:
+                rc, out, _ = await _run(
+                    ["git", "diff", "--name-only", rng],
+                    cwd=proj, shell=False)
+            except OSError:
+                rc, out = 1, ""        # mirrors shell `2>/dev/null`
+            if rc == 0:
+                diff = out
+                break
         if not re.search(r"prompt|\\.md$", diff, re.M):
             return {}
         if (proj / ".claude" / ".last-eval-pass").is_file():
@@ -266,13 +336,25 @@ def _tdd_gate(config):
         # recently than the target. A nonexistent target denies (parity
         # with the shell `find -newer` failing on a missing reference):
         # the gate's contract is test-first even for new source files.
-        target = _tool_input(input_data).get("file_path") or ""
-        if not re.match(r"(src|lib)/", target):
+        raw = _tool_input(input_data).get("file_path") or ""
+        if not raw:
             return {}
-        stem = os.path.basename(target)
-        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
         proj = _proj()
-        tpath = proj / target
+        # Claude Code passes ABSOLUTE file paths; normalize to project-
+        # relative before the src/|lib/ test (a bare re.match on an
+        # absolute path never matches, silently disabling the gate).
+        if os.path.isabs(raw):
+            try:
+                rel = os.path.relpath(raw, proj)
+            except ValueError:         # different drive (Windows) - give up
+                return {}
+        else:
+            rel = raw
+        if not re.match(r"(src|lib)/", rel):
+            return {}
+        stem = os.path.basename(rel)
+        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+        tpath = proj / rel
         newer = False
         if tpath.is_file():
             t_mtime = tpath.stat().st_mtime
@@ -283,7 +365,7 @@ def _tdd_gate(config):
                     for p in tests_dir.rglob(f"*{stem}*"))
         if not newer:
             return _deny(f"TDD gate: write a failing test for {stem} "
-                         f"before {target}.")
+                         f"before {rel}.")
         return {}
     return tdd_gate
 
@@ -299,15 +381,15 @@ def _format_lint_gate(config):
         proj = _proj()
         msgs = []
         if fmt:
-            r = subprocess.run(fmt, shell=True, cwd=proj,
-                               capture_output=True, text=True)
-            if r.returncode != 0:
+            rc, _, _ = await _run(fmt, cwd=proj, shell=True, merge=True)
+            if rc != 0:
                 msgs.append("format reported issues")
         if lint:
-            r = subprocess.run(lint, shell=True, cwd=proj,
-                               capture_output=True, text=True)
-            tail = "\\n".join(
-                (r.stdout + r.stderr).splitlines()[-20:]).strip()
+            # merge=True mirrors the shell's `2>&1 | tail -20`: the last 20
+            # lines of the CHRONOLOGICALLY interleaved stream, not stdout-
+            # then-stderr (which would reorder an interleaved summary).
+            _, out, _ = await _run(lint, cwd=proj, shell=True, merge=True)
+            tail = "\\n".join(out.splitlines()[-20:]).strip()
             if tail:
                 msgs.append(tail)
         if msgs:
@@ -343,10 +425,31 @@ _GATE_MATCHERS = {
 _GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0}
 
 
+# Canonical order of the SDK-carried gate universe (insertion order of
+# the factory table). build_hooks derives MEMBERSHIP from the caller's
+# config in this order, never from a stale frozen list.
+_GATE_ORDER = tuple(_GATE_FACTORIES)
+
+
+def _enabled_gates(config):
+    # Membership tracks the CALLER's config, not the emission-time GATES
+    # snapshot: a config that now warrants more gates than at emission
+    # (tdd_policy flipped to required, eval-gate turned on) gets them. A
+    # config carrying `_resolved_hooks` (a full resolved project config,
+    # e.g. Tessera's or the emitted RESOLVED_CONFIG) is authoritative;
+    # absent that key, fall back to the emission-time GATES list.
+    hooks = config.get("_resolved_hooks")
+    if hooks is not None:
+        active = set(hooks)
+        return [g for g in _GATE_ORDER if g in active]
+    return [g for g in _GATE_ORDER if g in set(GATES)]
+
+
 def build_hooks(config: dict) -> dict:
     """The single public builder (seam §9): resolved project config in,
     Agent SDK hooks mapping out. Fail-loud: a malformed config raises,
-    it never degrades to a smaller gate set."""
+    and gate membership follows the passed config (never a stale
+    emission-time set)."""
     if not isinstance(config, dict):
         raise TypeError("build_hooks: config must be the resolved "
                         "project config dict")
@@ -355,7 +458,7 @@ def build_hooks(config: dict) -> dict:
     if missing:
         raise KeyError(f"build_hooks: resolved config missing {missing}")
     out: dict = {}
-    for name in GATES:
+    for name in _enabled_gates(config):
         event, matcher = _GATE_MATCHERS[name]
         kwargs = {}
         if name in _GATE_TIMEOUTS:
@@ -372,19 +475,26 @@ def sdk_gates_module(cfg: dict) -> str:
     """Render .claude/sdk_gates/gates.py for this resolved config.
 
     Only the two literals below are config-derived; the gate logic is
-    static (and therefore syntax-checkable in isolation). json.dumps
-    output for pure str/list/dict data is valid Python literal syntax.
+    static (and therefore syntax-checkable in isolation). Leaf scalars are
+    coerced to str so the json.dumps output is ALWAYS valid Python: a
+    YAML-typed bool/None (minyaml turns unquoted true/false/null into
+    Python bool/None, and resolve_config never type-checks these leaves)
+    would otherwise render as `true`/`null` - valid JSON but undefined
+    Python names, NameError-ing the whole module at import.
     """
     gates = [h for h in cfg["_resolved_hooks"] if h in SDK_GATES]
     resolved = {
         "secrets": {"never_read_paths":
-                    list(cfg["secrets"]["never_read_paths"])},
-        "deps": {"approved": list(cfg["deps"]["approved"])},
-        "commands": {k: (cfg["commands"].get(k) or "")
+                    [str(p) for p in cfg["secrets"]["never_read_paths"]]},
+        "deps": {"approved": [str(x) for x in cfg["deps"]["approved"]]},
+        "commands": {k: str(cfg["commands"].get(k) or "")
                      for k in ("test", "lint", "format")},
+        # Carried so build_hooks(RESOLVED_CONFIG) derives the same gate
+        # membership on the SEV-1 path that a live resolved config would.
+        "_resolved_hooks": list(gates),
     }
     dynamic = (
-        "# The gates enabled for THIS project (emission-time subset of the\n"
+        "# The gates enabled for THIS project at emission (subset of the\n"
         "# resolved hook set; parity with the installed shell suite).\n"
         f"GATES = {json.dumps(gates)}\n\n"
         "# Emission-time snapshot of the gate-relevant resolved config.\n"

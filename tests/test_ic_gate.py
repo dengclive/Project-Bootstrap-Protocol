@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
@@ -229,6 +230,83 @@ conformance = open(os.path.join(
     ROOT, "Bootstrap-Protocol-v2-0-0.md")).read()
 check("AC-9-5: conformance note marks the substrate operative",
       "[2.1.0 update — substrate OPERATIVE]" in conformance)
+
+# ---- Code-review fix regressions ---------------------------------------- #
+# FORCE_FAIL typo/unknown value must RAISE (never silently no-op into a
+# real grant - the safety-critical direction).
+try:
+    ic_checks.run_ic_checks.__wrapped__  # noqa: B018 (attr probe only)
+except AttributeError:
+    pass
+for bad in ("IC5", "ic-2", "IC-8"):
+    os.environ["BOOTSTRAP_IC_FORCE_FAIL"] = bad
+    try:
+        ic_checks.run_ic_checks()
+        check(f"fix: FORCE_FAIL={bad!r} unknown value raises", False,
+              "no raise")
+    except ValueError:
+        check(f"fix: FORCE_FAIL={bad!r} unknown value raises", True)
+    finally:
+        del os.environ["BOOTSTRAP_IC_FORCE_FAIL"]
+# Whitespace is tolerated (stripped to a valid name), not an error.
+os.environ["BOOTSTRAP_IC_FORCE_FAIL"] = "IC-2 "
+try:
+    check("fix: FORCE_FAIL whitespace stripped to a valid force",
+          not ic_checks.run_ic_checks()["IC-2"]["passed"])
+finally:
+    del os.environ["BOOTSTRAP_IC_FORCE_FAIL"]
+
+# --print-config must run the IC gate: an sdk-callable config the install
+# would refuse must not validate clean here (verdict consistency).
+d = tempfile.mkdtemp()
+try:
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(SDK)
+    r = subprocess.run([sys.executable, BIN, "-C", d, "--print-config"],
+                       capture_output=True, text=True,
+                       env={**os.environ, "BOOTSTRAP_IC_FORCE_FAIL": "IC-6"})
+    check("fix: --print-config refuses an sdk-callable config on IC fail",
+          r.returncode == 2 and "Install REFUSED" in r.stderr, r.stderr)
+    r = subprocess.run([sys.executable, BIN, "-C", d, "--print-config"],
+                       capture_output=True, text=True)
+    check("fix: --print-config succeeds when the IC gate is green",
+          r.returncode == 0 and '"gate_substrate"' in r.stdout)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# Downgrade warning: an existing sdk-callable state re-applied with a
+# shell config warns loudly (and downgrades).
+d = tempfile.mkdtemp()
+try:
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(SDK)
+    assert subprocess.run([sys.executable, BIN, "-C", d],
+                          capture_output=True, text=True).returncode == 0
+    sp = os.path.join(d, ".claude", ".bootstrap-state.json")
+    assert json.load(open(sp))["gate_substrate"] == "sdk-callable"
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(BASE)
+    r = subprocess.run([sys.executable, BIN, "-C", d],
+                       capture_output=True, text=True)
+    check("fix: substrate downgrade on re-apply warns loudly",
+          "downgraded" in r.stderr and r.returncode == 0, r.stderr)
+    check("fix: downgrade actually writes shell",
+          json.load(open(sp))["gate_substrate"] == "shell")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# Write-side enforcement: a programmatic caller reaching apply_plan with an
+# sdk-callable cfg but no gate-clear must NOT persist sdk-callable.
+d = tempfile.mkdtemp()
+try:
+    import installer as _inst
+    cfg_sdk, _e = resolve_config(load_yaml(SDK))
+    assert not _e, _e
+    plan = _inst.build_plan(cfg_sdk)
+    _inst.apply_plan(Path(d), plan, cfg_sdk, dry=False, force=False)
+    st = json.load(open(os.path.join(d, ".claude",
+                                     ".bootstrap-state.json")))
+    check("fix: ungated apply_plan cannot persist sdk-callable",
+          st["gate_substrate"] == "shell")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -423,10 +423,13 @@ autonomous_modes:
         body = open(p).read()
         check(f"AC-8-1: {sh} routes via native --worktree",
               "--worktree" in body)
+        # The forbidden thing is an executable `git worktree add` command;
+        # doc/comment lines may mention the phrase (they warn against it).
+        # Inspect NON-COMMENT lines only - robust to any wording.
+        code = "\n".join(ln for ln in body.splitlines()
+                         if not ln.lstrip().startswith("#"))
         check(f"AC-8-1: {sh} has no hand-rolled `git worktree add`",
-              "git worktree add" not in body.replace(
-                  "never hand-roll git worktree add", "").replace(
-                  "hand-roll `git worktree add`", ""))
+              "git worktree add" not in code)
         check(f"AC-8-3: {sh} documents the retained claim/sentinel case",
               "RETAINED under native worktrees" in body)
     # Fail-safe: no task-id -> usage exit 2, no hang.

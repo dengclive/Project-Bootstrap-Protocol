@@ -45,25 +45,50 @@ def _resolved_fixture():
 
 
 def _ic1_validate_only() -> tuple[bool, str]:
-    """IC-1: `bootstrap-interview synthesize --validate-only` is real."""
+    """IC-1: `bootstrap-interview synthesize --validate-only` is real -
+    verified BEHAVIORALLY (a source grep would false-green on the flag
+    surviving in a docstring while the wiring is gone). Drives
+    interview.main and asserts the flag reaches the synthesize handler
+    (an unwired flag argparse-errors with SystemExit) and writes no
+    output file."""
+    import contextlib
+    import io
     import interview
-    import inspect
-    src = inspect.getsource(interview)
-    ok = ('"--validate-only"' in src or "'--validate-only'" in src) \
-        and "validate_only" in src
-    return ok, ("synthesize exposes --validate-only" if ok else
-                "interview module lacks the --validate-only surface")
+    with tempfile.TemporaryDirectory() as d:
+        missing = os.path.join(d, "no-such-interview.md")
+        out = os.path.join(d, "should-not-be-written.yaml")
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(buf), \
+                    contextlib.redirect_stdout(buf):
+                rc = interview.main(
+                    ["synthesize", "-i", missing, "-o", out,
+                     "--validate-only"])
+        except SystemExit:
+            # argparse rejected the flag -> not wired to the handler.
+            return False, ("--validate-only is not a wired synthesize "
+                           "flag (argparse rejected it)")
+        if not isinstance(rc, int):
+            return False, f"synthesize handler returned {rc!r}, not an exit code"
+        if os.path.exists(out):
+            return False, "--validate-only wrote an output file (must not)"
+    return True, ("synthesize --validate-only is wired and writes no "
+                  "output file")
 
 
 def _ic2_root_sentinels() -> tuple[bool, str]:
-    """IC-2: root .halt/.halt-hard dual-honor in every wrapper."""
+    """IC-2: root .halt/.halt-hard dual-honor in every wrapper. The
+    graceful-halt token is matched as `"$ROOT_HALT"` (quoted var use) -
+    NOT the bare `ROOT_HALT`, which is a substring of ROOT_HALT_HARD and
+    would pass vacuously whenever only the hard-halt guard survives."""
     from templates import TEMPLATES
     cfg = _resolved_fixture()
     missing = []
     for key in ("auto_sh", "loop_sh", "goal_loop_sh"):
         body = TEMPLATES[key](cfg)
-        if "ROOT_HALT_HARD" not in body or "ROOT_HALT" not in body \
-                or "queue/.halt" not in body:
+        if ('"$ROOT_HALT_HARD"' not in body
+                or '"$ROOT_HALT"' not in body
+                or "queue/.halt" not in body):
             missing.append(key)
     return (not missing,
             "all wrappers dual-honor root + queue sentinels" if not missing
@@ -87,13 +112,16 @@ def _ic3_gate_substrate_field() -> tuple[bool, str]:
 
 
 def _ic4_advisor_default() -> tuple[bool, str]:
-    """IC-4: LLM advisor default model is a current ID."""
-    import inspect
+    """IC-4: LLM advisor default model is the current ID - asserted by
+    ATTRIBUTE on the hoisted constant (not a source grep, which greens on
+    the literal appearing in any comment/changelog line)."""
     import llm_advisor
-    src = inspect.getsource(llm_advisor)
-    ok = "claude-sonnet-5" in src and "BOOTSTRAP_INTERVIEW_LLM_MODEL" in src
-    return ok, ("advisor defaults to claude-sonnet-5 (env-overridable)"
-                if ok else "advisor default model is not claude-sonnet-5")
+    model = getattr(llm_advisor, "DEFAULT_ADVISOR_MODEL", None)
+    env = getattr(llm_advisor, "MODEL_ENV", None)
+    ok = model == "claude-sonnet-5" and env == "BOOTSTRAP_INTERVIEW_LLM_MODEL"
+    return ok, (f"advisor default is {model!r} (env-overridable via {env})"
+                if ok else
+                f"advisor default is {model!r}, MODEL_ENV={env!r}")
 
 
 def _ic5_sdk_gates() -> tuple[bool, str]:
@@ -122,16 +150,21 @@ def _ic5_sdk_gates() -> tuple[bool, str]:
 
 
 def _ic6_native_worktree() -> tuple[bool, str]:
-    """IC-6: wrappers route via native --worktree; no hand-rolled
-    `git worktree add`."""
+    """IC-6: wrappers route via native --worktree with no hand-rolled
+    `git worktree add`. The forbidden thing is an executable
+    `git worktree add` COMMAND, so the check inspects only NON-COMMENT
+    shell lines - documentation may mention the phrase freely (it does,
+    to warn against it). This replaces the brittle strip-the-known-phrase
+    match that turned the check into a shadow grammar of allowed
+    sentences."""
     from templates import TEMPLATES
     cfg = _resolved_fixture()
     bad = []
     for key in ("loop_sh", "goal_loop_sh"):
         body = TEMPLATES[key](cfg)
-        stripped = body.replace("never hand-roll git worktree add", "") \
-                       .replace("hand-roll `git worktree add`", "")
-        if "--worktree" not in body or "git worktree add" in stripped:
+        code = "\n".join(ln for ln in body.splitlines()
+                         if not ln.lstrip().startswith("#"))
+        if "--worktree" not in body or "git worktree add" in code:
             bad.append(key)
     return (not bad,
             "wrappers route via native --worktree" if not bad
@@ -167,7 +200,16 @@ def run_ic_checks() -> dict:
     """Run every IC self-check. Returns an ordered mapping
     {ic: {"title", "passed", "detail"}}. A check that raises is a
     FAILURE with the exception as detail (fail-loud, never guess)."""
-    forced = os.environ.get("BOOTSTRAP_IC_FORCE_FAIL", "")
+    forced = os.environ.get("BOOTSTRAP_IC_FORCE_FAIL", "").strip()
+    valid_ics = {ic for ic, _, _ in _CHECKS}
+    if forced and forced not in valid_ics:
+        # Fail-loud/never-guess: an unrecognized override (typo like
+        # "IC5"/"ic-2", or a stale name) must NOT silently no-op into a
+        # real grant - that is the safety-critical direction the
+        # can-only-force-refusing asymmetry exists to make unreachable.
+        raise ValueError(
+            f"BOOTSTRAP_IC_FORCE_FAIL={forced!r} names no known check; "
+            f"expected one of {sorted(valid_ics)}")
     out: dict = {}
     for ic, title, fn in _CHECKS:
         try:

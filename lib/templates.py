@@ -1070,6 +1070,14 @@ def _per_task_wrapper(kind: str) -> str:
 # covers worktree creation, entry, and clean-worktree auto-cleanup (the
 # seam runtime floor >= 2.1.210 subsumes native worktree support). A
 # worktree is a drift-prevention boundary, NOT a security boundary.
+# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: add
+# `.claude/worktrees/` to .git/info/exclude (local, per-clone), e.g.
+#   git config --local --get core.excludesFile >/dev/null 2>&1
+#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null \
+#     || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
+# Do NOT add it to a COMMITTED .gitignore: `git worktree add` refuses to
+# create inside an ignored directory, so committing that rule breaks
+# worktree creation for every clone (Claude Code issue #57512).
 #
 # Usage: {self} <task-id> [spec-id]
 set -euo pipefail
@@ -1183,9 +1191,8 @@ flock -u 9
 log "{self} claimed task=$TASK_ID (skeleton: agent loop not implemented)"
 echo "{title} skeleton: task '$TASK_ID' claimed and guarded. Implement the" >&2
 echo "claude -p iteration loop per Bootstrap-Protocol-v2-0-0.md Phase {phase} before any" >&2
-echo "unattended use (dispatch with: claude -p --worktree \\"wt-$TASK_ID\\" -" >&2
-echo "IC-6 native worktree routing; never hand-roll git worktree add)." >&2
-echo "No agent work was dispatched." >&2
+echo "unattended use (dispatch with native routing: claude -p --worktree" >&2
+echo "\\"wt-$TASK_ID\\" - see the [IC-6] header). No agent work was dispatched." >&2
 EXIT_REASON="max-iterations"   # skeleton no-op: nothing iterated
 exit 0
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"
@@ -1387,6 +1394,10 @@ def _gitignore(cfg):
         ".installer-manifest.json", ".bootstrap-state.json",
         ".bootstrap-state.json.lock", ".bootstrap-state.json.pre-*",
         ".bootstrap-incomplete",
+        # IC-5: the SDK gate module is imported by the consumer's
+        # subprocess runner, which writes bytecode next to it. Ignore the
+        # cache (never gates.py itself - that stays manifest-tracked).
+        "sdk_gates/__pycache__/", "sdk_gates/*.pyc",
     ]
     if cfg["autonomous_modes"]["queue_mode_enabled"]:
         base += ["queue/.run-active", "queue/.run-active.lock",

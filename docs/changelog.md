@@ -506,3 +506,69 @@ ONE file each: settings.json `_generatedBy` "protocol 2.0.0" →
 "protocol 2.1.0" (emitted doc citations untouched — the protocol document
 keeps its versioned v2-0-0 self-name). Diff-verified vs HEAD: zero added,
 zero removed, no other file changed.
+
+### Code-review fix pass (max-effort adversarial review of R-7..R-9)
+
+Correctness (emitted `sdk_gates/gates.py`):
+- **NameError-proofing:** the emitted `RESOLVED_CONFIG` snapshot coerces
+  leaf scalars to `str`, so a YAML-typed `commands.test: true` (bool/None)
+  no longer renders `true`/`null` — undefined Python names that
+  NameError'd the whole module at the consumer's import.
+- **Gates run non-blocking:** every `subprocess.run` inside an async hook
+  is now `asyncio.create_subprocess_*` via a shared `_run` helper — a
+  blocking test/lint no longer freezes the consumer's single-threaded SDK
+  event loop for up to the declared timeout.
+- **tdd-gate** normalizes ABSOLUTE `file_path` (what Claude Code sends) to
+  project-relative before the `src/|lib/` test — it was a silent no-op.
+- **dependency-gate** handles `@scoped` npm packages, collapses whitespace
+  (tab / multi-space), and recognizes `python[3] -m pip install` — closing
+  fail-open bypasses.
+- **secrets-gate** normalizes bash negated classes `[^…]` → fnmatch `[!…]`
+  so the deny-list OVER-matches (the T-1 bias it claimed but violated);
+  patterns are precomputed once per config.
+- **test-gate** staleness scans `src/` AND `lib/` (parity with tdd's
+  source definition); **eval-gate** inspects the whole `@{u}..HEAD` push
+  range, not just the last commit; **spec-gate-commit** skips dot-dirs to
+  match the shell corpus; **format-lint** merges stderr→stdout for the
+  shell's chronological `2>&1 | tail`.
+- **build_hooks** derives gate MEMBERSHIP from the passed config
+  (`_resolved_hooks`, now carried in the snapshot), never a stale
+  emission-time set.
+
+IC gate (`lib/ic_checks.py`) + state transition:
+- **IC-1/IC-4** are now BEHAVIORAL/attribute checks (drive
+  `interview.main --validate-only`; assert the hoisted
+  `llm_advisor.DEFAULT_ADVISOR_MODEL`) instead of source greps that
+  green on a docstring; **IC-2** matches `"$ROOT_HALT"` (not the
+  `ROOT_HALT_HARD` substring); **IC-6** inspects NON-COMMENT lines for a
+  hand-rolled `git worktree add` (the strip-the-phrase match had become a
+  shadow grammar — it broke on the very fix that documented the flag).
+- `BOOTSTRAP_IC_FORCE_FAIL` RAISES on an unknown value (was a silent
+  no-op into a real grant).
+- The partition forcing function moved from import-time to `build_plan`,
+  so a violation no longer crashes `--ic-checks` (whose IC-7 reports it)
+  or `--uninstall`.
+- The IC gate runs before `--print-config` returns (verdict consistency
+  with the install), and `_write_state` ENFORCES the gate at the write
+  (`_ic_gate_cleared` token) — no caller bypassing `main()` can stamp an
+  ungated `sdk-callable`; a substrate downgrade on re-apply warns loudly.
+- `resolve_config` validates `gate_substrate` before the archetype
+  early-return (errors batch) and normalizes an invalid value to `shell`.
+
+Lifecycle:
+- `apply_plan` removes stale files dropped from the plan on re-apply (a
+  retrofit-over-greenfield re-install no longer orphans
+  `sdk_gates/gates.py` on disk while losing its manifest digest); the
+  `.claude/.gitignore` ignores `sdk_gates/__pycache__/`; the wrapper's
+  IC-6 comment documents the `.git/info/exclude` worktree-ignore (the
+  committed-`.gitignore` fix would break `git worktree add`); the
+  runtime-floor version parse is anchored (ignores update-notifier
+  banners, scans stderr too); the conformance-note stale tail corrected.
+
+Tests: +25 regression checks across `test_sdk_gates.py` (57) and
+`test_ic_gate.py` (37). Full suite: 700 checks green / 13 files.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 13, both fixtures).** Emitted-
+byte changes: `.claude/.gitignore` + `.claude/sdk_gates/gates.py` (both
+fixtures); `.claude/loop.sh` + `.claude/goal-loop.sh` (full_autonomous).
+Diff-verified vs the pre-fix head: zero files added, zero removed.

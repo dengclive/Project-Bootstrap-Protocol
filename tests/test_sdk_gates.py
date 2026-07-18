@@ -319,10 +319,72 @@ check("format-lint: failing format -> systemMessage, never a deny",
       "hookSpecificOutput" not in r
       and r.get("systemMessage") == "format reported issues", repr(r))
 
+# ---- Code-review fix regressions ---------------------------------------- #
+# tdd-gate: ABSOLUTE file_path (what Claude Code actually sends) must be
+# normalized and still enforce, not silently pass.
+r = run_gate("tdd-gate",
+             {"tool_input": {"file_path": os.path.join(proj, "src",
+                                                       "brandnew.py")}})
+check("fix: tdd-gate enforces on ABSOLUTE file_path (deny, not no-op)",
+      is_deny(r), repr(r))
+
+# dependency-gate: scoped @pkg and tab / `python -m pip` invocations
+r = run_gate("dependency-gate",
+             {"tool_input": {"command": "npm install @evil/backdoor"}})
+check("fix: dependency-gate blocks unapproved @scoped npm package",
+      is_deny(r) and "@evil/backdoor" in deny_reason(r), repr(r))
+r = run_gate("dependency-gate",
+             {"tool_input": {"command": "pip install\tleftpad"}})
+check("fix: dependency-gate blocks tab-separated install", is_deny(r))
+r = run_gate("dependency-gate",
+             {"tool_input": {"command": "python -m pip install leftpad"}})
+check("fix: dependency-gate blocks `python -m pip install`", is_deny(r))
+
+# secrets-gate: bash negated class [^...] must OVER-match (deny-list bias)
+gate = gates_mod._GATE_FACTORIES["secrets-gate"](
+    {"secrets": {"never_read_paths": ["[^.]env"]},
+     "deps": {"approved": []}, "commands": {}})
+r = asyncio.run(gate({"tool_input": {"file_path": "aenv"}}, "t", None))
+check("fix: secrets negated-class [^.]env over-matches 'aenv' (deny)",
+      is_deny(r), repr(r))
+
 os.chdir(HERE)
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(proj, ignore_errors=True)
 shutil.rmtree(workdir, ignore_errors=True)
+
+# ---- fix: bool/None config values render VALID Python (no NameError) ----- #
+_, cfg_bool_e = resolve_config(load_yaml(
+    "project:\n  name: b\n  archetype: service\n"
+    "commands:\n  test: true\n  lint: false\n"
+    "secrets:\n  never_read_paths: [true, \".env\"]\n"))
+assert not cfg_bool_e, cfg_bool_e
+cfg_bool, _ = resolve_config(load_yaml(
+    "project:\n  name: b\n  archetype: service\n"
+    "commands:\n  test: true\n  lint: false\n"
+    "secrets:\n  never_read_paths: [true, \".env\"]\n"))
+body_bool = templates.TEMPLATES["sdk_gates"](cfg_bool)
+try:
+    g2 = {}
+    exec(compile(body_bool, "g2", "exec"), g2)   # NameError if true/null leak
+    check("fix: bool/None config renders valid Python (no true/null leak)",
+          g2["RESOLVED_CONFIG"]["commands"]["test"] == "True")
+except NameError as e:
+    check("fix: bool/None config renders valid Python", False, str(e))
+
+# ---- fix: build_hooks membership follows the passed config --------------- #
+# A config warranting MORE gates than the emission snapshot enlarges the
+# set (never capped at the frozen GATES list).
+big = dict(gates_mod.RESOLVED_CONFIG)
+big["_resolved_hooks"] = list(gates_mod._GATE_FACTORIES)   # all 7
+hm_big = gates_mod.build_hooks(big)
+check("fix: build_hooks enlarges membership from config (7 gates)",
+      sum(len(v) for v in hm_big.values()) == 7)
+small = dict(gates_mod.RESOLVED_CONFIG)
+small["_resolved_hooks"] = ["secrets-gate"]
+hm_small = gates_mod.build_hooks(small)
+check("fix: build_hooks shrinks membership from config (1 gate)",
+      sum(len(v) for v in hm_small.values()) == 1)
 
 # ---- AC-7-5: reason literals appear in the emitted SHELL gate bodies ----- #
 # (message parity, modulo the documented interpolation sites: the {target}/
