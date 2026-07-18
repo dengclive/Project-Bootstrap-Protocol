@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from minyaml import load_yaml          # local stdlib-only YAML subset
-from templates import TEMPLATES        # all file bodies live here
+from templates import TEMPLATES, HOOK_EVENT_MAP  # all file bodies live here
 from defaults import resolve_config    # archetype defaults + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
@@ -390,6 +390,42 @@ SECURITY_CRITICAL_HOOKS = frozenset({
 AUTONOMY_CRITICAL_HOOKS = frozenset({
     "drift-detector-loop-cooperation", "iteration-summary-enforcement",
 })
+# Explicit warn/observability tier. Membership here is a DELIBERATE
+# non-critical decision, not a default: the forcing function below refuses
+# to import while any emitted hook is missing from all three sets.
+NON_CRITICAL_HOOKS = frozenset({
+    "spec-gate-entry", "ci-mirror", "cost-log", "drift-detector",
+    "task-done-alarm", "decision-required-alarm",
+})
+
+
+def _assert_tier_partition() -> None:
+    """Forcing function: the tier sets and templates.HOOK_EVENT_MAP must
+    partition exactly. A hook added to (or renamed in) the event map
+    without a tier decision here, a tier entry naming no emitted hook, or
+    a hook claimed by two tiers each fail at import - never silently
+    defaulting to non-critical. Runs at import so every CLI entry point
+    trips it, not only the test suite."""
+    emitted = set(HOOK_EVENT_MAP)
+    tiers = (SECURITY_CRITICAL_HOOKS, AUTONOMY_CRITICAL_HOOKS,
+             NON_CRITICAL_HOOKS)
+    classified = frozenset().union(*tiers)
+    problems = []
+    if emitted - classified:
+        problems.append(f"emitted hooks with no tier decision: "
+                        f"{sorted(emitted - classified)}")
+    if classified - emitted:
+        problems.append(f"tier entries naming no emitted hook: "
+                        f"{sorted(classified - emitted)}")
+    if sum(map(len, tiers)) != len(classified):
+        problems.append("a hook is claimed by more than one tier")
+    if problems:
+        raise RuntimeError(
+            "hook-tier partition violated (seam SS7.2 linkage): "
+            + "; ".join(problems))
+
+
+_assert_tier_partition()
 
 
 def _hook_tier(action: dict) -> str:

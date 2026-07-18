@@ -141,5 +141,35 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+# Forcing function (Milestone-B entry precondition): the tier sets and
+# templates.HOOK_EVENT_MAP partition exactly, asserted at installer import.
+import installer  # noqa: E402  (import-time assertion already survived)
+import templates  # noqa: E402
+
+classified = (installer.SECURITY_CRITICAL_HOOKS
+              | installer.AUTONOMY_CRITICAL_HOOKS
+              | installer.NON_CRITICAL_HOOKS)
+check("forcing: tier sets exactly cover templates.HOOK_EVENT_MAP",
+      classified == set(templates.HOOK_EVENT_MAP),
+      f"unclassified={set(templates.HOOK_EVENT_MAP) - classified} "
+      f"phantom={classified - set(templates.HOOK_EVENT_MAP)}")
+check("forcing: tiers are pairwise disjoint",
+      len(installer.SECURITY_CRITICAL_HOOKS)
+      + len(installer.AUTONOMY_CRITICAL_HOOKS)
+      + len(installer.NON_CRITICAL_HOOKS) == len(classified))
+
+# The assertion actually trips: an unclassified emitted hook raises.
+try:
+    templates.HOOK_EVENT_MAP["totally-new-hook"] = ("Stop", None)
+    try:
+        installer._assert_tier_partition()
+        check("forcing: unclassified emitted hook raises at import-check",
+              False, "no exception raised")
+    except RuntimeError as e:
+        check("forcing: unclassified emitted hook raises at import-check",
+              "totally-new-hook" in str(e), str(e))
+finally:
+    del templates.HOOK_EVENT_MAP["totally-new-hook"]
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

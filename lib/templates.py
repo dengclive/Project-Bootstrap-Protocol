@@ -604,29 +604,35 @@ exit 0
 # --------------------------------------------------------------------------- #
 # settings.json (Phase 6 wiring)
 # --------------------------------------------------------------------------- #
+# Module-level so the installer's tier forcing-function can assert every
+# emitted hook carries a deliberate seam-SS7.2 tier decision (import-time,
+# fail-loud). _settings_json is the only emission consumer; hoisting does
+# not change emitted bytes.
+HOOK_EVENT_MAP = {
+    "spec-gate-entry": ("UserPromptSubmit", None),
+    "spec-gate-commit": ("PreToolUse", "Bash"),
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    "test-gate": ("PreToolUse", "Bash"),
+    "format-lint-gate": ("PostToolUse", "Write|Edit"),
+    "ci-mirror": ("PreToolUse", "Bash"),
+    "cost-log": ("Stop", None),
+    "dependency-gate": ("PreToolUse", "Bash"),
+    "tdd-gate": ("PreToolUse", "Write"),
+    "eval-gate": ("PreToolUse", "Bash"),
+    "drift-detector": ("PostToolUse", None),
+    "task-done-alarm": ("SubagentStop", None),
+    "decision-required-alarm": ("Notification", None),
+    "drift-detector-loop-cooperation": ("PostToolUse", None),
+    "iteration-summary-enforcement": ("Stop", None),
+}
+
+
 def _settings_json(cfg):
     hooks = cfg["_resolved_hooks"]
-    event_map = {
-        "spec-gate-entry": ("UserPromptSubmit", None),
-        "spec-gate-commit": ("PreToolUse", "Bash"),
-        "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
-        "test-gate": ("PreToolUse", "Bash"),
-        "format-lint-gate": ("PostToolUse", "Write|Edit"),
-        "ci-mirror": ("PreToolUse", "Bash"),
-        "cost-log": ("Stop", None),
-        "dependency-gate": ("PreToolUse", "Bash"),
-        "tdd-gate": ("PreToolUse", "Write"),
-        "eval-gate": ("PreToolUse", "Bash"),
-        "drift-detector": ("PostToolUse", None),
-        "task-done-alarm": ("SubagentStop", None),
-        "decision-required-alarm": ("Notification", None),
-        "drift-detector-loop-cooperation": ("PostToolUse", None),
-        "iteration-summary-enforcement": ("Stop", None),
-    }
     slow = {"ci-mirror", "test-gate", "format-lint-gate"}
     by_event: dict = {}
     for hk in hooks:
-        ev, matcher = event_map[hk]
+        ev, matcher = HOOK_EVENT_MAP[hk]
         entry = {
             "type": "command",
             "command": f"$CLAUDE_PROJECT_DIR/.claude/hooks/{hk}.sh",
