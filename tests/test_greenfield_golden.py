@@ -196,14 +196,53 @@ EXPECTED_DIGESTS = {
     # (inline comment, matching quotes, surrounding whitespace) before
     # exporting EVALUATOR_MODEL, survives sed failure under
     # errexit+pipefail, and logs the resolved value for observability.
-    "default": "b6a3224491b89a306660d45f9d945a91e28d1f7aab122cf0beea9925e0d96412",
+    # [2.1.0 freeze-exception no. 10 (R-7/IC-5, SDK gate module)] BOTH
+    # fixtures re-baselined for exactly ONE new action each - hence
+    # 54 -> 55 and 66 -> 67: .claude/sdk_gates/gates.py (kind sdk_gates,
+    # security-critical tier, seam §9). Diff-verified vs HEAD: zero
+    # existing files changed, zero removed, in both fixtures.
+    # [2.1.0 freeze-exception no. 11 (R-8/IC-6, native worktree routing)]
+    # full_autonomous only, exactly TWO files (default fixture emits no
+    # wrappers - verified unchanged): loop.sh / goal-loop.sh gain the
+    # IC-6 native-routing instruction (claude -p --worktree, never
+    # hand-rolled `git worktree add`) and the RETAINED-case documentation
+    # on the claim/sentinel + cross-mode accounting block. Diff-verified
+    # vs HEAD: zero added, zero removed.
+    # [2.1.0 freeze-exception no. 12 (R-9/AC-9-5, release identity)] BOTH
+    # fixtures re-baselined for exactly ONE file each: settings.json
+    # `_generatedBy` "protocol 2.0.0" -> "protocol 2.1.0". Emitted doc
+    # citations are untouched (the protocol document keeps its versioned
+    # v2-0-0 self-name; 2.1.0 is code-side release identity). Diff-
+    # verified vs HEAD: zero added, zero removed, no other file changed.
+    #
+    # [2.1.0 freeze-exception no. 13 (code-review fix pass)] Emitted-byte
+    # changes from the adversarial-review fixes, diff-verified vs the
+    # pre-fix head (zero files added/removed):
+    #   default: .claude/.gitignore (+ sdk_gates/__pycache__ ignore) and
+    #     .claude/sdk_gates/gates.py (async subprocess; tdd absolute-path
+    #     normalization; scoped-pkg/verb dependency parsing; secrets
+    #     negated-class over-match; str-coerced snapshot; build_hooks
+    #     membership from config; skip-dot-dir corpus).
+    #   full_autonomous: the above + loop.sh/goal-loop.sh (IC-6 worktree
+    #     .git/info/exclude guidance; reworded dispatch echo).
+    #
+    # [2.1.0 freeze-exception no. 14 (re-sweep regression fixes)] Emitted-
+    # byte changes from fixing regressions the no. 13 fixes introduced,
+    # diff-verified vs the prior head (zero files added/removed):
+    #   default: .claude/sdk_gates/gates.py (empty-_resolved_hooks
+    #     fallback; pip[0-9.]* versioned-pip; per-line dependency scan;
+    #     _proj().resolve()).
+    #   full_autonomous: the above + loop.sh/goal-loop.sh (worktree
+    #     .git/info/exclude comment de-mangled — the backslash line-
+    #     continuation was collapsing the example).
+    "default": "df461145c5f87c478ef13076244458f784c9ffb51d6c0f86e42b7849c01dbfd1",
     "full_autonomous":
-        "a6883702f79a224faf0409e58c8f03ee1bba112f5cda1571855f72fa3a0e3744",
+        "2b9e54229ebd0eb5c5576ba9e45453f50fd783ca8d61b44392025feb423ac707",
 }
 
 EXPECTED_ACTION_COUNTS = {
-    "default": 54,
-    "full_autonomous": 66,
+    "default": 55,
+    "full_autonomous": 67,
 }
 
 

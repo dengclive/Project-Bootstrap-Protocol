@@ -27,15 +27,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from minyaml import load_yaml          # local stdlib-only YAML subset
-from templates import TEMPLATES        # all file bodies live here
+from templates import TEMPLATES, HOOK_EVENT_MAP  # all file bodies live here
 from defaults import resolve_config    # archetype defaults + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "2.0.0"
+PROTOCOL_VERSION = "2.1.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
-INSTALLER_VERSION = "1.0.0"
+# Seam binds floor (SEAM-CONTRACT v1.2.0, claude_code_runtime; confirmed
+# against the official changelog 2026-07-18): below 2.1.210 a PreToolUse
+# hook timeout is misreported as a user rejection instead of failing
+# closed. AC-9-4: startup logs the detected CLI version and warns loudly
+# below this floor (or when undetectable); the install itself proceeds -
+# the floor binds DISPATCH, not emission.
+RUNTIME_FLOOR = "2.1.210"
+INSTALLER_VERSION = "1.1.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -48,6 +55,10 @@ def build_plan(cfg: dict) -> list[dict]:
     a pure function of the config, which is what makes the installer
     deterministic and unit-testable.
     """
+    # Forcing function on the emission path: refuse to build a plan while
+    # the seam SS7.2 tier sets and HOOK_EVENT_MAP disagree (see the
+    # docstring for why this is here, not at import).
+    _assert_tier_partition()
     plan: list[dict] = []
 
     def add(path: str, body: str, *, mode: int = 0o644, kind: str = "file"):
@@ -81,6 +92,13 @@ def build_plan(cfg: dict) -> list[dict]:
 
     add(".claude/hooks/audio-alerts.config", TEMPLATES["audio_config"](cfg))
     add(".claude/settings.json", TEMPLATES["settings_json"](cfg), kind="settings")
+
+    # ---- IC-5 SDK gate module (Milestone B, seam §9) ---------------------- #
+    # Emitted alongside the shell suite (which remains the SEV-1 manual
+    # path, seam §7.5). Security-critical tier via its own kind (AC-7-6);
+    # the retrofit overlay DROPS this entry (retrofit stays shell-era).
+    add(".claude/sdk_gates/gates.py", TEMPLATES["sdk_gates"](cfg),
+        kind="sdk_gates")
 
     # ---- Skills, commands, agents (Phase 7) ------------------------------- #
     if cfg["workflow"]["install_skills"]:
@@ -228,6 +246,14 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
     # Build a path -> action map for in-place replacement.
     by_path = {a["path"]: a for a in plan}
 
+    # ---- Milestone B (IC-5): DROP the SDK gate module ------------------- #
+    # The SDK substrate is greenfield-2.1.0 surface; the retrofit track
+    # stays at RETROFIT_PROTOCOL_VERSION (shell-era), and Tessera's seam
+    # excludes retrofit entirely (seam §3.2, IG-10). The overlay - the
+    # single retrofit dispatch site per C1 - removes the entry rather
+    # than emitting an artifact the retrofit contract never declared.
+    by_path.pop(".claude/sdk_gates/gates.py", None)
+
     def replace(path: str, body: str, *, mode: int = 0o644,
                  kind: str = "file"):
         action = {"path": path, "body": body, "mode": mode, "kind": kind}
@@ -362,7 +388,8 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
     out = []
     seen: set = set()
     for a in plan:
-        out.append(by_path[a["path"]])
+        if a["path"] in by_path:       # overlay-dropped paths are skipped
+            out.append(by_path[a["path"]])
         seen.add(a["path"])
     for path in sorted(by_path):
         if path not in seen:
@@ -390,6 +417,43 @@ SECURITY_CRITICAL_HOOKS = frozenset({
 AUTONOMY_CRITICAL_HOOKS = frozenset({
     "drift-detector-loop-cooperation", "iteration-summary-enforcement",
 })
+# Explicit warn/observability tier. Membership here is a DELIBERATE
+# non-critical decision, not a default: the forcing function below refuses
+# to import while any emitted hook is missing from all three sets.
+NON_CRITICAL_HOOKS = frozenset({
+    "spec-gate-entry", "ci-mirror", "cost-log", "drift-detector",
+    "task-done-alarm", "decision-required-alarm",
+})
+
+
+def _assert_tier_partition() -> None:
+    """Forcing function: the tier sets and templates.HOOK_EVENT_MAP must
+    partition exactly. A hook added to (or renamed in) the event map
+    without a tier decision here, a tier entry naming no emitted hook, or
+    a hook claimed by two tiers each fail loudly - never silently
+    defaulting to non-critical. Called at the head of build_plan (every
+    emission path), NOT at import: an import-time raise would take down
+    `--ic-checks` (whose IC-7 entry exists precisely to REPORT this
+    violation as JSON) and `--uninstall`/`--print-config` (which emit
+    nothing), turning the diagnostic and the recovery path into casualties
+    of the very state they must survive."""
+    emitted = set(HOOK_EVENT_MAP)
+    tiers = (SECURITY_CRITICAL_HOOKS, AUTONOMY_CRITICAL_HOOKS,
+             NON_CRITICAL_HOOKS)
+    classified = frozenset().union(*tiers)
+    problems = []
+    if emitted - classified:
+        problems.append(f"emitted hooks with no tier decision: "
+                        f"{sorted(emitted - classified)}")
+    if classified - emitted:
+        problems.append(f"tier entries naming no emitted hook: "
+                        f"{sorted(classified - emitted)}")
+    if sum(map(len, tiers)) != len(classified):
+        problems.append("a hook is claimed by more than one tier")
+    if problems:
+        raise RuntimeError(
+            "hook-tier partition violated (seam SS7.2 linkage): "
+            + "; ".join(problems))
 
 
 def _hook_tier(action: dict) -> str:
@@ -397,6 +461,12 @@ def _hook_tier(action: dict) -> str:
     the security-critical set; every other non-hook manifest entry is
     non-critical (a digest mismatch there is a legitimate L-1 hand-edit)."""
     if action["kind"] == "settings":
+        return TIER_SECURITY
+    if action["kind"] == "sdk_gates":
+        # Seam §9: under the SDK substrate this one file carries every
+        # gate; it joins the security-critical set in the same release
+        # that emits it (a seam_version event, landed with the substrate-
+        # release seam bump - never a silent extension).
         return TIER_SECURITY
     if action["kind"] == "hook":
         name = Path(action["path"]).name
@@ -430,10 +500,12 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "files": [],
     }
-    summary = {"create": 0, "update": 0, "unchanged": 0, "skipped": 0}
+    summary = {"create": 0, "update": 0, "unchanged": 0, "skipped": 0,
+               "removed": 0}
 
     prev = _load_manifest(root)
     prev_files = {f["path"]: f for f in prev.get("files", [])} if prev else {}
+    planned_paths = {a["path"] for a in plan}
 
     for action in plan:
         # IC-2 [SR-17 decision (a)]: the project-root .gitignore is co-owned
@@ -484,6 +556,47 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             "kind": action["kind"],
             "tier": _hook_tier(action),
         })
+
+    # Stale-file cleanup: a re-apply whose plan no longer includes a path
+    # this installer previously created removes it from disk (the retrofit
+    # overlay dropping .claude/sdk_gates/gates.py is the first such case).
+    # Without this the dropped file lingers on disk while leaving the
+    # manifest - digest surveillance on a security-critical file is
+    # silently lost and --uninstall (manifest-driven) can never reach it.
+    # A hand-edited stale file (digest drift) is preserved and reported,
+    # never silently deleted (L-1 contract); the co-owned root .gitignore
+    # is managed by its own block logic and never file-deleted here.
+    # --dry-run PREVIEWS the removals (prints + counts them) without
+    # unlinking, so the preview is faithful for exactly the destructive
+    # case this cleanup introduced.
+    for path, known in prev_files.items():
+        if path in planned_paths or known.get("kind") == "gitignore_root":
+            continue
+        target = root / path
+        if not target.exists():
+            continue
+        try:
+            on_disk = _digest(target.read_text())
+        except OSError:
+            on_disk = None
+        if on_disk is not None and known.get("digest") == on_disk \
+                and known.get("state") != "skipped-local-edit":
+            if not dry:
+                target.unlink()
+            summary["removed"] += 1
+            tag = "REMOVE (dry run)" if dry else "REMOVE"
+            print(f"  {tag} {path}  (dropped from plan on re-apply)")
+        else:
+            print(f"  KEEP   {path}  (dropped from plan but locally "
+                  f"modified; left in place)", file=sys.stderr)
+
+    # If the SDK gate module is not being emitted this run (retrofit
+    # overlay drop, or a shell reconfigure) but a greenfield state file
+    # still advertises "sdk-callable", reconcile it to "shell": the module
+    # that field refers to is gone, and a consumer keying dispatch off the
+    # state must not believe the SDK substrate is active.
+    if not dry and ".claude/sdk_gates/gates.py" not in planned_paths:
+        _reconcile_orphaned_substrate(root)
 
     if not dry:
         # D6 / C1: single cfg["mode"] dispatch at the state-write site.
@@ -600,6 +713,28 @@ def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
     manifest["files"].append(co_owned)
 
 
+def _reconcile_orphaned_substrate(root: Path) -> None:
+    """Downgrade a greenfield state file's gate_substrate to "shell" when
+    the SDK gate module it refers to is no longer emitted (e.g. a
+    greenfield sdk-callable install re-applied in retrofit mode, whose
+    separate .retrofit-state.json never touches .bootstrap-state.json).
+    Without this the state advertises "sdk-callable" while gates.py has
+    been stale-deleted from disk - a silent enforcement gap."""
+    sp = root / STATE
+    if not sp.exists():
+        return
+    try:
+        st = json.loads(sp.read_text())
+    except Exception:
+        return
+    if st.get("gate_substrate") == "sdk-callable":
+        st["gate_substrate"] = "shell"
+        sp.write_text(json.dumps(st, indent=2) + "\n")
+        print('WARNING: .bootstrap-state.json advertised gate_substrate '
+              '"sdk-callable" but the SDK gate module is no longer emitted '
+              'by this install; reconciled to "shell".', file=sys.stderr)
+
+
 def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     """Write .claude/.bootstrap-state.json honouring the Bootstrap-Protocol-v2-0-0.md
     Phase 0 / Recovery-and-State schema (archetype, PRD path, CI/CD opt-out,
@@ -629,13 +764,34 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         backup = state_path.with_name(state_path.name + ".pre-2.0.0")
         if not backup.exists():
             backup.write_text(raw)
+    # R-9 enforcement AT THE WRITE (not just in main()): "sdk-callable" is
+    # persisted only when the IC gate cleared it IN THIS PROCESS
+    # (cfg["_ic_gate_cleared"], set by main() after run_ic_checks passes).
+    # A programmatic caller (test, plugin, Tessera-as-library) that reaches
+    # apply_plan without clearing the gate can never silently stamp an
+    # ungated substrate - it downgrades to "shell" loudly. No recursion
+    # with IC-3: that probe passes a shell-substrate fixture, so this
+    # branch is inert for it.
+    prior_substrate = state.get("gate_substrate")
+    requested = cfg.get("gate_substrate", "shell")
+    substrate = requested
+    if requested == "sdk-callable" and not cfg.get("_ic_gate_cleared"):
+        print("WARNING: gate_substrate: \"sdk-callable\" requested but the "
+              "IC gate did not clear it in this process; refusing to "
+              "persist an ungated substrate - writing \"shell\".",
+              file=sys.stderr)
+        substrate = "shell"
+    if prior_substrate == "sdk-callable" and substrate != "sdk-callable":
+        print(f"WARNING: gate_substrate downgraded "
+              f"{prior_substrate!r} -> {substrate!r} on this re-apply; a "
+              f"consumer keying dispatch off the state field falls back to "
+              f"shell-era enforcement. Any emitted sdk_gates/ module "
+              f"remains on disk.", file=sys.stderr)
     state.update({
         "bootstrap_protocol_version": PROTOCOL_VERSION,
-        # IC-3: the installed enforcement substrate. This installer emits the
-        # shell hook suite, so the only value it ever writes is "shell";
-        # "sdk-callable" is reserved for the >= 2.1.0 substrate release and
-        # is gated on the IC-1..IC-7 self-checks (lib/ic_checks.py).
-        "gate_substrate": "shell",
+        # IC-3: the installed enforcement substrate; see the enforcement
+        # block just above for how "sdk-callable" is gated at the write.
+        "gate_substrate": substrate,
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],
         "deterministic_install": True,
@@ -879,6 +1035,83 @@ def uninstall(root: Path) -> None:
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def _substrate_gate(cfg: dict) -> tuple[bool, dict | None]:
+    """R-9 IC gate (AC-9-1/9-2), side-effect-free on cfg. Returns
+    (ok, results): (True, None) when the config doesn't request
+    sdk-callable; (True, results) when it does and every IC-1..IC-7 check
+    passes; (False, results) when it requests sdk-callable but a check
+    fails. Callers that proceed set cfg["_ic_gate_cleared"] themselves so
+    the write-side enforcement can persist the granted value."""
+    if cfg.get("gate_substrate") != "sdk-callable":
+        return True, None
+    import ic_checks
+    results = ic_checks.run_ic_checks()
+    return ic_checks.all_passed(results), results
+
+
+def _print_substrate_refusal(results: dict) -> None:
+    print('Install REFUSED: gate_substrate: "sdk-callable" requested but '
+          "the IC self-checks are not green:", file=sys.stderr)
+    for ic, r in results.items():
+        if not r["passed"]:
+            print(f"  - {ic} ({r['title']}): {r['detail']}",
+                  file=sys.stderr)
+    print("The state file retains its current substrate. Fix the failing "
+          "checks or request gate_substrate: shell.", file=sys.stderr)
+
+
+def _runtime_floor_check() -> None:
+    """AC-9-4: log the detected Claude Code CLI version; warn LOUDLY when
+    it is below the seam binds floor (RUNTIME_FLOOR) or undetectable.
+    Never fatal - the floor binds dispatch behavior (fail-closed
+    PreToolUse timeouts), not emission - but never silent either."""
+    import re
+    import shutil
+    import subprocess
+    exe = shutil.which("claude")
+    detected = None
+    if exe:
+        try:
+            r = subprocess.run([exe, "--version"], capture_output=True,
+                               text=True, timeout=15)
+            # Scan BOTH streams (some wrappers print the version to stderr)
+            # and ANCHOR the match so an update-notifier banner or node
+            # version line elsewhere in the output can't be mistaken for
+            # the CLI version. Priority: the version adjacent to the
+            # "(Claude Code)" marker, else a version at the start of a
+            # line (optionally 'v'-prefixed).
+            out = (r.stdout or "") + "\n" + (r.stderr or "")
+            # Anchor priority so an update-notifier banner or node-version
+            # line can't be mistaken for the CLI version: (1) adjacent to
+            # the "(Claude Code)" marker; (2) after a "version" keyword;
+            # (3) a version at the start of a line.
+            m = (re.search(r"(\d+)\.(\d+)\.(\d+)\s*\(Claude Code\)", out)
+                 or re.search(r"(?i)version[^\d\n]*?(\d+)\.(\d+)\.(\d+)",
+                              out)
+                 or re.search(r"(?m)^\s*v?(\d+)\.(\d+)\.(\d+)\b", out))
+            if m:
+                detected = tuple(int(g) for g in m.groups())
+        except Exception:
+            detected = None
+    floor = tuple(int(p) for p in RUNTIME_FLOOR.split("."))
+    if detected is None:
+        print(f"WARNING: Claude Code CLI version undetectable - the seam "
+              f"runtime floor >= {RUNTIME_FLOOR} (fail-closed PreToolUse "
+              f"timeouts) cannot be confirmed. Unattended dispatch below "
+              f"the floor can stall on a gate-hook timeout.",
+              file=sys.stderr)
+        return
+    ver = ".".join(map(str, detected))
+    print(f"Claude Code runtime detected: {ver} "
+          f"(seam floor >= {RUNTIME_FLOOR})")
+    if detected < floor:
+        print(f"WARNING: Claude Code {ver} is BELOW the seam runtime "
+              f"floor {RUNTIME_FLOOR}: a PreToolUse gate-hook timeout is "
+              f"misreported as a user rejection below the floor, stalling "
+              f"unattended sessions. Upgrade before any autonomous "
+              f"dispatch.", file=sys.stderr)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         prog="bootstrap-install",
@@ -895,9 +1128,20 @@ def main(argv: list[str]) -> int:
                     help="Remove everything the installer created.")
     ap.add_argument("--print-config", action="store_true",
                     help="Print the fully-resolved config and exit.")
+    ap.add_argument("--ic-checks", action="store_true",
+                    help="Run the IC-1..IC-7 self-checks, print the "
+                         "checklist as JSON, exit non-zero on any "
+                         "failure (AC-9-3; asserted by the seam "
+                         "protocol-compatibility job).")
     args = ap.parse_args(argv)
 
     root = Path(args.dir).resolve()
+
+    if args.ic_checks:
+        import ic_checks
+        results = ic_checks.run_ic_checks()
+        print(json.dumps(results, indent=2))
+        return 0 if ic_checks.all_passed(results) else 1
 
     if args.uninstall:
         uninstall(root)
@@ -918,13 +1162,33 @@ def main(argv: list[str]) -> int:
             print(f"  - {e}", file=sys.stderr)
         return 2
 
+    # The IC gate runs BEFORE --print-config returns too: interview.py
+    # documents `--print-config` as the authoritative validation call and
+    # the seam §8.2 job uses it, so its verdict must match the install's
+    # (AC-9 consistency) - a config the install would refuse must not
+    # validate clean here.
+    ok, results = _substrate_gate(cfg)
+    if not ok:
+        _print_substrate_refusal(results)
+        return 2
+
     if args.print_config:
         print(json.dumps(cfg, indent=2, default=str))
         return 0
 
+    if results is not None:
+        # sdk-callable requested and all IC checks passed: mark the config
+        # gate-cleared so _write_state may persist "sdk-callable" (the
+        # write-side enforcement refuses it otherwise, even for callers
+        # that bypass this CLI path).
+        cfg["_ic_gate_cleared"] = True
+        print("IC gate: all IC-1..IC-7 self-checks passed - "
+              'gate_substrate: "sdk-callable" granted.')
+
     plan = build_plan(cfg)
     print(f"Bootstrap installer {INSTALLER_VERSION} "
           f"(protocol {PROTOCOL_VERSION})")
+    _runtime_floor_check()
     print(f"Archetype: {cfg['project']['archetype']}  |  "
           f"loop={cfg['autonomous_modes']['loop_mode_enabled']} "
           f"goal={cfg['autonomous_modes']['goal_supervised_mode_enabled']} "
@@ -935,7 +1199,8 @@ def main(argv: list[str]) -> int:
     summary = apply_plan(root, plan, cfg, dry=args.dry_run,
                           force=args.force)
     print(f"\nDone. create={summary['create']} update={summary['update']} "
-          f"unchanged={summary['unchanged']} skipped={summary['skipped']}")
+          f"unchanged={summary['unchanged']} skipped={summary['skipped']} "
+          f"removed={summary['removed']}")
     if args.dry_run:
         print("(dry run - no files written)")
     return 0

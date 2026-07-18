@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 
-PROTOCOL_VERSION = "2.0.0"
+from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
+
+PROTOCOL_VERSION = "2.1.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -604,29 +606,35 @@ exit 0
 # --------------------------------------------------------------------------- #
 # settings.json (Phase 6 wiring)
 # --------------------------------------------------------------------------- #
+# Module-level so the installer's tier forcing-function can assert every
+# emitted hook carries a deliberate seam-SS7.2 tier decision (import-time,
+# fail-loud). _settings_json is the only emission consumer; hoisting does
+# not change emitted bytes.
+HOOK_EVENT_MAP = {
+    "spec-gate-entry": ("UserPromptSubmit", None),
+    "spec-gate-commit": ("PreToolUse", "Bash"),
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    "test-gate": ("PreToolUse", "Bash"),
+    "format-lint-gate": ("PostToolUse", "Write|Edit"),
+    "ci-mirror": ("PreToolUse", "Bash"),
+    "cost-log": ("Stop", None),
+    "dependency-gate": ("PreToolUse", "Bash"),
+    "tdd-gate": ("PreToolUse", "Write"),
+    "eval-gate": ("PreToolUse", "Bash"),
+    "drift-detector": ("PostToolUse", None),
+    "task-done-alarm": ("SubagentStop", None),
+    "decision-required-alarm": ("Notification", None),
+    "drift-detector-loop-cooperation": ("PostToolUse", None),
+    "iteration-summary-enforcement": ("Stop", None),
+}
+
+
 def _settings_json(cfg):
     hooks = cfg["_resolved_hooks"]
-    event_map = {
-        "spec-gate-entry": ("UserPromptSubmit", None),
-        "spec-gate-commit": ("PreToolUse", "Bash"),
-        "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
-        "test-gate": ("PreToolUse", "Bash"),
-        "format-lint-gate": ("PostToolUse", "Write|Edit"),
-        "ci-mirror": ("PreToolUse", "Bash"),
-        "cost-log": ("Stop", None),
-        "dependency-gate": ("PreToolUse", "Bash"),
-        "tdd-gate": ("PreToolUse", "Write"),
-        "eval-gate": ("PreToolUse", "Bash"),
-        "drift-detector": ("PostToolUse", None),
-        "task-done-alarm": ("SubagentStop", None),
-        "decision-required-alarm": ("Notification", None),
-        "drift-detector-loop-cooperation": ("PostToolUse", None),
-        "iteration-summary-enforcement": ("Stop", None),
-    }
     slow = {"ci-mirror", "test-gate", "format-lint-gate"}
     by_event: dict = {}
     for hk in hooks:
-        ev, matcher = event_map[hk]
+        ev, matcher = HOOK_EVENT_MAP[hk]
         entry = {
             "type": "command",
             "command": f"$CLAUDE_PROJECT_DIR/.claude/hooks/{hk}.sh",
@@ -1055,6 +1063,20 @@ def _per_task_wrapper(kind: str) -> str:
 # operator completes and smoke-tests per the trust ramp. Until then this
 # script refuses to dispatch any unattended work.
 #
+# [IC-6] Worktree routing is NATIVE. The operator-completed loop dispatches
+#   claude -p --worktree "wt-$TASK_ID" ...
+# and Claude Code creates/reuses .claude/worktrees/wt-<task-id>/ itself.
+# Never hand-roll `git worktree add` in this wrapper - the native mechanism
+# covers worktree creation, entry, and clean-worktree auto-cleanup (the
+# seam runtime floor >= 2.1.210 subsumes native worktree support). A
+# worktree is a drift-prevention boundary, NOT a security boundary.
+# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: append
+# `.claude/worktrees/` to .git/info/exclude (local, per-clone). One-liner:
+#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
+# Do NOT add it to a COMMITTED .gitignore: the native mechanism refuses to
+# create a worktree inside an ignored directory, so committing that rule
+# breaks worktree creation for every clone (Claude Code issue #57512).
+#
 # Usage: {self} <task-id> [spec-id]
 set -euo pipefail
 # Self-locate: this script lives at <project>/.claude/{self}, so the project
@@ -1132,6 +1154,12 @@ then
 fi
 
 # 2. Race-safe claim (Bootstrap-Protocol-v2-0-0.md Phase {phase} step 2):
+#    RETAINED under native worktrees (IC-6, documented per case): the
+#    --worktree mechanism isolates the working DIRECTORY only. It does
+#    not provide per-task mutual exclusion across wrappers (the
+#    O_CREAT|O_EXCL sentinel below), nor the cross-mode combined-
+#    concurrency accounting (loop_in_flight/goal_in_flight in the state
+#    file under flock) - those stay here.
 #    2.1 O_CREAT|O_EXCL active sentinel.
 if ! ( set -C; printf '%s\\\\n' "$$" >"$ACTIVE" ) 2>/dev/null; then
   echo "Another {kind} run already owns '$TASK_ID' ($ACTIVE)." >&2
@@ -1161,7 +1189,8 @@ flock -u 9
 log "{self} claimed task=$TASK_ID (skeleton: agent loop not implemented)"
 echo "{title} skeleton: task '$TASK_ID' claimed and guarded. Implement the" >&2
 echo "claude -p iteration loop per Bootstrap-Protocol-v2-0-0.md Phase {phase} before any" >&2
-echo "unattended use. No agent work was dispatched." >&2
+echo "unattended use (dispatch with native routing: claude -p --worktree" >&2
+echo "\\"wt-$TASK_ID\\" - see the [IC-6] header). No agent work was dispatched." >&2
 EXIT_REASON="max-iterations"   # skeleton no-op: nothing iterated
 exit 0
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"
@@ -1363,6 +1392,10 @@ def _gitignore(cfg):
         ".installer-manifest.json", ".bootstrap-state.json",
         ".bootstrap-state.json.lock", ".bootstrap-state.json.pre-*",
         ".bootstrap-incomplete",
+        # IC-5: the SDK gate module is imported by the consumer's
+        # subprocess runner, which writes bytecode next to it. Ignore the
+        # cache (never gates.py itself - that stays manifest-tracked).
+        "sdk_gates/__pycache__/", "sdk_gates/*.pyc",
     ]
     if cfg["autonomous_modes"]["queue_mode_enabled"]:
         base += ["queue/.run-active", "queue/.run-active.lock",
@@ -2640,6 +2673,10 @@ TEMPLATES = {
     "specs_index": _specs_index,
     "gitignore": _gitignore,
     "gitignore_root": _gitignore_root,
+    # R-7 (IC-5): SDK gate module. Emitter lives in lib/sdk_gates_template.py
+    # (SR-11 deviation CONFIRMED: Python-emitting-Python stays syntax-
+    # checkable outside this file's shell-heredoc conventions).
+    "sdk_gates": sdk_gates_module,
     # Retrofit additions (new template fns; greenfield never reaches these).
     "retrofit_inventory_readme": _retrofit_inventory_readme,
     "retrofit_debt": _retrofit_debt,

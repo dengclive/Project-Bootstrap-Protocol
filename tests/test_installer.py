@@ -416,6 +416,22 @@ autonomous_modes:
               subprocess.run(["bash", "-n", p]).returncode == 0)
         check(f"W-1: {sh} is executable",
               os.access(p, os.X_OK))
+        # R-8 (IC-6) wrapper shape: worktree routing is NATIVE. The
+        # skeleton instructs `claude -p --worktree` and never hand-rolls
+        # `git worktree add`; the retained claim/sentinel pieces carry
+        # their why-native-does-not-cover-this documentation (AC-8-3).
+        body = open(p).read()
+        check(f"AC-8-1: {sh} routes via native --worktree",
+              "--worktree" in body)
+        # The forbidden thing is an executable `git worktree add` command;
+        # doc/comment lines may mention the phrase (they warn against it).
+        # Inspect NON-COMMENT lines only - robust to any wording.
+        code = "\n".join(ln for ln in body.splitlines()
+                         if not ln.lstrip().startswith("#"))
+        check(f"AC-8-1: {sh} has no hand-rolled `git worktree add`",
+              "git worktree add" not in code)
+        check(f"AC-8-3: {sh} documents the retained claim/sentinel case",
+              "RETAINED under native worktrees" in body)
     # Fail-safe: no task-id -> usage exit 2, no hang.
     r = subprocess.run(["bash", os.path.join(cl, "loop.sh")],
                        stdin=subprocess.DEVNULL, capture_output=True,
@@ -597,15 +613,17 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # ---------------------------------------------------------------------------
-# R-0 (spec bootstrap-v2): protocol 2.0.0 version identity (AC-A0-1..3)
+# R-0 (spec bootstrap-v2): protocol version identity (AC-A0-1..3).
+# [R-9/AC-9-5] Deliberately re-pinned 2.0.0 -> 2.1.0 at the Milestone-B
+# release-identity bump (tests/test_ic_gate.py owns the 2.1.0 assertions).
 # ---------------------------------------------------------------------------
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.0.0",
-      _installer_mod.PROTOCOL_VERSION == "2.0.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.0.0",
-      _templates_mod.PROTOCOL_VERSION == "2.0.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.1.0",
+      _installer_mod.PROTOCOL_VERSION == "2.1.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.1.0",
+      _templates_mod.PROTOCOL_VERSION == "2.1.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 
@@ -613,16 +631,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.0.0",
-          state.get("bootstrap_protocol_version") == "2.0.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.1.0",
+          state.get("bootstrap_protocol_version") == "2.1.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.0.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.1.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.0.0)")
+          == "bootstrap-installer (protocol 2.1.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.0.0",
-          manifest.get("protocol_version") == "2.0.0")
+    check("AC-A0-3: manifest records protocol_version 2.1.0",
+          manifest.get("protocol_version") == "2.1.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

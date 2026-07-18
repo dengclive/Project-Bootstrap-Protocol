@@ -354,3 +354,269 @@ startup check (seam binds ≥ v2.1.210 for fail-closed PreToolUse timeout —
 confirm the exact floor per the seam's own TODO), and the
 `PROTOCOL_VERSION` → `"2.1.0"` bump land only after Milestone A review and
 owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
+
+## 2.0.0 → 2.1.0 (Milestone B — SDK substrate; in progress)
+
+**Seam:** `SEAM-CONTRACT-v1-2-0.md` (Milestone-A pin event: protocol
+2.0.0 pinned by commit `1fa5bb6`). Branch `version-2-1-0`.
+
+### B-pre — `_hook_tier` forcing function (entry precondition)
+
+- `templates.HOOK_EVENT_MAP` hoisted to module level (emitted bytes
+  unchanged; golden green pre-R-7); `installer.py` asserts at import that
+  the seam §7.2 tier sets exactly partition the emitted hook set (new
+  explicit `NON_CRITICAL_HOOKS`; unclassified/phantom/double-claimed
+  names fail loud at every CLI entry point).
+
+### Verify-first findings (2026-07-18, against official changelogs)
+
+- **Claude Code runtime floor ≥ v2.1.210 CONFIRMED** (fail-closed
+  PreToolUse hook timeout at 2.1.210; worktree-entry consent 2.1.206;
+  exact-match hyphen matchers 2.1.195 — all subsumed by the floor). The
+  seam's `[TODO: confirm]` on `claude_code_runtime` is resolvable
+  seam-side with no value change. *Owner accepted 2026-07-18; the TODO
+  drops as confirmed in the owner's seam patch.*
+- **`claude-agent-sdk` feature floor = v0.1.60** (owner correction
+  2026-07-18, re-verified at the tags). The basic §4.1 deny shape
+  (`hookSpecificOutput` + `permissionDecision: "deny"` +
+  `permissionDecisionReason`) exists from v0.1.2 tagged source, but the
+  load-bearing dependencies land later: `dontAsk` absent from the SDK's
+  `PermissionMode` until **0.1.51** (#719; the seam §3.1 mandated
+  dispatch posture), and `setting_sources=[]` silently dropped until
+  **0.1.60** (#822) — R-7's SessionStart/SessionEnd shell retention
+  relies on `setting_sources=["project"]`. `additionalContext` on the
+  PreToolUse output is 0.1.29 (subsumed). Floor = **0.1.60**, replacing
+  the provisional ceiling-as-floor `>=0.2.114`. The `"defer"` decision
+  value (0.1.74) is a FORWARD OPTION, deliberately not required. The
+  seam patch is owner-side.
+- **Native worktree flag `--worktree`/`-w` confirmed in official docs**
+  (worktrees at `.claude/worktrees/<name>/`, branch `worktree-<name>`,
+  `worktree.baseRef`, `.worktreeinclude`); its introduction version is
+  NOT verifiable from official release notes (v2.1.49 is secondary-source
+  only) — R-8 therefore relies on the binding ≥ 2.1.210 floor, which
+  subsumes it, and pins no introduction version.
+
+### R-7 (IC-5) — gates as SDK `PreToolUse` callables
+
+- New emitter `lib/sdk_gates_template.py` — **[SR-11] the separate-module
+  deviation is CONFIRMED at implementation** (Python-emitting-Python
+  stays syntax-checkable outside templates.py's shell-heredoc
+  conventions); registered as `TEMPLATES["sdk_gates"]`.
+- Emits `.claude/sdk_gates/gates.py` per seam §9 VERBATIM: single public
+  builder `build_hooks(config) -> {"PreToolUse": [HookMatcher...], ...}`,
+  no I/O at import (probe-asserted), no network I/O, subprocess-only
+  loading documented, refusals in the structured §4.1 deny shape with
+  shell-parity reason strings (AC-7-5 fixtures assert each reason literal
+  against the emitted shell bodies). Seven gates: secrets, spec-commit,
+  dependency, test, tdd, eval (PreToolUse) + format-lint (PostToolUse,
+  feedback-only, never denies — mirroring its warn-tier shell nature).
+- Empty `commands.test` denies with the TODO reason (AC-7-2,
+  fail-loud-on-empty-commands); the full shell suite remains emitted as
+  the SEV-1 manual path (AC-7-3); `kind: "sdk_gates"` maps to the
+  security-critical tier (AC-7-6) — the §7.2 membership addition the
+  seam commits to at the substrate release, mirrored in
+  `tests/test_hook_tiers.py`'s contract list deliberately.
+- The retrofit overlay DROPS the module (retrofit stays shell-era
+  `RETROFIT_PROTOCOL_VERSION`; Tessera's seam excludes retrofit, IG-10).
+- Tests: `tests/test_sdk_gates.py` (49 checks, stubbed
+  `claude_agent_sdk`).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 10, both fixtures).** Exactly
+ONE new action each (54 → 55, 66 → 67): `.claude/sdk_gates/gates.py`.
+Diff-verified vs HEAD: zero existing files changed, zero removed.
+
+### R-8 (IC-6) — native worktree routing
+
+- Baseline finding, recorded per the spec's verify-first note: the
+  emitted wrappers contain **no hand-rolled `git worktree add`** — they
+  are guarded skeletons whose iteration loop is operator-completed, so
+  "replace hand-rolled creation with native" reduces to routing the
+  documented dispatch through the native mechanism.
+- `loop.sh` / `goal-loop.sh` skeletons now instruct the operator-
+  completed loop to dispatch `claude -p --worktree "wt-$TASK_ID"`
+  (Claude Code creates/reuses `.claude/worktrees/wt-<task-id>/`; a
+  worktree is drift-prevention, NOT a security boundary) and forbid
+  hand-rolling `git worktree add` (AC-8-1).
+- The claim/sentinel + cross-mode accounting block is RETAINED with its
+  why-native-does-not-cover-this documentation inline (AC-8-2/AC-8-3):
+  `--worktree` isolates the working directory only; per-task mutual
+  exclusion (O_CREAT|O_EXCL sentinel) and the combined-concurrency
+  accounting (`loop_in_flight`/`goal_in_flight` under flock) stay in the
+  wrapper.
+- **Manual verification note (AC-8 "operator-only" shape):** native
+  `--worktree`/`-w` behavior verified against the official worktrees
+  docs on 2026-07-18 (worktrees at `.claude/worktrees/<name>/`, branch
+  `worktree-<name>`, `worktree.baseRef`, `.worktreeinclude`); the flag's
+  introduction release is not verifiable from official release notes
+  (v2.1.49 is secondary-source only), so the wrappers rely on the
+  binding seam runtime floor ≥ 2.1.210, which subsumes it. Live
+  end-to-end wrapper dispatch remains operator-verified per the trust
+  ramp (the skeleton refuses unattended use by design).
+- Tests: `tests/test_installer.py` wrapper-shape assertions
+  (`--worktree` present, no `git worktree add`, RETAINED-case doc
+  present).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 11, full_autonomous only,
+loop.sh + goal-loop.sh).** Diff-verified vs HEAD: exactly two files
+changed, zero added, zero removed; default fixture byte-identical.
+
+### R-9 — the IC gate + 2.1.0 release identity
+
+- New `lib/ic_checks.py`: deterministic, self-contained IC-1..IC-7
+  self-checks against the live emission surface (validate-only surface,
+  wrapper sentinel dual-honor, state-writer behavioral probe, advisor
+  default, SDK-gate module contract incl. single-public-builder AST
+  check, native worktree routing, tier partition).
+  `BOOTSTRAP_IC_FORCE_FAIL=<IC>` is a documented TEST-ONLY override that
+  can only force REFUSING (the BOOTSTRAP_TEST_FORCE_PROMPT asymmetry).
+- New config surface: top-level `gate_substrate: "shell" | "sdk-callable"`
+  (default `"shell"`, byte-identity for existing configs; refused in
+  retrofit mode). `"sdk-callable"` is a REQUEST: the installer refuses
+  the install loudly — listing every failing check, writing nothing, an
+  existing state file therefore retaining `"shell"` — unless all seven
+  checks pass (AC-9-1); on green checks the state writer records the
+  granted value (AC-9-2). The refusal applies under `--dry-run` too.
+- `bootstrap-install --ic-checks` prints the checklist as JSON, exit
+  non-zero on any failure — the CI-assertable form for the seam §8.2
+  `protocol-compatibility` job (AC-9-3).
+- AC-9-4 runtime-floor startup check: `_runtime_floor_check()` logs the
+  detected Claude Code CLI version and warns LOUDLY below the seam floor
+  ≥ 2.1.210 (confirmed against the official changelog 2026-07-18 —
+  resolving the spec's "confirm the exact floor" note) or when
+  undetectable; never fatal (the floor binds dispatch, not emission),
+  never silent.
+- Release identity (AC-9-5): `PROTOCOL_VERSION` → `"2.1.0"` in
+  `lib/installer.py` + `lib/templates.py`; `INSTALLER_VERSION` → 1.1.0;
+  `RETROFIT_PROTOCOL_VERSION` stays 1.6.2. The protocol document's
+  conformance note gains the marked **[2.1.0 update — substrate
+  OPERATIVE]** addition (incl. the recorded IC-6 caveat: `--worktree`
+  confirmed in official docs, introduction release unverifiable,
+  subsumed by the runtime floor).
+- Deliberate test re-pins: `test_gate_substrate.py` AC-1-3 tripwire
+  replaced with its promised Milestone-B form (sdk-callable writable
+  ONLY via the ic_checks gate; writer never hardcodes it); version
+  literals 2.0.0 → 2.1.0 in `test_installer.py` (AC-A0),
+  `test_gate_substrate.py`, `test_retrofit.py` (8.3).
+- Tests: `tests/test_ic_gate.py` (28 checks: gate refusal/grant/JSON
+  checklist, config enum + retrofit exclusion, floor-warn via
+  PATH-injected fake `claude`, release identity).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 12, both fixtures).** Exactly
+ONE file each: settings.json `_generatedBy` "protocol 2.0.0" →
+"protocol 2.1.0" (emitted doc citations untouched — the protocol document
+keeps its versioned v2-0-0 self-name). Diff-verified vs HEAD: zero added,
+zero removed, no other file changed.
+
+### Code-review fix pass (max-effort adversarial review of R-7..R-9)
+
+Correctness (emitted `sdk_gates/gates.py`):
+- **NameError-proofing:** the emitted `RESOLVED_CONFIG` snapshot coerces
+  leaf scalars to `str`, so a YAML-typed `commands.test: true` (bool/None)
+  no longer renders `true`/`null` — undefined Python names that
+  NameError'd the whole module at the consumer's import.
+- **Gates run non-blocking:** every `subprocess.run` inside an async hook
+  is now `asyncio.create_subprocess_*` via a shared `_run` helper — a
+  blocking test/lint no longer freezes the consumer's single-threaded SDK
+  event loop for up to the declared timeout.
+- **tdd-gate** normalizes ABSOLUTE `file_path` (what Claude Code sends) to
+  project-relative before the `src/|lib/` test — it was a silent no-op.
+- **dependency-gate** handles `@scoped` npm packages, collapses whitespace
+  (tab / multi-space), and recognizes `python[3] -m pip install` — closing
+  fail-open bypasses.
+- **secrets-gate** normalizes bash negated classes `[^…]` → fnmatch `[!…]`
+  so the deny-list OVER-matches (the T-1 bias it claimed but violated);
+  patterns are precomputed once per config.
+- **test-gate** staleness scans `src/` AND `lib/` (parity with tdd's
+  source definition); **eval-gate** inspects the whole `@{u}..HEAD` push
+  range, not just the last commit; **spec-gate-commit** skips dot-dirs to
+  match the shell corpus; **format-lint** merges stderr→stdout for the
+  shell's chronological `2>&1 | tail`.
+- **build_hooks** derives gate MEMBERSHIP from the passed config
+  (`_resolved_hooks`, now carried in the snapshot), never a stale
+  emission-time set.
+
+IC gate (`lib/ic_checks.py`) + state transition:
+- **IC-1/IC-4** are now BEHAVIORAL/attribute checks (drive
+  `interview.main --validate-only`; assert the hoisted
+  `llm_advisor.DEFAULT_ADVISOR_MODEL`) instead of source greps that
+  green on a docstring; **IC-2** matches `"$ROOT_HALT"` (not the
+  `ROOT_HALT_HARD` substring); **IC-6** inspects NON-COMMENT lines for a
+  hand-rolled `git worktree add` (the strip-the-phrase match had become a
+  shadow grammar — it broke on the very fix that documented the flag).
+- `BOOTSTRAP_IC_FORCE_FAIL` RAISES on an unknown value (was a silent
+  no-op into a real grant).
+- The partition forcing function moved from import-time to `build_plan`,
+  so a violation no longer crashes `--ic-checks` (whose IC-7 reports it)
+  or `--uninstall`.
+- The IC gate runs before `--print-config` returns (verdict consistency
+  with the install), and `_write_state` ENFORCES the gate at the write
+  (`_ic_gate_cleared` token) — no caller bypassing `main()` can stamp an
+  ungated `sdk-callable`; a substrate downgrade on re-apply warns loudly.
+- `resolve_config` validates `gate_substrate` before the archetype
+  early-return (errors batch) and normalizes an invalid value to `shell`.
+
+Lifecycle:
+- `apply_plan` removes stale files dropped from the plan on re-apply (a
+  retrofit-over-greenfield re-install no longer orphans
+  `sdk_gates/gates.py` on disk while losing its manifest digest); the
+  `.claude/.gitignore` ignores `sdk_gates/__pycache__/`; the wrapper's
+  IC-6 comment documents the `.git/info/exclude` worktree-ignore (the
+  committed-`.gitignore` fix would break `git worktree add`); the
+  runtime-floor version parse is anchored (ignores update-notifier
+  banners, scans stderr too); the conformance-note stale tail corrected.
+
+Tests: +25 regression checks across `test_sdk_gates.py` (57) and
+`test_ic_gate.py` (37). Full suite: 700 checks green / 13 files.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 13, both fixtures).** Emitted-
+byte changes: `.claude/.gitignore` + `.claude/sdk_gates/gates.py` (both
+fixtures); `.claude/loop.sh` + `.claude/goal-loop.sh` (full_autonomous).
+Diff-verified vs the pre-fix head: zero files added, zero removed.
+
+### Adversarial re-sweep — regressions the fix pass introduced
+
+A second max-effort sweep over the fix commit found regressions the fixes
+themselves created; all fixed here, each now with a non-tautological
+regression test:
+- **`build_hooks` empty-set trap:** an empty `_resolved_hooks` (`[]`) fell
+  through to zero gates — a security substrate silently disabling all
+  enforcement. Now a missing OR empty value falls back to the emission
+  `GATES` (never the empty set).
+- **`gates.py` orphan, sharpened:** the new stale-file cleanup deleted
+  `gates.py` on a greenfield-sdk-callable → retrofit re-apply, but the
+  retrofit state writer (a separate `.retrofit-state.json`) left
+  `.bootstrap-state.json` still advertising `sdk-callable`.
+  `_reconcile_orphaned_substrate` now downgrades it to `shell` loudly when
+  the module is no longer emitted.
+- **`--dry-run` now previews removals** (`REMOVE (dry run)` + counted) so
+  the preview is faithful for the destructive re-apply case.
+- **Dependency-gate:** versioned `pip3.11 install` matched (`pip[0-9.]*`);
+  whitespace collapse no longer merges a verb split across NEWLINES
+  (per-line scan) — that would false-block a commit whose message merely
+  mentions an install verb.
+- **tdd-gate `_proj()` resolves** to an absolute root so the
+  absolute-path relativization is stable.
+- **IC-1 is genuinely end-to-end:** it builds a real interview via
+  `analyze` and drives `synthesize --validate-only` to the validate
+  branch (the prior probe returned at file-not-found, before the branch —
+  a vacuous check); **IC-5** defers to IC-7 instead of misattributing a
+  partition break; runtime-floor parse also matches a `version`-keyword
+  form.
+- **Worktree comment de-mangled:** the `.git/info/exclude` example used a
+  shell line-continuation backslash that Python collapsed inside the
+  non-raw template string, corrupting the emitted one-liner; rewritten as
+  a single line.
+
+Also proven (previously untested): stale-file cleanup end-to-end (unlink
++ manifest-orphan removal + L-1 hand-edit preservation + state
+reconcile), runtime-floor banner anchoring, `build_hooks` enlargement
+from a genuine subset fixture, eval-gate `@{u}..HEAD` whole-range with an
+upstream.
+
+Tests: 726 checks green / 13 files (`test_sdk_gates.py` 63,
+`test_ic_gate.py` 44).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 14, both fixtures).** Emitted-
+byte changes: `.claude/sdk_gates/gates.py` (both); `.claude/loop.sh` +
+`.claude/goal-loop.sh` (full_autonomous, worktree comment). Diff-verified
+vs the prior head: zero files added, zero removed.
