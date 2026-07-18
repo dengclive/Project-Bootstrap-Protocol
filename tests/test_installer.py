@@ -416,6 +416,19 @@ autonomous_modes:
               subprocess.run(["bash", "-n", p]).returncode == 0)
         check(f"W-1: {sh} is executable",
               os.access(p, os.X_OK))
+        # R-8 (IC-6) wrapper shape: worktree routing is NATIVE. The
+        # skeleton instructs `claude -p --worktree` and never hand-rolls
+        # `git worktree add`; the retained claim/sentinel pieces carry
+        # their why-native-does-not-cover-this documentation (AC-8-3).
+        body = open(p).read()
+        check(f"AC-8-1: {sh} routes via native --worktree",
+              "--worktree" in body)
+        check(f"AC-8-1: {sh} has no hand-rolled `git worktree add`",
+              "git worktree add" not in body.replace(
+                  "never hand-roll git worktree add", "").replace(
+                  "hand-roll `git worktree add`", ""))
+        check(f"AC-8-3: {sh} documents the retained claim/sentinel case",
+              "RETAINED under native worktrees" in body)
     # Fail-safe: no task-id -> usage exit 2, no hang.
     r = subprocess.run(["bash", os.path.join(cl, "loop.sh")],
                        stdin=subprocess.DEVNULL, capture_output=True,

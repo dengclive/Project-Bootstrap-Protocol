@@ -416,3 +416,38 @@ owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
 **FREEZE-EXCEPTION (golden re-baseline no. 10, both fixtures).** Exactly
 ONE new action each (54 → 55, 66 → 67): `.claude/sdk_gates/gates.py`.
 Diff-verified vs HEAD: zero existing files changed, zero removed.
+
+### R-8 (IC-6) — native worktree routing
+
+- Baseline finding, recorded per the spec's verify-first note: the
+  emitted wrappers contain **no hand-rolled `git worktree add`** — they
+  are guarded skeletons whose iteration loop is operator-completed, so
+  "replace hand-rolled creation with native" reduces to routing the
+  documented dispatch through the native mechanism.
+- `loop.sh` / `goal-loop.sh` skeletons now instruct the operator-
+  completed loop to dispatch `claude -p --worktree "wt-$TASK_ID"`
+  (Claude Code creates/reuses `.claude/worktrees/wt-<task-id>/`; a
+  worktree is drift-prevention, NOT a security boundary) and forbid
+  hand-rolling `git worktree add` (AC-8-1).
+- The claim/sentinel + cross-mode accounting block is RETAINED with its
+  why-native-does-not-cover-this documentation inline (AC-8-2/AC-8-3):
+  `--worktree` isolates the working directory only; per-task mutual
+  exclusion (O_CREAT|O_EXCL sentinel) and the combined-concurrency
+  accounting (`loop_in_flight`/`goal_in_flight` under flock) stay in the
+  wrapper.
+- **Manual verification note (AC-8 "operator-only" shape):** native
+  `--worktree`/`-w` behavior verified against the official worktrees
+  docs on 2026-07-18 (worktrees at `.claude/worktrees/<name>/`, branch
+  `worktree-<name>`, `worktree.baseRef`, `.worktreeinclude`); the flag's
+  introduction release is not verifiable from official release notes
+  (v2.1.49 is secondary-source only), so the wrappers rely on the
+  binding seam runtime floor ≥ 2.1.210, which subsumes it. Live
+  end-to-end wrapper dispatch remains operator-verified per the trust
+  ramp (the skeleton refuses unattended use by design).
+- Tests: `tests/test_installer.py` wrapper-shape assertions
+  (`--worktree` present, no `git worktree add`, RETAINED-case doc
+  present).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 11, full_autonomous only,
+loop.sh + goal-loop.sh).** Diff-verified vs HEAD: exactly two files
+changed, zero added, zero removed; default fixture byte-identical.

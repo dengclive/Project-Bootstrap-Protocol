@@ -1063,6 +1063,14 @@ def _per_task_wrapper(kind: str) -> str:
 # operator completes and smoke-tests per the trust ramp. Until then this
 # script refuses to dispatch any unattended work.
 #
+# [IC-6] Worktree routing is NATIVE. The operator-completed loop dispatches
+#   claude -p --worktree "wt-$TASK_ID" ...
+# and Claude Code creates/reuses .claude/worktrees/wt-<task-id>/ itself.
+# Never hand-roll `git worktree add` in this wrapper - the native mechanism
+# covers worktree creation, entry, and clean-worktree auto-cleanup (the
+# seam runtime floor >= 2.1.210 subsumes native worktree support). A
+# worktree is a drift-prevention boundary, NOT a security boundary.
+#
 # Usage: {self} <task-id> [spec-id]
 set -euo pipefail
 # Self-locate: this script lives at <project>/.claude/{self}, so the project
@@ -1140,6 +1148,12 @@ then
 fi
 
 # 2. Race-safe claim (Bootstrap-Protocol-v2-0-0.md Phase {phase} step 2):
+#    RETAINED under native worktrees (IC-6, documented per case): the
+#    --worktree mechanism isolates the working DIRECTORY only. It does
+#    not provide per-task mutual exclusion across wrappers (the
+#    O_CREAT|O_EXCL sentinel below), nor the cross-mode combined-
+#    concurrency accounting (loop_in_flight/goal_in_flight in the state
+#    file under flock) - those stay here.
 #    2.1 O_CREAT|O_EXCL active sentinel.
 if ! ( set -C; printf '%s\\\\n' "$$" >"$ACTIVE" ) 2>/dev/null; then
   echo "Another {kind} run already owns '$TASK_ID' ($ACTIVE)." >&2
@@ -1169,7 +1183,9 @@ flock -u 9
 log "{self} claimed task=$TASK_ID (skeleton: agent loop not implemented)"
 echo "{title} skeleton: task '$TASK_ID' claimed and guarded. Implement the" >&2
 echo "claude -p iteration loop per Bootstrap-Protocol-v2-0-0.md Phase {phase} before any" >&2
-echo "unattended use. No agent work was dispatched." >&2
+echo "unattended use (dispatch with: claude -p --worktree \\"wt-$TASK_ID\\" -" >&2
+echo "IC-6 native worktree routing; never hand-roll git worktree add)." >&2
+echo "No agent work was dispatched." >&2
 EXIT_REASON="max-iterations"   # skeleton no-op: nothing iterated
 exit 0
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"

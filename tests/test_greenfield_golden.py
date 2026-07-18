@@ -201,9 +201,16 @@ EXPECTED_DIGESTS = {
     # 54 -> 55 and 66 -> 67: .claude/sdk_gates/gates.py (kind sdk_gates,
     # security-critical tier, seam §9). Diff-verified vs HEAD: zero
     # existing files changed, zero removed, in both fixtures.
+    # [2.1.0 freeze-exception no. 11 (R-8/IC-6, native worktree routing)]
+    # full_autonomous only, exactly TWO files (default fixture emits no
+    # wrappers - verified unchanged): loop.sh / goal-loop.sh gain the
+    # IC-6 native-routing instruction (claude -p --worktree, never
+    # hand-rolled `git worktree add`) and the RETAINED-case documentation
+    # on the claim/sentinel + cross-mode accounting block. Diff-verified
+    # vs HEAD: zero added, zero removed.
     "default": "e6edc6227d0c113c90c887a84dd7ab094aea4d749bf1f17a077b2b2396b1c90a",
     "full_autonomous":
-        "b6875a579e302470ed0aabac427a0a93b00cbd3282c514dbcdc1bc18b39be41f",
+        "ed835679bd063f0ba667eddbafe7e52bcf90baee5117dceb37fe6ffe415e6fc3",
 }
 
 EXPECTED_ACTION_COUNTS = {
