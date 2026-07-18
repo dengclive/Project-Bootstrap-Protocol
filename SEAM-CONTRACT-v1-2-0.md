@@ -1,7 +1,7 @@
 -----
 
 artifact_name: tessera-bootstrap-seam-contract
-seam_version: 1.1.0
+seam_version: 1.2.0
 status: draft
 authored_by: Deng Clive
 consumed_by:
@@ -22,7 +22,7 @@ binds:
   # result-parsing field-semantics change (§4.1). Both invalidate prior consumer
   # assumptions, so every range below was re-validated and re-cut.
   tessera_prd: ">=0.5.0,<0.6.0"           # [D-03] Floor = first Tessera version that ABSORBS the seam-1.0.0 fold (targets_seam_version: 1.0.0 + §12.4 estimate semantics). 0.4.x does NOT satisfy seam 1.0.0 — it satisfied seam 0.1.0 only. Until the Tessera v0.5.0 fold lands, this binds set is KNOWINGLY UNSATISFIED and CI check 0 SHOULD fail — that failure is the designed out-of-sync signal, not a bug (P-5).
-  bootstrap_protocol: "2.0.0"             # was PIN-COMMIT-SHA; now pins the v2.0.0 protocol document (SDK migration). [TODO: replace with the exact commit hash on Bootstrap main that carries 2.0.0]
+  bootstrap_protocol: "2.0.0 @ 1fa5bb615e5f5102bb4108b79c944c635d6a3167"  # [1.2.0 A-pin] Protocol 2.0.0 = merge commit of PR #5 on main (short: 1fa5bb6). Check-0 upgrades from document-version identity to COMMIT identity: the four sites (this bind, Tessera pyproject.toml, PRD frontmatter target_protocol_pin, PRD §9.7 prose) must agree on this SHA. The commit qualification completes the previously-TODO pin — it drops no adopted version (none other existed), so it rides the MINOR per the BR-01 choreography.
   claude_agent_sdk: ">=0.2.114"           # [v1.0.0] PROVISIONAL ceiling-as-floor (D-07): 0.2.114 was merely the latest release observed at research time, not a feature-justified floor. [TODO: replace with the earliest release carrying PreToolUse callables + HookMatcher + ResultMessage.total_cost_usd, per the SDK changelog]
   claude_code_runtime: ">=2.1.210"        # [v1.0.0] min runtime for fail-closed PreToolUse timeout (§B-14) + worktree-entry consent ≥2.1.206 + hyphen matchers ≥2.1.195; 2.1.210 is the binding floor. [TODO: confirm against official changelog]
   claude_code_json_schema_range: ">=TBD,<TBD"  # [D-04 renamed from claude_code] The §8.3 compatibility-matrix referent: which CLI JSON-schema/field-name matrix rows apply. Distinct from claude_code_runtime (the installed-CLI behavioral floor above). Resolve against the runbook matrix.
@@ -32,11 +32,12 @@ binds_note: >
   its own targets_seam_version field). On disagreement, CI fails and this artifact is
   authoritative about the RELATIONSHIP only — never about either endpoint's internals.
   [v1.0.0] The Bootstrap pin moved from a placeholder commit-SHA to the 2.0.0 document
-  version; a TODO remains to bind the exact commit once reconciled against Bootstrap main.
+  version. [v1.2.0] The exact commit is now bound (`1fa5bb6`, the Milestone-A pin
+  event) — the v1.0.0-era TODO is closed and check-0 asserts commit identity.
 
 -----
 
-# Tessera ↔ Bootstrap Protocol — Seam Contract (v1.1.0)
+# Tessera ↔ Bootstrap Protocol — Seam Contract (v1.2.0)
 
 > *The wire, not either endpoint.*
 
@@ -116,7 +117,7 @@ Tessera invokes the protocol only through these subprocess entry points:
 | Command | Purpose | Notes |
 |---|---|---|
 | `bootstrap-interview synthesize` | Produce `bootstrap.config.yaml` and install intent from a pre-populated interview file | Invoked with a complete ANSWERS block; never interactively. See §7.3. |
-| ~~`bootstrap-interview synthesize --validate-only`~~ | **[1.1.0 pin-correction, IG-01] NOT IMPLEMENTED at the 1.9.0 pin** — the flag does not exist in `lib/interview.py`. | The 1.0.0 pin was fictional. Real validation path at this pin: `synthesize` to a temp output **+ `bootstrap-install --dry-run` or `--print-config`** (both real). `--validate-only` is a normative 2.0.0 requirement (protocol IC-1); this row upgrades when the pin does. |
+| `bootstrap-interview synthesize --validate-only` | **[1.2.0 row-upgrade, A-pin] IMPLEMENTED at the 2.0.0 pin (IC-1, `1fa5bb6`)** — parses the interview, runs `resolve_config`, reports invariant violations to stderr, writes no output file, exit code reflects validity (0 valid / non-zero invalid). | Replaces the 1.1.0 interim path (synthesize→tmp + `--dry-run`/`--print-config` — both remain real and permitted). Consumers upgrade §10.3/§10.4-class validation flows to the single call; Tessera does so in the same 1.2.0 re-pin pass. *(1.1.0 history: this row was a pin-correction — the flag was fictional at the 1.9.0 pin, IG-01.)* |
 | `bootstrap-install --print-config` | **[1.1.0, IG-07]** Resolve + echo the effective config without installing. | The validation workhorse for the interim path above. |
 | ~~`bootstrap-install --force`~~ | **[1.1.0, IG-07] PROHIBITED in Tessera's automated path.** | Exists in the CLI; force-overwrite defeats the §7.2 hand-edit preservation contract. Human-CLI use only. |
 | ~~`retrofit-interview`~~ | **[1.1.0, IG-10] NOT a permitted Tessera entry point at this pin.** | The Retrofit track (v1.6.2) exists on main; Tessera scope excludes it (Tessera NG12). |
@@ -215,15 +216,16 @@ The membership of the security-critical set is a **contract-level list**: adding
 
 ### 7.4 Shared sentinels
 
-**[1.1.0 pin-correction, IG-02] The 1.0.0 table below was fictional against the 1.9.0 code — corrected to the paths `lib/templates.py` actually emits.** Root-level shared sentinels never existed in the protocol; `.halt-hard` does not exist in the protocol at all (hard-kill is Tessera-only end-to-end). Root sentinels are a normative 2.0.0 requirement (protocol IC-2, with permanent dual-honor).
+**[1.1.0 pin-correction, IG-02] The 1.0.0 table was fictional against the 1.9.0 code.** *(Historical: at the 1.9.0 pin, root-level shared sentinels did not exist in the protocol and `.halt-hard` did not exist at all.)* **[1.2.0 row-upgrade, A-pin] IC-2 landed at the 2.0.0 pin (`1fa5bb6`): root sentinels are now protocol-honored shared surface with permanent dual-honor of the queue-scoped sentinels. The table below reflects the 2.0.0 pin.** The root sentinels' non-committability is installer-managed via a marker-delimited block in the project-root `.gitignore` (autonomous installs; operator content outside the block is never touched).
 
-| Sentinel | Location (as emitted at the 1.9.0 pin) | Owner/honored by | Meaning |
+| Sentinel | Location (as emitted at the 2.0.0 pin, `1fa5bb6`) | Owner/honored by | Meaning |
 |---|---|---|---|
-| `.halt` | `<project-dir>/.claude/queue/` | Protocol `auto.sh` (queue runner) | Graceful queue stop. **Tessera dual-honors: writes/watches this path in addition to its own root sentinels** so the shared-kill-switch guarantee is true at this pin. |
+| `.halt` | `<project-dir>/.claude/queue/` | Protocol `auto.sh` (queue runner) | Graceful queue stop. **Dual-honor is permanent:** the queue-scoped path remains honored alongside the root sentinels; Tessera continues to write/watch both. |
 | `.resume` | `<project-dir>/.claude/queue/` | Protocol `auto.sh` | Operator resume request. |
 | `.run-active` | `<project-dir>/.claude/queue/` | Protocol `auto.sh` + Tessera (observes) | A queue run is active. |
 | `.loop-active-<task-id>` / `.goal-active-<task-id>` | `<project-dir>/.claude/sessions/` | Per-task wrappers | A per-task loop is active. |
-| `.halt` / `.halt-hard` (project root) | `<project-dir>/` | **Tessera-only at this pin** (protocol honors them only from 2.0.0 IC-2 onward) | Tessera's per-project soft halt / hard kill. |
+| `.halt` (project root) | `<project-dir>/` | **Shared from the 2.0.0 pin (IC-2):** protocol wrappers (`auto.sh`/`loop.sh`/`goal-loop.sh`) + Tessera | Graceful stop at the next boundary. |
+| `.halt-hard` (project root) | `<project-dir>/` | **Shared from the 2.0.0 pin (IC-2):** protocol wrappers + Tessera | Immediate wrapper exit. The wrapper never signals in-flight `claude -p` — killing processes remains the caller's job (Tessera's §12 machinery on its dispatches). |
 
 - Both layers honor the shared **per-project** sentinels. A user running the protocol's `auto.sh`/`loop.sh`/`goal-loop.sh` directly can halt that project via the shared per-project sentinel.
 - **Global** sentinels (`~/.tessera/.halt`, `~/.tessera/.halt-hard`) and the per-project **budget** sentinel (`.halt-budget`) are **Tessera-only** — the protocol's bash skeletons are single-project-scoped and have no global concept. These are listed here to mark the boundary: they are explicitly *not* part of the shared surface, and the protocol is not expected to honor them.
@@ -264,7 +266,7 @@ A CI job — canonically `protocol-compatibility` — runs on **every protocol v
 
 0. **`binds` resolution (the sync assertion) [rewritten at seam 1.0.0 for the re-cut key set (D-04)].** Each consumer's declared version resolves inside its `binds` range (§8.1a), AND each consumer's `targets_seam_version` equals this artifact's `seam_version`. Both halves must hold; a failure here is the designed out-of-sync signal (P-5) — a deliberately-failing check 0 during a consumer-fold window is the *honest* state, and a passing check 0 immediately after a MAJOR is itself suspicious. Concretely, for every key in `binds`:
    - `tessera_prd`: parse `prd_version`, assert it satisfies the range; assert `targets_seam_version == seam_version`.
-   - `bootstrap_protocol`: **two-phase assertion.** Today the key holds the protocol *document version* — assert the pinned protocol document declares that version. When the `[TODO]` commit hash is bound, the assertion upgrades to commit identity (the pinned commit is the one named) *in addition to* the document version. State which phase applies in the CI job's output.
+   - `bootstrap_protocol`: **two-phase assertion — phase two operative since 1.2.0.** The key binds `2.0.0 @ 1fa5bb615e5f5102bb4108b79c944c635d6a3167`: assert **commit identity** (the pinned commit is the one named, agreeing across the four sites listed at the bind) *in addition to* the document version (the pinned commit's protocol document declares 2.0.0). State which phase applies in the CI job's output. *(Phase one — document-version-only, while the commit was `[TODO]` — applied through 1.1.0 and is retained here as the fallback semantics for any future re-pin window where a version is named before its commit exists.)*
    - `claude_agent_sdk`: assert the installed `claude-agent-sdk` package version satisfies the floor.
    - `claude_code_runtime`: assert the installed Claude Code CLI version satisfies the behavioral floor (fail-closed hook timeouts, worktree consent, matcher semantics).
    - `claude_code_json_schema_range`: assert the installed CLI version falls in a row of the §8.3 runbook compatibility matrix that this seam's §4.1 field pins were validated against.
@@ -317,6 +319,7 @@ Per project discipline, deferred interface surface has its constraints locked at
 
 ## 10. Changelog
 
+- **v1.2.0 (MINOR — Milestone-A pin event, 2026-07-17)** — Protocol 2.0.0 pinned by commit: `binds.bootstrap_protocol` = `2.0.0 @ 1fa5bb615e5f5102bb4108b79c944c635d6a3167` (merge of PR #5 into Bootstrap `main`), upgrading §8.2 check-0 from document-version identity to **commit identity** across the four agreement sites (this bind, Tessera `pyproject.toml`, PRD frontmatter `target_protocol_pin`, PRD §9.7). Row upgrades (both §8.4 triggers, planned by the BR-01 choreography): §3.2 `synthesize --validate-only` upgraded to real (IC-1); §7.4 root sentinels (`.halt`/`.halt-hard`) upgraded from Tessera-only to protocol-honored **shared surface** with permanent dual-honor of queue-scoped sentinels (IC-2), non-committability installer-managed via the root-`.gitignore` marker block. Also observable from 2.0.0: the state file gains `gate_substrate` (`"shell"` at this pin; `"sdk-callable"` installer-refused until the IC gate exists) — normative consumption lands via Tessera AC-PROTO-016 (BR-03). Classified MINOR: the commit qualification completes a previously-TODO pin (no adopted version dropped); the row upgrades add capability without removing any. Consumers re-pin `targets_seam_version: 1.2.0` — Tessera does so in the same pass, upgrading its §10.3/§10.4 validation flow to the single-call form. *(In-version correction, same day: the title heading, the `binds_note` commit-TODO line, and the §8.2 check-0 `bootstrap_protocol` bullet were swept to describe the landed pin rather than the pre-pin state — a descriptive correction per the DR-03 heading/prose-staleness discipline, not a wire change, so it rides inside 1.2.0 with no bump.)*
 - **v1.1.0 (MINOR — reality-corrections + additions)** — Main-branch reconciliation (`IMPLEMENTATION-GAP-ANALYSIS.md`). Pin-corrections of fictional 1.0.0 declarations: §3.2 `--validate-only` does not exist at the 1.9.0 pin (IG-01; real path = synthesize→tmp + `--dry-run`/`--print-config`); §7.4 sentinel paths corrected to the emitted `.claude/queue/`-scoped reality, root sentinels marked Tessera-only-until-IC-2, `.halt-hard` marked nonexistent in the protocol (IG-02); §7.2 hook set corrected to the 15 emitted names + new autonomy-critical tier (IG-03); check 5 tier-floor claim corrected (IG-05). Additions: `--print-config` pinned, `--force` prohibited, `retrofit-interview` explicitly not-permitted (IG-07/IG-10); checks 9–10 (minyaml round-trip, provenance-acceptance-at-CI). Classified MINOR, not MAJOR: nothing that ever existed is dropped — a consumer of a fictional pin cannot be broken by its correction; the only behavioral consumer obligation added is Tessera's dual-honor of queue-scoped sentinels, which Tessera v0.5.0 absorbs in the same pass. Consumers re-pin `targets_seam_version: 1.1.0`.
   - *In-version addendum (2026-07-17):* §9 gains the **SDK-gate-module deferred-surface entry** with locked constraints (location/integrity incl. the security-critical tier commitment, single-builder API proposal, no-import-time-I/O, subprocess-only loading). **Runner ownership DECIDED: consumer-owned (Tessera-owned)** — the protocol emits the gate module only, never a runner; the builder API is the §3 surface directly (mirrors §7.5; keeps the protocol's executable-emission surface from growing). Prompted by session adversarial review SR-01/SR-02: the substrate is contract surface and must be constraint-locked at deferral time per this document's own §9 discipline. Recorded as an in-version addendum (not a bump) because the addition is **deferred-surface-only** — §9 is not a §8.4 bump trigger, no wire surface or consumer obligation changes — and the seam is `status: draft`; the one declared consumer (Tessera PRD v0.5.0, `targets_seam_version: 1.1.0`) consumes nothing this entry touches, so its pin is unaffected — acknowledged explicitly rather than assumed. (The TF-01 §3.1-errata precedent is analogous in mechanism, but its "no adopted consumers" condition no longer holds at 1.1.0 and is not relied on; that errata was likewise recorded in-body, not as a second changelog entry — this addendum follows that placement.) `seam_version` remains `1.1.0`; the wire additions (§3 builder API, §7.2 tier membership) are explicitly deferred to the substrate-release seam MAJOR and do not enter the contract now.
 

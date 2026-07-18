@@ -2,7 +2,7 @@
 
 **Slug:** `bootstrap-v2` · **Target path in repo:** `.claude/specs/bootstrap-v2/requirements.md` · **Revision:** 3 *(rev-3, owner-confirmed 2026-07-17: decomposition R-0..R-9 ↔ IC-1..IC-7 confirmed as the implementation contract; AC-6-5 reworded to verify-existing (`effort: high` already emitted, `templates.py:769`/`:2075`); R-4 [SR-17] gitignore home decided: option (a) managed block.)*
 **review_applied:** `SESSION-ADVERSARIAL-REVIEW.md` — SR-01, SR-02, SR-04, SR-07, SR-08, SR-11, SR-12, SR-13, SR-16, SR-17 applied inline (tagged).
-**Upstream contract:** `Bootstrap-Protocol-v2-0-0.md` (Implementation Contract IC-1..IC-7), its Companion, `SEAM-CONTRACT-v1-1-0.md` **incl. its §9 SDK-gate-module entry** (folded 2026-07-17; runner ownership resolved Tessera-owned) [SR-01], `IMPLEMENTATION-GAP-ANALYSIS.md`.
+**Upstream contract:** `Bootstrap-Protocol-v2-0-0.md` (Implementation Contract IC-1..IC-7), its Companion, `SEAM-CONTRACT-v1-2-0.md` **incl. its §9 SDK-gate-module entry** (folded 2026-07-17; runner ownership resolved Tessera-owned; v1.2.0 = Milestone-A pin event, `binds.bootstrap_protocol` = `2.0.0 @ 1fa5bb6`) [SR-01], `IMPLEMENTATION-GAP-ANALYSIS.md`.
 **Baseline verified against:** live `main` tree, `PROTOCOL_VERSION = "1.9.0"`.
 
 ---
