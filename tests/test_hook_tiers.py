@@ -63,6 +63,11 @@ SEAM_SECURITY = {
     ".claude/hooks/dependency-gate.sh", ".claude/hooks/test-gate.sh",
     ".claude/hooks/eval-gate.sh", ".claude/hooks/tdd-gate.sh",
     ".claude/hooks/format-lint-gate.sh", ".claude/settings.json",
+    # Milestone B (seam §9): the SDK gate module joins the security-
+    # critical set IN THE SAME RELEASE that emits it - a seam_version
+    # event landing with the substrate-release seam bump, recorded here
+    # deliberately (this is a contract edit, not a test tweak).
+    ".claude/sdk_gates/gates.py",
 }
 SEAM_AUTONOMY = {
     ".claude/hooks/drift-detector-loop-cooperation.sh",

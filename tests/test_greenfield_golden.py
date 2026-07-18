@@ -196,14 +196,19 @@ EXPECTED_DIGESTS = {
     # (inline comment, matching quotes, surrounding whitespace) before
     # exporting EVALUATOR_MODEL, survives sed failure under
     # errexit+pipefail, and logs the resolved value for observability.
-    "default": "b6a3224491b89a306660d45f9d945a91e28d1f7aab122cf0beea9925e0d96412",
+    # [2.1.0 freeze-exception no. 10 (R-7/IC-5, SDK gate module)] BOTH
+    # fixtures re-baselined for exactly ONE new action each - hence
+    # 54 -> 55 and 66 -> 67: .claude/sdk_gates/gates.py (kind sdk_gates,
+    # security-critical tier, seam §9). Diff-verified vs HEAD: zero
+    # existing files changed, zero removed, in both fixtures.
+    "default": "e6edc6227d0c113c90c887a84dd7ab094aea4d749bf1f17a077b2b2396b1c90a",
     "full_autonomous":
-        "a6883702f79a224faf0409e58c8f03ee1bba112f5cda1571855f72fa3a0e3744",
+        "b6875a579e302470ed0aabac427a0a93b00cbd3282c514dbcdc1bc18b39be41f",
 }
 
 EXPECTED_ACTION_COUNTS = {
-    "default": 54,
-    "full_autonomous": 66,
+    "default": 55,
+    "full_autonomous": 67,
 }
 
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 
+from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
+
 PROTOCOL_VERSION = "2.0.0"
 
 
@@ -2646,6 +2648,10 @@ TEMPLATES = {
     "specs_index": _specs_index,
     "gitignore": _gitignore,
     "gitignore_root": _gitignore_root,
+    # R-7 (IC-5): SDK gate module. Emitter lives in lib/sdk_gates_template.py
+    # (SR-11 deviation CONFIRMED: Python-emitting-Python stays syntax-
+    # checkable outside this file's shell-heredoc conventions).
+    "sdk_gates": sdk_gates_module,
     # Retrofit additions (new template fns; greenfield never reaches these).
     "retrofit_inventory_readme": _retrofit_inventory_readme,
     "retrofit_debt": _retrofit_debt,

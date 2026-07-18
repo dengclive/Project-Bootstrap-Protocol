@@ -82,6 +82,13 @@ def build_plan(cfg: dict) -> list[dict]:
     add(".claude/hooks/audio-alerts.config", TEMPLATES["audio_config"](cfg))
     add(".claude/settings.json", TEMPLATES["settings_json"](cfg), kind="settings")
 
+    # ---- IC-5 SDK gate module (Milestone B, seam §9) ---------------------- #
+    # Emitted alongside the shell suite (which remains the SEV-1 manual
+    # path, seam §7.5). Security-critical tier via its own kind (AC-7-6);
+    # the retrofit overlay DROPS this entry (retrofit stays shell-era).
+    add(".claude/sdk_gates/gates.py", TEMPLATES["sdk_gates"](cfg),
+        kind="sdk_gates")
+
     # ---- Skills, commands, agents (Phase 7) ------------------------------- #
     if cfg["workflow"]["install_skills"]:
         for skill, body in TEMPLATES["skills"](cfg).items():
@@ -228,6 +235,14 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
     # Build a path -> action map for in-place replacement.
     by_path = {a["path"]: a for a in plan}
 
+    # ---- Milestone B (IC-5): DROP the SDK gate module ------------------- #
+    # The SDK substrate is greenfield-2.1.0 surface; the retrofit track
+    # stays at RETROFIT_PROTOCOL_VERSION (shell-era), and Tessera's seam
+    # excludes retrofit entirely (seam §3.2, IG-10). The overlay - the
+    # single retrofit dispatch site per C1 - removes the entry rather
+    # than emitting an artifact the retrofit contract never declared.
+    by_path.pop(".claude/sdk_gates/gates.py", None)
+
     def replace(path: str, body: str, *, mode: int = 0o644,
                  kind: str = "file"):
         action = {"path": path, "body": body, "mode": mode, "kind": kind}
@@ -362,7 +377,8 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
     out = []
     seen: set = set()
     for a in plan:
-        out.append(by_path[a["path"]])
+        if a["path"] in by_path:       # overlay-dropped paths are skipped
+            out.append(by_path[a["path"]])
         seen.add(a["path"])
     for path in sorted(by_path):
         if path not in seen:
@@ -433,6 +449,12 @@ def _hook_tier(action: dict) -> str:
     the security-critical set; every other non-hook manifest entry is
     non-critical (a digest mismatch there is a legitimate L-1 hand-edit)."""
     if action["kind"] == "settings":
+        return TIER_SECURITY
+    if action["kind"] == "sdk_gates":
+        # Seam §9: under the SDK substrate this one file carries every
+        # gate; it joins the security-critical set in the same release
+        # that emits it (a seam_version event, landed with the substrate-
+        # release seam bump - never a silent extension).
         return TIER_SECURITY
     if action["kind"] == "hook":
         name = Path(action["path"]).name

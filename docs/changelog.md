@@ -354,3 +354,65 @@ startup check (seam binds ≥ v2.1.210 for fail-closed PreToolUse timeout —
 confirm the exact floor per the seam's own TODO), and the
 `PROTOCOL_VERSION` → `"2.1.0"` bump land only after Milestone A review and
 owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
+
+## 2.0.0 → 2.1.0 (Milestone B — SDK substrate; in progress)
+
+**Seam:** `SEAM-CONTRACT-v1-2-0.md` (Milestone-A pin event: protocol
+2.0.0 pinned by commit `1fa5bb6`). Branch `version-2-1-0`.
+
+### B-pre — `_hook_tier` forcing function (entry precondition)
+
+- `templates.HOOK_EVENT_MAP` hoisted to module level (emitted bytes
+  unchanged; golden green pre-R-7); `installer.py` asserts at import that
+  the seam §7.2 tier sets exactly partition the emitted hook set (new
+  explicit `NON_CRITICAL_HOOKS`; unclassified/phantom/double-claimed
+  names fail loud at every CLI entry point).
+
+### Verify-first findings (2026-07-18, against official changelogs)
+
+- **Claude Code runtime floor ≥ v2.1.210 CONFIRMED** (fail-closed
+  PreToolUse hook timeout at 2.1.210; worktree-entry consent 2.1.206;
+  exact-match hyphen matchers 2.1.195 — all subsumed by the floor). The
+  seam's `[TODO: confirm]` on `claude_code_runtime` is resolvable
+  seam-side with no value change.
+- **`claude-agent-sdk` feature floor = v0.1.2** (earliest release with
+  the exact seam §4.1 deny shape — `hookSpecificOutput` with
+  `permissionDecision: "deny"` + `permissionDecisionReason`, types.py
+  source evidence — plus `HookMatcher` (≥0.1.0) and
+  `ResultMessage.total_cost_usd` (rename at 0.0.13)). Replaces the
+  provisional ceiling-as-floor `>=0.2.114`; the seam patch is owner-side.
+- **Native worktree flag `--worktree`/`-w` confirmed in official docs**
+  (worktrees at `.claude/worktrees/<name>/`, branch `worktree-<name>`,
+  `worktree.baseRef`, `.worktreeinclude`); its introduction version is
+  NOT verifiable from official release notes (v2.1.49 is secondary-source
+  only) — R-8 therefore relies on the binding ≥ 2.1.210 floor, which
+  subsumes it, and pins no introduction version.
+
+### R-7 (IC-5) — gates as SDK `PreToolUse` callables
+
+- New emitter `lib/sdk_gates_template.py` — **[SR-11] the separate-module
+  deviation is CONFIRMED at implementation** (Python-emitting-Python
+  stays syntax-checkable outside templates.py's shell-heredoc
+  conventions); registered as `TEMPLATES["sdk_gates"]`.
+- Emits `.claude/sdk_gates/gates.py` per seam §9 VERBATIM: single public
+  builder `build_hooks(config) -> {"PreToolUse": [HookMatcher...], ...}`,
+  no I/O at import (probe-asserted), no network I/O, subprocess-only
+  loading documented, refusals in the structured §4.1 deny shape with
+  shell-parity reason strings (AC-7-5 fixtures assert each reason literal
+  against the emitted shell bodies). Seven gates: secrets, spec-commit,
+  dependency, test, tdd, eval (PreToolUse) + format-lint (PostToolUse,
+  feedback-only, never denies — mirroring its warn-tier shell nature).
+- Empty `commands.test` denies with the TODO reason (AC-7-2,
+  fail-loud-on-empty-commands); the full shell suite remains emitted as
+  the SEV-1 manual path (AC-7-3); `kind: "sdk_gates"` maps to the
+  security-critical tier (AC-7-6) — the §7.2 membership addition the
+  seam commits to at the substrate release, mirrored in
+  `tests/test_hook_tiers.py`'s contract list deliberately.
+- The retrofit overlay DROPS the module (retrofit stays shell-era
+  `RETROFIT_PROTOCOL_VERSION`; Tessera's seam excludes retrofit, IG-10).
+- Tests: `tests/test_sdk_gates.py` (49 checks, stubbed
+  `claude_agent_sdk`).
+
+**FREEZE-EXCEPTION (golden re-baseline no. 10, both fixtures).** Exactly
+ONE new action each (54 → 55, 66 → 67): `.claude/sdk_gates/gates.py`.
+Diff-verified vs HEAD: zero existing files changed, zero removed.
