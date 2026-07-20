@@ -574,3 +574,81 @@ are intentionally operator-completed per BOOTSTRAP.md's own trust ramp.
 Unattended overnight use remains out of scope by construction and must not
 be certified until those loops are implemented and smoke-tested per
 Phase 9 stages 4–6.
+
+### v2.4.0 code fold (GR2-EX / TEL-EX) — mandated-artifact emissions the frozen templates omit
+
+**GR2-EX / TEL-EX (v2.4.0 code fold).** `lib/templates.py`,
+`lib/installer.py`, and (for the TEL-01 Phase 0 decision) `lib/interview.py`
+are in the frozen set, but the frozen v2.4.0 documents mandate three
+additive workspace artifacts (GR2-03a `assumption-ledger.md`, GR2-01
+`progress.md` references, GR2-02 trajectory-retention contract) and one
+opt-in artifact (TEL-01 `telemetry.md`) that the v2.2.0 code does not emit —
+exactly the class **W-1** patched under freeze (a mandated-artifact omission
+that defeats a documented protocol invariant). The code baseline was v2.2.0;
+the v2.3.0 GR2 doc fold and the v2.4.0 TEL-01 doc fold were both doc-first
+and landed no code, so the real code delta was
+`2.2.0 → 2.4.0 = GR2-01 + GR2-02 + GR2-03a + TEL-01` plus the version stamp.
+Changes are confined to: the new `_assumption_ledger` / `_telemetry` template
+functions and their `TEMPLATES` registrations; the GR2-01 prose in
+`_claude_md` / `_agents` plus the single-body embedding of the canonical
+`progress.md` template in `.claude/specs/INDEX.md`; the GR2-02
+comment-contract in the shared `_per_task_wrapper` skeleton (covers `loop.sh`
+and `goal-loop.sh`; `auto.sh` untouched, its `exit_reason` enum unchanged);
+in `installer.py` the two `build_plan` steering adds (one unconditional, one
+flag-gated) plus the one `_write_state` field; in `interview.py` the single
+`telemetry_export_enabled` Phase 0 decision (parse + render + interactive
+prompt, standalone top-level boolean); the version stamp
+(`PROTOCOL_VERSION` 2.2.0 → 2.4.0, `plugin.json`); and the deliberate golden
+re-baselines in `tests/test_greenfield_golden.py` (`EXPECTED_DIGESTS` /
+`EXPECTED_ACTION_COUNTS`, both fixtures, one per step) and the
+`test_validate_only.py` mini-golden (emitted config gains
+`telemetry_export_enabled: false`). Every other frozen file and every other
+hook/template body remains **byte-identical** to the upload — verified by the
+determinism digest on the default-off path and by the per-file golden
+diagnostic. No wire surface, no gate, no sentinel, no seam name/location
+changed (**seam impact: none**). Re-reviewed the fixes' own diffs (the
+standing two-rounds-running lesson): `_telemetry`'s emitted body is verified
+byte-identical to the frozen `telemetry.md` modulo the two scoped
+`OTEL_RESOURCE_ATTRIBUTES` substitutions; the `.format()`-into-shell wrapper
+skeleton was re-checked with `bash -n` on every generated wrapper. Full
+suite green from a pristine run: 14 suites, 866 checks (`test_installer.py`
+141 → 197, `test_interview.py` 66 → 73, `test_ic_gate.py` 45 → 46,
+`test_greenfield_golden.py` 6/6 re-baselined, `test_usage_limit_contract.py`
+95/95 with the auto.sh enum untouched). **Deferred, recorded not shipped:**
+the GR2-03a *surfacing* behavior (fail-loud non-blocking notice on
+model/runtime change) carries locked constraints and is out of this fold; the
+retrofit state schema is not extended for the telemetry flag (the flag-gated
+`build_plan` add still emits `telemetry.md` on a retrofit plan). Also
+recorded as a known, deliberately-untouched inconsistency: pre-existing
+emitted hook/wrapper bodies still cite `Bootstrap-Protocol-v2-0-0.md` /
+`-v2-2-0.md` (a future doc-reference-normalization pass) — only **new** text
+this fold added cites `-v2-4-0.md`.
+
+**Adversarial review of this fold (steps 6–8).** The open PR was reviewed
+multi-lens (ten independent finder angles, one refutation-seeking verifier
+per candidate, then a gap sweep); fifteen findings were confirmed and all
+are fixed in-branch. The two most serious were **upgrade-path** defects
+that only appear when the new installer runs over an existing 2.2.0
+workspace, which is why the fold's own greenfield-heavy suite missed them:
+`apply_plan`'s hand-edit guard only protected *manifest-tracked* paths, so
+a file an operator hand-created at one of this fold's **newly planned**
+paths (`assumption-ledger.md`, `telemetry.md` — the doc-first v2.3.0
+migration note tells them to) was overwritten with no warning; and the
+GR2-01 template's only emitted home is `.claude/specs/INDEX.md`, the one
+file the wizard directs operators to rewrite, so an upgraded install could
+not receive the template without `--force` destroying its spec roster. A
+third, **TEL-01 flag truthiness**, inverted explicit privacy opt-outs
+(`off` / `no` / `"false"` all read as ENABLED). One security fix:
+`telemetry.md` steers OTLP **auth headers** into
+`.claude/settings.local.json` and calls it "(gitignored)" while no emitted
+gitignore covered it — now it does, so the claim is true rather than
+softened. Three findings originated in the **frozen sources** and were
+corrected pre-release on the TAR-02..06 precedent (this PR has not merged),
+with the emitted copies moved in lockstep and a new equivalence pin
+asserting the two telemetry copies differ on exactly the one substituted
+line. Full details, including the findings deliberately **not** fixed, are
+in `docs/changelog.md` steps 6–8. Suite: 866 → **945 checks**, 14 suites
+green; goldens re-baselined three times, diff-verified before each update.
+The GR2-01 template moved out of the operator-edited `INDEX.md` into its own
+installer-owned `.claude/specs/progress-template.md` so upgrades can actually
+receive it, which is the review's one file-count change (56 → 57, 68 → 69).

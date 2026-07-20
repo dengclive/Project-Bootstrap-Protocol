@@ -523,8 +523,497 @@ autonomous_modes:
     # Operator-facing audit records stay COMMITTED (not ignored).
     check("G-1: .gitignore does NOT ignore backlog.md",
           "backlog.md" not in gi)
+    # GR2-03a (v2.4.0 fold): the assumption ledger lands in .claude/steering/,
+    # which the emitted .claude/.gitignore never ignores -> committed by
+    # construction (steering docs are the operator-facing calibration record).
+    check("GR2-03a: .gitignore does NOT ignore steering/ (ledger committed)",
+          "steering" not in gi)
 finally:
     shutil.rmtree(d, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# GR2-03a (v2.4.0 fold): assumption-ledger.md is an UNCONDITIONAL steering
+# artifact. Snapshot-based (+1 vs the v2.2.0 plan; no brittle absolute
+# literal here — the absolute count is pinned by test_greenfield_golden.py).
+# ---------------------------------------------------------------------------
+_LEDGER_PATH = ".claude/steering/assumption-ledger.md"
+for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
+    _c, _ = cfg_from(_fix)
+    _plan = build_plan(_c)
+    _ledger_actions = [a for a in _plan if a["path"] == _LEDGER_PATH]
+    check(f"GR2-03a[{_fix_name}]: assumption-ledger.md emitted exactly once",
+          len(_ledger_actions) == 1)
+    # NB (review fix): a "+1 vs the v2.2.0 plan" check used to live here,
+    # filtering the ledger out of THIS plan and comparing lengths. That is a
+    # partition of one list by complementary predicates, so the delta equals
+    # the ledger-occurrence count by construction — arithmetically identical
+    # to the check above and unable to fail independently of it. No pre-fold
+    # plan was ever built, so the baseline delta it advertised was never
+    # enforced. The absolute count IS pinned, by EXPECTED_ACTION_COUNTS in
+    # test_greenfield_golden.py (56 / 68), which is where a genuine "+1"
+    # regression surfaces.
+    if _ledger_actions:
+        _body = _ledger_actions[0]["body"]
+        # Interpolated (not hardcoded) default drift thresholds 50/120/3.
+        check(f"GR2-03a[{_fix_name}]: ledger interpolates drift thresholds",
+              "50 tool calls / 120 min / 3 file reads" in _body)
+        # Links to the v2.4.0 doc, not restating it as a second authority.
+        check(f"GR2-03a[{_fix_name}]: ledger cites Bootstrap-Protocol-v2-4-0",
+              "Bootstrap-Protocol-v2-4-0.md" in _body)
+
+# Determinism: the seeded ledger body carries no timestamp/randomness, so two
+# independent resolves produce byte-identical bodies (and the whole plan digest
+# still matches, per the existing determinism test).
+_cl1, _ = cfg_from(SERVICE)
+_cl2, _ = cfg_from(SERVICE)
+_b1 = [a for a in build_plan(_cl1) if a["path"] == _LEDGER_PATH][0]["body"]
+_b2 = [a for a in build_plan(_cl2) if a["path"] == _LEDGER_PATH][0]["body"]
+check("GR2-03a: ledger body deterministic across resolves", _b1 == _b2)
+
+# Interpolation is real, not decorative: a customized drift threshold flows
+# into the ledger body (so it never becomes a stale second authority).
+_cc, _ = cfg_from("""project:
+  name: custom
+  archetype: service
+hooks:
+  drift_tool_call_threshold: 77
+""")
+_cbody = [a for a in build_plan(_cc)
+          if a["path"] == _LEDGER_PATH][0]["body"]
+check("GR2-03a: customized drift threshold flows into the ledger",
+      "77 tool calls" in _cbody)
+
+# v2.4.0 spec-doc existence (RC-03 class): the assumption-ledger / telemetry
+# bodies and GR2-01/02 prose added by this fold cite Bootstrap-Protocol-v2-4-0
+# — the cited docs must exist at repo root so the citations are not dangling.
+for _doc in ("Bootstrap-Protocol-v2-4-0.md",
+             "Bootstrap-Protocol-Companion-v2-4-0.md"):
+    check(f"v2.4.0: cited spec doc exists at repo root: {_doc}",
+          os.path.isfile(os.path.join(ROOT, _doc)))
+
+# ---------------------------------------------------------------------------
+# GR2-01 (v2.4.0 fold): progress.md is prose-only (no new emitted file). The
+# read-first note is in CLAUDE.md; the failed-approaches do-not-retry
+# instruction is in the implementer agent body but NOT the reviewer; the
+# canonical progress.md template lives in exactly one emitted body
+# (.claude/specs/INDEX.md).
+# ---------------------------------------------------------------------------
+_gc, _ = cfg_from(FULL)
+_gplan = build_plan(_gc)
+
+
+def _body_of(plan, path):
+    for a in plan:
+        if a["path"] == path:
+            return a["body"]
+    return None
+
+
+_claude = _body_of(_gplan, "CLAUDE.md")
+_index = _body_of(_gplan, ".claude/specs/INDEX.md")
+_impl = _body_of(_gplan, ".claude/agents/implementer.md")
+_rev = _body_of(_gplan, ".claude/agents/reviewer.md")
+
+check("GR2-01: CLAUDE.md reading list reads progress.md first at priming",
+      _claude is not None and "progress.md" in _claude
+      and "first" in _claude.lower())
+check("GR2-01: implementer body present in FULL plan", _impl is not None)
+check("GR2-01: reviewer body present in FULL plan", _rev is not None)
+check("GR2-01: implementer consults Failed approaches / do-not-retry",
+      _impl is not None and "Failed approaches" in _impl
+      and "do-not-retry" in _impl)
+check("GR2-01: reviewer body does NOT gain the failed-approaches text "
+      "(stays part of the deterministic gate)",
+      _rev is not None and "do-not-retry" not in _rev
+      and "Failed approaches" not in _rev)
+
+# Canonical template home (review revision): the template lives in its OWN
+# installer-owned file, not inside the operator-edited INDEX.md roster. That
+# separation is what makes it deliverable on upgrade: INDEX.md is skipped by
+# the hand-edit guard on every real install (Phase 7.6 step 5 directs editing
+# it), so normative content parked there could never reach an existing
+# workspace, and --force delivered it only by destroying the roster.
+_PROGRESS_TPL = ".claude/specs/progress-template.md"
+_tpl = _body_of(_gplan, _PROGRESS_TPL)
+check("GR2-01: progress-template.md is emitted", _tpl is not None)
+check("GR2-01: template carries the Failed-approaches header",
+      _tpl is not None and "## Failed approaches" in _tpl)
+check("GR2-01: template carries the do-not-retry flag wording",
+      _tpl is not None and "do-not-retry: yes" in _tpl)
+for _lt in ("decisions.md", "learnings/", "<timestamp>-checkpoint.md"):
+    check(f"GR2-01: template links {_lt}", _tpl is not None and _lt in _tpl)
+check("GR2-01: template declares itself installer-owned",
+      _tpl is not None and "Installer-owned" in _tpl)
+# INDEX.md keeps the roster and POINTS at the template rather than embedding
+# it, so the two ownership domains stay separate.
+check("GR2-01: INDEX.md points at the template file",
+      _index is not None and "progress-template.md" in _index)
+check("GR2-01: INDEX.md no longer embeds the template body",
+      _index is not None and "# Progress — <slug>" not in _index)
+check("GR2-01: INDEX.md still carries the spec roster",
+      _index is not None and "| slug | status |" in _index)
+# No second emitted body duplicates the full template (uniqueness of the
+# home). The template's distinctive title line appears in exactly one body.
+_dupe = [a["path"] for a in _gplan
+         if a["body"] and "# Progress — <slug>" in a["body"]]
+check("GR2-01: progress.md template embedded in exactly one emitted body "
+      "(.claude/specs/progress-template.md)",
+      _dupe == [_PROGRESS_TPL])
+# The pointers in CLAUDE.md and the implementer body must name the file that
+# actually carries the template — a stale pointer here is the dangling-
+# reference class this revision exists to close.
+check("GR2-01: CLAUDE.md points at the template file",
+      _claude is not None and "progress-template.md" in _claude)
+check("GR2-01: implementer points at the template file",
+      _impl is not None and "progress-template.md" in _impl)
+
+# ---------------------------------------------------------------------------
+# GR2-02 (v2.4.0 fold): trajectory retention is a comment-contract in the
+# shared per-task wrapper skeleton (loop.sh + goal-loop.sh), no new file.
+# Two non-overlapping markers (AR-01 class): the retention item via the path
+# literal `.claude/logs/trajectory-`, and the loop-final summary via a
+# distinct `Trajectory:` line inside the documented loop-final structure
+# block.
+# ---------------------------------------------------------------------------
+for _rel in (".claude/loop.sh", ".claude/goal-loop.sh"):
+    _w = _body_of(_gplan, _rel)
+    check(f"GR2-02[{_rel}]: wrapper present in FULL plan", _w is not None)
+    check(f"GR2-02[{_rel}]: retention item names trajectory log path",
+          _w is not None and ".claude/logs/trajectory-" in _w)
+    check(f"GR2-02[{_rel}]: retention self-check fails loud when disabled",
+          _w is not None and "MUST FAIL LOUD" in _w
+          and "retention disabled" in _w)
+    # The loop-final structure block carries its own required Trajectory line.
+    _blk_start = _w.find("[loop-final-$TASK_ID.md structure") if _w else -1
+    _blk = _w[_blk_start:_blk_start + 700] if _blk_start >= 0 else ""
+    check(f"GR2-02[{_rel}]: loop-final structure block documents a Trajectory "
+          "line", "Trajectory:" in _blk)
+    # No new file was added by GR2-02 (comment-contract only).
+# goal-loop.sh keeps its judge-parity clause; loop.sh must not gain it (GR2-02
+# touched the shared skeleton, not the mode-specific injected values).
+_loopw = _body_of(_gplan, ".claude/loop.sh")
+check("GR2-02: loop.sh did not gain the judge-parity clause",
+      _loopw is not None and "judge retry-once" not in _loopw)
+
+# ---------------------------------------------------------------------------
+# TEL-01 (v2.4.0 fold): opt-in telemetry doc, flag-gated. Off by default
+# (invisible); on-path adds one committed steering file whose
+# OTEL_RESOURCE_ATTRIBUTES line is substituted. No wire, gate, or gitignore
+# change.
+# ---------------------------------------------------------------------------
+from templates import PROTOCOL_VERSION as _PV            # noqa: E402
+_TEL_PATH = ".claude/steering/telemetry.md"
+
+
+def _otel_line(body):
+    for _l in body.splitlines():
+        if _l.startswith("export OTEL_RESOURCE_ATTRIBUTES="):
+            return _l
+    return ""
+
+
+# OFF (default): no telemetry.md; determinism digest stable.
+_coff, _ = cfg_from(SERVICE)
+_plan_off = build_plan(_coff)
+check("TEL-01[off]: no telemetry.md on the default (flag-absent) path",
+      all(a["path"] != _TEL_PATH for a in _plan_off))
+check("TEL-01[off]: determinism digest stable with flag absent",
+      plan_digest(_coff) == plan_digest(cfg_from(SERVICE)[0]))
+
+# ON: +1 file, committed, OTEL line substituted.
+_TEL_ON = """project:
+  name: telon
+  archetype: ai-agent
+telemetry_export_enabled: true
+"""
+_con, _errs_on = cfg_from(_TEL_ON)
+check("TEL-01[on]: config with the flag resolves cleanly", _errs_on == [])
+check("TEL-01[on]: flag survives resolution", _con.get(
+    "telemetry_export_enabled") is True)
+_plan_on = build_plan(_con)
+_tel_actions = [a for a in _plan_on if a["path"] == _TEL_PATH]
+check("TEL-01[on]: telemetry.md emitted exactly once", len(_tel_actions) == 1)
+_off_same, _ = cfg_from(_TEL_ON.replace(
+    "telemetry_export_enabled: true", "telemetry_export_enabled: false"))
+check("TEL-01[on]: plan count +1 vs the same config flag-off",
+      len(_plan_on) - len(build_plan(_off_same)) == 1)
+_gi_on = _body_of(_plan_on, ".claude/.gitignore")
+check("TEL-01[on]: telemetry.md committed (steering not gitignored)",
+      _gi_on is not None and "telemetry" not in _gi_on)
+
+if _tel_actions:
+    _tbody = _tel_actions[0]["body"]
+    _ol = _otel_line(_tbody)
+    # Scope placeholder-absence to the export line ONLY (AR-01: the comment
+    # two lines above it legitimately keeps the literal placeholder names).
+    check("TEL-01[on]: OTEL line has no <protocol_version> literal",
+          "<protocol_version>" not in _ol)
+    check("TEL-01[on]: OTEL line has no <archetype> literal",
+          "<archetype>" not in _ol)
+    check("TEL-01[on]: OTEL line carries the substituted version",
+          f"bootstrap.protocol_version={_PV}" in _ol)
+    check("TEL-01[on]: OTEL line carries the substituted archetype",
+          "bootstrap.archetype=ai-agent" in _ol)
+    # The explanatory comment DOES still carry the literals (must not be
+    # substituted) — proves the substitution was scoped, not global.
+    check("TEL-01[on]: explanatory comment keeps the literal placeholders",
+          "<protocol_version>" in _tbody and "<archetype>" in _tbody)
+    # TAR-02 secrets posture: the pasteable auth-token vector (name WITH '=')
+    # must be absent; the bare name in the warning sentence must remain.
+    check("TEL-01 TAR-02: no OTEL_EXPORTER_OTLP_HEADERS= vector in the body",
+          "OTEL_EXPORTER_OTLP_HEADERS=" not in _tbody)
+    check("TEL-01 TAR-02: body warns via gitignored settings.local.json",
+          "settings.local.json" in _tbody)
+    # No wire: the body opens no socket / names no maintainer endpoint.
+    check("TEL-01: body is documentation only (no phone-home)",
+          "Not a phone-home" in _tbody)
+
+# State flag + TAR-01 version pairing on a real install.
+_d = _install(_TEL_ON)
+try:
+    _state = _json.load(open(os.path.join(_d, ".claude",
+                                          ".bootstrap-state.json")))
+    check("TEL-01: fresh install with flag true writes state flag true",
+          _state.get("telemetry_export_enabled") is True)
+    _tf = os.path.join(_d, ".claude", "steering", "telemetry.md")
+    check("TEL-01: telemetry.md written to disk on opt-in", os.path.exists(_tf))
+    _disk_ol = _otel_line(open(_tf).read())
+    check("TEL-01 TAR-01: OTEL version == state bootstrap_protocol_version",
+          f"bootstrap.protocol_version={_state['bootstrap_protocol_version']}"
+          in _disk_ol)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# Default install: state flag false, no telemetry.md on disk.
+_d0 = _install(SERVICE)
+try:
+    _s0 = _json.load(open(os.path.join(_d0, ".claude",
+                                       ".bootstrap-state.json")))
+    check("TEL-01: default install writes state flag false",
+          _s0.get("telemetry_export_enabled") is False)
+    check("TEL-01: default install emits no telemetry.md",
+          not os.path.exists(os.path.join(_d0, ".claude", "steering",
+                                          "telemetry.md")))
+finally:
+    shutil.rmtree(_d0, ignore_errors=True)
+
+# Retrofit passthrough: the flat top-level flag survives the retrofit branch
+# and the overlay still emits telemetry.md; flag-off retrofit plan unchanged.
+_RETRO_TEL = """mode: "retrofit"
+project:
+  name: r-tel
+  archetype: service
+telemetry_export_enabled: true
+secrets:
+  enabled: true
+deps:
+  enabled: true
+  approved: []
+commands:
+  test: "true"
+  lint: "true"
+  format: "true"
+retrofit:
+  spec_strategy: "forward-only"
+  legacy_allowlist:
+    - "src/**"
+    - "tests/**"
+  retrofit_active: true
+  r08_committed: true
+"""
+_rc, _rerrs = cfg_from(_RETRO_TEL)
+check("TEL-01 retrofit: flag survives resolve with errs == []",
+      _rerrs == [] and _rc.get("telemetry_export_enabled") is True)
+check("TEL-01 retrofit: plan includes telemetry.md (overlay wraps full plan)",
+      any(a["path"] == _TEL_PATH for a in build_plan(_rc)))
+_rc_off, _ = cfg_from(_RETRO_TEL.replace(
+    "telemetry_export_enabled: true\n", ""))
+check("TEL-01 retrofit: flag-absent retrofit plan has no telemetry.md",
+      all(a["path"] != _TEL_PATH for a in build_plan(_rc_off)))
+
+# ---------------------------------------------------------------------------
+# TEL-01 flag normalization (review finding: raw truthiness inverted opt-outs).
+# minyaml coerces only bare true/false, so every other YAML boolean spelling
+# reaches the installer as a NON-EMPTY STRING. Under raw truthiness `off`/`no`/
+# quoted "false" all read as ENABLED — an explicit privacy opt-out silently
+# inverted into an opt-in, with the state flag stamped true to match. The
+# normalizer resolves the accepted spellings and FAILS LOUD on anything else
+# rather than guessing what an unrecognized value meant.
+# ---------------------------------------------------------------------------
+from installer import telemetry_enabled            # noqa: E402
+
+for _spell in ("false", "no", "off", "0", '"false"', "'no'", "FALSE", " off "):
+    _cf, _ce = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_spell}
+""")
+    check(f"TEL-01 norm: {_spell!r} resolves to disabled",
+          _ce == [] and telemetry_enabled(_cf) is False)
+    check(f"TEL-01 norm: {_spell!r} emits no telemetry.md",
+          all(a["path"] != _TEL_PATH for a in build_plan(_cf)))
+
+for _spell in ("true", "yes", "on", "1", '"true"', "TRUE"):
+    _ct, _cte = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_spell}
+""")
+    check(f"TEL-01 norm: {_spell!r} resolves to enabled",
+          _cte == [] and telemetry_enabled(_ct) is True)
+    check(f"TEL-01 norm: {_spell!r} emits telemetry.md",
+          any(a["path"] == _TEL_PATH for a in build_plan(_ct)))
+
+check("TEL-01 norm: absent key defaults to disabled",
+      telemetry_enabled(cfg_from(SERVICE)[0]) is False)
+
+# Fail loud, not silent: an unrecognized value is never guessed either way.
+for _junk in ("maybe", "enabled", "2", "tru"):
+    _cj, _ = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_junk}
+""")
+    try:
+        telemetry_enabled(_cj)
+        check(f"TEL-01 norm: {_junk!r} rejected fail-loud", False)
+    except ValueError as _e:
+        check(f"TEL-01 norm: {_junk!r} rejected fail-loud",
+              "telemetry_export_enabled" in str(_e))
+
+# The state stamp routes through the same normalizer, so the emitted doc and
+# the persisted flag cannot disagree on a non-canonical spelling.
+_d_norm = _install("""project:
+  name: tnorm
+  archetype: service
+telemetry_export_enabled: off
+""")
+try:
+    _sn = _json.load(open(os.path.join(_d_norm, ".claude",
+                                       ".bootstrap-state.json")))
+    check("TEL-01 norm: 'off' install writes state flag false",
+          _sn.get("telemetry_export_enabled") is False)
+    check("TEL-01 norm: 'off' install emits no telemetry.md",
+          not os.path.exists(os.path.join(_d_norm, ".claude", "steering",
+                                          "telemetry.md")))
+finally:
+    shutil.rmtree(_d_norm, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# Upgrade-path protection (review finding: untracked files at newly planned
+# paths were silently overwritten). The manifest-unknown case is exactly the
+# 2.2.0 -> 2.4.0 upgrade: GR2-03a and TEL-01 add planned paths that a
+# doc-first operator may already have hand-created. Overwriting content the
+# installer never authored contradicts the promise the emitted ledger header
+# makes ("will not overwrite local edits without --force").
+# ---------------------------------------------------------------------------
+_LEDGER_REL = os.path.join(".claude", "steering", "assumption-ledger.md")
+_SENTINEL = "CUSTOM ROW: our fork calibrates against a different tier\n"
+
+_d_up = tempfile.mkdtemp()
+try:
+    open(os.path.join(_d_up, "bootstrap.config.yaml"), "w").write(SERVICE)
+    os.makedirs(os.path.join(_d_up, ".claude", "steering"), exist_ok=True)
+    open(os.path.join(_d_up, _LEDGER_REL), "w").write(_SENTINEL)
+    _r_up = subprocess.run([sys.executable, BIN, "-C", _d_up],
+                           capture_output=True, text=True)
+    _after = open(os.path.join(_d_up, _LEDGER_REL)).read()
+    check("upgrade: hand-created file at a newly planned path is preserved",
+          _after == _SENTINEL)
+    check("upgrade: the skip is reported, not silent",
+          "SKIP" in _r_up.stdout and "assumption-ledger.md" in _r_up.stdout)
+    check("upgrade: skip reason names it as not installer-generated",
+          "pre-existing and not installer-generated" in _r_up.stdout)
+    # Sticky across runs: a skip records the OPERATOR's digest, which must not
+    # read as "we wrote that" on the next run and fall through to overwrite.
+    subprocess.run([sys.executable, BIN, "-C", _d_up],
+                   capture_output=True, text=True)
+    check("upgrade: still preserved on a second run (skip is sticky)",
+          open(os.path.join(_d_up, _LEDGER_REL)).read() == _SENTINEL)
+    # --force remains the documented escape hatch.
+    subprocess.run([sys.executable, BIN, "-C", _d_up, "--force"],
+                   capture_output=True, text=True)
+    check("upgrade: --force still overwrites deliberately",
+          open(os.path.join(_d_up, _LEDGER_REL)).read() != _SENTINEL)
+finally:
+    shutil.rmtree(_d_up, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# TEL-01 credential posture (review finding: the emitted telemetry.md calls
+# .claude/settings.local.json "(gitignored)" and steers OTLP auth headers into
+# it, but no emitted gitignore covered that file). Claude Code auto-ignores it
+# only when Claude Code itself creates it, while the doc says to write it
+# BEFORE first launch — so a hand-created file holding
+# OTEL_EXPORTER_OTLP_HEADERS tokens was committable by `git add .claude`. The
+# rule now makes the doc's claim true on both greenfield and retrofit.
+# ---------------------------------------------------------------------------
+for _lbl, _c_gi in (("greenfield", cfg_from(SERVICE)[0]),
+                    ("retrofit", _rc)):
+    _gi_body = _body_of(build_plan(_c_gi), ".claude/.gitignore")
+    check(f"TEL-01 TAR-02[{_lbl}]: .gitignore covers settings.local.json",
+          _gi_body is not None and
+          "settings.local.json" in _gi_body.splitlines())
+
+# The doc must not restate drift thresholds: the assumption ledger interpolates
+# them from cfg["hooks"], so a hardcoded pair in a co-emitted steering doc is
+# the "stale second authority" GR2-03a exists to prevent (they disagreed on any
+# customized config). telemetry.md now points at the ledger instead.
+_tel_custom, _ = cfg_from("""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: true
+hooks:
+  drift_tool_call_threshold: 77
+""")
+_tel_b = _body_of(build_plan(_tel_custom), _TEL_PATH)
+_led_b = _body_of(build_plan(_tel_custom), ".claude/steering/assumption-ledger.md")
+check("TEL-01: telemetry.md states no hardcoded drift thresholds",
+      _tel_b is not None and "50/120/3" not in _tel_b)
+check("TEL-01: telemetry.md defers to the ledger for threshold values",
+      _tel_b is not None and "assumption-ledger.md" in _tel_b)
+check("GR2-03a: the ledger still carries the customized value",
+      _led_b is not None and "77 tool calls" in _led_b)
+check("TEL-01: no co-emitted doc contradicts the ledger's thresholds",
+      _tel_b is not None and "50 tool calls" not in _tel_b)
+
+# The trajectory retention contract must not claim a purge nothing performs:
+# the 7-day state policy covers .claude/sessions/, not .claude/logs/.
+check("GR2-02: telemetry.md does not claim trajectories are 7-day-purged",
+      _tel_b is not None and "7-day-purged" not in _tel_b)
+_loop_b = _body_of(build_plan(cfg_from(FULL)[0]), ".claude/loop.sh")
+if _loop_b is not None:
+    check("GR2-02: wrapper does not assert an inherited trajectory purge",
+          "purged with the\n# 7-day state-retention policy" not in _loop_b)
+    check("GR2-02: wrapper binds pruning as an operator duty",
+          "PRUNING IS PART OF THIS CONTRACT" in _loop_b)
+
+# ---------------------------------------------------------------------------
+# TEL-01 frozen-source equivalence (review finding: the ~77-line telemetry body
+# exists twice — once as the frozen root telemetry.md, once as the template
+# f-string — with the byte-verification done ONCE by hand at fold time and
+# pinned by nothing. A later correction to either copy would silently strand
+# the other, and no golden covers it because both fixtures leave the flag off.)
+# This asserts the actual contract: byte-identical modulo the ONE substituted
+# OTEL_RESOURCE_ATTRIBUTES line.
+# ---------------------------------------------------------------------------
+_FROZEN_TEL = os.path.join(ROOT, "telemetry.md")
+check("TEL-01 freeze: the frozen source telemetry.md exists",
+      os.path.exists(_FROZEN_TEL))
+if os.path.exists(_FROZEN_TEL) and _tel_b is not None:
+    _frozen_lines = open(_FROZEN_TEL).read().splitlines()
+    _emitted_lines = _tel_b.splitlines()
+    check("TEL-01 freeze: emitted body has the same line count as the source",
+          len(_frozen_lines) == len(_emitted_lines))
+    _differing = [i for i, (a, b) in
+                  enumerate(zip(_frozen_lines, _emitted_lines)) if a != b]
+    check("TEL-01 freeze: exactly one line differs from the frozen source",
+          len(_differing) == 1)
+    if len(_differing) == 1:
+        _dl = _emitted_lines[_differing[0]]
+        check("TEL-01 freeze: the one differing line IS the OTEL export line",
+              _dl.startswith("export OTEL_RESOURCE_ATTRIBUTES="))
+        check("TEL-01 freeze: the frozen source keeps the placeholders",
+              "<protocol_version>" in _frozen_lines[_differing[0]])
 
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
@@ -616,32 +1105,58 @@ finally:
 # R-0 (spec bootstrap-v2): protocol version identity (AC-A0-1..3).
 # [R-9/AC-9-5] Deliberately re-pinned 2.0.0 -> 2.1.0 at the Milestone-B
 # release-identity bump; [R6, 2.2.0] re-pinned 2.1.0 -> 2.2.0 at the
-# usage-limit bump (tests/test_ic_gate.py owns the mirror assertions).
+# usage-limit bump; [v2.4.0 code fold, GR2-EX/TEL-EX step 0] re-pinned
+# 2.2.0 -> 2.4.0 (single fold, no intermediate 2.3.0 code release; the
+# 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code)
+# (tests/test_ic_gate.py owns the mirror assertions).
 # ---------------------------------------------------------------------------
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.2.0",
-      _installer_mod.PROTOCOL_VERSION == "2.2.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.2.0",
-      _templates_mod.PROTOCOL_VERSION == "2.2.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.4.0",
+      _installer_mod.PROTOCOL_VERSION == "2.4.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.4.0",
+      _templates_mod.PROTOCOL_VERSION == "2.4.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
+# The two constants are declared independently in installer.py and
+# templates.py; pin them to EACH OTHER as well as to the literal, so a
+# half-applied bump fails here rather than emitting a body stamped with one
+# version while state records the other.
+check("AC-A0-1: installer and templates PROTOCOL_VERSION agree",
+      _installer_mod.PROTOCOL_VERSION == _templates_mod.PROTOCOL_VERSION)
+
+# Review finding: plugin/plugin.json was the ONE release-identity surface no
+# test read. Forgetting it fails nothing and ships a stale manifest — which
+# has happened twice: v2.0.0 shipped "1.0.0" (fixed later by review item
+# PR5-04/05), and the v2.2.0 bump omitted it again (caught only in review).
+# Both misses happened despite the changelog recording plugin.json as part of
+# the release set, so the convention alone is not the control.
+_PLUGIN_JSON = os.path.join(ROOT, "plugin", "plugin.json")
+check("AC-A0-1: plugin/plugin.json exists", os.path.exists(_PLUGIN_JSON))
+if os.path.exists(_PLUGIN_JSON):
+    _pj = _json.load(open(_PLUGIN_JSON))
+    check("AC-A0-1: plugin.json version tracks PROTOCOL_VERSION",
+          _pj.get("version") == _installer_mod.PROTOCOL_VERSION)
+    # The description carries the version in prose too ("v2.4.0"), which the
+    # 2.2.0 bump also had to hand-edit; pin it so prose and field cannot skew.
+    check("AC-A0-1: plugin.json description names the current version",
+          f"v{_installer_mod.PROTOCOL_VERSION}" in _pj.get("description", ""))
 
 d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.2.0",
-          state.get("bootstrap_protocol_version") == "2.2.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.4.0",
+          state.get("bootstrap_protocol_version") == "2.4.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.2.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.4.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.2.0)")
+          == "bootstrap-installer (protocol 2.4.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.2.0",
-          manifest.get("protocol_version") == "2.2.0")
+    check("AC-A0-3: manifest records protocol_version 2.4.0",
+          manifest.get("protocol_version") == "2.4.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

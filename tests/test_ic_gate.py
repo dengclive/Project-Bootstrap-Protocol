@@ -111,8 +111,8 @@ try:
                                         ".bootstrap-state.json")))
     check('AC-9-2: state records gate_substrate "sdk-callable"',
           state.get("gate_substrate") == "sdk-callable")
-    check("AC-9-5: state records protocol 2.2.0",
-          state.get("bootstrap_protocol_version") == "2.2.0")
+    check("AC-9-5: state records protocol 2.4.0",
+          state.get("bootstrap_protocol_version") == "2.4.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -215,10 +215,10 @@ check("AC-9-4: undetectable CLI warns loudly (never silent)",
 import installer   # noqa: E402
 import templates   # noqa: E402
 
-check("AC-9-5: installer PROTOCOL_VERSION is 2.2.0",
-      installer.PROTOCOL_VERSION == "2.2.0")
-check("AC-9-5: templates PROTOCOL_VERSION is 2.2.0",
-      templates.PROTOCOL_VERSION == "2.2.0")
+check("AC-9-5: installer PROTOCOL_VERSION is 2.4.0",
+      installer.PROTOCOL_VERSION == "2.4.0")
+check("AC-9-5: templates PROTOCOL_VERSION is 2.4.0",
+      templates.PROTOCOL_VERSION == "2.4.0")
 check("AC-9-5: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       installer.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 check("AC-9-5: seam runtime floor constant is 2.1.210",
@@ -228,6 +228,8 @@ check("AC-9-5: changelog carries the 2.0.0 -> 2.1.0 entry",
       "2.0.0 → 2.1.0" in changelog)
 check("R6 (2.2.0): changelog carries the 2.1.0 -> 2.2.0 entry",
       "2.1.0 → 2.2.0" in changelog)
+check("v2.4.0 fold: changelog carries the 2.2.0 -> 2.4.0 entry",
+      "2.2.0 → 2.4.0" in changelog)
 conformance = open(os.path.join(
     ROOT, "Bootstrap-Protocol-v2-0-0.md")).read()
 check("AC-9-5: conformance note marks the substrate operative",

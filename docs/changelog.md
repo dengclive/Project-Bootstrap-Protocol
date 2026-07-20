@@ -1,5 +1,517 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.2.0 → 2.4.0 (v2.4.0 code fold — GR2-EX / TEL-EX; bring code up to the frozen v2.4.0 docs)
+
+Single code fold; **no intermediate 2.3.0 code release**. The v2.3.0 GR2
+doc fold and the v2.4.0 TEL-01 doc fold were both doc-first and landed no
+code, so the real code delta is `2.2.0 → 2.4.0 = GR2-01 + GR2-02 +
+GR2-03a + TEL-01`. Freeze exception recorded in the README review history
+(GR2-EX / TEL-EX, W-1 precedent class: a mandated-artifact omission that
+defeats a documented protocol invariant). Landed as five sequenced
+commits so each golden re-baseline stays legible. Frozen v2.4.0 docs
+(`Bootstrap-Protocol-v2-4-0.md`, `Bootstrap-Protocol-Companion-v2-4-0.md`,
+`telemetry.md`) committed at repo root as the frozen sources this fold
+implements against (the emitted bodies cite them; RC-03-class doc-existence
+check added). **Test surface:** 14 suites, 866 checks green from a pristine
+run (`test_installer.py` 141 → 197, `test_interview.py` 66 → 73,
+`test_ic_gate.py` 45 → 46, golden 6/6 re-baselined per step, the auto.sh
+`exit_reason` enum untouched). Seam impact: none.
+
+### Step 0 — Version identity (`2.2.0 → 2.4.0`)
+
+- `PROTOCOL_VERSION` → `"2.4.0"` in `lib/installer.py` and
+  `lib/templates.py`. `RETROFIT_PROTOCOL_VERSION` stays `"1.6.2"`;
+  `RUNTIME_FLOOR` stays `"2.1.210"` (seam-owned, untouched per §8).
+- `plugin/plugin.json` version + description bumped to v2.4.0 (release
+  identity, precedent from the 2.2.0 bump).
+- Version assertions updated to 2.4.0: `AC-A0-1..3` (`test_installer.py`),
+  the `AC-9-5` mirrors (`test_ic_gate.py`), `AC-1-1/1-2` + corrupt-state
+  (`test_gate_substrate.py`), and retrofit `8.3` (`test_retrofit.py`).
+  New `test_ic_gate.py` tripwire asserts this changelog carries the
+  `2.2.0 → 2.4.0` entry.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 0).** Per AC-A0-3 the
+version rides emitted `_generatedBy` strings (`settings.json`, the
+manifest), so **both golden fixtures' digests move at this step with
+action counts unchanged**. Re-baselined `EXPECTED_DIGESTS` in
+`tests/test_greenfield_golden.py`; `EXPECTED_ACTION_COUNTS` unchanged
+(`default: 55`, `full_autonomous: 67`). Isolated into its own commit so
+the stamp's byte movement does not entangle the four content deltas.
+
+### Step 1 — GR2-03a assumption ledger (unconditional artifact)
+
+- New `_assumption_ledger(cfg)` in `lib/templates.py` (registered as
+  `"assumption_ledger"`), and an **unconditional** `build_plan` add of
+  `.claude/steering/assumption-ledger.md` after `tools.md`. Lands in
+  `.claude/steering/` (never gitignored) → committed by construction; **no
+  gitignore edit**.
+- Body is a faithful workspace rendering of the frozen `## Assumption
+  Ledger` section (`Bootstrap-Protocol-v2-4-0.md`, anchor
+  `#assumption-ledger`). The three drift-threshold numbers are
+  **interpolated from `cfg["hooks"]`** (`drift_tool_call_threshold` /
+  `drift_session_duration_minutes` / `drift_file_read_threshold`), not
+  hardcoded — the drift-detector hook body reads the same keys, so the
+  ledger can never become a stale second authority when an operator
+  customizes the detector. Pure function of cfg (no timestamp/env);
+  determinism proven by the digest test.
+- **File count +1 on every fixture** (default 55→56, full_autonomous
+  67→68). `test_installer.py` gains snapshot-based GR2-03a assertions
+  (emitted-once, +1 delta, committed, interpolation real vs decorative,
+  determinism); `test_greenfield_golden.py` re-baselined (both fixtures
+  +1, digests moved, freeze-exception comment added).
+- **DEFERRED (recorded, not shipped) — the GR2-03a *surfacing* behavior.**
+  The frozen spec has two halves: the emitted artifact (shipped here) and
+  a wizard behavior that "surfaces due entries on any pinned-model or
+  runtime-floor change as a fail-loud, non-blocking notice." This fold
+  delivers the **artifact only**. The surfacing is deferred with these
+  **locked constraints**: it MUST be fail-loud and **non-blocking** (never
+  blocks the model/runtime change); it MUST read the ledger's
+  `Re-validation trigger` column and surface exactly the rows whose trigger
+  matches the event; it MUST hang off the same event the v2.0.0 model
+  remap / any later regenerate-config flow already represents (no new
+  trigger surface); it MUST NOT silently proceed. Rationale: the emission
+  is a pure `build_plan` artifact with zero runtime surface, whereas the
+  surfacing is wizard-runtime logic wanting its own fixture and review;
+  bundling would widen this fold's blast radius. The emitted ledger words
+  the surfacing as protocol-specified with a "re-check by hand until it
+  lands" note (honest framing — the operator doc must not claim unshipped
+  behavior as current fact); when the surfacing ships, that one paragraph
+  updates under the same freeze exception as the surfacing change.
+
+### Step 2 — GR2-01 progress artifact (prose only, no new file)
+
+`progress.md` is created at *task start* (when a slug exists), not at
+install, so GR2-01 lands **no static file** and the plan count is
+unchanged. Three prose edits in `lib/templates.py`:
+
+- **`_claude_md`** reading list: read the task's
+  `.claude/specs/<slug>/progress.md` (`Status` + `Failed approaches`)
+  **first** at task/iteration priming, before the task brief, so a resumed
+  session does not re-attempt a known dead end.
+- **`_agents` implementer body**: consult the task's `progress.md` **Failed
+  approaches** during priming (loop and goal-supervised modes) and never
+  re-attempt a do-not-retry dead end. **The reviewer body is untouched** —
+  it is the deterministic gate; loop-awareness there would conflate gate
+  and iteration.
+- **`_specs_index` (`.claude/specs/INDEX.md`)** — the single emitted home
+  for the canonical `progress.md` reference template (Appendix B, with its
+  corrected link targets `decisions.md` / `learnings/` /
+  `sessions/<timestamp>-checkpoint.md`). Chosen over `/spec-new` because
+  skills/commands are gated on `install_skills`/`install_commands` whereas
+  INDEX.md is **unconditional**; the `_claude_md` note and implementer body
+  LINK here rather than duplicating the template. Without this embedding
+  GR2-01 would land the read-first prose with no emitted definition of the
+  artifact's shape — the runtime creator would have to invent it, violating
+  record-do-not-manufacture at runtime.
+- **Commit-policy edit — no-op in code, recorded.** The PRD line-889
+  committed-set enumeration lives only in the protocol document; **no
+  emitted body carries a committed-set enumeration** (the only
+  "operator-facing … committed" text in `lib/templates.py` is a Python
+  source comment inside `_gitignore`, which is not emitted). `progress.md`
+  is committed by construction because `.claude/specs/` is never
+  gitignored. No new enumeration was invented to have something to edit.
+- Count unchanged (56 / 68); golden re-baselined for the moved body bytes
+  (freeze-exception). `test_installer.py` gains GR2-01 assertions
+  (read-first note; implementer-has / reviewer-lacks the do-not-retry text;
+  template section headers + three link targets present; template embedded
+  in exactly one body).
+
+### Step 3 — GR2-02 trajectory retention (comment-contract only, no new file)
+
+Single edit surface: the shared `_per_task_wrapper(kind)` builder in
+`lib/templates.py`, which covers **both** `loop.sh` and `goal-loop.sh`
+(`_loop_sh` / `_goal_loop_sh` still only delegate). **`auto.sh` is not a
+GR2-02 target** — it is the separate queue runner, not the
+operator-completed loop; its `exit_reason` enum is untouched and adds no
+value.
+
+- **Fourth binding item** added to the wrapper's dispatch/deliverable
+  comment block (beside the `--output-format stream-json --verbose`
+  documentation): the operator-completed loop MUST retain each iteration's
+  stream JSON at `.claude/logs/trajectory-<task-id>-<iter-n>.jsonl`
+  (already gitignored under the existing `.claude/logs/` `logs/` rule — no
+  gitignore change — and purged with the 7-day state policy). A skeleton
+  self-check that finds retention disabled MUST **fail loud**.
+- **`Trajectory` line** added to the documented `loop-final-<task-id>.md`
+  structure block, linking the retained `.claude/logs/trajectory-*` files.
+- **The "OTel span export is optional" sentence is PRD framing, not
+  required emitted text** — the normative MUST-enumerate list (PRD line
+  1098) is items (1)–(4); the OTel-optional sentence is document framing
+  and is deliberately **not** added to the emitted comment (recorded so a
+  later review does not read the omission as a miss).
+- Count unchanged; **only the full_autonomous fixture's digest moves**
+  (`loop.sh` + `goal-loop.sh`); the default fixture has no wrappers so its
+  digest is untouched at this step. `test_installer.py` gains GR2-02
+  assertions (retention path literal; fail-loud self-check; the loop-final
+  `Trajectory:` line asserted *within* the structure block; loop.sh did not
+  gain the judge-parity clause). `test_usage_limit_contract.py`'s
+  auto.sh 13-value enum assertion stays green untouched.
+
+### Step 4 — TEL-01 telemetry doc (opt-in, flag-gated)
+
+- **`_telemetry(cfg)`** in `lib/templates.py` (registered `"telemetry"`)
+  returns the **frozen `telemetry.md` body verbatim**. Exactly two values
+  are stamped at emission, **scoped to the `OTEL_RESOURCE_ATTRIBUTES`
+  line**: `<protocol_version>` ← `PROTOCOL_VERSION`, `<archetype>` ←
+  `cfg["project"]["archetype"]`. The explanatory comment two lines above
+  legitimately keeps the literal placeholder names, so the substitution is
+  a scoped one-line build, not a global replace (AR-01 class). Fails loud
+  (raises) if either value is missing — never emits a body whose OTEL line
+  still carries a `<placeholder>`. Emitted body verified byte-identical to
+  the uploaded `telemetry.md` (modulo the two substitutions).
+- **`build_plan`** flag-gated add of `.claude/steering/telemetry.md` when
+  `cfg.get("telemetry_export_enabled")`. Committed by construction
+  (steering never gitignored); no gitignore edit. Read defensively.
+- **`_write_state`** persists `telemetry_export_enabled` cfg-authoritatively
+  (mirrors the mode-flag pattern); the flag-gated add and the state field
+  key off the same cfg value, so emitted doc and state never disagree.
+- **TAR-01 substitution-source deviation (recorded).** The frozen head
+  note / Companion / body comment say the version is stamped "from
+  `.bootstrap-state.json` (`bootstrap_protocol_version`)"; this
+  implementation stamps the `PROTOCOL_VERSION` **constant**. Code-verified
+  equivalent: both state writers stamp `bootstrap_protocol_version =
+  PROTOCOL_VERSION` (`_write_state` and `_write_retrofit_state`), and
+  `apply_plan` refreshes an unmodified `telemetry.md` on re-apply/upgrade
+  (hand-edits preserved under L-1, the expected exception) — so the emitted
+  constant equals the state-written value on every apply path. The
+  regression lock is the TAR-01 pairing assertion (emitted OTEL version ==
+  state `bootstrap_protocol_version` on the same apply).
+- **Wizard wiring — `lib/interview.py`** [freeze exception]. TEL-01 is a
+  skippable Phase 0 decision, wired as a **standalone top-level boolean**
+  (NOT under `autonomous_modes` — telemetry is independent of every
+  autonomous mode): added to `ANSWER_KEYS`, `default_answers` (default
+  skip), `answers_to_config` (top-level key), `parse_interview_answers`
+  `bool_keys`, the deterministic render (verbatim PRD "Enable observability
+  export?" question), and the interactive front-end prompt. Back-compat: a
+  pre-2.4.0 ANSWERS block lacking the line parses to `false` rather than
+  erroring. Phase 0.5 preview needs no interview edit — the dry-run plan
+  listing already includes `telemetry.md` once the flag-gated add lands.
+- **Config flag — no `defaults.py` freeze exception.** `resolve_config`
+  deep-copies `raw`, so the unknown top-level `telemetry_export_enabled`
+  key passes through on both greenfield and retrofit; the retrofit branch
+  rejects only the three nested `*_enabled` mode flags. Verified by the
+  retrofit-passthrough assertion. (The retrofit **state schema** is not
+  extended — out of scope, recorded; the flag-gated add still emits
+  `telemetry.md` on a retrofit plan because the overlay wraps the full
+  plan.)
+- **Off by default = invisible.** Default plan count and determinism digest
+  unchanged vs the post-GR2-03a baseline; **no golden move** (neither
+  golden fixture opts in — the on-path is covered only in
+  `test_installer.py`). On-path: +1 file, committed, substituted OTEL line.
+  New assertions in `test_installer.py` (off/on/committed/OTEL-scoped/
+  pairing/TAR-02-secrets/state-flag/retrofit-passthrough) and
+  `test_interview.py` (default false, verbatim question, yes→true
+  round-trip).
+
+### Step 6 — Adversarial code review of the fold: correctness fixes
+
+Multi-lens adversarial review of the open PR (10 finder angles, one
+refutation-seeking verifier per candidate, plus a gap sweep). Fixes land
+in the same PR, grouped by surface. This step is the **non-frozen `lib/`
+correctness set**; the frozen-source corrections and the remaining
+test/release-integrity items follow in steps 7 and 8.
+
+- **TEL-01 flag normalization (opt-out inversion).** `minyaml` coerces
+  only bare `true`/`false`, and `resolve_config` (frozen `defaults.py`)
+  neither knows nor validates the post-schema `telemetry_export_enabled`
+  key — so `off`, `no`, `"false"` all arrived as **non-empty strings** and
+  raw truthiness read them as ENABLED, emitting `telemetry.md` and
+  stamping `telemetry_export_enabled: true` into state. An explicit
+  privacy opt-out silently inverted into an opt-in. New
+  `installer.telemetry_enabled(cfg)` resolves the accepted spellings
+  (bool, `0`/`1` int, and the string forms) and **fails loud** on anything
+  unrecognized rather than guessing; both consumers (the `build_plan` gate
+  and the `_write_state` stamp) route through it, so the emitted doc and
+  the persisted flag cannot disagree. Only the wizard normalized before;
+  the documented hand-edit-the-config path had no guard.
+- **Upgrade-path overwrite protection.** `apply_plan`'s hand-edit guard
+  only fired for **manifest-tracked** paths: `prev_files.get(path)` is
+  `None` for a path the installer has never written, so the guard fell
+  through and overwrote it. That is precisely the `2.2.0 → 2.4.0` upgrade
+  — GR2-03a and TEL-01 both ADD planned paths, and the doc-first v2.3.0
+  migration note tells operators to hand-create `assumption-ledger.md`.
+  Reproduced end-to-end: a hand-seeded ledger was replaced with no
+  warning and no backup, contradicting the promise the emitted ledger's
+  own header makes. An untracked file at a planned path is now treated as
+  operator-owned and skipped (`pre-existing and not installer-generated`),
+  `--force` unchanged. Same fix closes a second-order gap: a skip records
+  the OPERATOR's digest, which on the next run read as "we wrote that" and
+  fell through to overwrite — protecting an edit exactly once and
+  clobbering it on the following run. Ownership is now sticky via the
+  `skipped-local-edit` state marker (a revert to our bytes classifies
+  `unchanged` and never reaches the guard).
+- **Fail-loud back-compat discriminator (TEL-01 parse).** The missing-key
+  exemption keyed only on the key NAME, so a **deleted or misspelled**
+  telemetry line in a freshly rendered v2.4.0 file resolved silently to
+  `false` — the operator believes the export is on, no `telemetry.md` is
+  emitted, and nothing says why (unknown keys are dropped without a
+  warning). `render_interview` emits the telemetry SECTION
+  unconditionally, so its presence dates a file to v2.4.0-or-later: marker
+  present ⇒ raise, marker absent ⇒ genuinely pre-2.4.0, keep defaulting to
+  skip. The locked back-compat requirement is preserved and
+  fail-loud-not-silent is restored on the designed hand-edit surface. The
+  title is now a shared constant (`TELEMETRY_SECTION_TITLE`) referenced by
+  both the renderer and the parser so the two cannot drift.
+- **Emitted comment-contract citations (GR2-02 wrappers).** Three
+  corrections in the shared `_per_task_wrapper` skeleton, all
+  string-asserted normative surface: (a) the trajectory-retention item
+  interpolated `{phase}`, making `goal-loop.sh` cite a *Phase 9.6
+  "Deliverable contract for the wrappers"* heading that does not exist —
+  now cites Phase 9.5 unconditionally, the contract's single normative
+  home (Phase 9.6 references rather than restates it); (b) the loop-final
+  block hardcoded **Phase 9.7**, which is queue mode — a phase a loop-only
+  project never enabled, and not where `loop-final` is defined — now
+  interpolates `{phase}` (9.5/9.6) like its sibling; (c) the block named
+  `.claude/specs/` while never stating the actual destination, now names
+  `.claude/sessions/loop-final-$TASK_ID.md` and states the gitignore
+  posture accurately (only the `.claude/sessions/` DOTFILE sentinels are
+  ignored). `auto.sh` untouched; its 13-value `exit_reason` enum unchanged.
+- **Assumption-ledger source-of-truth pointers.** `§6.D` → `§6.E`: §6.D is
+  the *Hook security & correctness checklist*; the drift thresholds live
+  under §6.E (*Audio alert system* → *Drift detector specifics*). Verified
+  against the frozen doc's own section map, and against the pre-existing
+  emitted bodies that correctly cite 6.D for the security checklist. The
+  max-iterations pointer to `.claude/loop-config.md` is now phrased
+  conditionally — that file is emitted only under loop mode, so the
+  UNCONDITIONAL ledger was sending a default install to a path absent
+  from its own tree.
+- **`progress.md` template cross-references.** The canonical template
+  embedded in every emitted `.claude/specs/INDEX.md` carried `PRD lines
+  806/1168` and `PRD Phase 7 step 6, §6.D` — coordinates into the Bootstrap
+  protocol document. In an emitted project "PRD" denotes the operator's own
+  product doc (`project.prd_path`) and the protocol doc is not shipped, so
+  every instantiated `progress.md` pointed agents at the wrong file (and
+  raw line numbers rot on the next doc edit). Replaced with self-contained
+  descriptions of the same conventions.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 6).** Both fixtures move;
+zero files added or removed; counts stable (`default: 56`,
+`full_autonomous: 68`). Diff-verified vs the pre-fix head before
+`GOLDEN_UPDATE=1` — default: `assumption-ledger.md` + `specs/INDEX.md`;
+full_autonomous: those two plus `loop.sh` / `goal-loop.sh`. Recorded in
+the golden-file comment alongside the digests.
+
+**Freeze-exception accounting correction.** The step-2 (GR2-01)
+default-fixture record enumerated two body movers (`CLAUDE.md`,
+`specs/INDEX.md`) where a main-vs-branch plan diff shows **three** — the
+implementer agent body is added unconditionally in `_agents`, so it moves
+in BOTH fixtures, not only `full_autonomous`. The aggregate digest was
+therefore absorbing a byte change the record never named, which is exactly
+what the tripwire's audit trail exists to prevent. Comment corrected;
+independently re-verified by diffing per-path bodies across `main` and the
+branch.
+
+**Test surface:** 14 suites, 914 checks green (`test_installer.py`
+197 → 237, `test_interview.py` 73 → 81). New coverage: flag normalization
+across every accepted spelling plus fail-loud rejection of unrecognized
+values, the state-stamp pairing on a non-canonical spelling, the
+untracked-path skip (including stickiness across runs and `--force`
+override), and the parse discriminator (deleted key, misspelled key,
+genuine pre-2.4.0 file, and other keys staying loud). Emitted wrappers
+still pass `bash -n` with telemetry on; re-apply idempotent
+(`create=0 update=0`); `--ic-checks` exit 0.
+
+### Step 7 — Review fixes in the frozen sources (pre-release corrections)
+
+Three review findings originate in the **frozen sources this fold
+implements against**, not in the code that renders them: the code
+faithfully reproduces text that is itself wrong. Because
+`Bootstrap-Protocol-v2-4-0.md`, the Companion, and `telemetry.md` are
+added by this PR and it has not merged, these are **pre-release
+corrections** on the TAR-02..06 precedent (that class edited
+`telemetry.md` eight times while it was "free pre-freeze"), not
+freeze exceptions against a released artifact. Each correction is applied
+to the frozen source AND the emitted copy in the same commit, so the two
+stay byte-equivalent modulo the one substituted line.
+
+- **`settings.local.json` was not actually gitignored (credential
+  vector).** The emitted `telemetry.md` steers OTLP endpoint and
+  **auth-header** settings into `.claude/settings.local.json` and calls
+  that file "(gitignored)" — while none of the three emitted gitignore
+  surfaces (`_gitignore`, `_gitignore_root`, `_retrofit_gitignore`)
+  covered it. Claude Code auto-ignores that file only when Claude Code
+  *itself* creates it, and the doc explicitly says to set these values
+  **before launching `claude`** — so in a fresh bootstrap the operator
+  hand-creates it, and `git add .claude` stages
+  `OTEL_EXPORTER_OTLP_HEADERS` tokens. The same paragraph concedes
+  "nothing in the pipeline scans it for a pasted secret," so no downstream
+  gate catches it either. **Fixed by making the claim true** (one entry in
+  the greenfield fragment, one in the retrofit fragment) rather than by
+  softening the doc — verified end-to-end: `git add -A` on a project with
+  a hand-written token file now stages nothing, `git check-ignore`
+  confirms the rule.
+- **`telemetry.md` restated drift thresholds as `(50/120/3)`.** The
+  assumption ledger interpolates those three values from `cfg["hooks"]`
+  *specifically so no emitted doc becomes a stale second authority* — yet
+  the co-emitted `telemetry.md` hardcoded them, so on any customized
+  config the two steering docs in the same directory disagreed about the
+  project's own configuration (reproduced with
+  `drift_tool_call_threshold: 77`: ledger says 77, telemetry said 50), and
+  the ledger cross-links `telemetry.md` as its evidence source. Rather
+  than add a third scoped substitution, the row now **drops the numbers
+  and points at the ledger** — the contradiction class is removed instead
+  of duplicated, consistent with the ledger's own "this ledger links, it
+  does not restate" rule.
+- **The trajectory 7-day purge was asserted but never implemented.** The
+  GR2-02 contract and `telemetry.md` both stated retained
+  `trajectory-*.jsonl` files "are purged with the 7-day state-retention
+  policy". That policy covers session-ID-namespaced state under
+  `.claude/sessions/`; it does not reach `.claude/logs/`, and **no emitted
+  hook, wrapper, or `auto.sh` consumes `purge_old_state_after_days`** —
+  nothing prunes trajectory files at all. Since the same contract makes
+  retention *mandatory*, the files accumulate without bound across an
+  unattended campaign while the committed doc told a privacy reviewer they
+  expire. Corrected to state pruning as part of the operator obligation
+  the contract already binds, in the wrapper comment, `telemetry.md`, the
+  protocol's Phase 9.5 item 4, and the Companion's artifact table and
+  migration note. **Deliberately not "fixed" by adding a purge:**
+  automatic file deletion in an emitted script is new destructive
+  behavior and an owner decision, not a review-fix. Implementing a real
+  prune remains available as a follow-up.
+- **`§6.D` → `§6.E` in the doc text too.** Step 6 corrected the emitted
+  ledger's citation; the same wrong letter appears in the v2.3.0 fold's
+  own doc text (the changelog note's "cross-reference pointers added at
+  §6.D", the Assumption Ledger section's links sentence, and the GR-2
+  appendix's "§6.D, Alert 3"). All three corrected. The pre-existing §6.D
+  references at Phase 6.D / "documented in section 6.D" are **unchanged
+  and out of scope** — verified present in `v2-0-0` and `v2-2-0`, so they
+  belong to the already-recorded doc-reference-normalization deferral.
+- **Literal `\uXXXX` escapes in the GR-2 appendix (found while fixing the
+  above, not in the review).** Lines 1967–2003 of the protocol doc — the
+  block the v2.3.0 fold added — carried 34 undecoded escapes (23
+  `—`, 9 `§`, plus `…`/`≥`) that render literally as
+  backslash-u text. Decoded in place; confined to that block, zero
+  elsewhere in the doc, zero in the Companion and `telemetry.md`.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 7).** Both fixtures move;
+zero files added/removed; counts stable (56 / 68). Diff-verified before
+`GOLDEN_UPDATE=1`: default — `.claude/.gitignore` only; full_autonomous —
+that plus `loop.sh` / `goal-loop.sh` (purge wording). `telemetry.md` is in
+**neither** fixture (both leave the flag off), so its threshold and purge
+corrections produce no golden movement and the "off by default =
+invisible" property still holds; those are covered behaviorally instead.
+
+**Test surface:** 14 suites, 928 checks green (`test_installer.py`
+237 → 251). New coverage: the gitignore entry on both greenfield and
+retrofit fragments, the absence of restated thresholds paired with the
+ledger still carrying the customized value, the purge-claim wording, and
+a **frozen-source equivalence pin** — the emitted body must match
+`telemetry.md` line-for-line with exactly one differing line, and that
+line must be the `OTEL_RESOURCE_ATTRIBUTES` export. That last check closes
+the gap that made these corrections risky: the two ~80-line copies were
+byte-verified once by hand at fold time and pinned by nothing, so a future
+edit to either could silently strand the other (no golden covers it,
+since both fixtures leave the flag off).
+
+### Step 8 — Review fixes: retrofit coherence, release identity, test quality
+
+- **GR2 artifacts reached retrofit with no consumer.** The overlay wraps
+  the full greenfield plan, so a retrofit install already receives the
+  unconditional `.claude/specs/INDEX.md` (carrying the canonical
+  `progress.md` template) and `assumption-ledger.md`, plus — on opt-in —
+  wrappers carrying the GR2-02 trajectory contract. But the overlay
+  **replaces** `CLAUDE.md` and `implementer.md` with retrofit-flavor
+  bodies, and those received none of the GR2-01 read-progress-first
+  prose. The artifacts shipped with nothing instructing an agent to
+  consume them, so a resumed unattended retrofit iteration could
+  re-attempt an approach flagged do-not-retry — the exact failure GR2-01
+  exists to prevent. Restored in both retrofit bodies, **scoped to the
+  `*_opted_in` sections**: that is the only configuration in which a
+  resumed autonomous session exists, so the default retrofit surface on
+  this 1.6.2-pinned track stays byte-unchanged (asserted, 10.17/10.18).
+  *Alternative considered:* dropping the GR2 artifacts from retrofit
+  plans entirely, by the overlay's own `sdk_gates` rationale ("an artifact
+  the retrofit contract never declared"). Rejected because `RETROFIT.md`
+  **does** declare the `specs/INDEX.md` structure the template lives in,
+  and the ledger's rows are operationally applicable (retrofit ships the
+  drift-detector hook and, on opt-in, `loop-config.md`). Widening the
+  instruction to unconditional, or dropping the artifacts, both remain
+  easy reversals from here.
+- **Retrofit GR2 coverage, previously zero.** `test_retrofit.py` had no
+  assertion about any GR2 artifact. Eight added (10.13–10.20): the
+  template ships, both opted-in instruction surfaces carry it, the
+  trajectory contract rides the retrofit wrappers, the default body stays
+  clean, the ledger lands, and the retrofit gitignore carries the TEL-01
+  `settings.local.json` entry.
+- **`plugin.json` version is now pinned.** It was the one release-identity
+  surface no test read, and it has been missed **twice**: v2.0.0 shipped
+  `"1.0.0"` (corrected later by a review item) and the v2.2.0 bump omitted
+  it again (caught only in adversarial review). Both misses happened even
+  though the changelog records `plugin.json` as part of the release set —
+  the convention was never the control. Now asserted against
+  `PROTOCOL_VERSION`, including the version in its description prose. Also
+  pinned: `installer.PROTOCOL_VERSION == templates.PROTOCOL_VERSION`, so a
+  half-applied bump fails rather than emitting bodies stamped with one
+  version while state records the other.
+- **Removed a tautological check.** The GR2-03a "plan count is +1 for the
+  ledger" check filtered the ledger out of the same plan and compared
+  lengths — a partition of one list by complementary predicates, so the
+  delta equalled the occurrence count by construction and could never fail
+  independently of the check above it. Its comment advertised a "+1 vs the
+  v2.2.0 plan" comparison that was never built. Deleted, with a note
+  pointing at `EXPECTED_ACTION_COUNTS` (56 / 68), which is where a real
+  count regression actually surfaces.
+
+**No golden movement from the items above** — the retrofit change touches
+only retrofit-flavor bodies (neither golden fixture is retrofit) and the
+rest is test-only.
+
+- **GR2-01 template ownership (the upgrade-delivery half).** Step 6 stopped
+  the upgrade from *destroying* operator content; this closes the other
+  half of the same finding. The canonical `progress.md` template was
+  emitted **inside `.claude/specs/INDEX.md`** — the spec roster, which
+  Phase 7.6 step 5 explicitly directs operators to rewrite. So on any real
+  install the hand-edit guard correctly SKIPS that file, and the template
+  could never reach an upgraded workspace, while `CLAUDE.md` and the
+  implementer body *were* updated to point at a section that would never
+  arrive (a dangling pointer). Delivering it required `--force`, which
+  destroys the roster. Root cause is altitude, not logic: installer-owned
+  normative content was parked in operator territory. The template now
+  lives in its **own installer-owned file**,
+  `.claude/specs/progress-template.md`, which nobody hand-edits and which
+  therefore updates cleanly forever; `INDEX.md` keeps the roster and
+  points at it. All four pointers (greenfield `CLAUDE.md` + implementer,
+  and both retrofit bodies) re-aimed. The original rationale for choosing
+  INDEX.md was that it is *unconditional* — a new unconditional file
+  satisfies that equally, without the ownership collision. Verified
+  end-to-end on a real `2.2.0 → 2.4.0` upgrade: roster intact,
+  hand-seeded ledger intact, `CREATE .claude/specs/progress-template.md`,
+  and the `CLAUDE.md` pointer resolving to a file that exists.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 8) — first count change of
+the review.** `default: 56 → 57`, `full_autonomous: 68 → 69`. One file
+added, zero removed, three bodies moved (`INDEX.md` loses the template
+body and gains a pointer; `CLAUDE.md` and `implementer.md` re-aim theirs).
+Diff-verified before `GOLDEN_UPDATE=1`; recorded in the golden comment.
+
+**Test surface:** 14 suites, **945 checks** green, up from 866 at the
+start of the review (`test_installer.py` 197 → 260, `test_interview.py`
+73 → 81, `test_retrofit.py` 254 → 262).
+
+### Review findings recorded but NOT fixed
+
+Below the reported cap or deliberately deferred, listed so a later pass
+does not re-derive them: the recorded retrofit **state-schema** gap for
+the telemetry flag (unchanged from step 4 — retrofit plans still emit
+`telemetry.md` without a state field to match); the emitted progress
+template's `../../learnings/` link, which resolves to `.claude/learnings/`
+while a retrofit plan's calibration ledger sits at repo-root `learnings/`
+(pre-existing placement, symmetric with greenfield, where neither mode
+creates the directory at install time); the duplicated ~110-word telemetry
+question text in `render_interview` and `run_interactive`, which has
+already drifted in formatting and is pinned by a test in only one copy;
+the `_body_of` helper defined *after* its would-be call sites, leaving two
+bare-`IndexError` lookups; two determinism checks strictly implied by the
+existing whole-plan digest check; the dead `not pv` arm in `_telemetry`'s
+guard (`PROTOCOL_VERSION` is a module literal); a redundant proposal
+rebuild in `test_interview.py`; the assumption ledger's drift row citing
+the drift-detector hook config even when `hooks.drift_detector: false`
+(untested configuration); and the freeze-exception ledger numbering, which
+runs `no. 6`–`no. 15` and is not continued by the v2.4.0 blocks — the
+recorded convention fixes the *format* (`no. N`, never `#N`) but not
+sequential numbering, and these blocks carry the citable `GR2-EX / TEL-EX`
+identity instead.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

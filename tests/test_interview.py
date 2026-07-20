@@ -455,5 +455,102 @@ check("R-3: legacy inline list form still parses (back-compat)",
       _lp["principles_ranked"] == ["A one", "B two", "C three"] and
       _lp["secrets_never_read_paths"] == [".env*", "secrets/**"])
 
+# --------------------------------------------------------------------------- #
+# TEL-01 (v2.4.0 fold): telemetry_export_enabled is a standalone top-level
+# opt-in wired through the wizard, default skip.
+# --------------------------------------------------------------------------- #
+_tp = IV.build_proposal("a service rest api worker endpoint")
+_tans = IV.default_answers(_tp)
+check("TEL-01: default answer skips telemetry (false)",
+      _tans["telemetry_export_enabled"] is False)
+# Default emitted config carries the top-level flag = false (mirrors how
+# queue_mode_enabled: false is emitted).
+_tcfg = IV.answers_to_config(_tans)
+check("TEL-01: default emitted config has top-level "
+      "telemetry_export_enabled: false",
+      _tcfg.get("telemetry_export_enabled") is False)
+check("TEL-01: telemetry flag is NOT nested under autonomous_modes",
+      "telemetry_export_enabled" not in _tcfg["autonomous_modes"])
+# The default-emitted YAML string carries the flag (surfaces in the ANSWERS
+# block the operator edits).
+_trender = IV.render_interview(_tp, "x")
+check("TEL-01: ANSWERS block emits telemetry_export_enabled: false",
+      "telemetry_export_enabled: false" in _trender)
+# Verbatim PRD question phrasing present in the render (not paraphrased).
+check("TEL-01: render carries the verbatim 'Enable observability export?' "
+      "question", "Enable observability export?" in _trender)
+# Answering yes yields a true config flag (answers layer).
+_tp2 = IV.build_proposal("a service rest api worker endpoint")
+_ans2 = IV.default_answers(_tp2)
+_ans2["telemetry_export_enabled"] = True
+_ans2_cfg = IV.answers_to_config(_ans2)
+check("TEL-01: answering yes yields top-level telemetry_export_enabled: true",
+      _ans2_cfg.get("telemetry_export_enabled") is True)
+# And a hand-edited ANSWERS block with the flag true parses back to true.
+_yes_block = IV.render_interview(_tp2, "x").replace(
+    "telemetry_export_enabled: false", "telemetry_export_enabled: true")
+check("TEL-01: telemetry_export_enabled: true round-trips through parse",
+      IV.parse_interview_answers(_yes_block)["telemetry_export_enabled"]
+      is True)
+
+# --------------------------------------------------------------------------- #
+# TEL-01 back-compat discriminator (review finding: the missing-key exemption
+# was unconditional, so a DELETED or MISSPELLED key in a freshly rendered
+# v2.4.0 file silently resolved an opt-in to false — the operator believes
+# telemetry is on, no telemetry.md is emitted, nothing says why). The telemetry
+# SECTION marker only a v2.4.0+ render carries is the discriminator: present =>
+# fail loud; absent => genuinely pre-2.4.0, keep defaulting to skip.
+# --------------------------------------------------------------------------- #
+check("TEL-01 back-compat: the render carries the section marker",
+      IV.TELEMETRY_SECTION_MARKER in _trender)
+
+# (a) A v2.4.0 file with the answer line DELETED must fail loud.
+_deleted = "\n".join(l for l in _trender.splitlines()
+                     if not l.strip().startswith("telemetry_export_enabled:"))
+try:
+    IV.parse_interview_answers(_deleted)
+    check("TEL-01 back-compat: deleted key in a v2.4.0 file fails loud", False)
+except ValueError as _e:
+    check("TEL-01 back-compat: deleted key in a v2.4.0 file fails loud",
+          "telemetry_export_enabled" in str(_e))
+
+# (b) A MISSPELLED key is the same class (unknown keys are dropped silently).
+_typo = _trender.replace("telemetry_export_enabled: false",
+                         "telemetry_export_enabld: true")
+try:
+    IV.parse_interview_answers(_typo)
+    check("TEL-01 back-compat: misspelled key fails loud", False)
+except ValueError as _e:
+    check("TEL-01 back-compat: misspelled key fails loud",
+          "telemetry_export_enabled" in str(_e))
+
+# (c) A genuinely pre-2.4.0 file (no telemetry section, no key) still parses,
+#     defaulting to skip — the locked back-compat requirement is preserved.
+_pre240 = "\n".join(
+    l for l in _deleted.splitlines()
+    if IV.TELEMETRY_SECTION_TITLE not in l
+    and "Enable observability export?" not in l
+    and "telemetry_export_enabled = false" not in l)
+check("TEL-01 back-compat: the pre-2.4.0 fixture has no section marker",
+      IV.TELEMETRY_SECTION_MARKER not in _pre240)
+_pre_parsed = IV.parse_interview_answers(_pre240)
+check("TEL-01 back-compat: pre-2.4.0 file still parses (no exception)",
+      isinstance(_pre_parsed, dict))
+check("TEL-01 back-compat: pre-2.4.0 file defaults telemetry to skip",
+      _pre_parsed["telemetry_export_enabled"] is False)
+check("TEL-01 back-compat: pre-2.4.0 file keeps every other answer intact",
+      _pre_parsed["project_name"] == _tans["project_name"])
+
+# (d) Every other missing key stays loud regardless of the marker (the
+#     exemption is scoped to the one key, not a general softening).
+_no_queue = "\n".join(l for l in _trender.splitlines()
+                      if not l.strip().startswith("queue_mode_enabled:"))
+try:
+    IV.parse_interview_answers(_no_queue)
+    check("TEL-01 back-compat: other missing keys still fail loud", False)
+except ValueError as _e:
+    check("TEL-01 back-compat: other missing keys still fail loud",
+          "queue_mode_enabled" in str(_e))
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

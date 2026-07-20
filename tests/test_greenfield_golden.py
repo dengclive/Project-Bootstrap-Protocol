@@ -251,19 +251,139 @@ EXPECTED_DIGESTS = {
     #     three usage_limit_* keys; RC-03 re-point), auto.sh (R5 exit_reason
     #     enum + run-summary + AR2-01 runner rule + AR2-09c key-less posture;
     #     RC-03 re-point).
-    "default": "742aa2955d04d35cc23a0cea9150a05c257a7d9a697e54e7c4064536614d64bf",
+    # [v2.4.0 code fold — step 0 version stamp] settings.json `_generatedBy`
+    # "protocol 2.2.0" -> "protocol 2.4.0" (PROTOCOL_VERSION bump). The ONLY
+    # default-fixture change; zero files added/removed; count stable at 55.
+    # PROTOCOL_VERSION is interpolated into exactly one emitted body
+    # (templates.py _settings_json `_generatedBy`); the 11 emitted hook
+    # citations and wrapper doc-filename citations stay at their existing
+    # versions by design (byte-change surface kept minimal, per the fold's
+    # "every other body byte-identical" claim).
+    # [v2.4.0 code fold — GR2-03a] +1 unconditional file
+    # .claude/steering/assumption-ledger.md (count 55 -> 56). No other body
+    # moves; the added path is the only per-file digest change.
+    # [v2.4.0 code fold — GR2-01] prose-only, count unchanged (56). Body
+    # bytes move for CLAUDE.md (progress.md read-first note),
+    # .claude/specs/INDEX.md (canonical progress.md template embedded), AND
+    # .claude/agents/implementer.md (failed-approaches do-not-retry priming
+    # instruction — added UNCONDITIONALLY in _agents, so it moves in BOTH
+    # fixtures, not only full_autonomous). [Corrected post-review: the
+    # original entry enumerated two movers where a main-vs-branch plan diff
+    # shows three, so the aggregate re-baseline was absorbing a byte change
+    # this record never named. Verified by diffing per-path bodies across
+    # main and the branch for the default fixture.]
+    # [v2.4.0 review-fix re-baseline] Emitted-byte changes from the
+    # adversarial-review fixes, diff-verified vs the pre-fix head (zero files
+    # added/removed; count stable at 56):
+    #   .claude/steering/assumption-ledger.md — drift-threshold source-of-truth
+    #     citation §6.D -> §6.E (§6.D is the hook security & correctness
+    #     checklist; the thresholds live under §6.E "Audio alert system",
+    #     *Drift detector specifics*), and the max-iterations pointer to
+    #     .claude/loop-config.md is now phrased conditionally (that file is
+    #     emitted only under loop mode, so the unconditional ledger was
+    #     pointing a default install at a path absent from its own tree).
+    #   .claude/specs/INDEX.md — the canonical progress.md template drops the
+    #     protocol-doc coordinates ("PRD lines 806/1168", "PRD Phase 7 step 6,
+    #     §6.D"): in an emitted project "PRD" denotes the operator's own
+    #     product doc, so those resolved against the wrong document.
+    # [v2.4.0 review-fix re-baseline, part 2 — frozen-source corrections]
+    # Diff-verified vs the part-1 head; zero files added/removed, count 56:
+    #   .claude/.gitignore — `settings.local.json` added. The emitted
+    #     telemetry.md steers OTLP endpoint AND auth-header settings into that
+    #     file and calls it "(gitignored)", but nothing ignored it: Claude Code
+    #     auto-ignores it only when Claude Code itself creates it, while the
+    #     doc says to write it BEFORE first launch. A hand-created file holding
+    #     OTEL_EXPORTER_OTLP_HEADERS tokens was therefore committable by
+    #     `git add .claude`, with the same paragraph conceding nothing scans
+    #     for pasted secrets. The rule makes the doc's claim true rather than
+    #     softening the doc. (Retrofit fragment gets the same entry; not a
+    #     golden fixture.)
+    # telemetry.md itself is NOT in either fixture (both leave the flag off),
+    # so its threshold/purge corrections produce no golden movement — the
+    # "off by default = invisible" property still holds. Those are covered by
+    # test_installer.py's TEL-01 blocks, including a new frozen-source
+    # equivalence pin.
+    # [v2.4.0 review-fix re-baseline, part 3 — GR2-01 template ownership]
+    # FIRST COUNT CHANGE OF THE REVIEW: 56 -> 57 (67 -> 69 for full). +1 file,
+    # zero removed, three bodies move. Diff-verified vs the part-2 head:
+    #   ADDED .claude/specs/progress-template.md — the canonical progress.md
+    #     template, relocated out of INDEX.md into its own installer-owned
+    #     file. INDEX.md is the operator-edited spec ROSTER (Phase 7.6 step 5
+    #     directs replacing the placeholder row), so the hand-edit guard skips
+    #     it on every real install: normative content parked inside it could
+    #     never reach an upgraded workspace, while CLAUDE.md and the
+    #     implementer body were updated to point at a section that would never
+    #     arrive. Delivering it required --force, which destroys the roster.
+    #     Separate file = separate ownership; it now updates cleanly.
+    #   .claude/specs/INDEX.md — template body removed, replaced by a pointer
+    #     plus an explicit "this file is yours to edit" note.
+    #   CLAUDE.md, .claude/agents/implementer.md — pointers re-aimed at
+    #     progress-template.md (a stale pointer here is the dangling-reference
+    #     class this revision closes).
+    "default": "d8b4bdab48f31c17a54530f49c26935a4a86bcbffc1b356ae3df3260b3f6a7ff",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
     #   Phase 9.5 transient paragraph); auto.sh enum restores the
     #   "within the run" / "transitively" qualifiers.
+    #   [v2.4.0 code fold — step 0 version stamp] same settings.json
+    #   `_generatedBy` "protocol 2.2.0" -> "protocol 2.4.0"; the ONLY
+    #   full_autonomous change at this step (count stable at 67).
+    #   [v2.4.0 code fold — GR2-03a] +1 unconditional file
+    #   .claude/steering/assumption-ledger.md (count 67 -> 68).
+    #   [v2.4.0 code fold — GR2-01] prose-only, count unchanged (68). Body
+    #   bytes move for CLAUDE.md, .claude/specs/INDEX.md, and the implementer
+    #   agent body (failed-approaches do-not-retry priming instruction).
+    #   [v2.4.0 code fold — GR2-02] comment-contract only, count unchanged
+    #   (68). Body bytes move for loop.sh + goal-loop.sh only (shared
+    #   _per_task_wrapper skeleton: trajectory-retention binding item +
+    #   loop-final Trajectory line). auto.sh is UNTOUCHED — default fixture
+    #   has no wrappers, so its digest does not move at this step.
+    #   [v2.4.0 review-fix re-baseline] Emitted-byte changes from the
+    #   adversarial-review fixes, diff-verified vs the pre-fix head (zero files
+    #   added/removed; count stable at 68): the two default-fixture bodies
+    #   above (assumption-ledger.md, specs/INDEX.md) PLUS the two wrappers —
+    #     loop.sh / goal-loop.sh — three comment-contract citation fixes in the
+    #     shared _per_task_wrapper skeleton: (a) the trajectory-retention item
+    #     now cites Phase 9.5 unconditionally (its single normative home; the
+    #     interpolated {phase} made goal-loop.sh cite a "Phase 9.6 Deliverable
+    #     contract for the wrappers" heading that does not exist), (b) the
+    #     loop-final block now interpolates {phase} (9.5/9.6) instead of the
+    #     hardcoded 9.7, which is queue mode — a phase a loop-only project
+    #     never enabled, and not where loop-final is defined, and (c) the block
+    #     now names the actual destination .claude/sessions/loop-final-
+    #     $TASK_ID.md and states the gitignore posture accurately (only the
+    #     .claude/sessions/ DOTFILE sentinels are ignored) instead of citing
+    #     .claude/specs/, which is not where the audit record belongs.
+    #   auto.sh remains UNTOUCHED (its 13-value exit_reason enum unchanged).
+    #   [v2.4.0 review-fix re-baseline, part 2 — frozen-source corrections]
+    #   The .claude/.gitignore `settings.local.json` entry above, PLUS
+    #   loop.sh / goal-loop.sh: the trajectory-retention contract no longer
+    #   ASSERTS that retained stream JSON "is purged with the 7-day
+    #   state-retention policy". That policy covers session-ID-namespaced
+    #   state under .claude/sessions/ and does not reach .claude/logs/; no
+    #   emitted hook, wrapper, or auto.sh consumes purge_old_state_after_days,
+    #   so nothing prunes trajectory files at all. Since the same contract
+    #   makes retention MANDATORY, the files accumulate without bound while
+    #   the committed telemetry.md told a privacy reviewer they expire.
+    #   Pruning is now stated as part of the operator obligation the contract
+    #   already binds. auto.sh still UNTOUCHED.
+    #   [v2.4.0 review-fix re-baseline, part 3 — GR2-01 template ownership]
+    #   Same +1 file and same three body moves as the default column
+    #   (68 -> 69); the split is archetype- and mode-independent.
     "full_autonomous":
-        "2c4dc150d828d8ee001842263067e2a6c85bf5fa6a5055b7dcb7a5b9b844e700",
+        "99784eb9bafd017e0cd0fa7a7c5f229d9b5b4cbdc80ba66a722abd093dcdd753",
 }
 
 EXPECTED_ACTION_COUNTS = {
-    "default": 55,
-    "full_autonomous": 67,
+    # [v2.4.0 code fold — GR2-03a] both fixtures +1 for the unconditional
+    # assumption-ledger.md steering artifact (55 -> 56, 67 -> 68).
+    # [v2.4.0 review fix — GR2-01 template ownership] both fixtures +1 again
+    # for the unconditional .claude/specs/progress-template.md, split out of
+    # the operator-edited INDEX.md so it is deliverable on upgrade
+    # (56 -> 57, 68 -> 69).
+    "default": 57,
+    "full_autonomous": 69,
 }
 
 

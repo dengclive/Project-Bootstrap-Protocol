@@ -543,7 +543,18 @@ def _run_hook(d, hook_name, payload, env_extra=None):
     """Run a hook script under the no-jq restricted PATH harness.
     CLAUDE_PROJECT_DIR must be set so the hook resolves its runtime
     files (.retrofit-state.json, spec-strategy.md, rollout-schedule.md)
-    in the test fixture rather than the parent repo."""
+    in the test fixture rather than the parent repo.
+
+    `cwd` must be set for the same reason. CLAUDE_PROJECT_DIR governs how the
+    hook resolves FILES, but the hooks also shell out to `git` (spec-gate-commit
+    reads `git diff --cached`), and git resolves its repository from the
+    PROCESS CWD. Without cwd=d the hook inherits the test runner's CWD — the
+    bootstrap repo itself — so those hooks read THIS repository's index instead
+    of the fixture's, and two checks (T2.AF4, T2.FS5) then pass or fail
+    depending on whatever the developer happens to have staged. Found when a
+    staged deletion in the parent repo turned the suite red with no code
+    change; CI only ever saw green because a fresh checkout has an empty
+    index."""
     e = dict(os.environ)
     e["PATH"] = _nojq_path()
     e["CLAUDE_PROJECT_DIR"] = d
@@ -551,7 +562,8 @@ def _run_hook(d, hook_name, payload, env_extra=None):
         e.update(env_extra)
     r = subprocess.run(
         ["bash", os.path.join(d, ".claude", "hooks", f"{hook_name}.sh")],
-        input=json.dumps(payload), capture_output=True, text=True, env=e)
+        input=json.dumps(payload), capture_output=True, text=True, env=e,
+        cwd=d)
     return r.returncode, r.stdout + r.stderr
 
 
@@ -831,9 +843,10 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.2.0' literally "
-          "(R6 usage-limit release-identity bump)",
-          state["bootstrap_protocol_version"] == "2.2.0")
+    check("8.3: bootstrap_protocol_version matches '2.4.0' literally "
+          "(v2.4.0 code fold release-identity bump; retrofit state also "
+          "stamps the greenfield PROTOCOL_VERSION per the shared writer)",
+          state["bootstrap_protocol_version"] == "2.4.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "
@@ -1037,6 +1050,47 @@ check("10.11: drift-detector-loop-cooperation hook installed on opt-in",
       "drift-detector-loop-cooperation" in cfg_lg["_resolved_hooks"])
 check("10.12: iteration-summary-enforcement hook installed on goal opt-in",
       "iteration-summary-enforcement" in cfg_lg["_resolved_hooks"])
+
+# ---------------------------------------------------------------------------
+# GR2 artifacts on the retrofit track (adversarial-review finding). The v2.4.0
+# fold's GR2 artifacts reach retrofit plans because the overlay WRAPS the full
+# greenfield plan: the unconditional .claude/specs/INDEX.md (carrying the
+# canonical progress.md template) and assumption-ledger.md are not replaced or
+# dropped, and the opted-in wrappers carry the GR2-02 trajectory contract. But
+# the overlay DOES replace CLAUDE.md and implementer.md with retrofit-flavor
+# bodies, and those carried no read-progress-first instruction — so the
+# artifacts shipped with nothing telling an agent to consume them, and a
+# resumed unattended retrofit iteration could re-attempt an approach flagged
+# do-not-retry. The instruction is restored for the opted-in case only (that
+# is the only configuration with a resumed autonomous session), leaving the
+# default retrofit body byte-unchanged on this version-pinned track.
+# ---------------------------------------------------------------------------
+_bodies_lg = {a["path"]: a["body"] for a in plan_lg}
+_bodies_no = {a["path"]: a["body"] for a in build_plan(cfg_no)}
+
+check("10.13: retrofit ships the canonical progress.md template (INDEX.md)",
+      "Canonical `progress.md` template"
+      in _bodies_lg.get(".claude/specs/INDEX.md", ""))
+check("10.14: opted-in retrofit CLAUDE.md instructs reading progress.md",
+      "progress.md" in _bodies_lg.get("CLAUDE.md", "")
+      and "Failed approaches" in _bodies_lg.get("CLAUDE.md", ""))
+check("10.15: opted-in retrofit implementer honors do-not-retry",
+      "do-not-retry" in _bodies_lg.get(".claude/agents/implementer.md", ""))
+check("10.16: the GR2-02 trajectory contract rides the retrofit wrappers",
+      "GR2-02" in _bodies_lg.get(".claude/loop.sh", ""))
+# Scope guard: the no-opt-in retrofit body stays free of the addendum, so the
+# default retrofit surface on the 1.6.2-pinned track is unchanged.
+check("10.17: default retrofit CLAUDE.md carries no progress addendum",
+      "Per-task progress ledger" not in _bodies_no.get("CLAUDE.md", ""))
+check("10.18: default retrofit implementer carries no GR2-01 bullet",
+      "GR2-01" not in _bodies_no.get(".claude/agents/implementer.md", ""))
+# The unconditional ledger reaches retrofit plans too (overlay wraps the full
+# plan). Recorded behavior, previously untested on this track.
+check("10.19: assumption-ledger.md lands on retrofit plans",
+      ".claude/steering/assumption-ledger.md" in paths_lg)
+check("10.20: retrofit .gitignore covers settings.local.json (TEL-01)",
+      "settings.local.json"
+      in _bodies_lg.get(".claude/.gitignore", "").splitlines())
 
 # loop.sh body is the greenfield guarded skeleton (RETROFIT R8.G step 1).
 _loop_action = next(a for a in plan_lg if a["path"] == ".claude/loop.sh")
