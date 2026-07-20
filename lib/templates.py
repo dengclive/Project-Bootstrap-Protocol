@@ -849,7 +849,12 @@ def _agents(cfg):
             f"implementation. Reads .claude/specs/<slug>/tasks/<id>.md.\n"
             f"---\n\n# implementer\n\nSelf-contained: subagents do not "
             f"inherit the default system prompt. Read steering + spec + task, "
-            f"implement, run gates, commit, log decisions via decision-log.\n"),
+            f"implement, run gates, commit, log decisions via decision-log.\n\n"
+            f"During priming (loop and goal-supervised modes alike), consult "
+            f"the task's `.claude/specs/<slug>/progress.md` **Failed "
+            f"approaches** section and never re-attempt an approach flagged "
+            f"do-not-retry. Its canonical shape is in `.claude/specs/"
+            f"INDEX.md`.\n"),
         "reviewer": (
             f"---\nname: reviewer\nmodel: {w['reviewer_model']}\n"
             f"effort: high\ntools: Read, Grep, Glob, Bash\n"
@@ -1545,6 +1550,11 @@ Per-task lifecycle: spec-review -> spec-decompose -> plan-review -> implement
 (decisions logged continuously) -> local gates -> code-review ->
 spec-validate -> pr-author.
 
+At task/iteration priming, read the task's `.claude/specs/<slug>/progress.md`
+**first** — its `Status` and `Failed approaches` ledger — before the task
+brief, so a resumed session does not re-attempt a known dead end. The
+canonical shape of that file lives in `.claude/specs/INDEX.md`.
+
 ## Urgent escalations (AI stops and asks)
 
 1. A do-not-touch / never-read path needs access or modification.
@@ -1562,6 +1572,13 @@ steering - do not override in-session.
 
 
 def _specs_index(cfg):
+    # GR2-01 (v2.4.0 fold): this unconditional body is the canonical home for
+    # the per-task `progress.md` reference template. `progress.md` is created
+    # at task start (when a slug exists), not at install, so no static
+    # progress.md is emitted and the plan file count is unchanged — this is
+    # the *definition of its shape* the runtime creator instantiates. The
+    # `_claude_md` reading-list note and the implementer agent body LINK here
+    # rather than duplicating the template.
     return """# Specs Index
 
 | slug | status | active version | in-flight against superseded? |
@@ -1569,6 +1586,52 @@ def _specs_index(cfg):
 | _placeholder_ | planned | - | - |
 
 Rows derived from the PRD (Phase 7.6) or invented by /spec-new at call time.
+
+## Canonical `progress.md` template (GR2-01)
+
+Each spec gets a `.claude/specs/<slug>/progress.md`, created at task start and
+updated at every iteration boundary and interactive checkpoint. Required
+sections: `Status`, `Completed`, `In flight`, `Failed approaches` (each failed
+entry records what was tried, why it failed, and a do-not-retry flag). It
+**links** to `decisions.md`, `learnings/`, and the latest checkpoint and MUST
+NOT duplicate their content (inlining a `decisions.md` entry is a lint
+failure). Instantiate exactly this shape:
+
+```markdown
+# Progress — <slug>
+
+## Status
+
+<one line: e.g. "In flight — iteration 3 of 10; deterministic gate passing, judge advisory pending.">
+
+## Completed
+
+- <finished sub-goal, one line each; link the spec section or checkpoint it closed>
+
+## In flight
+
+- <what is being worked right now, one line each>
+
+## Failed approaches
+
+<Each entry: what was tried, why it failed, and a do-not-retry flag. This
+section is read FIRST at task/iteration priming, before the task brief, so a
+resumed or re-primed session does not re-attempt a known dead end.>
+
+- **<approach name>** — tried: <what>. Failed because: <why>. **do-not-retry: yes**
+- **<approach name>** — tried: <what>. Failed because: <why>. **do-not-retry: no** (retry only if <condition> changes)
+
+## Links (this file links; it does not duplicate)
+
+- Decisions: `decisions.md` (sibling file — `.claude/specs/<slug>/decisions.md`, PRD lines 806/1168)
+- Learnings: `../../learnings/`
+- Latest checkpoint: `../../sessions/<timestamp>-checkpoint.md` (the checkpoint convention is timestamp-named, not task-id-named — PRD Phase 7 step 6, §6.D)
+```
+
+Lint rule (GR2-01, compose-do-not-fork): a `progress.md` must LINK to
+`decisions.md`, `learnings/`, and the latest checkpoint — never inline their
+content. Keep every section terse; the audit detail lives in the linked
+artifacts, not here.
 """
 
 

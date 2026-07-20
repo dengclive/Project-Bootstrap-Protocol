@@ -71,6 +71,44 @@ the stamp's byte movement does not entangle the four content deltas.
   behavior as current fact); when the surfacing ships, that one paragraph
   updates under the same freeze exception as the surfacing change.
 
+### Step 2 — GR2-01 progress artifact (prose only, no new file)
+
+`progress.md` is created at *task start* (when a slug exists), not at
+install, so GR2-01 lands **no static file** and the plan count is
+unchanged. Three prose edits in `lib/templates.py`:
+
+- **`_claude_md`** reading list: read the task's
+  `.claude/specs/<slug>/progress.md` (`Status` + `Failed approaches`)
+  **first** at task/iteration priming, before the task brief, so a resumed
+  session does not re-attempt a known dead end.
+- **`_agents` implementer body**: consult the task's `progress.md` **Failed
+  approaches** during priming (loop and goal-supervised modes) and never
+  re-attempt a do-not-retry dead end. **The reviewer body is untouched** —
+  it is the deterministic gate; loop-awareness there would conflate gate
+  and iteration.
+- **`_specs_index` (`.claude/specs/INDEX.md`)** — the single emitted home
+  for the canonical `progress.md` reference template (Appendix B, with its
+  corrected link targets `decisions.md` / `learnings/` /
+  `sessions/<timestamp>-checkpoint.md`). Chosen over `/spec-new` because
+  skills/commands are gated on `install_skills`/`install_commands` whereas
+  INDEX.md is **unconditional**; the `_claude_md` note and implementer body
+  LINK here rather than duplicating the template. Without this embedding
+  GR2-01 would land the read-first prose with no emitted definition of the
+  artifact's shape — the runtime creator would have to invent it, violating
+  record-do-not-manufacture at runtime.
+- **Commit-policy edit — no-op in code, recorded.** The PRD line-889
+  committed-set enumeration lives only in the protocol document; **no
+  emitted body carries a committed-set enumeration** (the only
+  "operator-facing … committed" text in `lib/templates.py` is a Python
+  source comment inside `_gitignore`, which is not emitted). `progress.md`
+  is committed by construction because `.claude/specs/` is never
+  gitignored. No new enumeration was invented to have something to edit.
+- Count unchanged (56 / 68); golden re-baselined for the moved body bytes
+  (freeze-exception). `test_installer.py` gains GR2-01 assertions
+  (read-first note; implementer-has / reviewer-lacks the do-not-retry text;
+  template section headers + three link targets present; template embedded
+  in exactly one body).
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

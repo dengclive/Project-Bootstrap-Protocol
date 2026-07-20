@@ -262,7 +262,10 @@ EXPECTED_DIGESTS = {
     # [v2.4.0 code fold — GR2-03a] +1 unconditional file
     # .claude/steering/assumption-ledger.md (count 55 -> 56). No other body
     # moves; the added path is the only per-file digest change.
-    "default": "f6fe5810816256afba5bc314c81af7a288c07df023ba94c21cff4681dbce1a1c",
+    # [v2.4.0 code fold — GR2-01] prose-only, count unchanged (56). Body
+    # bytes move for CLAUDE.md (progress.md read-first note) and
+    # .claude/specs/INDEX.md (canonical progress.md template embedded).
+    "default": "381bf32567ec4ec716762bfa62d702e4f5b319e0f74ffc67383bf07ab29733e6",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -273,8 +276,11 @@ EXPECTED_DIGESTS = {
     #   full_autonomous change at this step (count stable at 67).
     #   [v2.4.0 code fold — GR2-03a] +1 unconditional file
     #   .claude/steering/assumption-ledger.md (count 67 -> 68).
+    #   [v2.4.0 code fold — GR2-01] prose-only, count unchanged (68). Body
+    #   bytes move for CLAUDE.md, .claude/specs/INDEX.md, and the implementer
+    #   agent body (failed-approaches do-not-retry priming instruction).
     "full_autonomous":
-        "40568c1417022e69952be38794873300010b2e42ea7328b9c5f67a6fc0720e4b",
+        "1fb3a9bc109422b8af78b2bdb873a932ece0b54c80852978ed63e194089c005b",
 }
 
 EXPECTED_ACTION_COUNTS = {

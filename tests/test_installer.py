@@ -579,6 +579,60 @@ _cbody = [a for a in build_plan(_cc)
 check("GR2-03a: customized drift threshold flows into the ledger",
       "77 tool calls" in _cbody)
 
+# ---------------------------------------------------------------------------
+# GR2-01 (v2.4.0 fold): progress.md is prose-only (no new emitted file). The
+# read-first note is in CLAUDE.md; the failed-approaches do-not-retry
+# instruction is in the implementer agent body but NOT the reviewer; the
+# canonical progress.md template lives in exactly one emitted body
+# (.claude/specs/INDEX.md).
+# ---------------------------------------------------------------------------
+_gc, _ = cfg_from(FULL)
+_gplan = build_plan(_gc)
+
+
+def _body_of(plan, path):
+    for a in plan:
+        if a["path"] == path:
+            return a["body"]
+    return None
+
+
+_claude = _body_of(_gplan, "CLAUDE.md")
+_index = _body_of(_gplan, ".claude/specs/INDEX.md")
+_impl = _body_of(_gplan, ".claude/agents/implementer.md")
+_rev = _body_of(_gplan, ".claude/agents/reviewer.md")
+
+check("GR2-01: CLAUDE.md reading list reads progress.md first at priming",
+      _claude is not None and "progress.md" in _claude
+      and "first" in _claude.lower())
+check("GR2-01: implementer body present in FULL plan", _impl is not None)
+check("GR2-01: reviewer body present in FULL plan", _rev is not None)
+check("GR2-01: implementer consults Failed approaches / do-not-retry",
+      _impl is not None and "Failed approaches" in _impl
+      and "do-not-retry" in _impl)
+check("GR2-01: reviewer body does NOT gain the failed-approaches text "
+      "(stays part of the deterministic gate)",
+      _rev is not None and "do-not-retry" not in _rev
+      and "Failed approaches" not in _rev)
+
+# Canonical template home: INDEX.md carries the template's section headers,
+# the do-not-retry flag wording, and the three corrected link targets. Pin
+# non-overlapping markers so no single substring satisfies two assertions.
+check("GR2-01: INDEX.md carries the progress.md template Failed-approaches "
+      "header", _index is not None and "## Failed approaches" in _index)
+check("GR2-01: INDEX.md template carries the do-not-retry flag wording",
+      _index is not None and "do-not-retry: yes" in _index)
+for _lt in ("decisions.md", "learnings/", "<timestamp>-checkpoint.md"):
+    check(f"GR2-01: INDEX.md template links {_lt}",
+          _index is not None and _lt in _index)
+# No second emitted body duplicates the full template (uniqueness of the
+# home). The template's distinctive title line appears in exactly one body.
+_dupe = [a["path"] for a in _gplan
+         if a["body"] and "# Progress — <slug>" in a["body"]]
+check("GR2-01: progress.md template embedded in exactly one emitted body "
+      "(.claude/specs/INDEX.md)",
+      _dupe == [".claude/specs/INDEX.md"])
+
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
 # event+matcher with no orphans.
