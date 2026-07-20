@@ -235,9 +235,30 @@ EXPECTED_DIGESTS = {
     #   full_autonomous: the above + loop.sh/goal-loop.sh (worktree
     #     .git/info/exclude comment de-mangled — the backslash line-
     #     continuation was collapsing the example).
-    "default": "df461145c5f87c478ef13076244458f784c9ffb51d6c0f86e42b7849c01dbfd1",
+    # [2.2.0 freeze-exception no. 15 (usage-limit coping + gap closure)]
+    # Emitted-byte changes, diff-verified vs the pre-change head (zero files
+    # added, zero removed; action counts unchanged at 55 / 67):
+    #   default: settings.json `_generatedBy` "protocol 2.1.0" ->
+    #     "protocol 2.2.0" (R6) — the ONLY default-fixture change; the 11
+    #     emitted hook citations stay at v2-0-0 by design (RC-03 scoped to
+    #     the touched files, so re-pointing hooks would break the "no bytes
+    #     outside the named set" gate — same lag as no. 12).
+    #   full_autonomous: the above settings.json bump + five files —
+    #     loop.sh / goal-loop.sh (R2 dispatch flags --output-format
+    #     stream-json --verbose; R3 usage-limit vs transient comment block;
+    #     R4 judge-parity comment on goal-loop.sh only; RC-03 citation
+    #     re-point v2-0-0 -> v2-2-0), loop-config.md / goal-config.md (R1
+    #     three usage_limit_* keys; RC-03 re-point), auto.sh (R5 exit_reason
+    #     enum + run-summary + AR2-01 runner rule + AR2-09c key-less posture;
+    #     RC-03 re-point).
+    "default": "742aa2955d04d35cc23a0cea9150a05c257a7d9a697e54e7c4064536614d64bf",
+    #   Adversarial-review round-2 additions inside the same exception
+    #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
+    #   transient-path definition (no-rejected-event arm + infra_* knobs,
+    #   Phase 9.5 transient paragraph); auto.sh enum restores the
+    #   "within the run" / "transitively" qualifiers.
     "full_autonomous":
-        "2b9e54229ebd0eb5c5576ba9e45453f50fd783ca8d61b44392025feb423ac707",
+        "2c4dc150d828d8ee001842263067e2a6c85bf5fa6a5055b7dcb7a5b9b844e700",
 }
 
 EXPECTED_ACTION_COUNTS = {
