@@ -24,7 +24,32 @@ via `${CLAUDE_PROJECT_DIR:-.}`, so a suite that runs a hook without pinning
 that variable writes into the REPO instead of its fixture. That is how a
 1500-line .claude/logs/hooks.log accumulated in the working tree and was
 eventually committed by an over-broad `git add -A`. A suite must leave the
-tree exactly as it found it; this runner fails the run if one does not.
+tree exactly as it found it; when git is available this runner fails the run
+if one does not.
+
+Three details make that guarantee actually hold — the naive version did not:
+
+  * The snapshot uses `--ignored`, because the very path that motivated the
+    check (.claude/logs/hooks.log) is gitignored, as are __pycache__/ and
+    *.pyc. A plain `git status --porcelain` never reports ignored paths, so
+    the check would have been blind to the exact regression it exists for.
+    Suites run with PYTHONDONTWRITEBYTECODE=1 so honest bytecode caching does
+    not trip the now-ignored-aware check.
+  * It uses `--untracked-files=all`, so a file written into an already-present
+    untracked directory is enumerated rather than collapsed to one `?? dir/`
+    entry that looks identical before and after.
+  * Snapshot keys keep the two-char status code and the two snapshots are
+    compared by SYMMETRIC difference, so deleting or reverting an already-dirty
+    file (` M f` -> ` D f`, or ` M f` -> gone) is caught rather than cancelling
+    out. The one residual it cannot see is a pre-existing dirty file whose
+    content a suite changes while its git status stays byte-identical (still
+    ` M`); detecting that needs content hashing and is out of scope here.
+
+When git is unavailable or this is not a checkout (tarball, container build
+context, no git on PATH) the snapshot cannot be taken. That is reported LOUDLY
+as "check skipped" rather than passed silently — fail-loud-not-silent means a
+run where the net was never strung must not look identical to one where it
+held. Use --no-tree-check to opt out explicitly and quietly.
 """
 import argparse
 import os
@@ -39,6 +64,10 @@ TESTS = os.path.join(ROOT, "tests")
 
 SUMMARY_RE = re.compile(r"(\d+)\s+passed,\s+(\d+)\s+failed")
 
+# Under GitHub Actions, restore the per-suite log affordances the inlined loop
+# used to emit (folding + inline error annotations) that a bare command loses.
+GHA = os.environ.get("GITHUB_ACTIONS") == "true"
+
 
 def discover(pattern=None):
     names = sorted(f for f in os.listdir(TESTS)
@@ -49,21 +78,36 @@ def discover(pattern=None):
 
 
 def tree_state():
-    """Porcelain status, or None when git is unavailable / not a repo."""
+    """Full porcelain snapshot, or None when git is unavailable / not a repo.
+
+    `--ignored` so a write into a gitignored path (.claude/logs/hooks.log — the
+    original leak — or __pycache__/) is visible; `--untracked-files=all` so a
+    file created inside an already-untracked directory is enumerated rather than
+    collapsed to one `?? dir/` entry. Each key retains the two-char status code
+    (not stripped), so a deletion or revert of an already-dirty file changes the
+    key instead of cancelling against its prior state under a symmetric diff.
+    """
     try:
-        r = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(
+            ["git", "status", "--porcelain", "--ignored",
+             "--untracked-files=all"],
+            cwd=ROOT, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
-    return {line[3:] for line in r.stdout.splitlines() if line[3:]}
+    return {line for line in r.stdout.splitlines() if line.strip()}
 
 
 def run_one(path):
     started = time.monotonic()
+    # PYTHONDONTWRITEBYTECODE: suites import lib/ and tests/ modules; without
+    # this each run would drop __pycache__/*.pyc into the source tree, which the
+    # now-ignored-aware tree check would (correctly) flag as pollution.
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     r = subprocess.run([sys.executable, path], cwd=ROOT,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env=env)
     elapsed = time.monotonic() - started
     out = r.stdout + r.stderr
     hits = SUMMARY_RE.findall(out)
@@ -109,8 +153,19 @@ def main(argv):
     for path in suites:
         res = run_one(path)
         results.append(res)
+        # Fold each suite's output under Actions so a red suite is reachable
+        # without scrolling a flat ~1000-line log; annotate failures inline.
+        if GHA:
+            print(f"::group::{res['name']}")
         if not args.quiet or res["code"] != 0:
             print(res["output"], end="" if res["output"].endswith("\n") else "\n")
+        if GHA:
+            print("::endgroup::")
+            if res["code"] != 0:
+                why = ("crashed before printing a summary"
+                       if res["no_summary"] else f"{res['failed']} failing check(s)")
+                print(f"::error file=tests/{res['name']}::{why} "
+                      f"(exit {res['code']})")
 
     width = max(len(r["name"]) for r in results)
     print("\n" + "=" * (width + 34))
@@ -133,6 +188,10 @@ def main(argv):
     print(f"{len(results)} suites, {total_p} checks passed, {total_f} failed")
 
     rc = 0
+    # Flush stdout so the stderr diagnostics below land AFTER the summary table
+    # in a merged stream (CI pipes stdout and stderr separately, with no
+    # ordering guarantee between the two).
+    sys.stdout.flush()
     if bad:
         rc = 1
         print("\nFAILING SUITES:", file=sys.stderr)
@@ -143,14 +202,33 @@ def main(argv):
             print(f"  {r['name']}: exit {r['code']} — {detail}",
                   file=sys.stderr)
 
-    if before is not None:
+    # Working-tree pollution check. A None snapshot (git missing / not a repo)
+    # must be reported LOUDLY, never silently skipped — otherwise a run where
+    # the check never happened is indistinguishable from a verified-clean one.
+    if args.no_tree_check:
+        pass  # explicit, quiet opt-out
+    elif before is None:
+        sys.stdout.flush()
+        print("\nWORKING-TREE CHECK SKIPPED: could not read git status at "
+              "start (git missing, or not a git checkout). Tree pollution was "
+              "NOT verified this run. Pass --no-tree-check to silence this.",
+              file=sys.stderr)
+    else:
         after = tree_state()
-        if after is not None:
-            new = after - before
-            if new:
+        if after is None:
+            sys.stdout.flush()
+            print("\nWORKING-TREE CHECK SKIPPED: git status became unavailable "
+                  "mid-run; tree pollution was NOT verified this run.",
+                  file=sys.stderr)
+        else:
+            # Symmetric difference: catches new pollution (in after, not before)
+            # AND destructive changes to already-dirty state (in before, not
+            # after — a deletion or revert of a file that was dirty at start).
+            changed = (after - before) | (before - after)
+            if changed:
                 rc = 1
                 print("\nWORKING TREE POLLUTED by the test run:", file=sys.stderr)
-                for p in sorted(new):
+                for p in sorted(changed):
                     print(f"  {p}", file=sys.stderr)
                 print("  A suite wrote into the repo instead of its fixture. "
                       "Emitted hooks resolve paths via ${CLAUDE_PROJECT_DIR:-.}"

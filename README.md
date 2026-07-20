@@ -214,10 +214,15 @@ the middle scrolls past and the run still looks green. Summing the printed
 "N passed" lines has the mirror-image blind spot: a suite that dies on an
 unhandled exception prints no summary at all, so its checks silently vanish
 from the total instead of registering as a failure. The runner reports both,
-and also fails the run if a suite writes into the working tree instead of its
-fixture (emitted hooks resolve paths via `${CLAUDE_PROJECT_DIR:-.}`, so an
-unpinned hook invocation logs into *this repo* — that is how a 1500-line
-`.claude/logs/hooks.log` once accumulated here and got committed).
+and (when git is available) fails the run if a suite writes into the working
+tree instead of its fixture (emitted hooks resolve paths via
+`${CLAUDE_PROJECT_DIR:-.}`, so an unpinned hook invocation logs into *this
+repo* — that is how a 1500-line `.claude/logs/hooks.log` once accumulated here
+and got committed). The check snapshots `git status` with `--ignored
+--untracked-files=all`, so it sees writes into gitignored paths — including
+`.claude/logs/` itself — and into already-untracked directories, not just new
+tracked changes. Outside a git checkout the check is reported as skipped rather
+than passed silently.
 
 Individual suites still run directly when you want one in isolation:
 

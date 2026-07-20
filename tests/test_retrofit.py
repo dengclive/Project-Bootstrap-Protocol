@@ -798,9 +798,47 @@ try:
     with open(rs_path, "w") as fh:
         fh.write(rs_full)
 
-    # FAIL-SAFE #7b (FS7b): no-jq harness + no python3 (only one allowed
-    # fallback). Verifies that state-file read still fails toward ENFORCE
-    # when BOTH jq and python3 are absent (T2 worst-case "no parser").
+    # FAIL-SAFE #7b (FS7b): the T2 worst case — NEITHER jq NOR python3 on PATH,
+    # so the hook has no JSON parser at all.
+    #
+    # This is a real tripwire, not a tautology. The previous version asserted
+    # only that "retrofit_active exempt" was absent from the log — which is
+    # vacuously true, because with no parser the command string is unparseable,
+    # the git-commit `case` never matches, and the hook never reaches ANY
+    # exemption branch. Absence-of-a-string proved nothing about the fail-safe.
+    #
+    # So we reuse AF2's exact EXEMPTING condition (retrofit_active=true + a
+    # .claude/-only staged commit) — the setup that DID log "retrofit_active
+    # exempt" above when python3 was present — and assert that removing the last
+    # parser does NOT silently grant it. If jget were ever changed to fabricate
+    # a command without a parser, or the exemption stopped requiring a
+    # successful state read, the exempt line would reappear here and this fails.
+    # A positive assertion on the inert "ok" marker (below) rules out the
+    # empty-log escape hatch: we prove the hook ran and fell through, rather
+    # than simply producing no log.
+    #
+    # Honest posture note (owner-facing, NOT asserted as ENFORCE): under a
+    # total parser outage the git-commit `case` matches nothing, so the hook is
+    # an inert pass-through — it neither exempts NOR enforces (exit 0,
+    # "spec-gate-commit ok"). That emitted-gate fail-open on a fully unparseable
+    # payload is pre-existing and shared by secrets-gate; changing it is a
+    # separate design decision. This test locks the observable "no silent
+    # exemption" guarantee, not a block.
+    with open(state_path) as fh:
+        _st7b = json.load(fh)
+    _st7b["retrofit_active"] = True
+    with open(state_path, "w") as fh:
+        json.dump(_st7b, fh)
+    # Stage a .claude/-only file so this is AF2's exempting condition exactly.
+    subprocess.run(["git", "rm", "--cached", "-r", "."], cwd=d, check=False,
+                    capture_output=True)
+    os.makedirs(os.path.join(d, ".claude", "logs"), exist_ok=True)
+    _fs7b_stage = os.path.join(d, ".claude", "logs", "fs7b-marker")
+    with open(_fs7b_stage, "w") as fh:
+        fh.write("staged .claude-only for FS7b\n")
+    subprocess.run(["git", "add", "-f", ".claude/logs/fs7b-marker"], cwd=d,
+                    check=False)
+
     _no_py_path = tempfile.mkdtemp()
     for b in ("bash", "cat", "basename", "dirname", "date", "mkdir",
               "printf", "grep", "sed", "find", "mktemp", "rm", "env",
@@ -809,20 +847,28 @@ try:
         if src:
             os.symlink(src, os.path.join(_no_py_path, b))
     # NB: no jq, no python3 — strictly worst case.
+    _log_path = os.path.join(d, ".claude", "logs", "hooks.log")
+    _log_before = open(_log_path).read() if os.path.exists(_log_path) else ""
     e = dict(os.environ)
     e["PATH"] = _no_py_path
     e["CLAUDE_PROJECT_DIR"] = d
-    r = subprocess.run(
+    # cwd=d, like _run_hook: spec-gate-commit shells out to `git diff --cached`,
+    # and git resolves its repo from CWD — without this the hook would read the
+    # bootstrap repo's own index (the very leak 5f0bfd8 closed in _run_hook).
+    _r7b = subprocess.run(
         ["bash", os.path.join(d, ".claude", "hooks",
                                 "spec-gate-commit.sh")],
         input=json.dumps({"tool_input": {"command": "git commit -m x"}}),
-        capture_output=True, text=True, env=e)
-    _full_log = open(os.path.join(d, ".claude", "logs",
-                                    "hooks.log")).read()
-    check("T2.FS7b: no jq + no python3 -> retrofit_active stays false "
-          "(no parser available, fail-safe to ENFORCE)",
-          "retrofit_active exempt" not in _full_log.split(
-              "\n")[-3:][0] if _full_log else True)
+        capture_output=True, text=True, env=e, cwd=d)
+    _log_new = open(_log_path).read()[len(_log_before):]
+    check("T2.FS7b: no jq + no python3, under AF2's exempting setup -> "
+          "retrofit_active exemption NOT silently granted (a parser outage "
+          "cannot fabricate the .claude/-only exemption)",
+          "retrofit_active exempt" not in _log_new)
+    check("T2.FS7b': no parser -> hook is an inert pass-through, not a "
+          "spurious block (exit 0 and greenfield 'ok' fall-through reached, "
+          "proving the hook ran rather than producing an empty log)",
+          _r7b.returncode == 0 and "spec-gate-commit ok" in _log_new)
     shutil.rmtree(_no_py_path, ignore_errors=True)
 finally:
     shutil.rmtree(d, ignore_errors=True)
