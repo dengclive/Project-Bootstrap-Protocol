@@ -35,7 +35,7 @@ STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
 PROTOCOL_VERSION = "2.4.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
-# Seam binds floor (SEAM-CONTRACT v1.2.0, claude_code_runtime; confirmed
+# Seam binds floor (SEAM-CONTRACT v2.0.0, claude_code_runtime; unchanged
 # against the official changelog 2026-07-18): below 2.1.210 a PreToolUse
 # hook timeout is misreported as a user rejection instead of failing
 # closed. AC-9-4: startup logs the detected CLI version and warns loudly
