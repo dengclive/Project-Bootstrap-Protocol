@@ -45,6 +45,42 @@ RUNTIME_FLOOR = "2.1.210"
 INSTALLER_VERSION = "1.1.0"
 
 
+# TEL-01 (v2.4.0 fold): `telemetry_export_enabled` is a top-level flag that
+# post-dates the frozen defaults.py schema, so resolve_config neither coerces
+# nor validates it. minyaml converts only bare `true`/`false` to bool - every
+# other YAML-1.1 boolean spelling (`off`, `no`, `"false"`) arrives as a
+# NON-EMPTY STRING, and raw truthiness would read those as ENABLED, silently
+# inverting an operator's explicit opt-out. Normalize once, here, and fail loud
+# on anything unrecognized rather than guessing: a privacy opt-in must never be
+# decided by a typo. Both consumers (build_plan's gate and _write_state's
+# stamp) route through this, so the emitted doc and the state flag cannot
+# disagree.
+_TELEMETRY_TRUE = {"true", "yes", "on", "1"}
+_TELEMETRY_FALSE = {"false", "no", "off", "0", ""}
+
+
+def telemetry_enabled(cfg: dict) -> bool:
+    """Resolve the TEL-01 opt-in flag to a bool, fail-loud on garbage."""
+    raw = cfg.get("telemetry_export_enabled", False)
+    if isinstance(raw, bool):
+        return raw
+    # NB: bool is a subclass of int, so this arm is reached only by a real
+    # integer - minyaml renders bare 0/1 as ints, not strings.
+    if isinstance(raw, int) and raw in (0, 1):
+        return bool(raw)
+    if isinstance(raw, str):
+        token = raw.strip().strip('"').strip("'").lower()
+        if token in _TELEMETRY_TRUE:
+            return True
+        if token in _TELEMETRY_FALSE:
+            return False
+    raise ValueError(
+        f"telemetry_export_enabled: unrecognized value {raw!r}. Use true or "
+        "false (yes/no/on/off/1/0 are accepted). This flag is an opt-in for "
+        "an observability export, so the installer refuses to guess what an "
+        "unrecognized value meant.")
+
+
 # --------------------------------------------------------------------------- #
 # Plan construction
 # --------------------------------------------------------------------------- #
@@ -91,8 +127,9 @@ def build_plan(cfg: dict) -> list[dict]:
     # operator opted in (Phase 0 decision). Lands in .claude/steering/ (never
     # gitignored -> committed by construction; no gitignore edit). Off by
     # default: the default plan is byte-identical to the pre-TEL-01 baseline.
-    # Read defensively (cfg.get) so a config lacking the key never KeyErrors.
-    if cfg.get("telemetry_export_enabled", False):
+    # telemetry_enabled() reads defensively (a config lacking the key never
+    # KeyErrors) and normalizes YAML boolean spellings fail-loud.
+    if telemetry_enabled(cfg):
         add(".claude/steering/telemetry.md", TEMPLATES["telemetry"](cfg))
 
     # ---- Hooks (Phase 6) -------------------------------------------------- #
@@ -531,14 +568,35 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         verdict = _classify(root, action)
         target = root / action["path"]
 
-        # Don't clobber a file the operator hand-edited unless --force, but DO
-        # overwrite files we generated last time (tracked in the manifest).
+        # Don't clobber operator content unless --force, but DO overwrite files
+        # we generated last time (tracked in the manifest). Three ways a file
+        # at a planned path can be operator-owned:
+        #
+        #  1. UNTRACKED (known is None). The manifest has never recorded this
+        #     path, yet a differing file is already on disk - so the installer
+        #     did not write it. This is the upgrade case: a version that adds a
+        #     new planned path (GR2-03a's assumption-ledger.md, TEL-01's
+        #     telemetry.md) meeting a workspace where the operator hand-created
+        #     that artifact from the doc-first protocol release. Overwriting
+        #     silently would destroy content the installer never authored, and
+        #     the emitted ledger's own header promises it will not.
+        #  2. EDITED SINCE (digest drift against what we wrote).
+        #  3. ALREADY SKIPPED ONCE. A skip records the OPERATOR's digest, which
+        #     on the next run would otherwise read as "we wrote that" and fall
+        #     through to overwrite - protecting the edit exactly once and
+        #     clobbering it on the following run. The state marker keeps
+        #     operator ownership sticky until they --force or revert (a revert
+        #     to our bytes classifies "unchanged" and never reaches here).
         if verdict == "update" and not force:
             known = prev_files.get(action["path"])
             on_disk = _digest(target.read_text())
-            if known and known.get("digest") != on_disk:
+            untracked = known is None
+            if (untracked or known.get("digest") != on_disk
+                    or known.get("state") == "skipped-local-edit"):
                 summary["skipped"] += 1
-                print(f"  SKIP   {action['path']}  (locally modified; "
+                reason = ("pre-existing and not installer-generated"
+                          if untracked else "locally modified")
+                print(f"  SKIP   {action['path']}  ({reason}; "
                       f"use --force to overwrite)")
                 manifest["files"].append(
                     {"path": action["path"], "digest": on_disk,
@@ -820,10 +878,9 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         "queue_mode_enabled": bool(flags.get("queue_mode_enabled", False)),
         # TEL-01 (v2.4.0 fold): the Phase 0 opt-in decision, persisted
         # cfg-authoritatively (mirrors the mode-flag pattern above). The
-        # flag-gated build_plan add keys off the same cfg value, so the
+        # flag-gated build_plan add keys off the same normalizer, so the
         # emitted telemetry.md and this state field can never disagree.
-        "telemetry_export_enabled":
-            bool(cfg.get("telemetry_export_enabled", False)),
+        "telemetry_export_enabled": telemetry_enabled(cfg),
     })
     # --- the three tracking lists: initialise once, never clobber ---
     state.setdefault("loop_in_flight", [])

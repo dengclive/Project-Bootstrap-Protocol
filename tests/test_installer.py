@@ -805,6 +805,113 @@ _rc_off, _ = cfg_from(_RETRO_TEL.replace(
 check("TEL-01 retrofit: flag-absent retrofit plan has no telemetry.md",
       all(a["path"] != _TEL_PATH for a in build_plan(_rc_off)))
 
+# ---------------------------------------------------------------------------
+# TEL-01 flag normalization (review finding: raw truthiness inverted opt-outs).
+# minyaml coerces only bare true/false, so every other YAML boolean spelling
+# reaches the installer as a NON-EMPTY STRING. Under raw truthiness `off`/`no`/
+# quoted "false" all read as ENABLED — an explicit privacy opt-out silently
+# inverted into an opt-in, with the state flag stamped true to match. The
+# normalizer resolves the accepted spellings and FAILS LOUD on anything else
+# rather than guessing what an unrecognized value meant.
+# ---------------------------------------------------------------------------
+from installer import telemetry_enabled            # noqa: E402
+
+for _spell in ("false", "no", "off", "0", '"false"', "'no'", "FALSE", " off "):
+    _cf, _ce = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_spell}
+""")
+    check(f"TEL-01 norm: {_spell!r} resolves to disabled",
+          _ce == [] and telemetry_enabled(_cf) is False)
+    check(f"TEL-01 norm: {_spell!r} emits no telemetry.md",
+          all(a["path"] != _TEL_PATH for a in build_plan(_cf)))
+
+for _spell in ("true", "yes", "on", "1", '"true"', "TRUE"):
+    _ct, _cte = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_spell}
+""")
+    check(f"TEL-01 norm: {_spell!r} resolves to enabled",
+          _cte == [] and telemetry_enabled(_ct) is True)
+    check(f"TEL-01 norm: {_spell!r} emits telemetry.md",
+          any(a["path"] == _TEL_PATH for a in build_plan(_ct)))
+
+check("TEL-01 norm: absent key defaults to disabled",
+      telemetry_enabled(cfg_from(SERVICE)[0]) is False)
+
+# Fail loud, not silent: an unrecognized value is never guessed either way.
+for _junk in ("maybe", "enabled", "2", "tru"):
+    _cj, _ = cfg_from(f"""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: {_junk}
+""")
+    try:
+        telemetry_enabled(_cj)
+        check(f"TEL-01 norm: {_junk!r} rejected fail-loud", False)
+    except ValueError as _e:
+        check(f"TEL-01 norm: {_junk!r} rejected fail-loud",
+              "telemetry_export_enabled" in str(_e))
+
+# The state stamp routes through the same normalizer, so the emitted doc and
+# the persisted flag cannot disagree on a non-canonical spelling.
+_d_norm = _install("""project:
+  name: tnorm
+  archetype: service
+telemetry_export_enabled: off
+""")
+try:
+    _sn = _json.load(open(os.path.join(_d_norm, ".claude",
+                                       ".bootstrap-state.json")))
+    check("TEL-01 norm: 'off' install writes state flag false",
+          _sn.get("telemetry_export_enabled") is False)
+    check("TEL-01 norm: 'off' install emits no telemetry.md",
+          not os.path.exists(os.path.join(_d_norm, ".claude", "steering",
+                                          "telemetry.md")))
+finally:
+    shutil.rmtree(_d_norm, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# Upgrade-path protection (review finding: untracked files at newly planned
+# paths were silently overwritten). The manifest-unknown case is exactly the
+# 2.2.0 -> 2.4.0 upgrade: GR2-03a and TEL-01 add planned paths that a
+# doc-first operator may already have hand-created. Overwriting content the
+# installer never authored contradicts the promise the emitted ledger header
+# makes ("will not overwrite local edits without --force").
+# ---------------------------------------------------------------------------
+_LEDGER_REL = os.path.join(".claude", "steering", "assumption-ledger.md")
+_SENTINEL = "CUSTOM ROW: our fork calibrates against a different tier\n"
+
+_d_up = tempfile.mkdtemp()
+try:
+    open(os.path.join(_d_up, "bootstrap.config.yaml"), "w").write(SERVICE)
+    os.makedirs(os.path.join(_d_up, ".claude", "steering"), exist_ok=True)
+    open(os.path.join(_d_up, _LEDGER_REL), "w").write(_SENTINEL)
+    _r_up = subprocess.run([sys.executable, BIN, "-C", _d_up],
+                           capture_output=True, text=True)
+    _after = open(os.path.join(_d_up, _LEDGER_REL)).read()
+    check("upgrade: hand-created file at a newly planned path is preserved",
+          _after == _SENTINEL)
+    check("upgrade: the skip is reported, not silent",
+          "SKIP" in _r_up.stdout and "assumption-ledger.md" in _r_up.stdout)
+    check("upgrade: skip reason names it as not installer-generated",
+          "pre-existing and not installer-generated" in _r_up.stdout)
+    # Sticky across runs: a skip records the OPERATOR's digest, which must not
+    # read as "we wrote that" on the next run and fall through to overwrite.
+    subprocess.run([sys.executable, BIN, "-C", _d_up],
+                   capture_output=True, text=True)
+    check("upgrade: still preserved on a second run (skip is sticky)",
+          open(os.path.join(_d_up, _LEDGER_REL)).read() == _SENTINEL)
+    # --force remains the documented escape hatch.
+    subprocess.run([sys.executable, BIN, "-C", _d_up, "--force"],
+                   capture_output=True, text=True)
+    check("upgrade: --force still overwrites deliberately",
+          open(os.path.join(_d_up, _LEDGER_REL)).read() != _SENTINEL)
+finally:
+    shutil.rmtree(_d_up, ignore_errors=True)
+
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
 # event+matcher with no orphans.

@@ -263,9 +263,30 @@ EXPECTED_DIGESTS = {
     # .claude/steering/assumption-ledger.md (count 55 -> 56). No other body
     # moves; the added path is the only per-file digest change.
     # [v2.4.0 code fold — GR2-01] prose-only, count unchanged (56). Body
-    # bytes move for CLAUDE.md (progress.md read-first note) and
-    # .claude/specs/INDEX.md (canonical progress.md template embedded).
-    "default": "381bf32567ec4ec716762bfa62d702e4f5b319e0f74ffc67383bf07ab29733e6",
+    # bytes move for CLAUDE.md (progress.md read-first note),
+    # .claude/specs/INDEX.md (canonical progress.md template embedded), AND
+    # .claude/agents/implementer.md (failed-approaches do-not-retry priming
+    # instruction — added UNCONDITIONALLY in _agents, so it moves in BOTH
+    # fixtures, not only full_autonomous). [Corrected post-review: the
+    # original entry enumerated two movers where a main-vs-branch plan diff
+    # shows three, so the aggregate re-baseline was absorbing a byte change
+    # this record never named. Verified by diffing per-path bodies across
+    # main and the branch for the default fixture.]
+    # [v2.4.0 review-fix re-baseline] Emitted-byte changes from the
+    # adversarial-review fixes, diff-verified vs the pre-fix head (zero files
+    # added/removed; count stable at 56):
+    #   .claude/steering/assumption-ledger.md — drift-threshold source-of-truth
+    #     citation §6.D -> §6.E (§6.D is the hook security & correctness
+    #     checklist; the thresholds live under §6.E "Audio alert system",
+    #     *Drift detector specifics*), and the max-iterations pointer to
+    #     .claude/loop-config.md is now phrased conditionally (that file is
+    #     emitted only under loop mode, so the unconditional ledger was
+    #     pointing a default install at a path absent from its own tree).
+    #   .claude/specs/INDEX.md — the canonical progress.md template drops the
+    #     protocol-doc coordinates ("PRD lines 806/1168", "PRD Phase 7 step 6,
+    #     §6.D"): in an emitted project "PRD" denotes the operator's own
+    #     product doc, so those resolved against the wrong document.
+    "default": "b47614f94b8b4f0dca21d7bf1f727390b74c7d55c441edf2ae5cc75177ef97e4",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -284,8 +305,25 @@ EXPECTED_DIGESTS = {
     #   _per_task_wrapper skeleton: trajectory-retention binding item +
     #   loop-final Trajectory line). auto.sh is UNTOUCHED — default fixture
     #   has no wrappers, so its digest does not move at this step.
+    #   [v2.4.0 review-fix re-baseline] Emitted-byte changes from the
+    #   adversarial-review fixes, diff-verified vs the pre-fix head (zero files
+    #   added/removed; count stable at 68): the two default-fixture bodies
+    #   above (assumption-ledger.md, specs/INDEX.md) PLUS the two wrappers —
+    #     loop.sh / goal-loop.sh — three comment-contract citation fixes in the
+    #     shared _per_task_wrapper skeleton: (a) the trajectory-retention item
+    #     now cites Phase 9.5 unconditionally (its single normative home; the
+    #     interpolated {phase} made goal-loop.sh cite a "Phase 9.6 Deliverable
+    #     contract for the wrappers" heading that does not exist), (b) the
+    #     loop-final block now interpolates {phase} (9.5/9.6) instead of the
+    #     hardcoded 9.7, which is queue mode — a phase a loop-only project
+    #     never enabled, and not where loop-final is defined, and (c) the block
+    #     now names the actual destination .claude/sessions/loop-final-
+    #     $TASK_ID.md and states the gitignore posture accurately (only the
+    #     .claude/sessions/ DOTFILE sentinels are ignored) instead of citing
+    #     .claude/specs/, which is not where the audit record belongs.
+    #   auto.sh remains UNTOUCHED (its 13-value exit_reason enum unchanged).
     "full_autonomous":
-        "8d5b72f8f6fd27daf647f5c966d91664cae16cbde9343c8e562f478f69466a43",
+        "48db798659d9d958de69d6ef3f87431b6cf53c364a6e4336d9e2f76477b5d204",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -203,6 +203,114 @@ value.
   `test_interview.py` (default false, verbatim question, yes→true
   round-trip).
 
+### Step 6 — Adversarial code review of the fold: correctness fixes
+
+Multi-lens adversarial review of the open PR (10 finder angles, one
+refutation-seeking verifier per candidate, plus a gap sweep). Fixes land
+in the same PR, grouped by surface. This step is the **non-frozen `lib/`
+correctness set**; the frozen-source corrections and the remaining
+test/release-integrity items follow in steps 7 and 8.
+
+- **TEL-01 flag normalization (opt-out inversion).** `minyaml` coerces
+  only bare `true`/`false`, and `resolve_config` (frozen `defaults.py`)
+  neither knows nor validates the post-schema `telemetry_export_enabled`
+  key — so `off`, `no`, `"false"` all arrived as **non-empty strings** and
+  raw truthiness read them as ENABLED, emitting `telemetry.md` and
+  stamping `telemetry_export_enabled: true` into state. An explicit
+  privacy opt-out silently inverted into an opt-in. New
+  `installer.telemetry_enabled(cfg)` resolves the accepted spellings
+  (bool, `0`/`1` int, and the string forms) and **fails loud** on anything
+  unrecognized rather than guessing; both consumers (the `build_plan` gate
+  and the `_write_state` stamp) route through it, so the emitted doc and
+  the persisted flag cannot disagree. Only the wizard normalized before;
+  the documented hand-edit-the-config path had no guard.
+- **Upgrade-path overwrite protection.** `apply_plan`'s hand-edit guard
+  only fired for **manifest-tracked** paths: `prev_files.get(path)` is
+  `None` for a path the installer has never written, so the guard fell
+  through and overwrote it. That is precisely the `2.2.0 → 2.4.0` upgrade
+  — GR2-03a and TEL-01 both ADD planned paths, and the doc-first v2.3.0
+  migration note tells operators to hand-create `assumption-ledger.md`.
+  Reproduced end-to-end: a hand-seeded ledger was replaced with no
+  warning and no backup, contradicting the promise the emitted ledger's
+  own header makes. An untracked file at a planned path is now treated as
+  operator-owned and skipped (`pre-existing and not installer-generated`),
+  `--force` unchanged. Same fix closes a second-order gap: a skip records
+  the OPERATOR's digest, which on the next run read as "we wrote that" and
+  fell through to overwrite — protecting an edit exactly once and
+  clobbering it on the following run. Ownership is now sticky via the
+  `skipped-local-edit` state marker (a revert to our bytes classifies
+  `unchanged` and never reaches the guard).
+- **Fail-loud back-compat discriminator (TEL-01 parse).** The missing-key
+  exemption keyed only on the key NAME, so a **deleted or misspelled**
+  telemetry line in a freshly rendered v2.4.0 file resolved silently to
+  `false` — the operator believes the export is on, no `telemetry.md` is
+  emitted, and nothing says why (unknown keys are dropped without a
+  warning). `render_interview` emits the telemetry SECTION
+  unconditionally, so its presence dates a file to v2.4.0-or-later: marker
+  present ⇒ raise, marker absent ⇒ genuinely pre-2.4.0, keep defaulting to
+  skip. The locked back-compat requirement is preserved and
+  fail-loud-not-silent is restored on the designed hand-edit surface. The
+  title is now a shared constant (`TELEMETRY_SECTION_TITLE`) referenced by
+  both the renderer and the parser so the two cannot drift.
+- **Emitted comment-contract citations (GR2-02 wrappers).** Three
+  corrections in the shared `_per_task_wrapper` skeleton, all
+  string-asserted normative surface: (a) the trajectory-retention item
+  interpolated `{phase}`, making `goal-loop.sh` cite a *Phase 9.6
+  "Deliverable contract for the wrappers"* heading that does not exist —
+  now cites Phase 9.5 unconditionally, the contract's single normative
+  home (Phase 9.6 references rather than restates it); (b) the loop-final
+  block hardcoded **Phase 9.7**, which is queue mode — a phase a loop-only
+  project never enabled, and not where `loop-final` is defined — now
+  interpolates `{phase}` (9.5/9.6) like its sibling; (c) the block named
+  `.claude/specs/` while never stating the actual destination, now names
+  `.claude/sessions/loop-final-$TASK_ID.md` and states the gitignore
+  posture accurately (only the `.claude/sessions/` DOTFILE sentinels are
+  ignored). `auto.sh` untouched; its 13-value `exit_reason` enum unchanged.
+- **Assumption-ledger source-of-truth pointers.** `§6.D` → `§6.E`: §6.D is
+  the *Hook security & correctness checklist*; the drift thresholds live
+  under §6.E (*Audio alert system* → *Drift detector specifics*). Verified
+  against the frozen doc's own section map, and against the pre-existing
+  emitted bodies that correctly cite 6.D for the security checklist. The
+  max-iterations pointer to `.claude/loop-config.md` is now phrased
+  conditionally — that file is emitted only under loop mode, so the
+  UNCONDITIONAL ledger was sending a default install to a path absent
+  from its own tree.
+- **`progress.md` template cross-references.** The canonical template
+  embedded in every emitted `.claude/specs/INDEX.md` carried `PRD lines
+  806/1168` and `PRD Phase 7 step 6, §6.D` — coordinates into the Bootstrap
+  protocol document. In an emitted project "PRD" denotes the operator's own
+  product doc (`project.prd_path`) and the protocol doc is not shipped, so
+  every instantiated `progress.md` pointed agents at the wrong file (and
+  raw line numbers rot on the next doc edit). Replaced with self-contained
+  descriptions of the same conventions.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 6).** Both fixtures move;
+zero files added or removed; counts stable (`default: 56`,
+`full_autonomous: 68`). Diff-verified vs the pre-fix head before
+`GOLDEN_UPDATE=1` — default: `assumption-ledger.md` + `specs/INDEX.md`;
+full_autonomous: those two plus `loop.sh` / `goal-loop.sh`. Recorded in
+the golden-file comment alongside the digests.
+
+**Freeze-exception accounting correction.** The step-2 (GR2-01)
+default-fixture record enumerated two body movers (`CLAUDE.md`,
+`specs/INDEX.md`) where a main-vs-branch plan diff shows **three** — the
+implementer agent body is added unconditionally in `_agents`, so it moves
+in BOTH fixtures, not only `full_autonomous`. The aggregate digest was
+therefore absorbing a byte change the record never named, which is exactly
+what the tripwire's audit trail exists to prevent. Comment corrected;
+independently re-verified by diffing per-path bodies across `main` and the
+branch.
+
+**Test surface:** 14 suites, 914 checks green (`test_installer.py`
+197 → 237, `test_interview.py` 73 → 81). New coverage: flag normalization
+across every accepted spelling plus fail-loud rejection of unrecognized
+values, the state-stamp pairing on a non-canonical spelling, the
+untracked-path skip (including stickiness across runs and `--force`
+override), and the parse discriminator (deleted key, misspelled key,
+genuine pre-2.4.0 file, and other keys staying loud). Emitted wrappers
+still pass `bash -n` with telemetry on; re-apply idempotent
+(`create=0 update=0`); `--ic-checks` exit 0.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed
