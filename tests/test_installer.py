@@ -627,23 +627,45 @@ check("GR2-01: reviewer body does NOT gain the failed-approaches text "
       _rev is not None and "do-not-retry" not in _rev
       and "Failed approaches" not in _rev)
 
-# Canonical template home: INDEX.md carries the template's section headers,
-# the do-not-retry flag wording, and the three corrected link targets. Pin
-# non-overlapping markers so no single substring satisfies two assertions.
-check("GR2-01: INDEX.md carries the progress.md template Failed-approaches "
-      "header", _index is not None and "## Failed approaches" in _index)
-check("GR2-01: INDEX.md template carries the do-not-retry flag wording",
-      _index is not None and "do-not-retry: yes" in _index)
+# Canonical template home (review revision): the template lives in its OWN
+# installer-owned file, not inside the operator-edited INDEX.md roster. That
+# separation is what makes it deliverable on upgrade: INDEX.md is skipped by
+# the hand-edit guard on every real install (Phase 7.6 step 5 directs editing
+# it), so normative content parked there could never reach an existing
+# workspace, and --force delivered it only by destroying the roster.
+_PROGRESS_TPL = ".claude/specs/progress-template.md"
+_tpl = _body_of(_gplan, _PROGRESS_TPL)
+check("GR2-01: progress-template.md is emitted", _tpl is not None)
+check("GR2-01: template carries the Failed-approaches header",
+      _tpl is not None and "## Failed approaches" in _tpl)
+check("GR2-01: template carries the do-not-retry flag wording",
+      _tpl is not None and "do-not-retry: yes" in _tpl)
 for _lt in ("decisions.md", "learnings/", "<timestamp>-checkpoint.md"):
-    check(f"GR2-01: INDEX.md template links {_lt}",
-          _index is not None and _lt in _index)
+    check(f"GR2-01: template links {_lt}", _tpl is not None and _lt in _tpl)
+check("GR2-01: template declares itself installer-owned",
+      _tpl is not None and "Installer-owned" in _tpl)
+# INDEX.md keeps the roster and POINTS at the template rather than embedding
+# it, so the two ownership domains stay separate.
+check("GR2-01: INDEX.md points at the template file",
+      _index is not None and "progress-template.md" in _index)
+check("GR2-01: INDEX.md no longer embeds the template body",
+      _index is not None and "# Progress — <slug>" not in _index)
+check("GR2-01: INDEX.md still carries the spec roster",
+      _index is not None and "| slug | status |" in _index)
 # No second emitted body duplicates the full template (uniqueness of the
 # home). The template's distinctive title line appears in exactly one body.
 _dupe = [a["path"] for a in _gplan
          if a["body"] and "# Progress — <slug>" in a["body"]]
 check("GR2-01: progress.md template embedded in exactly one emitted body "
-      "(.claude/specs/INDEX.md)",
-      _dupe == [".claude/specs/INDEX.md"])
+      "(.claude/specs/progress-template.md)",
+      _dupe == [_PROGRESS_TPL])
+# The pointers in CLAUDE.md and the implementer body must name the file that
+# actually carries the template — a stale pointer here is the dangling-
+# reference class this revision exists to close.
+check("GR2-01: CLAUDE.md points at the template file",
+      _claude is not None and "progress-template.md" in _claude)
+check("GR2-01: implementer points at the template file",
+      _impl is not None and "progress-template.md" in _impl)
 
 # ---------------------------------------------------------------------------
 # GR2-02 (v2.4.0 fold): trajectory retention is a comment-contract in the

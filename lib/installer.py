@@ -186,6 +186,14 @@ def build_plan(cfg: dict) -> list[dict]:
 
     # ---- Specs index (Phase 7.6) ------------------------------------------ #
     add(".claude/specs/INDEX.md", TEMPLATES["specs_index"](cfg))
+    # GR2-01 (review revision): the canonical progress.md template is emitted
+    # as its own INSTALLER-OWNED file rather than embedded in INDEX.md. INDEX.md
+    # is the operator-edited spec roster, so the hand-edit guard skips it on
+    # every real install — which meant normative content parked inside it could
+    # never reach an upgraded workspace, and forcing it through destroyed the
+    # roster. Separate file, separate ownership: this one updates cleanly.
+    add(".claude/specs/progress-template.md",
+        TEMPLATES["progress_template"](cfg))
 
     # ---- gitignore fragment ----------------------------------------------- #
     add(".claude/.gitignore", TEMPLATES["gitignore"](cfg))

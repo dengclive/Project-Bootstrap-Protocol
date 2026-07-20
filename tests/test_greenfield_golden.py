@@ -303,7 +303,24 @@ EXPECTED_DIGESTS = {
     # "off by default = invisible" property still holds. Those are covered by
     # test_installer.py's TEL-01 blocks, including a new frozen-source
     # equivalence pin.
-    "default": "be76c93fe9abda85e2cf2452f708b4777f011090f91aefbeb240c016d562a02f",
+    # [v2.4.0 review-fix re-baseline, part 3 — GR2-01 template ownership]
+    # FIRST COUNT CHANGE OF THE REVIEW: 56 -> 57 (67 -> 69 for full). +1 file,
+    # zero removed, three bodies move. Diff-verified vs the part-2 head:
+    #   ADDED .claude/specs/progress-template.md — the canonical progress.md
+    #     template, relocated out of INDEX.md into its own installer-owned
+    #     file. INDEX.md is the operator-edited spec ROSTER (Phase 7.6 step 5
+    #     directs replacing the placeholder row), so the hand-edit guard skips
+    #     it on every real install: normative content parked inside it could
+    #     never reach an upgraded workspace, while CLAUDE.md and the
+    #     implementer body were updated to point at a section that would never
+    #     arrive. Delivering it required --force, which destroys the roster.
+    #     Separate file = separate ownership; it now updates cleanly.
+    #   .claude/specs/INDEX.md — template body removed, replaced by a pointer
+    #     plus an explicit "this file is yours to edit" note.
+    #   CLAUDE.md, .claude/agents/implementer.md — pointers re-aimed at
+    #     progress-template.md (a stale pointer here is the dangling-reference
+    #     class this revision closes).
+    "default": "d8b4bdab48f31c17a54530f49c26935a4a86bcbffc1b356ae3df3260b3f6a7ff",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -351,15 +368,22 @@ EXPECTED_DIGESTS = {
     #   the committed telemetry.md told a privacy reviewer they expire.
     #   Pruning is now stated as part of the operator obligation the contract
     #   already binds. auto.sh still UNTOUCHED.
+    #   [v2.4.0 review-fix re-baseline, part 3 — GR2-01 template ownership]
+    #   Same +1 file and same three body moves as the default column
+    #   (68 -> 69); the split is archetype- and mode-independent.
     "full_autonomous":
-        "9c87b31e8d3c3cd8c8b3e584211e67399f69b3d2fcaab9221bb9158373ece99f",
+        "99784eb9bafd017e0cd0fa7a7c5f229d9b5b4cbdc80ba66a722abd093dcdd753",
 }
 
 EXPECTED_ACTION_COUNTS = {
     # [v2.4.0 code fold — GR2-03a] both fixtures +1 for the unconditional
     # assumption-ledger.md steering artifact (55 -> 56, 67 -> 68).
-    "default": 56,
-    "full_autonomous": 68,
+    # [v2.4.0 review fix — GR2-01 template ownership] both fixtures +1 again
+    # for the unconditional .claude/specs/progress-template.md, split out of
+    # the operator-edited INDEX.md so it is deliverable on upgrade
+    # (56 -> 57, 68 -> 69).
+    "default": 57,
+    "full_autonomous": 69,
 }
 
 

@@ -452,12 +452,40 @@ since both fixtures leave the flag off).
   pointing at `EXPECTED_ACTION_COUNTS` (56 / 68), which is where a real
   count regression actually surfaces.
 
-**No golden movement at this step** — the retrofit change touches only
-retrofit-flavor bodies (neither golden fixture is retrofit) and the rest
-is test-only. Counts stay 56 / 68.
+**No golden movement from the items above** — the retrofit change touches
+only retrofit-flavor bodies (neither golden fixture is retrofit) and the
+rest is test-only.
 
-**Test surface:** 14 suites, **938 checks** green, up from 866 at the
-start of the review (`test_installer.py` 197 → 253, `test_interview.py`
+- **GR2-01 template ownership (the upgrade-delivery half).** Step 6 stopped
+  the upgrade from *destroying* operator content; this closes the other
+  half of the same finding. The canonical `progress.md` template was
+  emitted **inside `.claude/specs/INDEX.md`** — the spec roster, which
+  Phase 7.6 step 5 explicitly directs operators to rewrite. So on any real
+  install the hand-edit guard correctly SKIPS that file, and the template
+  could never reach an upgraded workspace, while `CLAUDE.md` and the
+  implementer body *were* updated to point at a section that would never
+  arrive (a dangling pointer). Delivering it required `--force`, which
+  destroys the roster. Root cause is altitude, not logic: installer-owned
+  normative content was parked in operator territory. The template now
+  lives in its **own installer-owned file**,
+  `.claude/specs/progress-template.md`, which nobody hand-edits and which
+  therefore updates cleanly forever; `INDEX.md` keeps the roster and
+  points at it. All four pointers (greenfield `CLAUDE.md` + implementer,
+  and both retrofit bodies) re-aimed. The original rationale for choosing
+  INDEX.md was that it is *unconditional* — a new unconditional file
+  satisfies that equally, without the ownership collision. Verified
+  end-to-end on a real `2.2.0 → 2.4.0` upgrade: roster intact,
+  hand-seeded ledger intact, `CREATE .claude/specs/progress-template.md`,
+  and the `CLAUDE.md` pointer resolving to a file that exists.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 8) — first count change of
+the review.** `default: 56 → 57`, `full_autonomous: 68 → 69`. One file
+added, zero removed, three bodies moved (`INDEX.md` loses the template
+body and gains a pointer; `CLAUDE.md` and `implementer.md` re-aim theirs).
+Diff-verified before `GOLDEN_UPDATE=1`; recorded in the golden comment.
+
+**Test surface:** 14 suites, **945 checks** green, up from 866 at the
+start of the review (`test_installer.py` 197 → 260, `test_interview.py`
 73 → 81, `test_retrofit.py` 254 → 262).
 
 ### Review findings recorded but NOT fixed

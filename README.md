@@ -623,3 +623,32 @@ recorded as a known, deliberately-untouched inconsistency: pre-existing
 emitted hook/wrapper bodies still cite `Bootstrap-Protocol-v2-0-0.md` /
 `-v2-2-0.md` (a future doc-reference-normalization pass) — only **new** text
 this fold added cites `-v2-4-0.md`.
+
+**Adversarial review of this fold (steps 6–8).** The open PR was reviewed
+multi-lens (ten independent finder angles, one refutation-seeking verifier
+per candidate, then a gap sweep); fifteen findings were confirmed and all
+are fixed in-branch. The two most serious were **upgrade-path** defects
+that only appear when the new installer runs over an existing 2.2.0
+workspace, which is why the fold's own greenfield-heavy suite missed them:
+`apply_plan`'s hand-edit guard only protected *manifest-tracked* paths, so
+a file an operator hand-created at one of this fold's **newly planned**
+paths (`assumption-ledger.md`, `telemetry.md` — the doc-first v2.3.0
+migration note tells them to) was overwritten with no warning; and the
+GR2-01 template's only emitted home is `.claude/specs/INDEX.md`, the one
+file the wizard directs operators to rewrite, so an upgraded install could
+not receive the template without `--force` destroying its spec roster. A
+third, **TEL-01 flag truthiness**, inverted explicit privacy opt-outs
+(`off` / `no` / `"false"` all read as ENABLED). One security fix:
+`telemetry.md` steers OTLP **auth headers** into
+`.claude/settings.local.json` and calls it "(gitignored)" while no emitted
+gitignore covered it — now it does, so the claim is true rather than
+softened. Three findings originated in the **frozen sources** and were
+corrected pre-release on the TAR-02..06 precedent (this PR has not merged),
+with the emitted copies moved in lockstep and a new equivalence pin
+asserting the two telemetry copies differ on exactly the one substituted
+line. Full details, including the findings deliberately **not** fixed, are
+in `docs/changelog.md` steps 6–8. Suite: 866 → **945 checks**, 14 suites
+green; goldens re-baselined three times, diff-verified before each update.
+The GR2-01 template moved out of the operator-edited `INDEX.md` into its own
+installer-owned `.claude/specs/progress-template.md` so upgrades can actually
+receive it, which is the review's one file-count change (56 → 57, 68 → 69).

@@ -1441,3 +1441,81 @@
 2026-07-20T10:22:58Z dependency-gate ok
 2026-07-20T10:22:58Z dependency-gate ok
 2026-07-20T10:22:58Z dependency-gate ok
+2026-07-20T10:25:45Z secrets-gate BLOCK /x/.env
+2026-07-20T10:25:45Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:25:45Z secrets-gate ok src/main.py
+2026-07-20T10:25:45Z secrets-gate BLOCK config.env
+2026-07-20T10:25:45Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:25:45Z secrets-gate BLOCK app.KEY
+2026-07-20T10:25:45Z secrets-gate BLOCK .ENV
+2026-07-20T10:25:45Z secrets-gate ok environment.md
+2026-07-20T10:25:45Z secrets-gate ok src/prevent.py
+2026-07-20T10:25:45Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:25:45Z dependency-gate ok
+2026-07-20T10:25:45Z dependency-gate ok
+2026-07-20T10:25:45Z dependency-gate ok
+2026-07-20T10:26:33Z secrets-gate BLOCK /x/.env
+2026-07-20T10:26:33Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:26:33Z secrets-gate ok src/main.py
+2026-07-20T10:26:33Z secrets-gate BLOCK config.env
+2026-07-20T10:26:33Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:26:33Z secrets-gate BLOCK app.KEY
+2026-07-20T10:26:33Z secrets-gate BLOCK .ENV
+2026-07-20T10:26:33Z secrets-gate ok environment.md
+2026-07-20T10:26:33Z secrets-gate ok src/prevent.py
+2026-07-20T10:26:33Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:26:33Z dependency-gate ok
+2026-07-20T10:26:33Z dependency-gate ok
+2026-07-20T10:26:33Z dependency-gate ok
+2026-07-20T10:27:42Z secrets-gate BLOCK /x/.env
+2026-07-20T10:27:42Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:27:42Z secrets-gate ok src/main.py
+2026-07-20T10:27:42Z secrets-gate BLOCK config.env
+2026-07-20T10:27:42Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:27:42Z secrets-gate BLOCK app.KEY
+2026-07-20T10:27:42Z secrets-gate BLOCK .ENV
+2026-07-20T10:27:42Z secrets-gate ok environment.md
+2026-07-20T10:27:42Z secrets-gate ok src/prevent.py
+2026-07-20T10:27:42Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:27:42Z dependency-gate ok
+2026-07-20T10:27:42Z dependency-gate ok
+2026-07-20T10:27:42Z dependency-gate ok
+2026-07-20T10:27:54Z secrets-gate BLOCK /x/.env
+2026-07-20T10:27:54Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:27:54Z secrets-gate ok src/main.py
+2026-07-20T10:27:54Z secrets-gate BLOCK config.env
+2026-07-20T10:27:54Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:27:54Z secrets-gate BLOCK app.KEY
+2026-07-20T10:27:55Z secrets-gate BLOCK .ENV
+2026-07-20T10:27:55Z secrets-gate ok environment.md
+2026-07-20T10:27:55Z secrets-gate ok src/prevent.py
+2026-07-20T10:27:55Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:27:55Z dependency-gate ok
+2026-07-20T10:27:55Z dependency-gate ok
+2026-07-20T10:27:55Z dependency-gate ok
+2026-07-20T10:28:42Z secrets-gate BLOCK /x/.env
+2026-07-20T10:28:42Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:28:42Z secrets-gate ok src/main.py
+2026-07-20T10:28:43Z secrets-gate BLOCK config.env
+2026-07-20T10:28:43Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:28:43Z secrets-gate BLOCK app.KEY
+2026-07-20T10:28:43Z secrets-gate BLOCK .ENV
+2026-07-20T10:28:43Z secrets-gate ok environment.md
+2026-07-20T10:28:43Z secrets-gate ok src/prevent.py
+2026-07-20T10:28:43Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:28:43Z dependency-gate ok
+2026-07-20T10:28:43Z dependency-gate ok
+2026-07-20T10:28:43Z dependency-gate ok
+2026-07-20T10:28:59Z secrets-gate BLOCK /x/.env
+2026-07-20T10:28:59Z secrets-gate BLOCK secrets/db.yml
+2026-07-20T10:28:59Z secrets-gate ok src/main.py
+2026-07-20T10:28:59Z secrets-gate BLOCK config.env
+2026-07-20T10:28:59Z secrets-gate BLOCK backend/prod.env
+2026-07-20T10:28:59Z secrets-gate BLOCK app.KEY
+2026-07-20T10:28:59Z secrets-gate BLOCK .ENV
+2026-07-20T10:28:59Z secrets-gate ok environment.md
+2026-07-20T10:28:59Z secrets-gate ok src/prevent.py
+2026-07-20T10:28:59Z secrets-gate BLOCK $(touch /tmp/pwn).env
+2026-07-20T10:28:59Z dependency-gate ok
+2026-07-20T10:28:59Z dependency-gate ok
+2026-07-20T10:28:59Z dependency-gate ok
