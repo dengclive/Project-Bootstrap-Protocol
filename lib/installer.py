@@ -87,6 +87,13 @@ def build_plan(cfg: dict) -> list[dict]:
     # on every fixture. The surfacing behavior is deferred (see changelog).
     add(".claude/steering/assumption-ledger.md",
         TEMPLATES["assumption_ledger"](cfg))
+    # TEL-01 (v2.4.0 fold): opt-in observability doc, emitted ONLY when the
+    # operator opted in (Phase 0 decision). Lands in .claude/steering/ (never
+    # gitignored -> committed by construction; no gitignore edit). Off by
+    # default: the default plan is byte-identical to the pre-TEL-01 baseline.
+    # Read defensively (cfg.get) so a config lacking the key never KeyErrors.
+    if cfg.get("telemetry_export_enabled", False):
+        add(".claude/steering/telemetry.md", TEMPLATES["telemetry"](cfg))
 
     # ---- Hooks (Phase 6) -------------------------------------------------- #
     hook_set = cfg["_resolved_hooks"]            # filled by resolve_config
@@ -811,6 +818,12 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         "goal_supervised_mode_enabled":
             bool(flags.get("goal_supervised_mode_enabled", False)),
         "queue_mode_enabled": bool(flags.get("queue_mode_enabled", False)),
+        # TEL-01 (v2.4.0 fold): the Phase 0 opt-in decision, persisted
+        # cfg-authoritatively (mirrors the mode-flag pattern above). The
+        # flag-gated build_plan add keys off the same cfg value, so the
+        # emitted telemetry.md and this state field can never disagree.
+        "telemetry_export_enabled":
+            bool(cfg.get("telemetry_export_enabled", False)),
     })
     # --- the three tracking lists: initialise once, never clobber ---
     state.setdefault("loop_in_flight", [])

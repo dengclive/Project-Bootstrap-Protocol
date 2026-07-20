@@ -140,6 +140,62 @@ value.
   gain the judge-parity clause). `test_usage_limit_contract.py`'s
   auto.sh 13-value enum assertion stays green untouched.
 
+### Step 4 — TEL-01 telemetry doc (opt-in, flag-gated)
+
+- **`_telemetry(cfg)`** in `lib/templates.py` (registered `"telemetry"`)
+  returns the **frozen `telemetry.md` body verbatim**. Exactly two values
+  are stamped at emission, **scoped to the `OTEL_RESOURCE_ATTRIBUTES`
+  line**: `<protocol_version>` ← `PROTOCOL_VERSION`, `<archetype>` ←
+  `cfg["project"]["archetype"]`. The explanatory comment two lines above
+  legitimately keeps the literal placeholder names, so the substitution is
+  a scoped one-line build, not a global replace (AR-01 class). Fails loud
+  (raises) if either value is missing — never emits a body whose OTEL line
+  still carries a `<placeholder>`. Emitted body verified byte-identical to
+  the uploaded `telemetry.md` (modulo the two substitutions).
+- **`build_plan`** flag-gated add of `.claude/steering/telemetry.md` when
+  `cfg.get("telemetry_export_enabled")`. Committed by construction
+  (steering never gitignored); no gitignore edit. Read defensively.
+- **`_write_state`** persists `telemetry_export_enabled` cfg-authoritatively
+  (mirrors the mode-flag pattern); the flag-gated add and the state field
+  key off the same cfg value, so emitted doc and state never disagree.
+- **TAR-01 substitution-source deviation (recorded).** The frozen head
+  note / Companion / body comment say the version is stamped "from
+  `.bootstrap-state.json` (`bootstrap_protocol_version`)"; this
+  implementation stamps the `PROTOCOL_VERSION` **constant**. Code-verified
+  equivalent: both state writers stamp `bootstrap_protocol_version =
+  PROTOCOL_VERSION` (`_write_state` and `_write_retrofit_state`), and
+  `apply_plan` refreshes an unmodified `telemetry.md` on re-apply/upgrade
+  (hand-edits preserved under L-1, the expected exception) — so the emitted
+  constant equals the state-written value on every apply path. The
+  regression lock is the TAR-01 pairing assertion (emitted OTEL version ==
+  state `bootstrap_protocol_version` on the same apply).
+- **Wizard wiring — `lib/interview.py`** [freeze exception]. TEL-01 is a
+  skippable Phase 0 decision, wired as a **standalone top-level boolean**
+  (NOT under `autonomous_modes` — telemetry is independent of every
+  autonomous mode): added to `ANSWER_KEYS`, `default_answers` (default
+  skip), `answers_to_config` (top-level key), `parse_interview_answers`
+  `bool_keys`, the deterministic render (verbatim PRD "Enable observability
+  export?" question), and the interactive front-end prompt. Back-compat: a
+  pre-2.4.0 ANSWERS block lacking the line parses to `false` rather than
+  erroring. Phase 0.5 preview needs no interview edit — the dry-run plan
+  listing already includes `telemetry.md` once the flag-gated add lands.
+- **Config flag — no `defaults.py` freeze exception.** `resolve_config`
+  deep-copies `raw`, so the unknown top-level `telemetry_export_enabled`
+  key passes through on both greenfield and retrofit; the retrofit branch
+  rejects only the three nested `*_enabled` mode flags. Verified by the
+  retrofit-passthrough assertion. (The retrofit **state schema** is not
+  extended — out of scope, recorded; the flag-gated add still emits
+  `telemetry.md` on a retrofit plan because the overlay wraps the full
+  plan.)
+- **Off by default = invisible.** Default plan count and determinism digest
+  unchanged vs the post-GR2-03a baseline; **no golden move** (neither
+  golden fixture opts in — the on-path is covered only in
+  `test_installer.py`). On-path: +1 file, committed, substituted OTEL line.
+  New assertions in `test_installer.py` (off/on/committed/OTEL-scoped/
+  pairing/TAR-02-secrets/state-flag/retrofit-passthrough) and
+  `test_interview.py` (default false, verbatim question, yes→true
+  round-trip).
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

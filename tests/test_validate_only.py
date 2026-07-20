@@ -42,6 +42,13 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 # worktree run, 2026-07-17). A change here means the DEFAULT synthesize
 # path's bytes moved - that is an intentional-freeze-exception decision,
 # never a drive-by re-baseline.
+#
+# [v2.4.0 code fold — TEL-01 wizard wiring] RE-BASELINED. The emitted
+# bootstrap.config.yaml now carries the top-level `telemetry_export_enabled:
+# false` line (the wizard-wired Phase 0 opt-in, default skip). This is the
+# only byte change to the default synthesize output at this fold; recorded as
+# a freeze exception, not a drive-by. Previous digest:
+# 9f725b3f88f9b54eb1a0414dbc5e8e1a372a5c6049bb016119b4051b6113ac38.
 def _run(args, cwd):
     return subprocess.run([sys.executable, BIN] + args, cwd=cwd,
                           capture_output=True, text=True)
@@ -105,7 +112,7 @@ finally:
 # unaffected (the flag branch has no side effects).
 # --------------------------------------------------------------------------- #
 EXPECTED_NOFLAG_SHA256 = \
-    "9f725b3f88f9b54eb1a0414dbc5e8e1a372a5c6049bb016119b4051b6113ac38"
+    "798a30bf895ef7aa2a27295344a5ffeee501ad63e31ef7464675baf03b274b17"
 
 d = tempfile.mkdtemp()
 try:

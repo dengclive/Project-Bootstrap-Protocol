@@ -350,6 +350,111 @@ it — that is what keeps the staleness class from going invisible again.
 """
 
 
+def _telemetry(cfg):
+    # TEL-01 (v2.4.0 fold): the operator-opt-in telemetry steering doc. The
+    # body is the FROZEN telemetry.md verbatim; exactly two values are stamped
+    # at emission, SCOPED to the OTEL_RESOURCE_ATTRIBUTES line:
+    #   <protocol_version> <- PROTOCOL_VERSION (the same constant the state
+    #     writer stamps into bootstrap_protocol_version; using it here keeps
+    #     the body a pure function of config without reading the state file at
+    #     plan time — see the changelog TAR-01 equivalence rationale).
+    #   <archetype>        <- cfg["project"]["archetype"].
+    # The explanatory comment two lines above that line KEEPS the literal
+    # placeholder names by design (it explains where the values come from), so
+    # substitution must NOT be a global replace — it is scoped to the one
+    # export line built below. Fail loud if either value is missing: never emit
+    # a body whose OTEL_RESOURCE_ATTRIBUTES line still carries a <placeholder>.
+    pv = PROTOCOL_VERSION
+    arche = cfg["project"].get("archetype")
+    if not pv or not arche:
+        raise RuntimeError(
+            "TEL-01: refusing to emit telemetry.md with a missing "
+            f"substitution value (protocol_version={pv!r}, "
+            f"archetype={arche!r}); the OTEL_RESOURCE_ATTRIBUTES line would "
+            "carry an unsubstituted <placeholder>. Fix the config and re-run.")
+    otel_line = (
+        'export OTEL_RESOURCE_ATTRIBUTES="bootstrap.protocol_version='
+        f'{pv},bootstrap.archetype={arche}"')
+    return f"""# Observability & Telemetry (operator-opt-in)
+
+**Status:** enabled at bootstrap (`telemetry_export_enabled: true`). Off by default; you turned it on.
+
+This project exports **Claude Code's native OpenTelemetry signal** to a backend **you own**. The
+Bootstrap Protocol opens no network sink of its own and transmits nothing to anyone. Everything below
+is standard Claude Code configuration — we compose it, we do not wrap it.
+
+Claude Code telemetry is opt-in and, by design, is sent only to the OTLP endpoint you configure —
+never to Anthropic, and never to the Bootstrap maintainers. (This describes the OpenTelemetry export.
+Anthropic's separate operational telemetry is a different channel, governed by Claude Code's Data
+usage settings, not by anything here.) If you later choose to share findings to
+help improve the protocol, that is a deliberate export you perform from your own backend, not an
+automatic channel.
+
+## Enable
+
+Set these in your shell profile, or in `.claude/settings.local.json` (gitignored), **before**
+launching `claude`. Variables exported after launch have no effect. Do **not** put backend auth
+headers or tokens (`OTEL_EXPORTER_OTLP_HEADERS`) in `.claude/settings.json` or any other committed
+file — that file is committed and security-critical-tier, and nothing in the pipeline scans it for a
+pasted secret. (Org-wide managed settings are a separate, MDM-distributed system file, not the
+project `.claude/settings.json`.)
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317   # your collector
+
+# Slice mechanism health by archetype and protocol version in your own backend.
+# <protocol_version> and <archetype> are stamped by the wizard at emission time
+# from .bootstrap-state.json (bootstrap_protocol_version) and the resolved config:
+{otel_line}
+```
+
+To confirm it works locally before wiring a backend, set `OTEL_METRICS_EXPORTER=console` and
+`OTEL_LOGS_EXPORTER=console` and watch the events print.
+
+## Redaction posture — do not widen without cause
+
+This project's default is the **redaction-clean** signal: prompts, tool arguments, file contents, and
+raw API bodies are **not** exported. That is deliberate. The mechanism-health questions below are all
+answerable from the redacted events. Do **not** set `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_TOOL_DETAILS`,
+`OTEL_LOG_TOOL_CONTENT`, `OTEL_LOG_ASSISTANT_RESPONSES`, or `OTEL_LOG_RAW_API_BODIES` unless you have
+a specific reason and you have confirmed your backend filters sensitive fields. Note one gotcha:
+`OTEL_LOG_ASSISTANT_RESPONSES` falls back to `OTEL_LOG_USER_PROMPTS` when unset, so if you turn prompt
+logging on, set `OTEL_LOG_ASSISTANT_RESPONSES=0` to keep responses redacted. The trajectory logs (`.claude/logs/trajectory-*.jsonl`) remain the local,
+gitignored, 7-day-purged raw record for "why did it do that at 3am?" — they are not part of this export.
+
+Identity rides every export even at the redaction-clean default: when you authenticate via OAuth,
+`user.email` is attached to metrics and events, and `user.account_uuid` / `user.account_id` are on by
+default. For a backend you own this is usually fine; if it is not, filter those fields at the backend
+or set `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`.
+
+## What to watch, and which Bootstrap mechanism it answers
+
+| Question about our mechanisms | Event / metric | Key attributes |
+| --- | --- | --- |
+| Are the gates (secrets/deps/drift hooks) firing, and where from? | `claude_code.tool_decision`, `claude_code.hook_execution_complete` | `decision`, `source`, `num_blocking`, `num_non_blocking_error` |
+| Do the drift thresholds (50/120/3) match real saturation? | `claude_code.compaction` | `trigger`, `pre_tokens`, `post_tokens` |
+| How often do unattended loops hit infra failure / usage-limit halts? | `claude_code.api_error`, `claude_code.api_retries_exhausted` | `attempt`, `status_code`, `total_attempts` |
+| How often does autonomy escalate or get gated? | `claude_code.permission_mode_changed` | `from_mode`, `to_mode` (always present); `trigger` (`auto_gate_denied`, `auto_opt_in`) — absent when the transition originates from the SDK/bridge, so verify it appears under `claude -p` at implementation |
+| Is the subagent token multiplier assumption still valid? | `claude_code.token.usage` | `agent.name`, `query_source` (`main`/`subagent`/`auxiliary`) |
+| Are we tripping model refusals in autonomous runs? | `claude_code.api_refusal` | `has_category` |
+
+The token-usage-by-subagent row feeds the **Assumption Ledger** directly: it is the evidence source
+for re-validating the subagent token-multiplier assumption on any pinned-model change.
+
+## What this is not
+
+- **Not a phone-home.** The protocol ships no maintainer endpoint. Rejected on category-mismatch
+  (fleet metrics, GAR-04), wire-surface/exfiltration threat, and complexity budget.
+- **Not a substitute for the audit record.** The committed `loop-final-*.md` / `run-summary-*.md`
+  artifacts remain the operator-facing review surface. OTel is the trend/aggregate layer over them.
+- **Not required.** Disable any time by unsetting `CLAUDE_CODE_ENABLE_TELEMETRY`; nothing else changes.
+"""
+
+
 def _hook_body(name: str, cfg: dict):
     c = cfg["commands"]
     sec_paths = cfg["secrets"]["never_read_paths"]
@@ -2963,6 +3068,8 @@ TEMPLATES = {
     "tools": _tools,
     # GR2-03a (v2.4.0 fold): unconditional assumption-ledger steering artifact.
     "assumption_ledger": _assumption_ledger,
+    # TEL-01 (v2.4.0 fold): opt-in telemetry steering doc (flag-gated add).
+    "telemetry": _telemetry,
     # D5 / OD-2: dispatch hook between greenfield and retrofit by cfg["mode"].
     # _hook_body is preserved AST-identical; _hook_dispatch falls through
     # to _hook_body for mode != "retrofit", so greenfield output stays

@@ -455,5 +455,43 @@ check("R-3: legacy inline list form still parses (back-compat)",
       _lp["principles_ranked"] == ["A one", "B two", "C three"] and
       _lp["secrets_never_read_paths"] == [".env*", "secrets/**"])
 
+# --------------------------------------------------------------------------- #
+# TEL-01 (v2.4.0 fold): telemetry_export_enabled is a standalone top-level
+# opt-in wired through the wizard, default skip.
+# --------------------------------------------------------------------------- #
+_tp = IV.build_proposal("a service rest api worker endpoint")
+_tans = IV.default_answers(_tp)
+check("TEL-01: default answer skips telemetry (false)",
+      _tans["telemetry_export_enabled"] is False)
+# Default emitted config carries the top-level flag = false (mirrors how
+# queue_mode_enabled: false is emitted).
+_tcfg = IV.answers_to_config(_tans)
+check("TEL-01: default emitted config has top-level "
+      "telemetry_export_enabled: false",
+      _tcfg.get("telemetry_export_enabled") is False)
+check("TEL-01: telemetry flag is NOT nested under autonomous_modes",
+      "telemetry_export_enabled" not in _tcfg["autonomous_modes"])
+# The default-emitted YAML string carries the flag (surfaces in the ANSWERS
+# block the operator edits).
+_trender = IV.render_interview(_tp, "x")
+check("TEL-01: ANSWERS block emits telemetry_export_enabled: false",
+      "telemetry_export_enabled: false" in _trender)
+# Verbatim PRD question phrasing present in the render (not paraphrased).
+check("TEL-01: render carries the verbatim 'Enable observability export?' "
+      "question", "Enable observability export?" in _trender)
+# Answering yes yields a true config flag (answers layer).
+_tp2 = IV.build_proposal("a service rest api worker endpoint")
+_ans2 = IV.default_answers(_tp2)
+_ans2["telemetry_export_enabled"] = True
+_ans2_cfg = IV.answers_to_config(_ans2)
+check("TEL-01: answering yes yields top-level telemetry_export_enabled: true",
+      _ans2_cfg.get("telemetry_export_enabled") is True)
+# And a hand-edited ANSWERS block with the flag true parses back to true.
+_yes_block = IV.render_interview(_tp2, "x").replace(
+    "telemetry_export_enabled: false", "telemetry_export_enabled: true")
+check("TEL-01: telemetry_export_enabled: true round-trips through parse",
+      IV.parse_interview_answers(_yes_block)["telemetry_export_enabled"]
+      is True)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

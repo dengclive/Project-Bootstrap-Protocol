@@ -661,6 +661,142 @@ _loopw = _body_of(_gplan, ".claude/loop.sh")
 check("GR2-02: loop.sh did not gain the judge-parity clause",
       _loopw is not None and "judge retry-once" not in _loopw)
 
+# ---------------------------------------------------------------------------
+# TEL-01 (v2.4.0 fold): opt-in telemetry doc, flag-gated. Off by default
+# (invisible); on-path adds one committed steering file whose
+# OTEL_RESOURCE_ATTRIBUTES line is substituted. No wire, gate, or gitignore
+# change.
+# ---------------------------------------------------------------------------
+from templates import PROTOCOL_VERSION as _PV            # noqa: E402
+_TEL_PATH = ".claude/steering/telemetry.md"
+
+
+def _otel_line(body):
+    for _l in body.splitlines():
+        if _l.startswith("export OTEL_RESOURCE_ATTRIBUTES="):
+            return _l
+    return ""
+
+
+# OFF (default): no telemetry.md; determinism digest stable.
+_coff, _ = cfg_from(SERVICE)
+_plan_off = build_plan(_coff)
+check("TEL-01[off]: no telemetry.md on the default (flag-absent) path",
+      all(a["path"] != _TEL_PATH for a in _plan_off))
+check("TEL-01[off]: determinism digest stable with flag absent",
+      plan_digest(_coff) == plan_digest(cfg_from(SERVICE)[0]))
+
+# ON: +1 file, committed, OTEL line substituted.
+_TEL_ON = """project:
+  name: telon
+  archetype: ai-agent
+telemetry_export_enabled: true
+"""
+_con, _errs_on = cfg_from(_TEL_ON)
+check("TEL-01[on]: config with the flag resolves cleanly", _errs_on == [])
+check("TEL-01[on]: flag survives resolution", _con.get(
+    "telemetry_export_enabled") is True)
+_plan_on = build_plan(_con)
+_tel_actions = [a for a in _plan_on if a["path"] == _TEL_PATH]
+check("TEL-01[on]: telemetry.md emitted exactly once", len(_tel_actions) == 1)
+_off_same, _ = cfg_from(_TEL_ON.replace(
+    "telemetry_export_enabled: true", "telemetry_export_enabled: false"))
+check("TEL-01[on]: plan count +1 vs the same config flag-off",
+      len(_plan_on) - len(build_plan(_off_same)) == 1)
+_gi_on = _body_of(_plan_on, ".claude/.gitignore")
+check("TEL-01[on]: telemetry.md committed (steering not gitignored)",
+      _gi_on is not None and "telemetry" not in _gi_on)
+
+if _tel_actions:
+    _tbody = _tel_actions[0]["body"]
+    _ol = _otel_line(_tbody)
+    # Scope placeholder-absence to the export line ONLY (AR-01: the comment
+    # two lines above it legitimately keeps the literal placeholder names).
+    check("TEL-01[on]: OTEL line has no <protocol_version> literal",
+          "<protocol_version>" not in _ol)
+    check("TEL-01[on]: OTEL line has no <archetype> literal",
+          "<archetype>" not in _ol)
+    check("TEL-01[on]: OTEL line carries the substituted version",
+          f"bootstrap.protocol_version={_PV}" in _ol)
+    check("TEL-01[on]: OTEL line carries the substituted archetype",
+          "bootstrap.archetype=ai-agent" in _ol)
+    # The explanatory comment DOES still carry the literals (must not be
+    # substituted) — proves the substitution was scoped, not global.
+    check("TEL-01[on]: explanatory comment keeps the literal placeholders",
+          "<protocol_version>" in _tbody and "<archetype>" in _tbody)
+    # TAR-02 secrets posture: the pasteable auth-token vector (name WITH '=')
+    # must be absent; the bare name in the warning sentence must remain.
+    check("TEL-01 TAR-02: no OTEL_EXPORTER_OTLP_HEADERS= vector in the body",
+          "OTEL_EXPORTER_OTLP_HEADERS=" not in _tbody)
+    check("TEL-01 TAR-02: body warns via gitignored settings.local.json",
+          "settings.local.json" in _tbody)
+    # No wire: the body opens no socket / names no maintainer endpoint.
+    check("TEL-01: body is documentation only (no phone-home)",
+          "Not a phone-home" in _tbody)
+
+# State flag + TAR-01 version pairing on a real install.
+_d = _install(_TEL_ON)
+try:
+    _state = _json.load(open(os.path.join(_d, ".claude",
+                                          ".bootstrap-state.json")))
+    check("TEL-01: fresh install with flag true writes state flag true",
+          _state.get("telemetry_export_enabled") is True)
+    _tf = os.path.join(_d, ".claude", "steering", "telemetry.md")
+    check("TEL-01: telemetry.md written to disk on opt-in", os.path.exists(_tf))
+    _disk_ol = _otel_line(open(_tf).read())
+    check("TEL-01 TAR-01: OTEL version == state bootstrap_protocol_version",
+          f"bootstrap.protocol_version={_state['bootstrap_protocol_version']}"
+          in _disk_ol)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# Default install: state flag false, no telemetry.md on disk.
+_d0 = _install(SERVICE)
+try:
+    _s0 = _json.load(open(os.path.join(_d0, ".claude",
+                                       ".bootstrap-state.json")))
+    check("TEL-01: default install writes state flag false",
+          _s0.get("telemetry_export_enabled") is False)
+    check("TEL-01: default install emits no telemetry.md",
+          not os.path.exists(os.path.join(_d0, ".claude", "steering",
+                                          "telemetry.md")))
+finally:
+    shutil.rmtree(_d0, ignore_errors=True)
+
+# Retrofit passthrough: the flat top-level flag survives the retrofit branch
+# and the overlay still emits telemetry.md; flag-off retrofit plan unchanged.
+_RETRO_TEL = """mode: "retrofit"
+project:
+  name: r-tel
+  archetype: service
+telemetry_export_enabled: true
+secrets:
+  enabled: true
+deps:
+  enabled: true
+  approved: []
+commands:
+  test: "true"
+  lint: "true"
+  format: "true"
+retrofit:
+  spec_strategy: "forward-only"
+  legacy_allowlist:
+    - "src/**"
+    - "tests/**"
+  retrofit_active: true
+  r08_committed: true
+"""
+_rc, _rerrs = cfg_from(_RETRO_TEL)
+check("TEL-01 retrofit: flag survives resolve with errs == []",
+      _rerrs == [] and _rc.get("telemetry_export_enabled") is True)
+check("TEL-01 retrofit: plan includes telemetry.md (overlay wraps full plan)",
+      any(a["path"] == _TEL_PATH for a in build_plan(_rc)))
+_rc_off, _ = cfg_from(_RETRO_TEL.replace(
+    "telemetry_export_enabled: true\n", ""))
+check("TEL-01 retrofit: flag-absent retrofit plan has no telemetry.md",
+      all(a["path"] != _TEL_PATH for a in build_plan(_rc_off)))
+
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
 # event+matcher with no orphans.

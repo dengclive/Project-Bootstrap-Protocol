@@ -59,6 +59,9 @@ ANSWER_KEYS = [
     "loop_mode_enabled",
     "goal_supervised_mode_enabled",
     "queue_mode_enabled",
+    # TEL-01 (v2.4.0 fold): standalone top-level opt-in, NOT an autonomous
+    # mode (independent of every autonomous mode). Default skip.
+    "telemetry_export_enabled",
     "commands_test",
     "commands_lint",
     "commands_format",
@@ -155,6 +158,10 @@ def default_answers(proposal: dict) -> dict:
         "goal_supervised_mode_enabled":
             p["autonomous_modes"]["goal_supervised_mode_enabled"],
         "queue_mode_enabled": p["autonomous_modes"]["queue_mode_enabled"],
+        # TEL-01 (v2.4.0 fold): default skip (opt-in only, independent of the
+        # autonomous modes). The operator flips it in the ANSWERS block or the
+        # interactive prompt.
+        "telemetry_export_enabled": False,
         # NEVER guessed - emitted empty, flagged HUMAN-REQUIRED.
         "commands_test": "",
         "commands_lint": "",
@@ -190,6 +197,12 @@ def answers_to_config(ans: dict) -> dict:
                 bool(ans["goal_supervised_mode_enabled"]),
             "queue_mode_enabled": bool(ans["queue_mode_enabled"]),
         },
+        # TEL-01 (v2.4.0 fold): standalone TOP-LEVEL boolean — deliberately NOT
+        # nested under autonomous_modes (telemetry is independent of every
+        # autonomous mode). build_plan's flag-gated add and _write_state both
+        # key off this exact top-level path.
+        "telemetry_export_enabled": bool(ans.get("telemetry_export_enabled",
+                                                  False)),
         "principles": {
             "ranked": list(ans["principles_ranked"]),
             "tiebreakers": [],
@@ -366,6 +379,27 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "_Constraint: queue mode requires loop or goal mode "
         "(Bootstrap-Protocol-v2-0-0.md Phase 9.7). The tool will not emit an invalid combo._",
     ])
+    # TEL-01 (v2.4.0 fold): standalone opt-in decision, independent of every
+    # autonomous mode. Question phrasing is the PRD's verbatim text
+    # (Bootstrap-Protocol-v2-4-0.md, "Enable observability export?"). Set
+    # telemetry_export_enabled in the ANSWERS block below.
+    section("Observability / telemetry export", [
+        "**Proposed:** `telemetry_export_enabled = false` (default skip; "
+        "opt-in only, independent of every autonomous mode)",
+        "",
+        "\"Enable observability export? This writes a steering doc, "
+        "`telemetry.md`, that documents Claude Code's own opt-in "
+        "OpenTelemetry surface and points it at a backend you run. It's how "
+        "you'd later see whether the gates, drift thresholds, and autonomous "
+        "loops are behaving — gate fire rates, compaction behavior, "
+        "infra-failure rates, and per-subagent token usage — as trends over "
+        "time. Nothing is sent anywhere the protocol chooses: export goes "
+        "only to the OTLP endpoint you configure, never to Anthropic and "
+        "never to the Bootstrap maintainers, and prompts, tool arguments, "
+        "file contents, and API bodies stay redacted unless you deliberately "
+        "turn them on against your own backend. Off by default; you can "
+        "enable it any time later.\"",
+    ])
     section("Project commands — HUMAN-REQUIRED (left empty by design)", [
         "`commands.test`, `commands.lint`, `commands.format`, "
         "`commands.typecheck`, `commands.ci_local`",
@@ -429,6 +463,7 @@ def parse_interview_answers(text: str) -> dict:
     bool_keys = {
         "secrets_enabled", "deps_enabled", "loop_mode_enabled",
         "goal_supervised_mode_enabled", "queue_mode_enabled",
+        "telemetry_export_enabled",
     }
     list_keys = {"principles_ranked", "secrets_never_read_paths"}
 
@@ -473,6 +508,13 @@ def parse_interview_answers(text: str) -> dict:
                 continue
             raise ValueError(f"ANSWERS block missing key: {k}")
         if k not in raw:
+            # TEL-01 (v2.4.0 fold): back-compat — a pre-2.4.0 ANSWERS block
+            # has no telemetry line. Default it to skip (false) rather than
+            # rejecting an otherwise-valid older interview file. Every other
+            # key stays required.
+            if k == "telemetry_export_enabled":
+                out[k] = False
+                continue
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
         if k in bool_keys:
@@ -649,6 +691,26 @@ def run_interactive(prd_text: str, *, instream, outstream,
         o("\n  ! Queue mode requires loop or goal mode (Bootstrap-Protocol-v2-0-0.md 9.7). "
           "Disabling queue mode.\n")
         ans["queue_mode_enabled"] = False
+
+    # TEL-01 (v2.4.0 fold): standalone opt-in, independent of the autonomous
+    # modes. Verbatim PRD question text (Bootstrap-Protocol-v2-4-0.md).
+    show("Observability / telemetry export",
+         "Enable observability export? This writes a steering doc, "
+         "telemetry.md, that documents Claude Code's own opt-in OpenTelemetry "
+         "surface and points it at a backend you run. It's how you'd later "
+         "see whether the gates, drift thresholds, and autonomous loops are "
+         "behaving — gate fire rates, compaction behavior, infra-failure "
+         "rates, and per-subagent token usage — as trends over time. Nothing "
+         "is sent anywhere the protocol chooses: export goes only to the OTLP "
+         "endpoint you configure, never to Anthropic and never to the "
+         "Bootstrap maintainers, and prompts, tool arguments, file contents, "
+         "and API bodies stay redacted unless you deliberately turn them on "
+         "against your own backend. Off by default; you can enable it any "
+         "time later.")
+    v = _ask("Telemetry export enabled? true|false",
+             str(ans["telemetry_export_enabled"]).lower(),
+             instream=instream, outstream=outstream, eof=eof)
+    ans["telemetry_export_enabled"] = v.lower() in ("true", "1", "yes", "on")
 
     o("\n--- Project commands (HUMAN-REQUIRED) ---\n"
       "A PRD cannot supply these. Empty => the installer emits gates that "
