@@ -1,5 +1,36 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.2.0 → 2.4.0 (v2.4.0 code fold — GR2-EX / TEL-EX; bring code up to the frozen v2.4.0 docs)
+
+Single code fold; **no intermediate 2.3.0 code release**. The v2.3.0 GR2
+doc fold and the v2.4.0 TEL-01 doc fold were both doc-first and landed no
+code, so the real code delta is `2.2.0 → 2.4.0 = GR2-01 + GR2-02 +
+GR2-03a + TEL-01`. Freeze exception recorded in the README review history
+(GR2-EX / TEL-EX, W-1 precedent class: a mandated-artifact omission that
+defeats a documented protocol invariant). Landed as five sequenced
+commits so each golden re-baseline stays legible.
+
+### Step 0 — Version identity (`2.2.0 → 2.4.0`)
+
+- `PROTOCOL_VERSION` → `"2.4.0"` in `lib/installer.py` and
+  `lib/templates.py`. `RETROFIT_PROTOCOL_VERSION` stays `"1.6.2"`;
+  `RUNTIME_FLOOR` stays `"2.1.210"` (seam-owned, untouched per §8).
+- `plugin/plugin.json` version + description bumped to v2.4.0 (release
+  identity, precedent from the 2.2.0 bump).
+- Version assertions updated to 2.4.0: `AC-A0-1..3` (`test_installer.py`),
+  the `AC-9-5` mirrors (`test_ic_gate.py`), `AC-1-1/1-2` + corrupt-state
+  (`test_gate_substrate.py`), and retrofit `8.3` (`test_retrofit.py`).
+  New `test_ic_gate.py` tripwire asserts this changelog carries the
+  `2.2.0 → 2.4.0` entry.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 0).** Per AC-A0-3 the
+version rides emitted `_generatedBy` strings (`settings.json`, the
+manifest), so **both golden fixtures' digests move at this step with
+action counts unchanged**. Re-baselined `EXPECTED_DIGESTS` in
+`tests/test_greenfield_golden.py`; `EXPECTED_ACTION_COUNTS` unchanged
+(`default: 55`, `full_autonomous: 67`). Isolated into its own commit so
+the stamp's byte movement does not entangle the four content deltas.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

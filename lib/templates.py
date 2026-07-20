@@ -12,7 +12,7 @@ import json
 
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 
-PROTOCOL_VERSION = "2.2.0"
+PROTOCOL_VERSION = "2.4.0"
 
 
 # --------------------------------------------------------------------------- #

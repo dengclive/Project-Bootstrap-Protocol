@@ -616,15 +616,18 @@ finally:
 # R-0 (spec bootstrap-v2): protocol version identity (AC-A0-1..3).
 # [R-9/AC-9-5] Deliberately re-pinned 2.0.0 -> 2.1.0 at the Milestone-B
 # release-identity bump; [R6, 2.2.0] re-pinned 2.1.0 -> 2.2.0 at the
-# usage-limit bump (tests/test_ic_gate.py owns the mirror assertions).
+# usage-limit bump; [v2.4.0 code fold, GR2-EX/TEL-EX step 0] re-pinned
+# 2.2.0 -> 2.4.0 (single fold, no intermediate 2.3.0 code release; the
+# 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code)
+# (tests/test_ic_gate.py owns the mirror assertions).
 # ---------------------------------------------------------------------------
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.2.0",
-      _installer_mod.PROTOCOL_VERSION == "2.2.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.2.0",
-      _templates_mod.PROTOCOL_VERSION == "2.2.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.4.0",
+      _installer_mod.PROTOCOL_VERSION == "2.4.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.4.0",
+      _templates_mod.PROTOCOL_VERSION == "2.4.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 
@@ -632,16 +635,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.2.0",
-          state.get("bootstrap_protocol_version") == "2.2.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.4.0",
+          state.get("bootstrap_protocol_version") == "2.4.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.2.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.4.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.2.0)")
+          == "bootstrap-installer (protocol 2.4.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.2.0",
-          manifest.get("protocol_version") == "2.2.0")
+    check("AC-A0-3: manifest records protocol_version 2.4.0",
+          manifest.get("protocol_version") == "2.4.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

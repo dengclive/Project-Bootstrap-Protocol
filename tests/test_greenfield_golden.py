@@ -251,14 +251,25 @@ EXPECTED_DIGESTS = {
     #     three usage_limit_* keys; RC-03 re-point), auto.sh (R5 exit_reason
     #     enum + run-summary + AR2-01 runner rule + AR2-09c key-less posture;
     #     RC-03 re-point).
-    "default": "742aa2955d04d35cc23a0cea9150a05c257a7d9a697e54e7c4064536614d64bf",
+    # [v2.4.0 code fold — step 0 version stamp] settings.json `_generatedBy`
+    # "protocol 2.2.0" -> "protocol 2.4.0" (PROTOCOL_VERSION bump). The ONLY
+    # default-fixture change; zero files added/removed; count stable at 55.
+    # PROTOCOL_VERSION is interpolated into exactly one emitted body
+    # (templates.py _settings_json `_generatedBy`); the 11 emitted hook
+    # citations and wrapper doc-filename citations stay at their existing
+    # versions by design (byte-change surface kept minimal, per the fold's
+    # "every other body byte-identical" claim).
+    "default": "20f78d024fa6b4a25f2813aafd25319a20ee002d10cab96c5f7a0991e937ada1",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
     #   Phase 9.5 transient paragraph); auto.sh enum restores the
     #   "within the run" / "transitively" qualifiers.
+    #   [v2.4.0 code fold — step 0 version stamp] same settings.json
+    #   `_generatedBy` "protocol 2.2.0" -> "protocol 2.4.0"; the ONLY
+    #   full_autonomous change at this step (count stable at 67).
     "full_autonomous":
-        "2c4dc150d828d8ee001842263067e2a6c85bf5fa6a5055b7dcb7a5b9b844e700",
+        "262fe46be26df1fe5c53ebebd6168e253519dbec92cce124878a76aa1dce6d9c",
 }
 
 EXPECTED_ACTION_COUNTS = {
