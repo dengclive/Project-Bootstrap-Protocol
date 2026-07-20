@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""run-tests - run every standalone suite and report per-suite results.
+
+Usage:
+  bin/run-tests [-k PATTERN] [-q] [--no-tree-check] [--list]
+
+The suites are standalone scripts that call sys.exit(): each is run directly
+with python3, never via pytest. Exit status is 0 only if every suite exits 0.
+
+Why this exists rather than a shell one-liner. The habitual invocation was
+
+    for t in tests/test_*.py; do python3 "$t"; done
+
+which reports nothing at the end and, critically, **swallows failures**: the
+loop's exit status is whatever the LAST suite returned, so a suite that fails
+in the middle scrolls past and the run still looks successful. Summing the
+printed "N passed" lines has the same blind spot from the other direction — a
+suite that dies on an unhandled exception prints no summary line at all, so
+its checks silently vanish from the total instead of registering as a failure.
+Both failure modes are reported explicitly here.
+
+The working-tree check is not incidental. Emitted hooks resolve their log path
+via `${CLAUDE_PROJECT_DIR:-.}`, so a suite that runs a hook without pinning
+that variable writes into the REPO instead of its fixture. That is how a
+1500-line .claude/logs/hooks.log accumulated in the working tree and was
+eventually committed by an over-broad `git add -A`. A suite must leave the
+tree exactly as it found it; this runner fails the run if one does not.
+"""
+import argparse
+import os
+import re
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, ".."))
+TESTS = os.path.join(ROOT, "tests")
+
+SUMMARY_RE = re.compile(r"(\d+)\s+passed,\s+(\d+)\s+failed")
+
+
+def discover(pattern=None):
+    names = sorted(f for f in os.listdir(TESTS)
+                   if f.startswith("test_") and f.endswith(".py"))
+    if pattern:
+        names = [n for n in names if pattern in n]
+    return [os.path.join(TESTS, n) for n in names]
+
+
+def tree_state():
+    """Porcelain status, or None when git is unavailable / not a repo."""
+    try:
+        r = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return {line[3:] for line in r.stdout.splitlines() if line[3:]}
+
+
+def run_one(path):
+    started = time.monotonic()
+    r = subprocess.run([sys.executable, path], cwd=ROOT,
+                       capture_output=True, text=True)
+    elapsed = time.monotonic() - started
+    out = r.stdout + r.stderr
+    hits = SUMMARY_RE.findall(out)
+    passed, failed = (int(hits[-1][0]), int(hits[-1][1])) if hits else (0, 0)
+    return {
+        "name": os.path.basename(path),
+        "code": r.returncode,
+        "passed": passed,
+        "failed": failed,
+        # A suite that dies before printing its summary is NOT a suite with
+        # zero failures — flag it so it cannot be read as a clean run.
+        "no_summary": not hits,
+        "elapsed": elapsed,
+        "output": out,
+    }
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(
+        prog="run-tests", description="Run every standalone test suite.")
+    ap.add_argument("-k", dest="pattern", metavar="PATTERN",
+                    help="only run suites whose filename contains PATTERN")
+    ap.add_argument("-q", "--quiet", action="store_true",
+                    help="suppress per-check output from passing suites")
+    ap.add_argument("--no-tree-check", action="store_true",
+                    help="skip the working-tree pollution check")
+    ap.add_argument("--list", action="store_true",
+                    help="list the discovered suites and exit")
+    args = ap.parse_args(argv)
+
+    suites = discover(args.pattern)
+    if not suites:
+        print(f"run-tests: no suites matched {args.pattern!r}", file=sys.stderr)
+        return 2
+    if args.list:
+        for s in suites:
+            print(os.path.basename(s))
+        return 0
+
+    before = None if args.no_tree_check else tree_state()
+
+    results = []
+    for path in suites:
+        res = run_one(path)
+        results.append(res)
+        if not args.quiet or res["code"] != 0:
+            print(res["output"], end="" if res["output"].endswith("\n") else "\n")
+
+    width = max(len(r["name"]) for r in results)
+    print("\n" + "=" * (width + 34))
+    print(f"{'suite'.ljust(width)}  {'checks':>8}  {'fail':>5}  {'time':>6}   status")
+    print("-" * (width + 34))
+    for r in results:
+        if r["code"] != 0 and r["no_summary"]:
+            status = f"CRASHED (exit {r['code']}, no summary)"
+        elif r["code"] != 0:
+            status = f"FAILED (exit {r['code']})"
+        else:
+            status = "ok"
+        print(f"{r['name'].ljust(width)}  {r['passed']:>8}  {r['failed']:>5}  "
+              f"{r['elapsed']:>5.1f}s   {status}")
+    print("-" * (width + 34))
+
+    total_p = sum(r["passed"] for r in results)
+    total_f = sum(r["failed"] for r in results)
+    bad = [r for r in results if r["code"] != 0]
+    print(f"{len(results)} suites, {total_p} checks passed, {total_f} failed")
+
+    rc = 0
+    if bad:
+        rc = 1
+        print("\nFAILING SUITES:", file=sys.stderr)
+        for r in bad:
+            detail = ("crashed before printing a summary — its checks are "
+                      "MISSING from the totals above"
+                      if r["no_summary"] else f"{r['failed']} failing check(s)")
+            print(f"  {r['name']}: exit {r['code']} — {detail}",
+                  file=sys.stderr)
+
+    if before is not None:
+        after = tree_state()
+        if after is not None:
+            new = after - before
+            if new:
+                rc = 1
+                print("\nWORKING TREE POLLUTED by the test run:", file=sys.stderr)
+                for p in sorted(new):
+                    print(f"  {p}", file=sys.stderr)
+                print("  A suite wrote into the repo instead of its fixture. "
+                      "Emitted hooks resolve paths via ${CLAUDE_PROJECT_DIR:-.}"
+                      " — pin CLAUDE_PROJECT_DIR (and cwd) to the fixture when "
+                      "running one.", file=sys.stderr)
+
+    if rc == 0:
+        print("ALL SUITES PASSED")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

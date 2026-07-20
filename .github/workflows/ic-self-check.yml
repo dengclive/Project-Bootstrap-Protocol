@@ -24,16 +24,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Compose, do not fork: the per-suite loop this step used to inline now
+      # lives in bin/run-tests, so CI and a local run cannot drift. The runner
+      # additionally flags a suite that crashes before printing its summary
+      # (whose checks would otherwise vanish from the totals rather than
+      # register as a failure) and fails the run if a suite writes into the
+      # working tree instead of its fixture.
       - name: Run all standalone suites
-        run: |
-          set -euo pipefail
-          rc=0
-          for t in tests/test_*.py; do
-            echo "::group::$t"
-            if ! python3 "$t"; then
-              echo "::error file=$t::suite failed"
-              rc=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "$rc"
+        run: bin/run-tests

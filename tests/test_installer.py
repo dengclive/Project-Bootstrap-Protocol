@@ -155,11 +155,32 @@ def _install(yaml_text, extra=None):
 
 
 def _run_hook(path, payload, env=None):
+    """Run an emitted hook against the fixture that emitted it.
+
+    Both the project dir and the CWD are pinned to that fixture, because the
+    emitted hooks resolve runtime paths two different ways and BOTH leak to the
+    parent repo if left unset:
+
+      * files, via `${CLAUDE_PROJECT_DIR:-.}` — unset, this resolved to `.`,
+        the test runner's CWD, i.e. the bootstrap repo itself. Every hook run
+        appended to the REPO's .claude/logs/hooks.log; that is how a 1500-line
+        log accumulated in the working tree and eventually got committed.
+      * git state, via the process CWD — `git` finds its repository from CWD,
+        not from CLAUDE_PROJECT_DIR. No hook exercised here shells out to git
+        today (only secrets-gate and dependency-gate are executed; the
+        git-using spec-gate-commit / test-gate / ci-mirror appear only in
+        wiring assertions), but the sibling suite had exactly this bug read
+        the real repo's index, so pin it here before a future test trips it.
+
+    Caller-supplied env still wins — the no-jq harness overrides PATH this way.
+    """
+    proj = os.path.dirname(os.path.dirname(os.path.dirname(path)))
     e = dict(os.environ)
+    e["CLAUDE_PROJECT_DIR"] = proj
     if env:
         e.update(env)
     r = subprocess.run(["bash", path], input=_json.dumps(payload),
-                        capture_output=True, text=True, env=e)
+                        capture_output=True, text=True, env=e, cwd=proj)
     return r.returncode
 
 
