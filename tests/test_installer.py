@@ -912,6 +912,83 @@ try:
 finally:
     shutil.rmtree(_d_up, ignore_errors=True)
 
+# ---------------------------------------------------------------------------
+# TEL-01 credential posture (review finding: the emitted telemetry.md calls
+# .claude/settings.local.json "(gitignored)" and steers OTLP auth headers into
+# it, but no emitted gitignore covered that file). Claude Code auto-ignores it
+# only when Claude Code itself creates it, while the doc says to write it
+# BEFORE first launch — so a hand-created file holding
+# OTEL_EXPORTER_OTLP_HEADERS tokens was committable by `git add .claude`. The
+# rule now makes the doc's claim true on both greenfield and retrofit.
+# ---------------------------------------------------------------------------
+for _lbl, _c_gi in (("greenfield", cfg_from(SERVICE)[0]),
+                    ("retrofit", _rc)):
+    _gi_body = _body_of(build_plan(_c_gi), ".claude/.gitignore")
+    check(f"TEL-01 TAR-02[{_lbl}]: .gitignore covers settings.local.json",
+          _gi_body is not None and
+          "settings.local.json" in _gi_body.splitlines())
+
+# The doc must not restate drift thresholds: the assumption ledger interpolates
+# them from cfg["hooks"], so a hardcoded pair in a co-emitted steering doc is
+# the "stale second authority" GR2-03a exists to prevent (they disagreed on any
+# customized config). telemetry.md now points at the ledger instead.
+_tel_custom, _ = cfg_from("""project:
+  name: t
+  archetype: service
+telemetry_export_enabled: true
+hooks:
+  drift_tool_call_threshold: 77
+""")
+_tel_b = _body_of(build_plan(_tel_custom), _TEL_PATH)
+_led_b = _body_of(build_plan(_tel_custom), ".claude/steering/assumption-ledger.md")
+check("TEL-01: telemetry.md states no hardcoded drift thresholds",
+      _tel_b is not None and "50/120/3" not in _tel_b)
+check("TEL-01: telemetry.md defers to the ledger for threshold values",
+      _tel_b is not None and "assumption-ledger.md" in _tel_b)
+check("GR2-03a: the ledger still carries the customized value",
+      _led_b is not None and "77 tool calls" in _led_b)
+check("TEL-01: no co-emitted doc contradicts the ledger's thresholds",
+      _tel_b is not None and "50 tool calls" not in _tel_b)
+
+# The trajectory retention contract must not claim a purge nothing performs:
+# the 7-day state policy covers .claude/sessions/, not .claude/logs/.
+check("GR2-02: telemetry.md does not claim trajectories are 7-day-purged",
+      _tel_b is not None and "7-day-purged" not in _tel_b)
+_loop_b = _body_of(build_plan(cfg_from(FULL)[0]), ".claude/loop.sh")
+if _loop_b is not None:
+    check("GR2-02: wrapper does not assert an inherited trajectory purge",
+          "purged with the\n# 7-day state-retention policy" not in _loop_b)
+    check("GR2-02: wrapper binds pruning as an operator duty",
+          "PRUNING IS PART OF THIS CONTRACT" in _loop_b)
+
+# ---------------------------------------------------------------------------
+# TEL-01 frozen-source equivalence (review finding: the ~77-line telemetry body
+# exists twice — once as the frozen root telemetry.md, once as the template
+# f-string — with the byte-verification done ONCE by hand at fold time and
+# pinned by nothing. A later correction to either copy would silently strand
+# the other, and no golden covers it because both fixtures leave the flag off.)
+# This asserts the actual contract: byte-identical modulo the ONE substituted
+# OTEL_RESOURCE_ATTRIBUTES line.
+# ---------------------------------------------------------------------------
+_FROZEN_TEL = os.path.join(ROOT, "telemetry.md")
+check("TEL-01 freeze: the frozen source telemetry.md exists",
+      os.path.exists(_FROZEN_TEL))
+if os.path.exists(_FROZEN_TEL) and _tel_b is not None:
+    _frozen_lines = open(_FROZEN_TEL).read().splitlines()
+    _emitted_lines = _tel_b.splitlines()
+    check("TEL-01 freeze: emitted body has the same line count as the source",
+          len(_frozen_lines) == len(_emitted_lines))
+    _differing = [i for i, (a, b) in
+                  enumerate(zip(_frozen_lines, _emitted_lines)) if a != b]
+    check("TEL-01 freeze: exactly one line differs from the frozen source",
+          len(_differing) == 1)
+    if len(_differing) == 1:
+        _dl = _emitted_lines[_differing[0]]
+        check("TEL-01 freeze: the one differing line IS the OTEL export line",
+              _dl.startswith("export OTEL_RESOURCE_ATTRIBUTES="))
+        check("TEL-01 freeze: the frozen source keeps the placeholders",
+              "<protocol_version>" in _frozen_lines[_differing[0]])
+
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
 # event+matcher with no orphans.

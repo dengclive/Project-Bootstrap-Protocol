@@ -311,6 +311,98 @@ genuine pre-2.4.0 file, and other keys staying loud). Emitted wrappers
 still pass `bash -n` with telemetry on; re-apply idempotent
 (`create=0 update=0`); `--ic-checks` exit 0.
 
+### Step 7 — Review fixes in the frozen sources (pre-release corrections)
+
+Three review findings originate in the **frozen sources this fold
+implements against**, not in the code that renders them: the code
+faithfully reproduces text that is itself wrong. Because
+`Bootstrap-Protocol-v2-4-0.md`, the Companion, and `telemetry.md` are
+added by this PR and it has not merged, these are **pre-release
+corrections** on the TAR-02..06 precedent (that class edited
+`telemetry.md` eight times while it was "free pre-freeze"), not
+freeze exceptions against a released artifact. Each correction is applied
+to the frozen source AND the emitted copy in the same commit, so the two
+stay byte-equivalent modulo the one substituted line.
+
+- **`settings.local.json` was not actually gitignored (credential
+  vector).** The emitted `telemetry.md` steers OTLP endpoint and
+  **auth-header** settings into `.claude/settings.local.json` and calls
+  that file "(gitignored)" — while none of the three emitted gitignore
+  surfaces (`_gitignore`, `_gitignore_root`, `_retrofit_gitignore`)
+  covered it. Claude Code auto-ignores that file only when Claude Code
+  *itself* creates it, and the doc explicitly says to set these values
+  **before launching `claude`** — so in a fresh bootstrap the operator
+  hand-creates it, and `git add .claude` stages
+  `OTEL_EXPORTER_OTLP_HEADERS` tokens. The same paragraph concedes
+  "nothing in the pipeline scans it for a pasted secret," so no downstream
+  gate catches it either. **Fixed by making the claim true** (one entry in
+  the greenfield fragment, one in the retrofit fragment) rather than by
+  softening the doc — verified end-to-end: `git add -A` on a project with
+  a hand-written token file now stages nothing, `git check-ignore`
+  confirms the rule.
+- **`telemetry.md` restated drift thresholds as `(50/120/3)`.** The
+  assumption ledger interpolates those three values from `cfg["hooks"]`
+  *specifically so no emitted doc becomes a stale second authority* — yet
+  the co-emitted `telemetry.md` hardcoded them, so on any customized
+  config the two steering docs in the same directory disagreed about the
+  project's own configuration (reproduced with
+  `drift_tool_call_threshold: 77`: ledger says 77, telemetry said 50), and
+  the ledger cross-links `telemetry.md` as its evidence source. Rather
+  than add a third scoped substitution, the row now **drops the numbers
+  and points at the ledger** — the contradiction class is removed instead
+  of duplicated, consistent with the ledger's own "this ledger links, it
+  does not restate" rule.
+- **The trajectory 7-day purge was asserted but never implemented.** The
+  GR2-02 contract and `telemetry.md` both stated retained
+  `trajectory-*.jsonl` files "are purged with the 7-day state-retention
+  policy". That policy covers session-ID-namespaced state under
+  `.claude/sessions/`; it does not reach `.claude/logs/`, and **no emitted
+  hook, wrapper, or `auto.sh` consumes `purge_old_state_after_days`** —
+  nothing prunes trajectory files at all. Since the same contract makes
+  retention *mandatory*, the files accumulate without bound across an
+  unattended campaign while the committed doc told a privacy reviewer they
+  expire. Corrected to state pruning as part of the operator obligation
+  the contract already binds, in the wrapper comment, `telemetry.md`, the
+  protocol's Phase 9.5 item 4, and the Companion's artifact table and
+  migration note. **Deliberately not "fixed" by adding a purge:**
+  automatic file deletion in an emitted script is new destructive
+  behavior and an owner decision, not a review-fix. Implementing a real
+  prune remains available as a follow-up.
+- **`§6.D` → `§6.E` in the doc text too.** Step 6 corrected the emitted
+  ledger's citation; the same wrong letter appears in the v2.3.0 fold's
+  own doc text (the changelog note's "cross-reference pointers added at
+  §6.D", the Assumption Ledger section's links sentence, and the GR-2
+  appendix's "§6.D, Alert 3"). All three corrected. The pre-existing §6.D
+  references at Phase 6.D / "documented in section 6.D" are **unchanged
+  and out of scope** — verified present in `v2-0-0` and `v2-2-0`, so they
+  belong to the already-recorded doc-reference-normalization deferral.
+- **Literal `\uXXXX` escapes in the GR-2 appendix (found while fixing the
+  above, not in the review).** Lines 1967–2003 of the protocol doc — the
+  block the v2.3.0 fold added — carried 34 undecoded escapes (23
+  `—`, 9 `§`, plus `…`/`≥`) that render literally as
+  backslash-u text. Decoded in place; confined to that block, zero
+  elsewhere in the doc, zero in the Companion and `telemetry.md`.
+
+**FREEZE-EXCEPTION (golden re-baseline, step 7).** Both fixtures move;
+zero files added/removed; counts stable (56 / 68). Diff-verified before
+`GOLDEN_UPDATE=1`: default — `.claude/.gitignore` only; full_autonomous —
+that plus `loop.sh` / `goal-loop.sh` (purge wording). `telemetry.md` is in
+**neither** fixture (both leave the flag off), so its threshold and purge
+corrections produce no golden movement and the "off by default =
+invisible" property still holds; those are covered behaviorally instead.
+
+**Test surface:** 14 suites, 928 checks green (`test_installer.py`
+237 → 251). New coverage: the gitignore entry on both greenfield and
+retrofit fragments, the absence of restated thresholds paired with the
+ledger still carrying the customized value, the purge-claim wording, and
+a **frozen-source equivalence pin** — the emitted body must match
+`telemetry.md` line-for-line with exactly one differing line, and that
+line must be the `OTEL_RESOURCE_ATTRIBUTES` export. That last check closes
+the gap that made these corrections risky: the two ~80-line copies were
+byte-verified once by hand at fold time and pinned by nothing, so a future
+edit to either could silently strand the other (no golden covers it,
+since both fixtures leave the flag off).
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

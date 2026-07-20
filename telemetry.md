@@ -47,7 +47,10 @@ answerable from the redacted events. Do **not** set `OTEL_LOG_USER_PROMPTS`, `OT
 a specific reason and you have confirmed your backend filters sensitive fields. Note one gotcha:
 `OTEL_LOG_ASSISTANT_RESPONSES` falls back to `OTEL_LOG_USER_PROMPTS` when unset, so if you turn prompt
 logging on, set `OTEL_LOG_ASSISTANT_RESPONSES=0` to keep responses redacted. The trajectory logs (`.claude/logs/trajectory-*.jsonl`) remain the local,
-gitignored, 7-day-purged raw record for "why did it do that at 3am?" — they are not part of this export.
+gitignored raw record for "why did it do that at 3am?" — they are not part of this export. Note their
+retention is the operator-completed loop's responsibility (the 7-day state policy covers
+`.claude/sessions/`, not `.claude/logs/`), so confirm the real retention window before citing one in a
+privacy review.
 
 Identity rides every export even at the redaction-clean default: when you authenticate via OAuth,
 `user.email` is attached to metrics and events, and `user.account_uuid` / `user.account_id` are on by
@@ -59,7 +62,7 @@ or set `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`.
 | Question about our mechanisms | Event / metric | Key attributes |
 | --- | --- | --- |
 | Are the gates (secrets/deps/drift hooks) firing, and where from? | `claude_code.tool_decision`, `claude_code.hook_execution_complete` | `decision`, `source`, `num_blocking`, `num_non_blocking_error` |
-| Do the drift thresholds (50/120/3) match real saturation? | `claude_code.compaction` | `trigger`, `pre_tokens`, `post_tokens` |
+| Do the drift thresholds match real saturation? (this project's configured values are in `.claude/steering/assumption-ledger.md`) | `claude_code.compaction` | `trigger`, `pre_tokens`, `post_tokens` |
 | How often do unattended loops hit infra failure / usage-limit halts? | `claude_code.api_error`, `claude_code.api_retries_exhausted` | `attempt`, `status_code`, `total_attempts` |
 | How often does autonomy escalate or get gated? | `claude_code.permission_mode_changed` | `from_mode`, `to_mode` (always present); `trigger` (`auto_gate_denied`, `auto_opt_in`) — absent when the transition originates from the SDK/bridge, so verify it appears under `claude -p` at implementation |
 | Is the subagent token multiplier assumption still valid? | `claude_code.token.usage` | `agent.name`, `query_source` (`main`/`subagent`/`auxiliary`) |

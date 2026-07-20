@@ -432,7 +432,10 @@ answerable from the redacted events. Do **not** set `OTEL_LOG_USER_PROMPTS`, `OT
 a specific reason and you have confirmed your backend filters sensitive fields. Note one gotcha:
 `OTEL_LOG_ASSISTANT_RESPONSES` falls back to `OTEL_LOG_USER_PROMPTS` when unset, so if you turn prompt
 logging on, set `OTEL_LOG_ASSISTANT_RESPONSES=0` to keep responses redacted. The trajectory logs (`.claude/logs/trajectory-*.jsonl`) remain the local,
-gitignored, 7-day-purged raw record for "why did it do that at 3am?" — they are not part of this export.
+gitignored raw record for "why did it do that at 3am?" — they are not part of this export. Note their
+retention is the operator-completed loop's responsibility (the 7-day state policy covers
+`.claude/sessions/`, not `.claude/logs/`), so confirm the real retention window before citing one in a
+privacy review.
 
 Identity rides every export even at the redaction-clean default: when you authenticate via OAuth,
 `user.email` is attached to metrics and events, and `user.account_uuid` / `user.account_id` are on by
@@ -444,7 +447,7 @@ or set `OTEL_METRICS_INCLUDE_ACCOUNT_UUID=false`.
 | Question about our mechanisms | Event / metric | Key attributes |
 | --- | --- | --- |
 | Are the gates (secrets/deps/drift hooks) firing, and where from? | `claude_code.tool_decision`, `claude_code.hook_execution_complete` | `decision`, `source`, `num_blocking`, `num_non_blocking_error` |
-| Do the drift thresholds (50/120/3) match real saturation? | `claude_code.compaction` | `trigger`, `pre_tokens`, `post_tokens` |
+| Do the drift thresholds match real saturation? (this project's configured values are in `.claude/steering/assumption-ledger.md`) | `claude_code.compaction` | `trigger`, `pre_tokens`, `post_tokens` |
 | How often do unattended loops hit infra failure / usage-limit halts? | `claude_code.api_error`, `claude_code.api_retries_exhausted` | `attempt`, `status_code`, `total_attempts` |
 | How often does autonomy escalate or get gated? | `claude_code.permission_mode_changed` | `from_mode`, `to_mode` (always present); `trigger` (`auto_gate_denied`, `auto_opt_in`) — absent when the transition originates from the SDK/bridge, so verify it appears under `claude -p` at implementation |
 | Is the subagent token multiplier assumption still valid? | `claude_code.token.usage` | `agent.name`, `query_source` (`main`/`subagent`/`auxiliary`) |
@@ -1337,11 +1340,19 @@ def _per_task_wrapper(kind: str) -> str:
 # each iteration's stream JSON at
 #     .claude/logs/trajectory-$TASK_ID-<iter-n>.jsonl
 # (one file per iteration). These live under .claude/logs/, ALREADY gitignored
-# by the existing `logs/` rule (no gitignore change), and are purged with the
-# 7-day state-retention policy - the local, gitignored "why did it do that at
-# 3am?" raw record, NOT part of any telemetry export. A skeleton self-check
-# that finds retention disabled MUST FAIL LOUD (fail-loud-not-silent) - never
-# silently proceed without it.
+# by the existing `logs/` rule (no gitignore change) - the local, gitignored
+# "why did it do that at 3am?" raw record, NOT part of any telemetry export.
+# A skeleton self-check that finds retention disabled MUST FAIL LOUD
+# (fail-loud-not-silent) - never silently proceed without it.
+#
+# PRUNING IS PART OF THIS CONTRACT AND IS NOT DONE FOR YOU. The 7-day state
+# policy covers session-ID-namespaced state under .claude/sessions/; it does
+# NOT reach .claude/logs/, and nothing in the emitted tree prunes trajectory
+# files. Retained stream JSON carries full tool I/O and grows without bound
+# across an unattended campaign, so the operator-completed loop MUST prune it
+# on a stated retention window (7 days matches the state policy) - and any
+# telemetry/privacy review MUST be told the real retention, not an inherited
+# one.
 #
 # [Usage-limit vs transient-failure handling - Bootstrap-Protocol-v2-2-0.md
 #  Phase {phase} "Infrastructure-error handling", AR2-corrected. BINDING on the
@@ -1819,6 +1830,15 @@ def _gitignore(cfg):
         ".installer-manifest.json", ".bootstrap-state.json",
         ".bootstrap-state.json.lock", ".bootstrap-state.json.pre-*",
         ".bootstrap-incomplete",
+        # TEL-01 review fix: the emitted telemetry.md steers OTLP endpoint and
+        # AUTH-HEADER settings into .claude/settings.local.json and calls that
+        # file "(gitignored)" — but nothing here ignored it. Claude Code
+        # auto-ignores the file only when IT creates it, while the doc tells
+        # operators to write it BEFORE first launch, so a hand-created file
+        # holding OTEL_EXPORTER_OTLP_HEADERS tokens was committable by
+        # `git add .claude`. The same paragraph concedes nothing scans for
+        # pasted secrets, so this rule is the guard that makes the claim true.
+        "settings.local.json",
         # IC-5: the SDK gate module is imported by the consumer's
         # subprocess runner, which writes bytecode next to it. Ignore the
         # cache (never gates.py itself - that stays manifest-tracked).
@@ -2925,6 +2945,10 @@ def _retrofit_gitignore(cfg):
         "sessions/.iteration-summary-*", "sessions/.evaluator-feedback-*",
         ".installer-manifest.json", ".bootstrap-state.json",
         ".bootstrap-state.json.lock", ".bootstrap-incomplete",
+        # TEL-01 review fix, parity with the greenfield fragment: telemetry.md
+        # is emitted on retrofit plans too (the overlay wraps the full plan),
+        # and it steers auth headers into settings.local.json.
+        "settings.local.json",
         # Retrofit-specific (per RETROFIT R8.C gitignore block):
         ".retrofit-state.json",
         ".bootstrap-state.json.pre-1.7", ".bootstrap-state.json.pre-1.8",

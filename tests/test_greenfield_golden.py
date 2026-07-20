@@ -286,7 +286,24 @@ EXPECTED_DIGESTS = {
     #     protocol-doc coordinates ("PRD lines 806/1168", "PRD Phase 7 step 6,
     #     §6.D"): in an emitted project "PRD" denotes the operator's own
     #     product doc, so those resolved against the wrong document.
-    "default": "b47614f94b8b4f0dca21d7bf1f727390b74c7d55c441edf2ae5cc75177ef97e4",
+    # [v2.4.0 review-fix re-baseline, part 2 — frozen-source corrections]
+    # Diff-verified vs the part-1 head; zero files added/removed, count 56:
+    #   .claude/.gitignore — `settings.local.json` added. The emitted
+    #     telemetry.md steers OTLP endpoint AND auth-header settings into that
+    #     file and calls it "(gitignored)", but nothing ignored it: Claude Code
+    #     auto-ignores it only when Claude Code itself creates it, while the
+    #     doc says to write it BEFORE first launch. A hand-created file holding
+    #     OTEL_EXPORTER_OTLP_HEADERS tokens was therefore committable by
+    #     `git add .claude`, with the same paragraph conceding nothing scans
+    #     for pasted secrets. The rule makes the doc's claim true rather than
+    #     softening the doc. (Retrofit fragment gets the same entry; not a
+    #     golden fixture.)
+    # telemetry.md itself is NOT in either fixture (both leave the flag off),
+    # so its threshold/purge corrections produce no golden movement — the
+    # "off by default = invisible" property still holds. Those are covered by
+    # test_installer.py's TEL-01 blocks, including a new frozen-source
+    # equivalence pin.
+    "default": "be76c93fe9abda85e2cf2452f708b4777f011090f91aefbeb240c016d562a02f",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -322,8 +339,20 @@ EXPECTED_DIGESTS = {
     #     .claude/sessions/ DOTFILE sentinels are ignored) instead of citing
     #     .claude/specs/, which is not where the audit record belongs.
     #   auto.sh remains UNTOUCHED (its 13-value exit_reason enum unchanged).
+    #   [v2.4.0 review-fix re-baseline, part 2 — frozen-source corrections]
+    #   The .claude/.gitignore `settings.local.json` entry above, PLUS
+    #   loop.sh / goal-loop.sh: the trajectory-retention contract no longer
+    #   ASSERTS that retained stream JSON "is purged with the 7-day
+    #   state-retention policy". That policy covers session-ID-namespaced
+    #   state under .claude/sessions/ and does not reach .claude/logs/; no
+    #   emitted hook, wrapper, or auto.sh consumes purge_old_state_after_days,
+    #   so nothing prunes trajectory files at all. Since the same contract
+    #   makes retention MANDATORY, the files accumulate without bound while
+    #   the committed telemetry.md told a privacy reviewer they expire.
+    #   Pruning is now stated as part of the operator obligation the contract
+    #   already binds. auto.sh still UNTOUCHED.
     "full_autonomous":
-        "48db798659d9d958de69d6ef3f87431b6cf53c364a6e4336d9e2f76477b5d204",
+        "9c87b31e8d3c3cd8c8b3e584211e67399f69b3d2fcaab9221bb9158373ece99f",
 }
 
 EXPECTED_ACTION_COUNTS = {
