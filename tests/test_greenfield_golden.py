@@ -279,8 +279,13 @@ EXPECTED_DIGESTS = {
     #   [v2.4.0 code fold — GR2-01] prose-only, count unchanged (68). Body
     #   bytes move for CLAUDE.md, .claude/specs/INDEX.md, and the implementer
     #   agent body (failed-approaches do-not-retry priming instruction).
+    #   [v2.4.0 code fold — GR2-02] comment-contract only, count unchanged
+    #   (68). Body bytes move for loop.sh + goal-loop.sh only (shared
+    #   _per_task_wrapper skeleton: trajectory-retention binding item +
+    #   loop-final Trajectory line). auto.sh is UNTOUCHED — default fixture
+    #   has no wrappers, so its digest does not move at this step.
     "full_autonomous":
-        "1fb3a9bc109422b8af78b2bdb873a932ece0b54c80852978ed63e194089c005b",
+        "8d5b72f8f6fd27daf647f5c966d91664cae16cbde9343c8e562f478f69466a43",
 }
 
 EXPECTED_ACTION_COUNTS = {

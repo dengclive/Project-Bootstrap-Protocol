@@ -633,6 +633,34 @@ check("GR2-01: progress.md template embedded in exactly one emitted body "
       "(.claude/specs/INDEX.md)",
       _dupe == [".claude/specs/INDEX.md"])
 
+# ---------------------------------------------------------------------------
+# GR2-02 (v2.4.0 fold): trajectory retention is a comment-contract in the
+# shared per-task wrapper skeleton (loop.sh + goal-loop.sh), no new file.
+# Two non-overlapping markers (AR-01 class): the retention item via the path
+# literal `.claude/logs/trajectory-`, and the loop-final summary via a
+# distinct `Trajectory:` line inside the documented loop-final structure
+# block.
+# ---------------------------------------------------------------------------
+for _rel in (".claude/loop.sh", ".claude/goal-loop.sh"):
+    _w = _body_of(_gplan, _rel)
+    check(f"GR2-02[{_rel}]: wrapper present in FULL plan", _w is not None)
+    check(f"GR2-02[{_rel}]: retention item names trajectory log path",
+          _w is not None and ".claude/logs/trajectory-" in _w)
+    check(f"GR2-02[{_rel}]: retention self-check fails loud when disabled",
+          _w is not None and "MUST FAIL LOUD" in _w
+          and "retention disabled" in _w)
+    # The loop-final structure block carries its own required Trajectory line.
+    _blk_start = _w.find("[loop-final-$TASK_ID.md structure") if _w else -1
+    _blk = _w[_blk_start:_blk_start + 700] if _blk_start >= 0 else ""
+    check(f"GR2-02[{_rel}]: loop-final structure block documents a Trajectory "
+          "line", "Trajectory:" in _blk)
+    # No new file was added by GR2-02 (comment-contract only).
+# goal-loop.sh keeps its judge-parity clause; loop.sh must not gain it (GR2-02
+# touched the shared skeleton, not the mode-specific injected values).
+_loopw = _body_of(_gplan, ".claude/loop.sh")
+check("GR2-02: loop.sh did not gain the judge-parity clause",
+      _loopw is not None and "judge retry-once" not in _loopw)
+
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right
 # event+matcher with no orphans.

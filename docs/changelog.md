@@ -109,6 +109,37 @@ unchanged. Three prose edits in `lib/templates.py`:
   template section headers + three link targets present; template embedded
   in exactly one body).
 
+### Step 3 — GR2-02 trajectory retention (comment-contract only, no new file)
+
+Single edit surface: the shared `_per_task_wrapper(kind)` builder in
+`lib/templates.py`, which covers **both** `loop.sh` and `goal-loop.sh`
+(`_loop_sh` / `_goal_loop_sh` still only delegate). **`auto.sh` is not a
+GR2-02 target** — it is the separate queue runner, not the
+operator-completed loop; its `exit_reason` enum is untouched and adds no
+value.
+
+- **Fourth binding item** added to the wrapper's dispatch/deliverable
+  comment block (beside the `--output-format stream-json --verbose`
+  documentation): the operator-completed loop MUST retain each iteration's
+  stream JSON at `.claude/logs/trajectory-<task-id>-<iter-n>.jsonl`
+  (already gitignored under the existing `.claude/logs/` `logs/` rule — no
+  gitignore change — and purged with the 7-day state policy). A skeleton
+  self-check that finds retention disabled MUST **fail loud**.
+- **`Trajectory` line** added to the documented `loop-final-<task-id>.md`
+  structure block, linking the retained `.claude/logs/trajectory-*` files.
+- **The "OTel span export is optional" sentence is PRD framing, not
+  required emitted text** — the normative MUST-enumerate list (PRD line
+  1098) is items (1)–(4); the OTel-optional sentence is document framing
+  and is deliberately **not** added to the emitted comment (recorded so a
+  later review does not read the omission as a miss).
+- Count unchanged; **only the full_autonomous fixture's digest moves**
+  (`loop.sh` + `goal-loop.sh`); the default fixture has no wrappers so its
+  digest is untouched at this step. `test_installer.py` gains GR2-02
+  assertions (retention path literal; fail-loud self-check; the loop-final
+  `Trajectory:` line asserted *within* the structure block; loop.sh did not
+  gain the judge-parity clause). `test_usage_limit_contract.py`'s
+  auto.sh 13-value enum assertion stays green untouched.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

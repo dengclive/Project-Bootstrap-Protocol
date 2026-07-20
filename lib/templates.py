@@ -1213,6 +1213,21 @@ def _per_task_wrapper(kind: str) -> str:
 # create a worktree inside an ignored directory, so committing that rule
 # breaks worktree creation for every clone (Claude Code issue #57512).
 #
+# [Trajectory retention - GR2-02, Bootstrap-Protocol-v2-4-0.md Phase {phase}
+#  "Deliverable contract for the wrappers" item 4. BINDING on the operator-
+#  completed iteration loop; the bare skeleton dispatches nothing.]
+#
+# The loop ALREADY produces per-iteration NDJSON (the --output-format
+# stream-json --verbose flags above). The operator-completed loop MUST RETAIN
+# each iteration's stream JSON at
+#     .claude/logs/trajectory-$TASK_ID-<iter-n>.jsonl
+# (one file per iteration). These live under .claude/logs/, ALREADY gitignored
+# by the existing `logs/` rule (no gitignore change), and are purged with the
+# 7-day state-retention policy - the local, gitignored "why did it do that at
+# 3am?" raw record, NOT part of any telemetry export. A skeleton self-check
+# that finds retention disabled MUST FAIL LOUD (fail-loud-not-silent) - never
+# silently proceed without it.
+#
 # [Usage-limit vs transient-failure handling - Bootstrap-Protocol-v2-2-0.md
 #  Phase {phase} "Infrastructure-error handling", AR2-corrected. BINDING on the
 #  operator-completed iteration loop; the bare skeleton dispatches nothing.]
@@ -1273,7 +1288,20 @@ def _per_task_wrapper(kind: str) -> str:
 # CLAUDE_CODE_RETRY_WATCHDOG=1 on the `claude` subprocess - an in-request
 # retry layer COMPLEMENTARY to this between-iterations reset-aware wait. It is
 # a plain CLI env var available on ANY conformant install, NOT gated on
-# gate_substrate.{judge_parity_comment}
+# gate_substrate.
+#
+# [loop-final-$TASK_ID.md structure - GR2-02, Bootstrap-Protocol-v2-4-0.md
+#  Phase 9.7] The operator-completed loop writes the audit record
+#  loop-final-$TASK_ID.md at exit (committed - .claude/specs/ and the
+#  operator-facing audit records are never gitignored). Required lines:
+#     Status:      <completed | halted:<cause> | max-iterations>
+#     Iterations:  <n of max>
+#     Trajectory:  links to the retained
+#                  .claude/logs/trajectory-$TASK_ID-*.jsonl files (one per
+#                  iteration; the gitignored raw per-iteration record this
+#                  committed summary points at)
+# The Trajectory line is REQUIRED (GR2-02): it makes the retained per-iteration
+# stream JSON discoverable from the committed audit record.{judge_parity_comment}
 #
 # Usage: {self} <task-id> [spec-id]
 set -euo pipefail
