@@ -579,6 +579,14 @@ _cbody = [a for a in build_plan(_cc)
 check("GR2-03a: customized drift threshold flows into the ledger",
       "77 tool calls" in _cbody)
 
+# v2.4.0 spec-doc existence (RC-03 class): the assumption-ledger / telemetry
+# bodies and GR2-01/02 prose added by this fold cite Bootstrap-Protocol-v2-4-0
+# — the cited docs must exist at repo root so the citations are not dangling.
+for _doc in ("Bootstrap-Protocol-v2-4-0.md",
+             "Bootstrap-Protocol-Companion-v2-4-0.md"):
+    check(f"v2.4.0: cited spec doc exists at repo root: {_doc}",
+          os.path.isfile(os.path.join(ROOT, _doc)))
+
 # ---------------------------------------------------------------------------
 # GR2-01 (v2.4.0 fold): progress.md is prose-only (no new emitted file). The
 # read-first note is in CLAUDE.md; the failed-approaches do-not-retry

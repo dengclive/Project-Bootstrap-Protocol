@@ -8,7 +8,14 @@ code, so the real code delta is `2.2.0 → 2.4.0 = GR2-01 + GR2-02 +
 GR2-03a + TEL-01`. Freeze exception recorded in the README review history
 (GR2-EX / TEL-EX, W-1 precedent class: a mandated-artifact omission that
 defeats a documented protocol invariant). Landed as five sequenced
-commits so each golden re-baseline stays legible.
+commits so each golden re-baseline stays legible. Frozen v2.4.0 docs
+(`Bootstrap-Protocol-v2-4-0.md`, `Bootstrap-Protocol-Companion-v2-4-0.md`,
+`telemetry.md`) committed at repo root as the frozen sources this fold
+implements against (the emitted bodies cite them; RC-03-class doc-existence
+check added). **Test surface:** 14 suites, 866 checks green from a pristine
+run (`test_installer.py` 141 → 197, `test_interview.py` 66 → 73,
+`test_ic_gate.py` 45 → 46, golden 6/6 re-baselined per step, the auto.sh
+`exit_reason` enum untouched). Seam impact: none.
 
 ### Step 0 — Version identity (`2.2.0 → 2.4.0`)
 

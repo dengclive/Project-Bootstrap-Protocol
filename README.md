@@ -574,3 +574,52 @@ are intentionally operator-completed per BOOTSTRAP.md's own trust ramp.
 Unattended overnight use remains out of scope by construction and must not
 be certified until those loops are implemented and smoke-tested per
 Phase 9 stages 4–6.
+
+### v2.4.0 code fold (GR2-EX / TEL-EX) — mandated-artifact emissions the frozen templates omit
+
+**GR2-EX / TEL-EX (v2.4.0 code fold).** `lib/templates.py`,
+`lib/installer.py`, and (for the TEL-01 Phase 0 decision) `lib/interview.py`
+are in the frozen set, but the frozen v2.4.0 documents mandate three
+additive workspace artifacts (GR2-03a `assumption-ledger.md`, GR2-01
+`progress.md` references, GR2-02 trajectory-retention contract) and one
+opt-in artifact (TEL-01 `telemetry.md`) that the v2.2.0 code does not emit —
+exactly the class **W-1** patched under freeze (a mandated-artifact omission
+that defeats a documented protocol invariant). The code baseline was v2.2.0;
+the v2.3.0 GR2 doc fold and the v2.4.0 TEL-01 doc fold were both doc-first
+and landed no code, so the real code delta was
+`2.2.0 → 2.4.0 = GR2-01 + GR2-02 + GR2-03a + TEL-01` plus the version stamp.
+Changes are confined to: the new `_assumption_ledger` / `_telemetry` template
+functions and their `TEMPLATES` registrations; the GR2-01 prose in
+`_claude_md` / `_agents` plus the single-body embedding of the canonical
+`progress.md` template in `.claude/specs/INDEX.md`; the GR2-02
+comment-contract in the shared `_per_task_wrapper` skeleton (covers `loop.sh`
+and `goal-loop.sh`; `auto.sh` untouched, its `exit_reason` enum unchanged);
+in `installer.py` the two `build_plan` steering adds (one unconditional, one
+flag-gated) plus the one `_write_state` field; in `interview.py` the single
+`telemetry_export_enabled` Phase 0 decision (parse + render + interactive
+prompt, standalone top-level boolean); the version stamp
+(`PROTOCOL_VERSION` 2.2.0 → 2.4.0, `plugin.json`); and the deliberate golden
+re-baselines in `tests/test_greenfield_golden.py` (`EXPECTED_DIGESTS` /
+`EXPECTED_ACTION_COUNTS`, both fixtures, one per step) and the
+`test_validate_only.py` mini-golden (emitted config gains
+`telemetry_export_enabled: false`). Every other frozen file and every other
+hook/template body remains **byte-identical** to the upload — verified by the
+determinism digest on the default-off path and by the per-file golden
+diagnostic. No wire surface, no gate, no sentinel, no seam name/location
+changed (**seam impact: none**). Re-reviewed the fixes' own diffs (the
+standing two-rounds-running lesson): `_telemetry`'s emitted body is verified
+byte-identical to the frozen `telemetry.md` modulo the two scoped
+`OTEL_RESOURCE_ATTRIBUTES` substitutions; the `.format()`-into-shell wrapper
+skeleton was re-checked with `bash -n` on every generated wrapper. Full
+suite green from a pristine run: 14 suites, 866 checks (`test_installer.py`
+141 → 197, `test_interview.py` 66 → 73, `test_ic_gate.py` 45 → 46,
+`test_greenfield_golden.py` 6/6 re-baselined, `test_usage_limit_contract.py`
+95/95 with the auto.sh enum untouched). **Deferred, recorded not shipped:**
+the GR2-03a *surfacing* behavior (fail-loud non-blocking notice on
+model/runtime change) carries locked constraints and is out of this fold; the
+retrofit state schema is not extended for the telemetry flag (the flag-gated
+`build_plan` add still emits `telemetry.md` on a retrofit plan). Also
+recorded as a known, deliberately-untouched inconsistency: pre-existing
+emitted hook/wrapper bodies still cite `Bootstrap-Protocol-v2-0-0.md` /
+`-v2-2-0.md` (a future doc-reference-normalization pass) — only **new** text
+this fold added cites `-v2-4-0.md`.
