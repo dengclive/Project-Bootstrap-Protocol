@@ -31,6 +31,46 @@ action counts unchanged**. Re-baselined `EXPECTED_DIGESTS` in
 (`default: 55`, `full_autonomous: 67`). Isolated into its own commit so
 the stamp's byte movement does not entangle the four content deltas.
 
+### Step 1 — GR2-03a assumption ledger (unconditional artifact)
+
+- New `_assumption_ledger(cfg)` in `lib/templates.py` (registered as
+  `"assumption_ledger"`), and an **unconditional** `build_plan` add of
+  `.claude/steering/assumption-ledger.md` after `tools.md`. Lands in
+  `.claude/steering/` (never gitignored) → committed by construction; **no
+  gitignore edit**.
+- Body is a faithful workspace rendering of the frozen `## Assumption
+  Ledger` section (`Bootstrap-Protocol-v2-4-0.md`, anchor
+  `#assumption-ledger`). The three drift-threshold numbers are
+  **interpolated from `cfg["hooks"]`** (`drift_tool_call_threshold` /
+  `drift_session_duration_minutes` / `drift_file_read_threshold`), not
+  hardcoded — the drift-detector hook body reads the same keys, so the
+  ledger can never become a stale second authority when an operator
+  customizes the detector. Pure function of cfg (no timestamp/env);
+  determinism proven by the digest test.
+- **File count +1 on every fixture** (default 55→56, full_autonomous
+  67→68). `test_installer.py` gains snapshot-based GR2-03a assertions
+  (emitted-once, +1 delta, committed, interpolation real vs decorative,
+  determinism); `test_greenfield_golden.py` re-baselined (both fixtures
+  +1, digests moved, freeze-exception comment added).
+- **DEFERRED (recorded, not shipped) — the GR2-03a *surfacing* behavior.**
+  The frozen spec has two halves: the emitted artifact (shipped here) and
+  a wizard behavior that "surfaces due entries on any pinned-model or
+  runtime-floor change as a fail-loud, non-blocking notice." This fold
+  delivers the **artifact only**. The surfacing is deferred with these
+  **locked constraints**: it MUST be fail-loud and **non-blocking** (never
+  blocks the model/runtime change); it MUST read the ledger's
+  `Re-validation trigger` column and surface exactly the rows whose trigger
+  matches the event; it MUST hang off the same event the v2.0.0 model
+  remap / any later regenerate-config flow already represents (no new
+  trigger surface); it MUST NOT silently proceed. Rationale: the emission
+  is a pure `build_plan` artifact with zero runtime surface, whereas the
+  surfacing is wizard-runtime logic wanting its own fixture and review;
+  bundling would widen this fold's blast radius. The emitted ledger words
+  the surfacing as protocol-specified with a "re-check by hand until it
+  lands" note (honest framing — the operator doc must not claim unshipped
+  behavior as current fact); when the surfacing ships, that one paragraph
+  updates under the same freeze exception as the surfacing change.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

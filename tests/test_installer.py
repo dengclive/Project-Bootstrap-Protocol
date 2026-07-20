@@ -523,8 +523,61 @@ autonomous_modes:
     # Operator-facing audit records stay COMMITTED (not ignored).
     check("G-1: .gitignore does NOT ignore backlog.md",
           "backlog.md" not in gi)
+    # GR2-03a (v2.4.0 fold): the assumption ledger lands in .claude/steering/,
+    # which the emitted .claude/.gitignore never ignores -> committed by
+    # construction (steering docs are the operator-facing calibration record).
+    check("GR2-03a: .gitignore does NOT ignore steering/ (ledger committed)",
+          "steering" not in gi)
 finally:
     shutil.rmtree(d, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# GR2-03a (v2.4.0 fold): assumption-ledger.md is an UNCONDITIONAL steering
+# artifact. Snapshot-based (+1 vs the v2.2.0 plan; no brittle absolute
+# literal here — the absolute count is pinned by test_greenfield_golden.py).
+# ---------------------------------------------------------------------------
+_LEDGER_PATH = ".claude/steering/assumption-ledger.md"
+for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
+    _c, _ = cfg_from(_fix)
+    _plan = build_plan(_c)
+    _ledger_actions = [a for a in _plan if a["path"] == _LEDGER_PATH]
+    check(f"GR2-03a[{_fix_name}]: assumption-ledger.md emitted exactly once",
+          len(_ledger_actions) == 1)
+    # +1 vs the v2.2.0 plan: rebuild the plan without the unconditional ledger
+    # add and confirm the delta is exactly this one path.
+    _without = [a for a in _plan if a["path"] != _LEDGER_PATH]
+    check(f"GR2-03a[{_fix_name}]: plan count is +1 for the ledger",
+          len(_plan) - len(_without) == 1)
+    if _ledger_actions:
+        _body = _ledger_actions[0]["body"]
+        # Interpolated (not hardcoded) default drift thresholds 50/120/3.
+        check(f"GR2-03a[{_fix_name}]: ledger interpolates drift thresholds",
+              "50 tool calls / 120 min / 3 file reads" in _body)
+        # Links to the v2.4.0 doc, not restating it as a second authority.
+        check(f"GR2-03a[{_fix_name}]: ledger cites Bootstrap-Protocol-v2-4-0",
+              "Bootstrap-Protocol-v2-4-0.md" in _body)
+
+# Determinism: the seeded ledger body carries no timestamp/randomness, so two
+# independent resolves produce byte-identical bodies (and the whole plan digest
+# still matches, per the existing determinism test).
+_cl1, _ = cfg_from(SERVICE)
+_cl2, _ = cfg_from(SERVICE)
+_b1 = [a for a in build_plan(_cl1) if a["path"] == _LEDGER_PATH][0]["body"]
+_b2 = [a for a in build_plan(_cl2) if a["path"] == _LEDGER_PATH][0]["body"]
+check("GR2-03a: ledger body deterministic across resolves", _b1 == _b2)
+
+# Interpolation is real, not decorative: a customized drift threshold flows
+# into the ledger body (so it never becomes a stale second authority).
+_cc, _ = cfg_from("""project:
+  name: custom
+  archetype: service
+hooks:
+  drift_tool_call_threshold: 77
+""")
+_cbody = [a for a in build_plan(_cc)
+          if a["path"] == _LEDGER_PATH][0]["body"]
+check("GR2-03a: customized drift threshold flows into the ledger",
+      "77 tool calls" in _cbody)
 
 # Per-archetype apply matrix: eval-gate only for ai-agent; conditional
 # files present; settings.json wires every resolved hook to the right

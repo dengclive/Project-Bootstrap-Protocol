@@ -259,7 +259,10 @@ EXPECTED_DIGESTS = {
     # citations and wrapper doc-filename citations stay at their existing
     # versions by design (byte-change surface kept minimal, per the fold's
     # "every other body byte-identical" claim).
-    "default": "20f78d024fa6b4a25f2813aafd25319a20ee002d10cab96c5f7a0991e937ada1",
+    # [v2.4.0 code fold — GR2-03a] +1 unconditional file
+    # .claude/steering/assumption-ledger.md (count 55 -> 56). No other body
+    # moves; the added path is the only per-file digest change.
+    "default": "f6fe5810816256afba5bc314c81af7a288c07df023ba94c21cff4681dbce1a1c",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -268,13 +271,17 @@ EXPECTED_DIGESTS = {
     #   [v2.4.0 code fold — step 0 version stamp] same settings.json
     #   `_generatedBy` "protocol 2.2.0" -> "protocol 2.4.0"; the ONLY
     #   full_autonomous change at this step (count stable at 67).
+    #   [v2.4.0 code fold — GR2-03a] +1 unconditional file
+    #   .claude/steering/assumption-ledger.md (count 67 -> 68).
     "full_autonomous":
-        "262fe46be26df1fe5c53ebebd6168e253519dbec92cce124878a76aa1dce6d9c",
+        "40568c1417022e69952be38794873300010b2e42ea7328b9c5f67a6fc0720e4b",
 }
 
 EXPECTED_ACTION_COUNTS = {
-    "default": 55,
-    "full_autonomous": 67,
+    # [v2.4.0 code fold — GR2-03a] both fixtures +1 for the unconditional
+    # assumption-ledger.md steering artifact (55 -> 56, 67 -> 68).
+    "default": 56,
+    "full_autonomous": 68,
 }
 
 

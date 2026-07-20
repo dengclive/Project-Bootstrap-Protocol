@@ -81,6 +81,12 @@ def build_plan(cfg: dict) -> list[dict]:
     else:
         add(".claude/steering/ci-cd.md", TEMPLATES["cicd_optout"](cfg))
     add(".claude/steering/tools.md", TEMPLATES["tools"](cfg))
+    # GR2-03a (v2.4.0 fold): the assumption ledger is an UNCONDITIONAL steering
+    # artifact seeded at bootstrap — lands in .claude/steering/ (never
+    # gitignored, so committed by construction). Pure function of cfg; +1 file
+    # on every fixture. The surfacing behavior is deferred (see changelog).
+    add(".claude/steering/assumption-ledger.md",
+        TEMPLATES["assumption_ledger"](cfg))
 
     # ---- Hooks (Phase 6) -------------------------------------------------- #
     hook_set = cfg["_resolved_hooks"]            # filled by resolve_config
