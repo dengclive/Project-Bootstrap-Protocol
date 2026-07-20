@@ -810,12 +810,18 @@ try:
     # So we reuse AF2's exact EXEMPTING condition (retrofit_active=true + a
     # .claude/-only staged commit) — the setup that DID log "retrofit_active
     # exempt" above when python3 was present — and assert that removing the last
-    # parser does NOT silently grant it. If jget were ever changed to fabricate
-    # a command without a parser, or the exemption stopped requiring a
-    # successful state read, the exempt line would reappear here and this fails.
-    # A positive assertion on the inert "ok" marker (below) rules out the
-    # empty-log escape hatch: we prove the hook ran and fell through, rather
-    # than simply producing no log.
+    # parser does NOT silently grant it. What this discriminates: the exemption
+    # requires a working JSON parser TWICE over — once for jget to parse the
+    # command (so the git-commit `case` matches) and once for the preamble to
+    # read retrofit_active=true. A parser outage removes BOTH, so the exempt
+    # line cannot appear; restoring a parser (mutation-tested: symlink python3
+    # back into the no-parser PATH) makes assertion 1 FAIL. Neither half alone
+    # is enough — with an empty CMD the `case` is skipped regardless of
+    # RETROFIT_ACTIVE, and with RETROFIT_ACTIVE=false the state read never grants
+    # exemption — so this guards the parser-outage boundary as a whole, not
+    # either failure independently. A positive assertion on the inert "ok"
+    # marker (below) rules out the empty-log escape hatch: we prove the hook ran
+    # and fell through, rather than simply producing no log.
     #
     # Honest posture note (owner-facing, NOT asserted as ENFORCE): under a
     # total parser outage the git-commit `case` matches nothing, so the hook is
