@@ -613,10 +613,211 @@ reconcile), runtime-floor banner anchoring, `build_hooks` enlargement
 from a genuine subset fixture, eval-gate `@{u}..HEAD` whole-range with an
 upstream.
 
-Tests: 726 checks green / 13 files (`test_sdk_gates.py` 63,
-`test_ic_gate.py` 44).
+Tests: 706 checks green / 13 files (`test_sdk_gates.py` 63,
+`test_ic_gate.py` 44). *(RC-08 correction, 2.2.0: this line previously
+claimed 726 — a stale tally never matched to a measured run. The measured
+total at the 2.1.0 tip is 706; corrected in place rather than carried
+forward. No test was removed — the 726 figure was wrong when written.)*
 
 **FREEZE-EXCEPTION (golden re-baseline no. 14, both fixtures).** Emitted-
 byte changes: `.claude/sdk_gates/gates.py` (both); `.claude/loop.sh` +
 `.claude/goal-loop.sh` (full_autonomous, worktree comment). Diff-verified
 vs the prior head: zero files added, zero removed.
+
+## 2.1.0 → 2.2.0 (usage-limit coping + gap-closure merge)
+
+**Spec:** `Bootstrap-Protocol-v2-2-0.md` (AR2-corrected) +
+`Bootstrap-Protocol-Companion-v2-2-0.md`. Reset-aware usage-limit handling
+bound into the per-task wrapper skeletons' comment contract, consuming the
+Claude Agent SDK's `rate_limit_event` / `RateLimitInfo` stream contract,
+plus the gap-closure items (deliverable contract, `exit_reason` enum and
+run-summary structure enumerated in emitted comments, blessed goal-config
+extras already shipped at 2.1.0). Changelog-first; minimal-diff; fail-loud;
+no drive-by refactors. Work items R1–R8 map 1:1 to the implementation
+prompt.
+
+Live-capture basis (Step 0): `claude -p "say ok" --output-format
+stream-json --verbose` on CLI 2.1.215 confirmed the wire shape used
+below — NDJSON lines with a top-level `type`, and a `rate_limit_event`
+line carrying a nested `rate_limit_info` object with camelCase
+`status` / `resetsAt` / `rateLimitType` (observed value `seven_day`,
+`status: "allowed_warning"`). Confirms AR2-03.
+
+### R1 — Three usage-limit-wait config keys
+
+`usage_limit_wait` (`reset-aware` | `off`, default `reset-aware`),
+`usage_limit_max_wait_seconds` (default `21600`), and
+`usage_limit_wait_jitter_seconds` (default `60`) added to **both**
+`loop-config.md` and `goal-config.md`, adjacent to the existing
+`infra_retry_seconds` / `infra_max_consecutive_failures` pair, each with a
+one-line comment (PRD Phase 9.5, §`.claude/loop-config.md` / Phase 9.6
+`goal-config.md`). Existing config files without the keys stay valid — the
+wrappers apply the documented defaults (Companion Migration notes).
+
+### R2 — Dispatch flags on the documented invocation
+
+The skeleton's documented `claude -p` dispatch instruction gains
+`--output-format stream-json --verbose` alongside `--worktree` (flags
+added, nothing removed) in the `[IC-6]` header and the closing dispatch
+echo of `_per_task_wrapper`. The NDJSON stream these flags produce is what
+the usage-limit branch tails (PRD Phase 9.5 "Infrastructure-error
+handling").
+
+### R3 — Per-task skeleton binding comments (usage-limit vs transient split)
+
+New normative comment block in `_per_task_wrapper` (emitted into both
+`loop.sh` and `goal-loop.sh`), wording per PRD Phase 9.5 (AR2-01/02/03/05
+corrected): match `rate_limit_event` by the line's **top-level `type`**
+(never substring); camelCase wire keys in nested `rate_limit_info`
+(`status`, `resetsAt` Unix seconds may-be-absent, `rateLimitType` ∈
+five_hour | seven_day | seven_day_opus | seven_day_sonnet | overage);
+record the most recent event before exit; on a non-expected non-zero exit
+a `rejected` + future `resetsAt` → usage-limit path, `rejected` +
+absent/past `resetsAt` → transient path; `reset-aware` wait =
+`(resetsAt − now) + jitter` (jitter uniform `0..usage_limit_wait_jitter_seconds`,
+added only), ceiling `usage_limit_max_wait_seconds` → halt with
+`usage-limit-reset-abandoned` into `loop-final-<task-id>.md` surfacing
+bucket + reset time; otherwise sleep then re-probe the **same** iteration
+without incrementing the counter; the wait does **not** consume the
+transient retry; **never compute your own reset time** (honor `resetsAt`
+as floor-plus-jitter, never hardcode +5h/+7d); `usage_limit_wait: off`
+routes rejections to the transient path; fail-loud fallback if the build
+stops emitting `rate_limit_event`; substrate-independent
+`CLAUDE_CODE_RETRY_WATCHDOG=1` watchdog note (in-request retry,
+complementary, not gated on `gate_substrate`).
+
+### R4 — `goal-loop.sh` judge-parity comment
+
+A `rejected` usage-limit `rate_limit_event` on **either** the `claude -p`
+call **or** the judge call takes the same reset-aware wait path and does
+**not** consume the judge retry-once (PRD `.claude/goal-loop.sh` /
+`goal-config.md` descriptions). Injected only into `goal-loop.sh` via the
+per-kind parity placeholder; `loop.sh` does not carry it.
+
+### R5 — `auto.sh` skeleton comments (enum + run-summary + runner rule)
+
+New comment block in `_auto_sh` enumerating **all 13** `exit_reason`
+values with one-line triggers (Recovery & State enum, PRD lines 138–150);
+the required run-summary structure incl. the `Ended because` line (code +
+one plain sentence; `urgent-escalation` names the pending-decision note;
+`usage-limit-reset-abandoned` names the limiting bucket `rate_limit_type`
+and reset time `resets_at`); the AR2-01 terminal runner rule (an observed
+`usage-limit-reset-abandoned` task halt is terminal-at-queue-level via
+graceful shutdown, propagates the bucket/reset time, and counts toward
+**neither** the three-consecutive-halts threshold **nor** the
+infrastructure-failure threshold — the cap is account-level, so continuing
+manufactures a mislabeled `three-consecutive-halts` cascade); and the
+AR2-09c **key-less** runner posture (brief sleep + retry, two consecutive
+runner-level failures → halt; `auto-config.md` keeps its budget keys and
+gains no runner-level `infra_*` keys).
+
+### R6 — Version identity + citation re-baseline (RC-03)
+
+- `PROTOCOL_VERSION` → `"2.2.0"` (`lib/installer.py`, `lib/templates.py`).
+  `INSTALLER_VERSION` stays `"1.1.0"`; `RETROFIT_PROTOCOL_VERSION` stays
+  `"1.6.2"`. Test literals re-pinned. `plugin/plugin.json` version +
+  description → 2.2.0 (review finding: the 2.1.0 release-identity commit
+  `0ac36bd` established plugin.json as part of the release set; the
+  implementation prompt's R6 omitted it).
+- **RC-03 (decided: yes):** emitted protocol-document citations
+  `Bootstrap-Protocol-v2-0-0.md` → `Bootstrap-Protocol-v2-2-0.md`, **scoped
+  to the files this change already touches** — `loop.sh`, `goal-loop.sh`,
+  `loop-config.md`, `goal-config.md`, `auto.sh`. The 11 emitted hook
+  citations are **deliberately left at `v2-0-0`**: re-pointing them would
+  change bytes in the *default* fixture (11 hook files) outside the named
+  FREEZE-EXCEPTION set, violating the mandated "zero unintended byte
+  changes outside the named set" gate. This is the same citation-lag
+  posture as freeze-exception no. 12 (2.1.0 kept citations at v2-0-0). The
+  citation bytes re-pointed here ride inside the no. 15 re-baseline below.
+  *(Operator flag: this partial re-point is an intentional, gate-forced
+  scope decision, not an omission — see the session report.)*
+
+### R7 — New suite `tests/test_usage_limit_contract.py`
+
+Standalone-suite style (own pass/fail counter, `sys.exit(1)` on any
+failure). Emits both fixtures via `build_plan` and string-asserts the
+config keys/defaults/co-location, the per-task skeleton contract strings
+(both wrappers, plus the goal-only judge-parity sentence), the `auto.sh`
+enum + render clause + runner rule, and the negative assertion that no
+`usage_limit_*` key appears in `auto-config.md`.
+
+### R8 — Eighth IC check: deferred (AR2-09b)
+
+Not added. Recorded post-2.2.0 in the PRD with its cost-of-deferral line;
+the golden fixtures + R7 cover the repo-side risk. AR2-09a (no emitted
+run-summary template file) likewise stands — the structure is bound only
+through `auto.sh`'s comment contract.
+
+**Test count (measured, honest).** Pre-change: **706** checks / 13 files
+(RC-08: the 2.1.0 section's "726" was a stale never-measured tally,
+corrected above). Post-change: **802** checks / 14 files — the delta is
+`tests/test_usage_limit_contract.py` (**95** checks after the review-pass
+strengthening below) plus one new release-identity check in
+`test_ic_gate.py` (44 → 45) and re-pinned version literals in existing
+suites; the golden digests re-baseline (no. 15) but the action counts
+(default 55 / full_autonomous 67) are unchanged.
+
+**Adversarial-review fix pass (pre-merge, multi-lens).** Eight finder
+angles + per-candidate verification over the working diff; six confirmed
+findings fixed (zero emitted-byte impact — golden digests unchanged,
+verified):
+1. `plugin/plugin.json` bumped to 2.2.0 (see R6 above).
+2. `test_ic_gate.py` gains the `2.1.0 → 2.2.0` changelog-entry tripwire
+   (the convention the 2.1.0 release established but R6 didn't carry
+   forward).
+3. R5 enum assertions anchored to the emitted enum-block line shape
+   (`"\n#   <value>  "`) plus a set-equality count guard parsed from the
+   emitted block — mutation-verified: 7 of 13 enum literals were
+   previously satisfiable by occurrences outside the enum block, and the
+   old count guard compared the test's own list to a literal (tautology).
+4. AR2-01 assertions anchored (`ar2-01,\n#  terminal.]`) and the
+   counted-toward-neither rule asserted as one contiguous
+   whitespace-normalized clause — mutation-verified against a
+   semantics-inverting edit that the old fragment checks passed.
+5. Six subsumed R1 bare-key checks collapsed into the key+default needles
+   (the `test_goal_evaluator_keys.py` convention).
+6. New RC-03 citation-integrity checks: the five re-pointed files cite
+   `Bootstrap-Protocol-v2-2-0.md` with no stale `v2-0-0` residue, and both
+   cited docs exist at the repo root (they are new files this release —
+   an omitted `git add` would otherwise ship dangling citations with CI
+   green). Two stale Python-side (non-emitted) `v2-0-0` comments in the
+   touched `_auto_sh` / `_per_task_wrapper` regions re-pointed.
+Round 2 (fresh-eyes pass over the fixed diff; three confirmed
+spec-fidelity findings, all emitted-byte changes riding inside the no. 15
+named set — `loop.sh`/`goal-loop.sh`/`auto.sh` only, default fixture
+untouched, digest re-verified):
+7. The usage-limit vs transient split now DEFINES the transient arm
+   instead of only referencing it: a third classification arm (no
+   `"rejected"` `rate_limit_event` at all — network error, 5xx, 529 —
+   → transient path) and a transient-path paragraph naming
+   `infra_retry_seconds` / `infra_max_consecutive_failures` and the
+   same-iteration no-increment retry (Phase 9.5 transient paragraph; the
+   deliverable contract requires the comments to enumerate the split, and
+   half of it was previously implicit).
+8. `auto.sh` enum one-liners restore two load-bearing qualifiers dropped
+   from the Recovery & State wording: `three-consecutive-halts` is scoped
+   "within the run", and `operator-only-timeout`'s blocking is
+   "transitively" on operator action.
+9. The suite now emits BOTH fixtures (its docstring/this-section claim was
+   previously false): a default-fixture negative asserts no `usage_limit`
+   text leaks into any non-autonomous emitted file and no wrappers are
+   emitted; plus transient-arm and enum-qualifier assertions (85 → 95).
+Report-only (deliberate non-fixes): the emitted wrapper `log()`/sentinel
+`printf '%s\\n'` literal-backslash-n quirk is pre-existing at 2.1.0 and on
+the recorded deferred-cleanup backlog — fixing it perturbs frozen emitted
+bytes and belongs to its own freeze-exception, not this change.
+
+**FREEZE-EXCEPTION (golden re-baseline no. 15).** Emitted-byte changes,
+diff-verified vs the pre-change head (zero files added, zero removed):
+- **`full_autonomous` fixture (6 files):** `loop.sh` and `goal-loop.sh`
+  (R2 dispatch flags + R3 usage-limit comment block + R4 goal-parity
+  comment on goal-loop.sh + RC-03 citation re-point); `loop-config.md` and
+  `goal-config.md` (R1 three keys + RC-03 citation re-point); `auto.sh`
+  (R5 enum/run-summary/runner comment block + RC-03 citation re-point);
+  `settings.json` `_generatedBy` (R6, `protocol 2.1.0` → `protocol
+  2.2.0`).
+- **`default` fixture (1 file):** `settings.json` `_generatedBy` only
+  (`protocol 2.1.0` → `protocol 2.2.0`). The default fixture emits no
+  wrappers/config/runner, so R1–R5 and the RC-03 re-point do not reach it;
+  its hook citations remain at `v2-0-0` by design (see R6).
+Everything outside this named set is byte-identical to the pre-change head.

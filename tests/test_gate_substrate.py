@@ -66,7 +66,7 @@ try:
     check("AC-1-1: fresh install writes no .pre-2.0.0 backup",
           not os.path.exists(os.path.join(d, BACKUP_REL)))
     check("AC-1-1: version field alongside substrate field",
-          state.get("bootstrap_protocol_version") == "2.1.0")
+          state.get("bootstrap_protocol_version") == "2.2.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -94,8 +94,8 @@ try:
     state = json.load(open(state_path))
     check("AC-1-2: migrated state has gate_substrate == 'shell'",
           state.get("gate_substrate") == "shell")
-    check("AC-1-2: migrated state version bumped to 2.1.0",
-          state.get("bootstrap_protocol_version") == "2.1.0")
+    check("AC-1-2: migrated state version bumped to 2.2.0",
+          state.get("bootstrap_protocol_version") == "2.2.0")
     check("AC-1-2: pre-existing keys preserved (non-destructive)",
           state.get("completed_phases") == ["0", "1", "2"])
     backup_path = os.path.join(d, BACKUP_REL)
@@ -136,7 +136,7 @@ try:
     state = json.load(open(state_path))
     check("corrupt-state: rewritten state is valid with gate_substrate "
           "'shell'", state.get("gate_substrate") == "shell"
-          and state.get("bootstrap_protocol_version") == "2.1.0")
+          and state.get("bootstrap_protocol_version") == "2.2.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

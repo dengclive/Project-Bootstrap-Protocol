@@ -831,9 +831,9 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.1.0' literally "
-          "(R-9 release-identity bump)",
-          state["bootstrap_protocol_version"] == "2.1.0")
+    check("8.3: bootstrap_protocol_version matches '2.2.0' literally "
+          "(R6 usage-limit release-identity bump)",
+          state["bootstrap_protocol_version"] == "2.2.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "
