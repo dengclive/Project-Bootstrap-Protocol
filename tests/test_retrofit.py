@@ -1039,6 +1039,47 @@ check("10.11: drift-detector-loop-cooperation hook installed on opt-in",
 check("10.12: iteration-summary-enforcement hook installed on goal opt-in",
       "iteration-summary-enforcement" in cfg_lg["_resolved_hooks"])
 
+# ---------------------------------------------------------------------------
+# GR2 artifacts on the retrofit track (adversarial-review finding). The v2.4.0
+# fold's GR2 artifacts reach retrofit plans because the overlay WRAPS the full
+# greenfield plan: the unconditional .claude/specs/INDEX.md (carrying the
+# canonical progress.md template) and assumption-ledger.md are not replaced or
+# dropped, and the opted-in wrappers carry the GR2-02 trajectory contract. But
+# the overlay DOES replace CLAUDE.md and implementer.md with retrofit-flavor
+# bodies, and those carried no read-progress-first instruction — so the
+# artifacts shipped with nothing telling an agent to consume them, and a
+# resumed unattended retrofit iteration could re-attempt an approach flagged
+# do-not-retry. The instruction is restored for the opted-in case only (that
+# is the only configuration with a resumed autonomous session), leaving the
+# default retrofit body byte-unchanged on this version-pinned track.
+# ---------------------------------------------------------------------------
+_bodies_lg = {a["path"]: a["body"] for a in plan_lg}
+_bodies_no = {a["path"]: a["body"] for a in build_plan(cfg_no)}
+
+check("10.13: retrofit ships the canonical progress.md template (INDEX.md)",
+      "Canonical `progress.md` template"
+      in _bodies_lg.get(".claude/specs/INDEX.md", ""))
+check("10.14: opted-in retrofit CLAUDE.md instructs reading progress.md",
+      "progress.md" in _bodies_lg.get("CLAUDE.md", "")
+      and "Failed approaches" in _bodies_lg.get("CLAUDE.md", ""))
+check("10.15: opted-in retrofit implementer honors do-not-retry",
+      "do-not-retry" in _bodies_lg.get(".claude/agents/implementer.md", ""))
+check("10.16: the GR2-02 trajectory contract rides the retrofit wrappers",
+      "GR2-02" in _bodies_lg.get(".claude/loop.sh", ""))
+# Scope guard: the no-opt-in retrofit body stays free of the addendum, so the
+# default retrofit surface on the 1.6.2-pinned track is unchanged.
+check("10.17: default retrofit CLAUDE.md carries no progress addendum",
+      "Per-task progress ledger" not in _bodies_no.get("CLAUDE.md", ""))
+check("10.18: default retrofit implementer carries no GR2-01 bullet",
+      "GR2-01" not in _bodies_no.get(".claude/agents/implementer.md", ""))
+# The unconditional ledger reaches retrofit plans too (overlay wraps the full
+# plan). Recorded behavior, previously untested on this track.
+check("10.19: assumption-ledger.md lands on retrofit plans",
+      ".claude/steering/assumption-ledger.md" in paths_lg)
+check("10.20: retrofit .gitignore covers settings.local.json (TEL-01)",
+      "settings.local.json"
+      in _bodies_lg.get(".claude/.gitignore", "").splitlines())
+
 # loop.sh body is the greenfield guarded skeleton (RETROFIT R8.G step 1).
 _loop_action = next(a for a in plan_lg if a["path"] == ".claude/loop.sh")
 check("10.13: loop.sh body is the BOOTSTRAP-equivalent guarded skeleton",

@@ -403,6 +403,87 @@ byte-verified once by hand at fold time and pinned by nothing, so a future
 edit to either could silently strand the other (no golden covers it,
 since both fixtures leave the flag off).
 
+### Step 8 — Review fixes: retrofit coherence, release identity, test quality
+
+- **GR2 artifacts reached retrofit with no consumer.** The overlay wraps
+  the full greenfield plan, so a retrofit install already receives the
+  unconditional `.claude/specs/INDEX.md` (carrying the canonical
+  `progress.md` template) and `assumption-ledger.md`, plus — on opt-in —
+  wrappers carrying the GR2-02 trajectory contract. But the overlay
+  **replaces** `CLAUDE.md` and `implementer.md` with retrofit-flavor
+  bodies, and those received none of the GR2-01 read-progress-first
+  prose. The artifacts shipped with nothing instructing an agent to
+  consume them, so a resumed unattended retrofit iteration could
+  re-attempt an approach flagged do-not-retry — the exact failure GR2-01
+  exists to prevent. Restored in both retrofit bodies, **scoped to the
+  `*_opted_in` sections**: that is the only configuration in which a
+  resumed autonomous session exists, so the default retrofit surface on
+  this 1.6.2-pinned track stays byte-unchanged (asserted, 10.17/10.18).
+  *Alternative considered:* dropping the GR2 artifacts from retrofit
+  plans entirely, by the overlay's own `sdk_gates` rationale ("an artifact
+  the retrofit contract never declared"). Rejected because `RETROFIT.md`
+  **does** declare the `specs/INDEX.md` structure the template lives in,
+  and the ledger's rows are operationally applicable (retrofit ships the
+  drift-detector hook and, on opt-in, `loop-config.md`). Widening the
+  instruction to unconditional, or dropping the artifacts, both remain
+  easy reversals from here.
+- **Retrofit GR2 coverage, previously zero.** `test_retrofit.py` had no
+  assertion about any GR2 artifact. Eight added (10.13–10.20): the
+  template ships, both opted-in instruction surfaces carry it, the
+  trajectory contract rides the retrofit wrappers, the default body stays
+  clean, the ledger lands, and the retrofit gitignore carries the TEL-01
+  `settings.local.json` entry.
+- **`plugin.json` version is now pinned.** It was the one release-identity
+  surface no test read, and it has been missed **twice**: v2.0.0 shipped
+  `"1.0.0"` (corrected later by a review item) and the v2.2.0 bump omitted
+  it again (caught only in adversarial review). Both misses happened even
+  though the changelog records `plugin.json` as part of the release set —
+  the convention was never the control. Now asserted against
+  `PROTOCOL_VERSION`, including the version in its description prose. Also
+  pinned: `installer.PROTOCOL_VERSION == templates.PROTOCOL_VERSION`, so a
+  half-applied bump fails rather than emitting bodies stamped with one
+  version while state records the other.
+- **Removed a tautological check.** The GR2-03a "plan count is +1 for the
+  ledger" check filtered the ledger out of the same plan and compared
+  lengths — a partition of one list by complementary predicates, so the
+  delta equalled the occurrence count by construction and could never fail
+  independently of the check above it. Its comment advertised a "+1 vs the
+  v2.2.0 plan" comparison that was never built. Deleted, with a note
+  pointing at `EXPECTED_ACTION_COUNTS` (56 / 68), which is where a real
+  count regression actually surfaces.
+
+**No golden movement at this step** — the retrofit change touches only
+retrofit-flavor bodies (neither golden fixture is retrofit) and the rest
+is test-only. Counts stay 56 / 68.
+
+**Test surface:** 14 suites, **938 checks** green, up from 866 at the
+start of the review (`test_installer.py` 197 → 253, `test_interview.py`
+73 → 81, `test_retrofit.py` 254 → 262).
+
+### Review findings recorded but NOT fixed
+
+Below the reported cap or deliberately deferred, listed so a later pass
+does not re-derive them: the recorded retrofit **state-schema** gap for
+the telemetry flag (unchanged from step 4 — retrofit plans still emit
+`telemetry.md` without a state field to match); the emitted progress
+template's `../../learnings/` link, which resolves to `.claude/learnings/`
+while a retrofit plan's calibration ledger sits at repo-root `learnings/`
+(pre-existing placement, symmetric with greenfield, where neither mode
+creates the directory at install time); the duplicated ~110-word telemetry
+question text in `render_interview` and `run_interactive`, which has
+already drifted in formatting and is pinned by a test in only one copy;
+the `_body_of` helper defined *after* its would-be call sites, leaving two
+bare-`IndexError` lookups; two determinism checks strictly implied by the
+existing whole-plan digest check; the dead `not pv` arm in `_telemetry`'s
+guard (`PROTOCOL_VERSION` is a module literal); a redundant proposal
+rebuild in `test_interview.py`; the assumption ledger's drift row citing
+the drift-detector hook config even when `hooks.drift_detector: false`
+(untested configuration); and the freeze-exception ledger numbering, which
+runs `no. 6`–`no. 15` and is not continued by the v2.4.0 blocks — the
+recorded convention fixes the *format* (`no. N`, never `#N`) but not
+sequential numbering, and these blocks carry the citable `GR2-EX / TEL-EX`
+identity instead.
+
 ## 1.9.0 → 2.0.0 (Milestone A — doc-conformant; `gate_substrate` stays `"shell"`)
 
 **Spec:** `.claude/specs/bootstrap-v2/requirements.md` rev-3 (owner-confirmed

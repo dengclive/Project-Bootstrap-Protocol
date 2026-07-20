@@ -2720,6 +2720,25 @@ def _retrofit_implementer_agent(cfg):
             f"   When a task is running under loop or goal-supervised "
             f"mode (sentinel `.loop-active-<task-id>` or "
             f"`.goal-active-<task-id>` present):\n"
+            # GR2-01 review fix: a retrofit plan already ships the progress.md
+            # template (in the unconditional .claude/specs/INDEX.md, which the
+            # overlay does not replace) and, on opt-in, wrappers carrying the
+            # GR2-02 trajectory contract — but the retrofit-flavor bodies that
+            # REPLACE the greenfield CLAUDE.md and implementer carried none of
+            # the read-progress-first instruction, so the artifact shipped with
+            # nothing telling an agent to consume it and a resumed loop could
+            # re-attempt approaches flagged do-not-retry. Scoped to the
+            # opted-in section: that is the only configuration where a resumed
+            # autonomous session exists, so default retrofit output is
+            # byte-unchanged.
+            f"   - **Read `progress.md` first (GR2-01).** At task and "
+            f"iteration priming, read the task's "
+            f"`.claude/specs/<slug>/progress.md` — its `Status` and "
+            f"`Failed approaches` ledger — BEFORE the task brief, and "
+            f"never re-attempt an approach flagged do-not-retry. A "
+            f"resumed unattended iteration is exactly where a known dead "
+            f"end gets retried. The canonical shape is in "
+            f"`.claude/specs/INDEX.md`.\n"
             f"   - **Tier-3 self-healing end-of-turn.** Attempt up to "
             f"three hook fixes within one turn before escalating; the "
             f"agent owns the iteration budget, not the operator.\n"
@@ -2834,6 +2853,22 @@ def _retrofit_claude_md(cfg):
     goal_in = bool(rf_am.get("goal_supervised_mode_opted_in"))
     queue_in = bool(rf_am.get("queue_mode_opted_in"))
 
+    # GR2-01 review fix (see _retrofit_implementer_agent): the retrofit
+    # CLAUDE.md replaces the greenfield one, which carries the reading-list
+    # note pointing at progress.md. Restore it for the opted-in case so the
+    # progress artifact the retrofit plan already emits has a consumer.
+    progress_section = ""
+    if loop_in or goal_in:
+        progress_section = (
+            "\n## Per-task progress ledger (GR2-01)\n\n"
+            "At task/iteration priming, read the task's "
+            "`.claude/specs/<slug>/progress.md` **first** — its `Status` "
+            "and `Failed approaches` ledger — before the task brief, so a "
+            "resumed session does not re-attempt a known dead end. Each "
+            "failed entry carries a do-not-retry flag; honor it. The "
+            "canonical shape of that file lives in "
+            "`.claude/specs/INDEX.md`.\n")
+
     loop_section = ""
     if loop_in:
         loop_section = (
@@ -2907,7 +2942,7 @@ categorization in `tech.md` that looks wrong in light of new evidence.
 
 The escalation list is the contract. If the agent escalates outside it,
 fix steering — do not override in-session.
-{loop_section}{goal_section}{queue_section}
+{progress_section}{loop_section}{goal_section}{queue_section}
 ## Retrofit-specific references
 
 - `.claude/debt.md` — known issues registry (R3); retrofit does NOT fix

@@ -543,11 +543,15 @@ for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
     _ledger_actions = [a for a in _plan if a["path"] == _LEDGER_PATH]
     check(f"GR2-03a[{_fix_name}]: assumption-ledger.md emitted exactly once",
           len(_ledger_actions) == 1)
-    # +1 vs the v2.2.0 plan: rebuild the plan without the unconditional ledger
-    # add and confirm the delta is exactly this one path.
-    _without = [a for a in _plan if a["path"] != _LEDGER_PATH]
-    check(f"GR2-03a[{_fix_name}]: plan count is +1 for the ledger",
-          len(_plan) - len(_without) == 1)
+    # NB (review fix): a "+1 vs the v2.2.0 plan" check used to live here,
+    # filtering the ledger out of THIS plan and comparing lengths. That is a
+    # partition of one list by complementary predicates, so the delta equals
+    # the ledger-occurrence count by construction — arithmetically identical
+    # to the check above and unable to fail independently of it. No pre-fold
+    # plan was ever built, so the baseline delta it advertised was never
+    # enforced. The absolute count IS pinned, by EXPECTED_ACTION_COUNTS in
+    # test_greenfield_golden.py (56 / 68), which is where a genuine "+1"
+    # regression surfaces.
     if _ledger_actions:
         _body = _ledger_actions[0]["body"]
         # Interpolated (not hardcoded) default drift thresholds 50/120/3.
@@ -1093,6 +1097,29 @@ check("AC-A0-1: templates.PROTOCOL_VERSION is 2.4.0",
       _templates_mod.PROTOCOL_VERSION == "2.4.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
+# The two constants are declared independently in installer.py and
+# templates.py; pin them to EACH OTHER as well as to the literal, so a
+# half-applied bump fails here rather than emitting a body stamped with one
+# version while state records the other.
+check("AC-A0-1: installer and templates PROTOCOL_VERSION agree",
+      _installer_mod.PROTOCOL_VERSION == _templates_mod.PROTOCOL_VERSION)
+
+# Review finding: plugin/plugin.json was the ONE release-identity surface no
+# test read. Forgetting it fails nothing and ships a stale manifest — which
+# has happened twice: v2.0.0 shipped "1.0.0" (fixed later by review item
+# PR5-04/05), and the v2.2.0 bump omitted it again (caught only in review).
+# Both misses happened despite the changelog recording plugin.json as part of
+# the release set, so the convention alone is not the control.
+_PLUGIN_JSON = os.path.join(ROOT, "plugin", "plugin.json")
+check("AC-A0-1: plugin/plugin.json exists", os.path.exists(_PLUGIN_JSON))
+if os.path.exists(_PLUGIN_JSON):
+    _pj = _json.load(open(_PLUGIN_JSON))
+    check("AC-A0-1: plugin.json version tracks PROTOCOL_VERSION",
+          _pj.get("version") == _installer_mod.PROTOCOL_VERSION)
+    # The description carries the version in prose too ("v2.4.0"), which the
+    # 2.2.0 bump also had to hand-edit; pin it so prose and field cannot skew.
+    check("AC-A0-1: plugin.json description names the current version",
+          f"v{_installer_mod.PROTOCOL_VERSION}" in _pj.get("description", ""))
 
 d = _install(FULL)
 try:
