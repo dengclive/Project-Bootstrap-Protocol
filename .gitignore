@@ -1,0 +1,11 @@
+# Transient artifacts of running the suite and the installer in-place.
+# The emitted .claude/.gitignore covers INSTALLED projects; this file covers
+# this repository, which is the installer's source, not an installed project.
+__pycache__/
+*.pyc
+
+# Hook-execution log: the suite invokes emitted hooks, which append here.
+.claude/logs/
+
+# Session checkpoints are local working notes, not release artifacts.
+.claude/checkpoints/

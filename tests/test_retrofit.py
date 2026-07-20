@@ -543,7 +543,18 @@ def _run_hook(d, hook_name, payload, env_extra=None):
     """Run a hook script under the no-jq restricted PATH harness.
     CLAUDE_PROJECT_DIR must be set so the hook resolves its runtime
     files (.retrofit-state.json, spec-strategy.md, rollout-schedule.md)
-    in the test fixture rather than the parent repo."""
+    in the test fixture rather than the parent repo.
+
+    `cwd` must be set for the same reason. CLAUDE_PROJECT_DIR governs how the
+    hook resolves FILES, but the hooks also shell out to `git` (spec-gate-commit
+    reads `git diff --cached`), and git resolves its repository from the
+    PROCESS CWD. Without cwd=d the hook inherits the test runner's CWD — the
+    bootstrap repo itself — so those hooks read THIS repository's index instead
+    of the fixture's, and two checks (T2.AF4, T2.FS5) then pass or fail
+    depending on whatever the developer happens to have staged. Found when a
+    staged deletion in the parent repo turned the suite red with no code
+    change; CI only ever saw green because a fresh checkout has an empty
+    index."""
     e = dict(os.environ)
     e["PATH"] = _nojq_path()
     e["CLAUDE_PROJECT_DIR"] = d
@@ -551,7 +562,8 @@ def _run_hook(d, hook_name, payload, env_extra=None):
         e.update(env_extra)
     r = subprocess.run(
         ["bash", os.path.join(d, ".claude", "hooks", f"{hook_name}.sh")],
-        input=json.dumps(payload), capture_output=True, text=True, env=e)
+        input=json.dumps(payload), capture_output=True, text=True, env=e,
+        cwd=d)
     return r.returncode, r.stdout + r.stderr
 
 
