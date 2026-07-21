@@ -917,8 +917,10 @@ owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
 
 ## 2.0.0 → 2.1.0 (Milestone B — SDK substrate; in progress)
 
-**Seam:** `SEAM-CONTRACT-v1-2-0.md` (Milestone-A pin event: protocol
-2.0.0 pinned by commit `1fa5bb6`). Branch `version-2-1-0`.
+**Seam:** `SEAM-CONTRACT-v2-0-0.md` (at the time of this Milestone-B work
+it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
+2.0.0 pinned by commit `1fa5bb6`; renamed and re-pointed to `2.4.0 @
+251f82f` at the seam-2.0.0 substrate re-cut). Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 
