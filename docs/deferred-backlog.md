@@ -30,13 +30,15 @@ work) · `no-action` (reviewed, judged fine as-is; listed so it isn't re-derived
 | B-2 | `tessera_prd` floor re-cut | Awaits the absorbing Tessera version (P-5 window). Note: re-pinning `targets_seam_version` alone greens check-0 before any runner consumes `build_hooks`. `open` (blocked on Tessera roadmap) |
 | B-3 | `claude_code_json_schema_range: TBD` | Open by design (Tessera-runbook referent); resolve when the matrix is known. `open` (blocked) |
 
-## C. 2.4.0-fold deferred items
+## C. 2.2.0 / 2.4.0-fold deferred items
 
 | ID | Item | Source |
 |---|---|---|
 | C-1 | GR2-03a surfacing notice — fail-loud, non-blocking on model/runtime change (constraints locked, not built) | changelog / milestone memory. `open` |
 | C-2 | Retrofit telemetry state-schema — retrofit plans emit `telemetry.md` without a matching state field | changelog "recorded but NOT fixed". `open` |
 | C-3 | Doc-citation normalization pass — pre-existing hook/wrapper citations at older versions (incl. `§6.D` refs) | changelog. `open` |
+| C-4 | R8 — eighth IC check (AR2-09b): NOT added at 2.2.0 (golden fixtures + R7 cover the repo-side risk); a forward feature with a recorded cost-of-deferral | changelog `### R8 — Eighth IC check: deferred (AR2-09b)`; `ic_checks.py` has only IC-1..IC-7. `decision` |
+| C-5 | AR2-09a — no standalone run-summary template file is emitted (the run-summary is inline in the wrappers) | `templates.py:1083` "[AR2-09a]"; milestone memory. `decision` |
 
 ## D. Sub-cap review findings (changelog "recorded but NOT fixed")
 
@@ -52,6 +54,7 @@ Small correctness/cleanup items below the reported cap. All `open`.
 | D-6 | Redundant proposal rebuild in `test_interview.py` |
 | D-7 | Assumption-ledger drift row cites drift-detector config even when `hooks.drift_detector: false` (untested config) |
 | D-8 | Freeze-exception ledger numbering not continued by v2.4.0 blocks (format fixed, sequential numbering not) |
+| D-9 | Per-task wrapper `log()` emits a literal `\n` (a `.format`-doubling quirk at `templates.py:1444`), so its `hooks.log` entries share one physical line — vs the correct single-backslash form in `auto.sh`/`loop.sh`. Worth its own small freeze-exception. (changelog ~L904, milestone memory) |
 
 ## E. Post-retrofit test-coverage queue
 
@@ -66,14 +69,14 @@ Source: `post-retrofit-tasks` memory. Landing structure: a `tests/smoke/` dir.
 | — | CI (#5) | `done` — Milestone A (`ic-self-check.yml`) |
 | — | Interactive walkthrough test (#1) | `done` — PR #2 |
 
-## F. Lower-priority (2026-05-19 checkpoint)
+## F. Lower-priority (2026-05-19 checkpoint + Milestone-B carry-over)
 
-| ID | Item |
-|---|---|
-| F-1 | test-gate grandfather clause — per-module exemption from the `inventory/testing.md` no-test list. `open` |
-| F-2 | Widen `inventory_scan.py` pyproject regex — misses bare `fastapi` without a version. `open` |
-| F-3 | Refactor `propose_commands` to take a root path instead of `os.getcwd()`. `open` |
-| F-4 | Phase 9.6 unnamed config keys — spec decision for retry posture / completion-criteria checklist / audio-cue overrides (currently comments, no keys). `decision` |
+| ID | Item | Source |
+|---|---|---|
+| F-1 | test-gate grandfather clause — per-module exemption from the `inventory/testing.md` no-test list | 2026-05-19 checkpoint. `open` |
+| F-2 | Widen `inventory_scan.py` pyproject regex — misses bare `fastapi` without a version | 2026-05-19 checkpoint. `open` |
+| F-3 | Refactor `propose_commands` to take a root path instead of `os.getcwd()` | 2026-05-19 checkpoint. `open` |
+| F-4 | Phase 9.6 unnamed config keys — spec decision for retry posture / completion-criteria checklist / audio-cue overrides (currently comments, no keys) | milestone memory / Milestone-B carry-over (NOT the 2026-05-19 checkpoint). `decision` |
 
 ## G. Retrofit adversarial-review deferrals (Round 3, v1.6.3)
 
