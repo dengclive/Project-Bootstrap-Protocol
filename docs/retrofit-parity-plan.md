@@ -21,8 +21,10 @@ available to retrofit?* Two-part answer:
   and contain **zero** mentions of any 2.x concept — SDK substrate, usage-limit
   coping, GR2/TEL, assumption ledger, trajectory retention (grep count 0 for each).
 - **Dangling references:** they cite `BOOTSTRAP.md` / `BOOTSTRAP-COMPANION.md`
-  (renamed out of existence — only `Bootstrap-Protocol-v2-*.md` ship now). 7 such
-  refs in `RETROFIT.md` alone; the sharpest is `R8.D:1424`, which tells the
+  (renamed out of existence — only `Bootstrap-Protocol-v2-*.md` ship now).
+  **Replace ALL of them: 8 lines in `RETROFIT.md` + 17 in `RETROFIT-COMPANION.md`
+  match `BOOTSTRAP(-COMPANION)?\.md`** (scope the re-cut to both files, not just
+  RETROFIT.md); the sharpest is `R8.D:1424`, which tells the
   executor to *read nine AI actions directly from `BOOTSTRAP.md`* — a file that no
   longer exists.
 - `RETROFIT-GAP-ANALYSIS.md` is itself a historical artifact (baselined v1.5.1 vs
@@ -35,11 +37,21 @@ greenfield code and mutates output only through the `mode == "retrofit"` overlay
 `bootstrap_protocol_version: 2.4.0` + `gate_substrate: "shell"` into retrofit
 state **today**.
 
-- **Reaches retrofit through the shared overlay** (so "readily available" — yes):
-  usage-limit wrappers (2.2.0), `--worktree` routing, GR2-01/02/03a, the TEL-01
-  `telemetry.md` doc. Most ride the *shared* template functions verbatim, gated on
-  the retrofit `*_opted_in` flags + the scaffold-but-defer guard (inert until the
-  operator meets brownfield milestones). This gating is **by design** (OD-4).
+- **Reaches retrofit through the shared overlay** (so "readily available" — yes),
+  in three distinct gating classes — do NOT flatten them to "opt-in-gated":
+  - **Unconditional** (emitted on every retrofit install): GR2-03a
+    `assumption-ledger.md` (`installer.py:120-125`) and GR2-01
+    `progress-template.md` (`installer.py:189-195`).
+  - **cfg-flag-gated:** the TEL-01 `telemetry.md` doc, on `telemetry_export_enabled`
+    (`installer.py:126-128`); **size-gated:** the worktree-budget doc, on
+    `codebase_size_gb >= 1` (`installer.py:359`).
+  - **`*_opted_in` + scaffold-but-defer (inert until brownfield milestone, OD-4):**
+    ONLY the autonomous `loop.sh`/`goal-loop.sh`/`auto.sh` wrappers
+    (`installer.py:355-388`), which is where the **2.2.0 usage-limit coping** and
+    **GR2-02 trajectory retention** ride. `--worktree` routing rides these same
+    wrappers.
+  All ride the *shared* greenfield template functions verbatim (retrofit does not
+  fork them).
 - **Intentionally EXCLUDED — contract-backed, NOT gaps:** the **SDK gate
   substrate** — retrofit is "the one path that drops `gates.py`" (seam §7.2 /
   check-8 line 236/312; refused at `defaults.py:244`); and **Tessera dispatch**
@@ -90,46 +102,70 @@ From `project_retrofit_installer.md` (PR #1 invariants) and the seam:
   `brownfield_milestones` nested). **T2** — every retrofit-hook error path falls
   through to ENFORCE (14 locked cases). **OD-4** — scaffold-but-defer (never enable
   an autonomous mode at retrofit time). **R0.8** gate.
-- **Golden safety confirmed for the doc work:** `lib/templates.py` does **not**
+- **Golden safety confirmed for the *doc* work:** `lib/templates.py` does **not**
   reference `BOOTSTRAP.md` — the dangling refs live only in the root docs, so the
   Phase-1 doc re-cut does **not** touch emitted bytes / goldens. (Verify any
   byte-identity test on the retrofit docs themselves and update its baseline
   deliberately if one exists.)
+- **BUT the version number is NOT doc-only:** `RETROFIT_PROTOCOL_VERSION`
+  (`installer.py:37`) is a code constant written into the emitted
+  `.retrofit-state.json` (`installer.py:992`) and hard-asserted by three tests
+  (`test_ic_gate.py:222` AC-9-5, `test_installer.py:1141` AC-A0-1,
+  `test_retrofit.py:902` check 8.4). Bumping it is a **code** change that alters
+  retrofit-emitted bytes and those tests — it belongs in Phase 2 (with C-2), never
+  in the Phase-1 doc re-cut.
 
 ---
 
 ## 4. Plan (phased)
 
 ### Phase 0 — Owner decisions (before any work)
-1. **Version bump.** A doc re-cut re-targeting Bootstrap 2.4.0 is at least a
-   RETROFIT **minor** (companion-target change). Recommend **`1.6.2 → 1.7.0`**
-   (doc re-cut + in-lane gaps). Decide whether closing C-2 (a new state field)
-   pushes it further. *(The old `RETROFIT-GAP-ANALYSIS.md §5` flagged a
-   minor-vs-major question; this resolves it.)*
+1. **Version bump — and what earns it.** Under RETROFIT's own semver precedent, a
+   doc re-cut / companion re-target **alone is a PATCH** (v1.5.1 was a catch-up
+   patch, v1.6.2 a reference re-anchor patch; `RETROFIT.md:42` says a minor needs a
+   behavioral change, "not a reference fix"). The **new state field C-2 is what
+   earns a MINOR** (additive field → minor per the scheme). So: recommend
+   **`1.6.2 → 1.7.0`, earned by C-2 and landing in Phase 2 with it** — do NOT
+   attribute the minor to the doc re-cut (a patch on its own), and do NOT treat
+   C-2 as an escalator "past" a minor (additive is exactly a minor, never a major).
+   Because the version is a code constant with pinning tests (see §3), the bump is
+   a Phase-2 **code** change, not a doc-header edit. *(Ignore the old
+   `RETROFIT-GAP-ANALYSIS.md §5` minor-vs-major question — it was already resolved
+   by shipping v1.6.0; it is a different decision.)*
 2. **Confirm retrofit stays shell-era permanently** (recommended — it's
    contract-backed). Record the decision in the re-cut so it isn't re-litigated.
 3. **Retire `RETROFIT-GAP-ANALYSIS.md`?** Recommend yes — replace with a short
    pointer to `docs/deferred-backlog.md` + this plan (it's a stale historical doc).
 
-### Phase 1 — Retrofit doc re-cut (the main neglect item; highest value)
+### Phase 1 — Retrofit doc re-cut (the main neglect item; highest value) — a PATCH
 - Re-cut `RETROFIT.md` + `RETROFIT-COMPANION.md` to companion
   `Bootstrap-Protocol-v2-4-0.md` / `-Companion-v2-4-0.md`:
-  - Replace all `BOOTSTRAP.md` / `BOOTSTRAP-COMPANION.md` refs (7 in RETROFIT.md)
-    with the v2-4-0 names; fix the `R8.D:1424` "read 9 AI actions from BOOTSTRAP.md"
-    carve-out to point at the real section in the current doc.
-  - Add a **"2.x delta for the retrofit track"** section stating plainly what
-    retrofit DOES and does NOT get: SDK substrate excluded (shell-era, seam
-    carve-out); usage-limit / worktree / GR2 / trajectory reach it under
-    `*_opted_in` + scaffold-defer; TEL-01 doc emitted, state field pending (C-2).
-  - Bump the version header + companion-target line per Phase 0.1.
+  - Replace **all** `BOOTSTRAP.md` / `BOOTSTRAP-COMPANION.md` refs across BOTH docs
+    (§1a: 8 lines in RETROFIT.md + 17 in COMPANION) with the v2-4-0 names; fix the
+    `R8.D:1424` "read 9 AI actions from BOOTSTRAP.md" carve-out to point at the real
+    section in the current doc.
+  - Add a **"2.x delta for the retrofit track"** section stating the §1b gating
+    classes precisely: SDK substrate excluded (shell-era, seam carve-out);
+    **GR2-01 / GR2-03a emitted unconditionally**; `telemetry.md` **cfg-flag-gated**;
+    worktree-budget **size-gated**; **usage-limit coping + GR2-02 trajectory +
+    `--worktree` routing ride the autonomous wrappers under `*_opted_in` +
+    scaffold-defer**; TEL-01 doc emitted, state field pending (C-2). (Do NOT flatten
+    these to "opt-in-gated" — that was the assessment error this review corrected.)
 - Retire/replace `RETROFIT-GAP-ANALYSIS.md` per Phase 0.3.
-- **No emitted-byte / golden impact** (root docs only — verified).
+- **Version stays `1.6.2` in this phase** — the bump is code (Phase 2), not a doc edit.
+- **No emitted-byte / golden impact** — root docs only; `templates.py` has no
+  `BOOTSTRAP.md` ref, and the version constant is untouched here.
 
 ### Phase 2 — Close in-lane code gaps (respecting C1/B5/T2/OD-4)
-- **C-2 (priority)** — extend `_write_retrofit_state` (the C1 sibling, NOT
-  `_write_state`) with `telemetry_export_enabled`, mirroring `installer.py:891`;
-  add a retrofit test. Small, well-scoped, closes the clearest half-folded 2.4.0
-  feature.
+- **C-2 + version bump (priority, bundled — together they earn the minor)** —
+  extend `_write_retrofit_state` (the C1 sibling, **NOT** `_write_state`) with
+  `telemetry_export_enabled`, mirroring `installer.py:891`; **and** bump
+  `RETROFIT_PROTOCOL_VERSION` `installer.py:37` → `1.7.0`. Both change the emitted
+  `.retrofit-state.json`, so in the SAME change update the three version-pinning
+  tests (`test_ic_gate.py:222` AC-9-5, `test_installer.py:1141` AC-A0-1,
+  `test_retrofit.py:902` check 8.4 → `1.7.0`), extend `test_retrofit.py` for the new
+  field, and set the RETROFIT doc headers to 1.7.0. Closes the clearest half-folded
+  2.4.0 feature.
 - Then, as capacity allows: **C-1** GR2-03a surfacing (both tracks), **D-7**
   assumption-ledger drift row when `hooks.drift_detector:false`, **G-F1** startup
   `bootstrap_protocol_version` mismatch check, **F-1** test-gate grandfather clause.
@@ -145,11 +181,17 @@ From `project_retrofit_installer.md` (PR #1 invariants) and the seam:
   ranges; **G-B3** sort `legacy_allowlist` before emit; **G-A5** ledger counter.
 
 ### Verification (end-to-end)
-- `tests/test_greenfield_golden.py` **6/6 unchanged** after every phase (C1/D2).
-- `bin/run-tests` green; `tests/test_retrofit.py` extended for the new state field.
+- **Greenfield golden** `tests/test_greenfield_golden.py` **6/6 unchanged after
+  every phase** (C1/D2) — retrofit work never perturbs greenfield goldens.
+- **Retrofit-emitted state DOES change in Phase 2** (not Phase 1): the
+  `retrofit_protocol_version` field → 1.7.0 and the new `telemetry_export_enabled`
+  field. `bin/run-tests` is green **only after** updating the three version-pinning
+  tests (AC-9-5, AC-A0-1, retrofit 8.4) and extending `test_retrofit.py` — the
+  version bump falsifies those `"1.6.2"` literals until they are updated.
+- **Phase 1 (docs)** touches no test and has no emitted-byte impact.
 - e2e retrofit install idempotent; `--ic-checks` unaffected (retrofit no-op).
-- Frozen-file diffs: none expected from Phase 1 (root docs); any deliberate
-  baseline update recorded in `docs/changelog.md`.
+- Frozen-file diffs: none from Phase 1 (root docs); any deliberate baseline update
+  recorded in `docs/changelog.md`.
 
 ---
 
