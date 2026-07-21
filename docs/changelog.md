@@ -1,5 +1,53 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Test harness & isolation (PR #9) — adversarial-review fixes
+
+Multi-lens adversarial review of PR #9 (7 finder lenses → 3 refutation-seeking
+verifiers per finding → completeness sweep, 62 agents). 13 findings survived
+verification, collapsing to six distinct defects — all fixed here. No emitted
+artifact or golden fixture changed; test surface 945 → 946 checks.
+
+- **Tree-pollution check was blind to the leak it exists for.** `bin/run-tests`
+  snapshotted `git status --porcelain` with no `--ignored`, so a suite writing
+  into `.claude/logs/hooks.log` (gitignored — the *motivating* regression) was
+  invisible: the runner printed `ALL SUITES PASSED` while the repo was written
+  into. Now `--ignored --untracked-files=all`; suites run with
+  `PYTHONDONTWRITEBYTECODE=1` so honest bytecode caching does not trip the
+  now-ignored-aware check. Verified by reproduction: reverting the `_run_hook`
+  pin and running the installer suite now exits 1 on `!! .claude/logs/hooks.log`.
+- **Silent skip on a None snapshot.** `tree_state()` returns None when git is
+  unavailable / not a checkout; both call sites skipped the check wordlessly,
+  rc untouched — a run where the net was never strung looked identical to a
+  verified-clean one (against fail-loud-not-silent). Now reported LOUDLY as
+  "WORKING-TREE CHECK SKIPPED"; `--no-tree-check` remains the quiet opt-out.
+- **Set-difference missed destructive changes to already-dirty files.** Keys
+  stripped the status code and the diff was one-directional (`after - before`),
+  so deleting or reverting a file that was already dirty at start cancelled out.
+  Now keys keep the status code and the comparison is symmetric.
+- **Untracked-directory collapsing.** A file written into a pre-existing
+  untracked dir hid behind a single `?? dir/` entry; `--untracked-files=all`
+  now enumerates it.
+- **CI lost its log affordances.** The move to `run: bin/run-tests` dropped the
+  inline loop's `::group::` folding and `::error` annotations, and streamed 945
+  checks flat. The runner now re-emits both under `GITHUB_ACTIONS`, and flushes
+  stdout before the stderr diagnostics so the merged CI log is ordered.
+- **T2.FS7b was a vacuous tripwire** (`tests/test_retrofit.py`, pre-existing on
+  main). It asserted only the absence of `retrofit_active exempt` from the log —
+  tautologically true, because with no JSON parser the command is unparseable,
+  the git-commit `case` never matches, and no exemption branch is reached.
+  Rewritten to reuse AF2's exact exempting condition (retrofit_active=true +
+  .claude/-only staged) and assert a parser outage does NOT silently grant it,
+  plus a positive assertion on the inert `ok` fall-through (rules out the
+  empty-log escape). Mutation-tested: injecting python3 back flips it to FAIL.
+  Also added the missing `cwd=d` (the leak class 5f0bfd8 closed in `_run_hook`).
+
+**Owner-facing posture note (NOT changed here):** under a *total* parser outage
+(no jq AND no python3) the emitted git-commit gates match nothing and become an
+inert pass-through — they neither exempt nor enforce. `secrets-gate` shares this
+fail-open on an unparseable payload. Changing the emitted gates' fail posture is
+a golden-changing RETROFIT-contract decision left to the owner; FS7b now locks
+the observable "no silent exemption" guarantee rather than asserting a block.
+
 ## 2.2.0 → 2.4.0 (v2.4.0 code fold — GR2-EX / TEL-EX; bring code up to the frozen v2.4.0 docs)
 
 Single code fold; **no intermediate 2.3.0 code release**. The v2.3.0 GR2

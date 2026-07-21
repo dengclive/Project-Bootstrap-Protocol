@@ -199,21 +199,53 @@ deterministic installer).
 
 ## Tests
 
-Standalone scripts — run each directly (not via pytest):
+The suites are standalone scripts that call `sys.exit()`. Run the whole set
+through the runner — this is what CI runs, so local and CI cannot drift:
 
 ```bash
-python3 tests/test_installer.py           # 135 checks - plan, e2e, AC-A0, R-6
-python3 tests/test_interview.py           # 66 checks  - parser round-trips
-python3 tests/test_retrofit.py            # 253 checks - retrofit track
-python3 tests/test_greenfield_golden.py   # golden digests (GOLDEN_UPDATE=1 to re-baseline)
-python3 tests/test_gate_substrate.py      # 12 checks  - IC-3 state field + migration
-python3 tests/test_validate_only.py       # 10 checks  - IC-1 --validate-only
-python3 tests/test_advisor_model.py       # 15 checks  - IC-4 advisor default + fallback
-python3 tests/test_root_sentinels.py      # 28 checks  - IC-2 dual-honor + root gitignore
-python3 tests/test_hook_tiers.py          # 9 checks   - IC-7 manifest tiers
-python3 tests/test_goal_evaluator_keys.py # 13 checks  - Phase 9.6 goal-config keys
-python3 tests/test_auto_run_sentinel.py   # 16 checks  - Phase 9.7 .run-active race safety
+bin/run-tests            # all suites, per-suite table, non-zero if any fails
+bin/run-tests -q         # totals only (suppress per-check output)
+bin/run-tests -k retrofit  # only suites whose filename contains "retrofit"
 ```
+
+**Do not use `for t in tests/test_*.py; do python3 "$t"; done`.** The loop's
+exit status is whatever the *last* suite returned, so a suite that fails in
+the middle scrolls past and the run still looks green. Summing the printed
+"N passed" lines has the mirror-image blind spot: a suite that dies on an
+unhandled exception prints no summary at all, so its checks silently vanish
+from the total instead of registering as a failure. The runner reports both,
+and (when git is available) fails the run if a suite writes into the working
+tree instead of its fixture (emitted hooks resolve paths via
+`${CLAUDE_PROJECT_DIR:-.}`, so an unpinned hook invocation logs into *this
+repo* — that is how a 1500-line `.claude/logs/hooks.log` once accumulated here
+and got committed). The check snapshots `git status` with `--ignored
+--untracked-files=all`, so it sees writes into gitignored paths — including
+`.claude/logs/` itself — and into already-untracked directories, not just new
+tracked changes. Outside a git checkout the check is reported as skipped rather
+than passed silently.
+
+Individual suites still run directly when you want one in isolation:
+
+```bash
+python3 tests/test_installer.py           # plan, e2e, AC-A0, R-6, GR2/TEL-01
+python3 tests/test_interview.py           # parser round-trips, TEL-01 wizard
+python3 tests/test_retrofit.py            # retrofit track
+python3 tests/test_greenfield_golden.py   # golden digests (GOLDEN_UPDATE=1 to re-baseline)
+python3 tests/test_gate_substrate.py      # IC-3 state field + migration
+python3 tests/test_validate_only.py       # IC-1 --validate-only
+python3 tests/test_advisor_model.py       # IC-4 advisor default + fallback
+python3 tests/test_root_sentinels.py      # IC-2 dual-honor + root gitignore
+python3 tests/test_hook_tiers.py          # IC-7 manifest tiers
+python3 tests/test_goal_evaluator_keys.py # Phase 9.6 goal-config keys
+python3 tests/test_auto_run_sentinel.py   # Phase 9.7 .run-active race safety
+python3 tests/test_ic_gate.py             # IC-1..IC-7 gate + changelog tripwire
+python3 tests/test_sdk_gates.py           # IC-5 SDK gate module
+python3 tests/test_usage_limit_contract.py # 2.2.0 usage-limit comment contract
+```
+
+Per-suite check counts are deliberately not listed here — they move with
+almost every change and the stale numbers were never load-bearing. Run
+`bin/run-tests` for the current table.
 
 ## Review history
 
