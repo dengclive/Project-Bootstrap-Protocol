@@ -633,26 +633,38 @@ check("DS-01 back-compat: pre-2.5.0 file parses, design flags default false",
 
 class _Responder:
     """A prompt-aware stdin stub (robust to prompt ordering): answers the
-    archetype + design prompts by inspecting the prompt just written, and
-    accepts the default (empty line) for everything else. A call cap prevents
-    any accidental infinite validated-loop from hanging the test."""
+    archetype + design prompts by inspecting the CURRENT prompt just written,
+    and accepts the default (empty line) for everything else. A call cap
+    prevents any accidental infinite validated-loop from hanging the test.
+
+    Anchoring: `_ask` writes `{question}\\n  [default: X] > ` and then reads, so
+    the current question is the last line BEFORE the final `[default:` marker.
+    Matching on that single line (not a fixed-size tail slice) isolates each
+    prompt — otherwise the just-answered design prompt still sits in the window
+    when the skill prompt fires and would shadow it (feeding the design answer
+    to the skill question), and the archetype prompt would leak into the tier
+    prompt."""
 
     def __init__(self, out, archetype, design, skill):
         self.out, self.arche = out, archetype
         self.design, self.skill = design, skill
         self.n = 0
 
+    def _current_prompt(self):
+        before = self.out.getvalue().rsplit("[default:", 1)[0]
+        return before.rstrip("\n ").rsplit("\n", 1)[-1]
+
     def readline(self):
         self.n += 1
         if self.n > 60:
             return ""  # safety EOF
-        tail = self.out.getvalue()[-200:]
-        if "Archetype [" in tail:
+        prompt = self._current_prompt()
+        if "Archetype [" in prompt:
             return self.arche + "\n"
-        if "Generate design steering doc? true|false" in tail:
-            return self.design + "\n"
-        if "advisory design-review skill?" in tail:
+        if "advisory design-review skill?" in prompt:
             return self.skill + "\n"
+        if "Generate design steering doc?" in prompt:
+            return self.design + "\n"
         return "\n"
 
 
@@ -668,6 +680,20 @@ check("DS-01 interactive: fullstack is OFFERED design steering",
 check("DS-01 interactive: fullstack accept records both flags true",
       _fs_ans["design_steering_enabled"] is True
       and _fs_ans["design_review_skill_enabled"] is True)
+
+# Interactive: design=YES, skill=NO — the skill prompt MUST receive its own
+# answer, not the design answer. This guards the _Responder anchoring AND the
+# run_interactive skill wiring: with design and skill DIFFERENT, a stub that
+# shadowed the skill prompt (or code that read the wrong variable) records
+# skill True and fails here.
+_dn_out = _io.StringIO()
+_dn_ans = IV.run_interactive(
+    "a full-stack web app with a user dashboard",
+    instream=_Responder(_dn_out, "fullstack", "true", "false"),
+    outstream=_dn_out, project_fallback="p")
+check("DS-01 interactive: design=yes skill=no records steering True, skill False",
+      _dn_ans["design_steering_enabled"] is True
+      and _dn_ans["design_review_skill_enabled"] is False)
 
 # Interactive: data-ml (excluded) is NOT offered and records false.
 _dm_out = _io.StringIO()

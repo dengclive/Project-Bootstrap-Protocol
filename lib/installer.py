@@ -963,18 +963,28 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         # emitted telemetry.md and this state field can never disagree.
         "telemetry_export_enabled": telemetry_enabled(cfg),
         # DS-01 (v2.5.0): Phase 0 opt-in decisions, persisted cfg-authoritatively
-        # (mirrors the mode-flag / telemetry pattern above). The flag-gated
-        # build_plan add keys off the same normalizers, so the emitted design.md
-        # (and the optional skill/command) and these state fields can never
-        # disagree. Forward-compat is default-on-READ, NOT the IC-3 write-into-
-        # old-files mechanism: design_steering_enabled() returns False for an
-        # absent key (cfg.get(..., False)); nothing is written into old state
-        # files at read time (same posture as telemetry_export_enabled /
-        # exit_reason). Retrofit installs inherit the False default harmlessly:
-        # _write_retrofit_state carries neither field, exactly as it carries no
-        # telemetry_export_enabled.
+        # (mirrors the mode-flag / telemetry pattern above). Forward-compat is
+        # default-on-READ, NOT the IC-3 write-into-old-files mechanism:
+        # design_steering_enabled() returns False for an absent key
+        # (cfg.get(..., False)); nothing is written into old state files at read
+        # time (same posture as telemetry_export_enabled / exit_reason). Retrofit
+        # installs inherit the False default harmlessly: _write_retrofit_state
+        # carries neither field, exactly as it carries no telemetry_export_enabled.
         "design_steering_enabled": design_steering_enabled(cfg),
-        "design_review_skill_enabled": design_review_skill_enabled(cfg),
+        # The skill field is gated on the primary via `and`, so it records the
+        # SAME condition build_plan emits SKILL.md under (the nested
+        # `if design_steering_enabled: if design_review_skill_enabled:` at
+        # build_plan) — the emitted skill/command and this state field can never
+        # disagree. The `and` also short-circuits when steering is off, so the
+        # skill normalizer is NOT evaluated then: a garbage design_review_skill_
+        # enabled value on a steering-off install is inert (matching build_plan,
+        # which never reaches it either) instead of crashing _write_state after
+        # apply_plan has already written every file. When steering IS on, both
+        # build_plan (gate) and this line evaluate the skill normalizer, so a
+        # garbage value fails loud EARLY in build_plan, before any file is
+        # written — the same fail-early property telemetry_enabled has.
+        "design_review_skill_enabled": (design_steering_enabled(cfg)
+                                        and design_review_skill_enabled(cfg)),
     })
     # --- the three tracking lists: initialise once, never clobber ---
     state.setdefault("loop_in_flight", [])

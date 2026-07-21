@@ -1414,6 +1414,57 @@ try:
 finally:
     shutil.rmtree(_dsd0, ignore_errors=True)
 
+# DS-01 skill-flag gating on the primary (review BUG-1 + BUG-2 regression).
+# The skill state field is gated on design_steering_enabled via `and`, so:
+#  (a) steering OFF + skill TRUE must record skill FALSE (state cannot claim a
+#      skill was installed when build_plan emitted none), and
+#  (b) steering OFF + a GARBAGE skill value must NOT crash the install after
+#      apply_plan has written files — the `and` short-circuits and the skill
+#      normalizer is never evaluated, mirroring build_plan (which never reaches
+#      it when steering is off).
+_DS_SKILL_ON_STEER_OFF = """project:
+  name: dssoff
+  archetype: service
+  prd_tier: standard
+design_steering_enabled: false
+design_review_skill_enabled: true
+"""
+_dsg = _install(_DS_SKILL_ON_STEER_OFF)
+try:
+    _dsgs = _json.load(open(os.path.join(_dsg, ".claude",
+                                         ".bootstrap-state.json")))
+    check("DS-01[gate]: steering off + skill true records skill FALSE "
+          "(state matches emission)",
+          _dsgs.get("design_review_skill_enabled") is False)
+    check("DS-01[gate]: steering off + skill true emits no SKILL.md on disk",
+          not os.path.exists(os.path.join(
+              _dsg, ".claude", "skills", "design-review", "SKILL.md")))
+finally:
+    shutil.rmtree(_dsg, ignore_errors=True)
+
+# Garbage skill value with steering OFF must be inert (no crash, no partial
+# install). _install runs the real apply_plan -> _write_state path; a raise
+# would propagate and fail this check.
+_DS_SKILL_GARBAGE = _DS_SKILL_ON_STEER_OFF.replace(
+    "design_review_skill_enabled: true", "design_review_skill_enabled: maybe")
+_ds_crash = None
+_dsg2 = None
+try:
+    _dsg2 = _install(_DS_SKILL_GARBAGE)
+    _dsg2s = _json.load(open(os.path.join(_dsg2, ".claude",
+                                          ".bootstrap-state.json")))
+    _ds_state_ok = (_dsg2s.get("design_review_skill_enabled") is False)
+except Exception as _e:
+    _ds_crash = _e
+    _ds_state_ok = False
+finally:
+    if _dsg2:
+        shutil.rmtree(_dsg2, ignore_errors=True)
+check("DS-01[gate]: garbage skill value with steering off does NOT crash the "
+      "install (no partial install)", _ds_crash is None)
+check("DS-01[gate]: garbage skill value with steering off records skill False "
+      "in a complete state file", _ds_state_ok)
+
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
