@@ -33,7 +33,7 @@ from defaults import resolve_config    # archetype defaults + validation
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "2.4.0"
+PROTOCOL_VERSION = "2.5.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
 # Seam binds floor (SEAM-CONTRACT v2.0.0, claude_code_runtime; unchanged
 # against the official changelog 2026-07-18): below 2.1.210 a PreToolUse
@@ -79,6 +79,62 @@ def telemetry_enabled(cfg: dict) -> bool:
         "false (yes/no/on/off/1/0 are accepted). This flag is an opt-in for "
         "an observability export, so the installer refuses to guess what an "
         "unrecognized value meant.")
+
+
+# DS-01 (v2.5.0): twin of _TELEMETRY_TRUE/_FALSE at installer.py:58. Parallel
+# token sets (NOT a shared _BOOL_TRUE/_FALSE): there is no shared bool-token set
+# in this repo, and refactoring telemetry's tokens into one would touch the
+# telemetry normalizer the full_autonomous golden fixture exercises and risk
+# perturbing its digest. Parallel keeps the diff minimal and the golden honest.
+_DESIGN_TRUE = {"true", "yes", "on", "1"}
+_DESIGN_FALSE = {"false", "no", "off", "0", ""}
+
+
+def design_steering_enabled(cfg: dict) -> bool:
+    """Resolve the DS-01 opt-in flag to a bool, fail-loud on garbage.
+    Twin of telemetry_enabled (installer.py:62)."""
+    raw = cfg.get("design_steering_enabled", False)
+    if isinstance(raw, bool):
+        return raw
+    # NB: bool is a subclass of int, so this arm is reached only by a real
+    # integer - minyaml renders bare 0/1 as ints, not strings.
+    if isinstance(raw, int) and raw in (0, 1):
+        return bool(raw)
+    if isinstance(raw, str):
+        token = raw.strip().strip('"').strip("'").lower()
+        if token in _DESIGN_TRUE:
+            return True
+        if token in _DESIGN_FALSE:
+            return False
+    raise ValueError(
+        f"design_steering_enabled: unrecognized value {raw!r}. Use true or "
+        "false (yes/no/on/off/1/0 are accepted). This flag is an opt-in for a "
+        "design-steering doc, so the installer refuses to guess what an "
+        "unrecognized value meant.")
+
+
+def design_review_skill_enabled(cfg: dict) -> bool:
+    """Resolve the DS-01 optional-skill flag to a bool, fail-loud on garbage.
+    Twin of telemetry_enabled (installer.py:62); a SECOND decision gated on the
+    primary being on (Phase 0 step 6: 'yes to the doc' does not silently install
+    the skill). The build_plan gate only consults this when design steering is
+    already enabled, so an operator who leaves it absent gets no skill."""
+    raw = cfg.get("design_review_skill_enabled", False)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int) and raw in (0, 1):
+        return bool(raw)
+    if isinstance(raw, str):
+        token = raw.strip().strip('"').strip("'").lower()
+        if token in _DESIGN_TRUE:
+            return True
+        if token in _DESIGN_FALSE:
+            return False
+    raise ValueError(
+        f"design_review_skill_enabled: unrecognized value {raw!r}. Use true or "
+        "false (yes/no/on/off/1/0 are accepted). This flag is an opt-in for the "
+        "advisory design-review skill, so the installer refuses to guess what "
+        "an unrecognized value meant.")
 
 
 # --------------------------------------------------------------------------- #
@@ -131,6 +187,23 @@ def build_plan(cfg: dict) -> list[dict]:
     # KeyErrors) and normalizes YAML boolean spellings fail-loud.
     if telemetry_enabled(cfg):
         add(".claude/steering/telemetry.md", TEMPLATES["telemetry"](cfg))
+
+    # DS-01 (v2.5.0): opt-in design-steering doc, emitted ONLY when the operator
+    # opted in (Phase 0 step 6). Lands in .claude/steering/ (never gitignored ->
+    # committed by construction, no gitignore edit). Off by default: the default
+    # plan is byte-identical to the pre-DS-01 baseline. design_steering_enabled()
+    # reads defensively (a config lacking the key never KeyErrors). The optional
+    # advisory design-review skill is a SECOND decision, gated on the primary:
+    # emitted as a direct add() (NOT via _skills/_commands, which key off
+    # workflow.install_skills) so it is governed only by the design flags. The
+    # /design-review command is emitted alongside the skill (never alone).
+    if design_steering_enabled(cfg):
+        add(".claude/steering/design.md", TEMPLATES["design"](cfg))
+        if design_review_skill_enabled(cfg):
+            add(".claude/skills/design-review/SKILL.md",
+                TEMPLATES["design_review_skill"](cfg))
+            add(".claude/commands/design-review.md",
+                TEMPLATES["design_review_command"](cfg))
 
     # ---- Hooks (Phase 6) -------------------------------------------------- #
     hook_set = cfg["_resolved_hooks"]            # filled by resolve_config
@@ -889,6 +962,19 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         # flag-gated build_plan add keys off the same normalizer, so the
         # emitted telemetry.md and this state field can never disagree.
         "telemetry_export_enabled": telemetry_enabled(cfg),
+        # DS-01 (v2.5.0): Phase 0 opt-in decisions, persisted cfg-authoritatively
+        # (mirrors the mode-flag / telemetry pattern above). The flag-gated
+        # build_plan add keys off the same normalizers, so the emitted design.md
+        # (and the optional skill/command) and these state fields can never
+        # disagree. Forward-compat is default-on-READ, NOT the IC-3 write-into-
+        # old-files mechanism: design_steering_enabled() returns False for an
+        # absent key (cfg.get(..., False)); nothing is written into old state
+        # files at read time (same posture as telemetry_export_enabled /
+        # exit_reason). Retrofit installs inherit the False default harmlessly:
+        # _write_retrofit_state carries neither field, exactly as it carries no
+        # telemetry_export_enabled.
+        "design_steering_enabled": design_steering_enabled(cfg),
+        "design_review_skill_enabled": design_review_skill_enabled(cfg),
     })
     # --- the three tracking lists: initialise once, never clobber ---
     state.setdefault("loop_in_flight", [])

@@ -1128,16 +1128,19 @@ finally:
 # release-identity bump; [R6, 2.2.0] re-pinned 2.1.0 -> 2.2.0 at the
 # usage-limit bump; [v2.4.0 code fold, GR2-EX/TEL-EX step 0] re-pinned
 # 2.2.0 -> 2.4.0 (single fold, no intermediate 2.3.0 code release; the
-# 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code)
-# (tests/test_ic_gate.py owns the mirror assertions).
+# 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code);
+# [DS-01, 2.5.0] re-pinned 2.4.0 -> 2.5.0 at the design-steering fold (Step 7
+# version bump; PROTOCOL_VERSION is stamped into settings.json _generatedBy,
+# state, and the manifest — see the golden re-baseline for the emitted-byte
+# proof). (tests/test_ic_gate.py owns the mirror assertions.)
 # ---------------------------------------------------------------------------
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.4.0",
-      _installer_mod.PROTOCOL_VERSION == "2.4.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.4.0",
-      _templates_mod.PROTOCOL_VERSION == "2.4.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.5.0",
+      _installer_mod.PROTOCOL_VERSION == "2.5.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.5.0",
+      _templates_mod.PROTOCOL_VERSION == "2.5.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 # The two constants are declared independently in installer.py and
@@ -1168,16 +1171,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.4.0",
-          state.get("bootstrap_protocol_version") == "2.4.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.5.0",
+          state.get("bootstrap_protocol_version") == "2.5.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.4.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.5.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.4.0)")
+          == "bootstrap-installer (protocol 2.5.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.4.0",
-          manifest.get("protocol_version") == "2.4.0")
+    check("AC-A0-3: manifest records protocol_version 2.5.0",
+          manifest.get("protocol_version") == "2.5.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -1229,6 +1232,188 @@ check("AC-6-5: effort: appears only on the reviewer (table has no other "
       "effort annotation)",
       all("\neffort:" not in agents[p] for p in agents
           if p != ".claude/agents/reviewer.md"))
+
+# ---------------------------------------------------------------------------
+# DS-01 (v2.5.0): opt-in design-steering doc + optional advisory skill/command,
+# flag-gated. Off by default (invisible — proven byte-identical by
+# test_greenfield_golden.py). Mirrors the TEL-01 block above. The interactive
+# OFFER is archetype-gated (tested in test_interview.py); the FLAG is not (an
+# operator hand-setting it on any archetype still emits) — asserted here.
+# ---------------------------------------------------------------------------
+import io as _io                                            # noqa: E402
+from installer import (design_steering_enabled,            # noqa: E402
+                       design_review_skill_enabled)
+_DS_DOC = ".claude/steering/design.md"
+_DS_SKILL = ".claude/skills/design-review/SKILL.md"
+_DS_CMD = ".claude/commands/design-review.md"
+_DS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_frozen(rel):
+    with _io.open(os.path.join(_DS_ROOT, rel), "r", encoding="utf-8",
+                  newline="") as _fh:
+        return _fh.read()
+
+
+# OFF (default): no design artifacts; determinism digest stable.
+_ds_off, _ = cfg_from(SERVICE)
+_ds_plan_off = build_plan(_ds_off)
+check("DS-01[off]: no design.md on the default (flag-absent) path",
+      all(a["path"] != _DS_DOC for a in _ds_plan_off))
+check("DS-01[off]: no design-review skill/command on the default path",
+      all(a["path"] not in (_DS_SKILL, _DS_CMD) for a in _ds_plan_off))
+check("DS-01[off]: determinism digest stable with flag absent",
+      plan_digest(_ds_off) == plan_digest(cfg_from(SERVICE)[0]))
+
+# ON (doc only): +1 file, committed; skill declined => no skill/command.
+_DS_DOC_ONLY = """project:
+  name: dson
+  archetype: fullstack
+  prd_tier: standard
+design_steering_enabled: true
+"""
+_ds_con, _ds_errs = cfg_from(_DS_DOC_ONLY)
+check("DS-01[on]: config with the flag resolves cleanly", _ds_errs == [])
+check("DS-01[on]: flag survives resolution",
+      _ds_con.get("design_steering_enabled") is True)
+_ds_plan_on = build_plan(_ds_con)
+_ds_doc_actions = [a for a in _ds_plan_on if a["path"] == _DS_DOC]
+check("DS-01[on doc-only]: design.md emitted exactly once",
+      len(_ds_doc_actions) == 1)
+check("DS-01[on doc-only]: skill declined => no SKILL.md, no command",
+      all(a["path"] not in (_DS_SKILL, _DS_CMD) for a in _ds_plan_on))
+_ds_off_same, _ = cfg_from(_DS_DOC_ONLY.replace(
+    "design_steering_enabled: true", "design_steering_enabled: false"))
+check("DS-01[on doc-only]: plan count +1 vs the same config flag-off",
+      len(_ds_plan_on) - len(build_plan(_ds_off_same)) == 1)
+_ds_gi = _body_of(_ds_plan_on, ".claude/.gitignore")
+check("DS-01[on]: design.md committed (steering not gitignored)",
+      _ds_gi is not None and "design.md" not in _ds_gi)
+if _ds_doc_actions:
+    check("DS-01[on]: emitted design.md is byte-identical to the frozen body",
+          _ds_doc_actions[0]["body"] == _read_frozen("docs/design.md"))
+    _dbody = _ds_doc_actions[0]["body"]
+    # DELTA-01 / accessibility-invariant fidelity guards (not paraphrase).
+    check("DS-01[on]: design.md carries invariant 8 (accessibility floor)",
+          "8. **Accessible by default**" in _dbody)
+    check("DS-01[on]: design.md defers ranking to principles.md (compose-fork)",
+          "principles.md" in _dbody
+          and "do not treat this doc as a second" in _dbody)
+    # Project-specifics is a HUMAN-REQUIRED placeholder, never guessed.
+    check("DS-01[on]: design.md Project-specifics stays a bracket placeholder",
+          "[e.g. Tailwind + design tokens]" in _dbody)
+
+# ON + skill: SKILL.md + command emitted exactly once each.
+_DS_FULL = """project:
+  name: dsfull
+  archetype: fullstack
+  prd_tier: standard
+design_steering_enabled: true
+design_review_skill_enabled: true
+"""
+_dsf_con, _ = cfg_from(_DS_FULL)
+_dsf_plan = build_plan(_dsf_con)
+check("DS-01[on+skill]: SKILL.md emitted exactly once",
+      len([a for a in _dsf_plan if a["path"] == _DS_SKILL]) == 1)
+check("DS-01[on+skill]: /design-review command emitted exactly once",
+      len([a for a in _dsf_plan if a["path"] == _DS_CMD]) == 1)
+check("DS-01[on+skill]: plan count +3 vs the fully flag-off config",
+      len(_dsf_plan) - len(build_plan(_ds_off_same)) == 3)
+_dsf_skill = _body_of(_dsf_plan, _DS_SKILL)
+_dsf_cmd = _body_of(_dsf_plan, _DS_CMD)
+check("DS-01[on+skill]: SKILL.md byte-identical to the frozen body",
+      _dsf_skill == _read_frozen("docs/SKILL.md"))
+check("DS-01[on+skill]: command byte-identical to the frozen body",
+      _dsf_cmd == _read_frozen("docs/design-review.md"))
+check("DS-01[on+skill]: skill is advisory (flags, not a deterministic gate)",
+      _dsf_skill is not None and "Advisory design pass" in _dsf_skill
+      and "it flags issues" in _dsf_skill
+      and "Not** a deterministic gate" in _dsf_skill)
+
+# Skill is a SKILL, never a hook: absent from every hook body + settings.json.
+_ds_hooks = [a for a in _dsf_plan if a["kind"] == "hook"]
+check("DS-01: design-review absent from every emitted hook body",
+      all("design-review" not in a["body"] and "design_review" not in a["body"]
+          for a in _ds_hooks))
+_ds_settings = _body_of(_dsf_plan, ".claude/settings.json")
+check("DS-01: design-review absent from settings.json (no PreToolUse wiring)",
+      _ds_settings is not None and "design-review" not in _ds_settings
+      and "design_review" not in _ds_settings)
+
+# ARCHETYPE GATE vs FLAG: the interactive offer is archetype-gated, but the
+# FLAG is not — a non-user-facing archetype (data-ml) that hand-sets the flag
+# STILL emits. build_plan must do NO archetype check on the flag.
+_DS_DATAML = """project:
+  name: dsdml
+  archetype: data-ml
+  prd_tier: standard
+design_steering_enabled: true
+"""
+_dml_con, _dml_errs = cfg_from(_DS_DATAML)
+check("DS-01[gate]: data-ml + hand-set flag resolves cleanly (flag accepted)",
+      _dml_errs == [])
+_dml_plan = build_plan(_dml_con)
+check("DS-01[gate]: data-ml + hand-set flag STILL emits design.md "
+      "(offer gated, flag not)",
+      any(a["path"] == _DS_DOC for a in _dml_plan))
+
+# Skill flag WITHOUT the primary => no skill (gated on design_steering_enabled).
+_ds_skill_only, _ = cfg_from("""project:
+  name: dsso
+  archetype: fullstack
+  prd_tier: standard
+design_review_skill_enabled: true
+""")
+check("DS-01: skill flag alone (steering off) emits neither doc nor skill",
+      all(a["path"] not in (_DS_DOC, _DS_SKILL, _DS_CMD)
+          for a in build_plan(_ds_skill_only)))
+
+# Normalizer fail-loud on garbage (twin of telemetry_enabled).
+try:
+    design_steering_enabled({"design_steering_enabled": "maybe"})
+    check("DS-01: normalizer fails loud on an unrecognized value", False)
+except ValueError:
+    check("DS-01: normalizer fails loud on an unrecognized value", True)
+check("DS-01: normalizer accepts YAML boolean spellings (off -> False)",
+      design_steering_enabled({"design_steering_enabled": "off"}) is False)
+check("DS-01: normalizer defaults absent key to False (forward-compat read)",
+      design_steering_enabled({}) is False
+      and design_review_skill_enabled({}) is False)
+
+# State: fresh install writes both flags true; default install writes false.
+_dsd = _install(_DS_FULL)
+try:
+    _dss = _json.load(open(os.path.join(_dsd, ".claude",
+                                        ".bootstrap-state.json")))
+    check("DS-01: fresh install writes design_steering_enabled true",
+          _dss.get("design_steering_enabled") is True)
+    check("DS-01: fresh install writes design_review_skill_enabled true",
+          _dss.get("design_review_skill_enabled") is True)
+    check("DS-01: design.md written to disk on opt-in",
+          os.path.exists(os.path.join(_dsd, ".claude", "steering",
+                                      "design.md")))
+    check("DS-01: SKILL.md + command written to disk on skill opt-in",
+          os.path.exists(os.path.join(
+              _dsd, ".claude", "skills", "design-review", "SKILL.md"))
+          and os.path.exists(os.path.join(
+              _dsd, ".claude", "commands", "design-review.md")))
+finally:
+    shutil.rmtree(_dsd, ignore_errors=True)
+
+_dsd0 = _install(SERVICE)
+try:
+    _dss0 = _json.load(open(os.path.join(_dsd0, ".claude",
+                                         ".bootstrap-state.json")))
+    check("DS-01: default install writes design_steering_enabled false",
+          _dss0.get("design_steering_enabled") is False)
+    check("DS-01: default install writes design_review_skill_enabled false",
+          _dss0.get("design_review_skill_enabled") is False)
+    check("DS-01: default install emits no design.md",
+          not os.path.exists(os.path.join(_dsd0, ".claude", "steering",
+                                          "design.md")))
+finally:
+    shutil.rmtree(_dsd0, ignore_errors=True)
+
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

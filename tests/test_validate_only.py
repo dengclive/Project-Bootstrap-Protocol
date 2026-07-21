@@ -49,6 +49,14 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 # only byte change to the default synthesize output at this fold; recorded as
 # a freeze exception, not a drive-by. Previous digest:
 # 9f725b3f88f9b54eb1a0414dbc5e8e1a372a5c6049bb016119b4051b6113ac38.
+#
+# [v2.5.0 DS-01 wizard wiring] RE-BASELINED again. answers_to_config now emits
+# two more top-level opt-in lines — `design_steering_enabled: false` and
+# `design_review_skill_enabled: false` (Phase 0 step 6, default skip) — exactly
+# as TEL-01 added its line. VERIFIED the delta is ONLY these two lines: stripping
+# them from the new output reproduces the previous digest 798a30bf...bit-for-bit.
+# Freeze exception, not a drive-by. Previous digest:
+# 798a30bf895ef7aa2a27295344a5ffeee501ad63e31ef7464675baf03b274b17.
 def _run(args, cwd):
     return subprocess.run([sys.executable, BIN] + args, cwd=cwd,
                           capture_output=True, text=True)
@@ -112,7 +120,7 @@ finally:
 # unaffected (the flag branch has no side effects).
 # --------------------------------------------------------------------------- #
 EXPECTED_NOFLAG_SHA256 = \
-    "798a30bf895ef7aa2a27295344a5ffeee501ad63e31ef7464675baf03b274b17"
+    "9544a945a166ad99cb7f699cfa42c3e900d60dc1e8759e3541b68b6c0cc9a1e9"
 
 d = tempfile.mkdtemp()
 try:

@@ -62,6 +62,11 @@ ANSWER_KEYS = [
     # TEL-01 (v2.4.0 fold): standalone top-level opt-in, NOT an autonomous
     # mode (independent of every autonomous mode). Default skip.
     "telemetry_export_enabled",
+    # DS-01 (v2.5.0): twin top-level opt-ins (design doc + its optional skill),
+    # independent of every autonomous mode. Default skip. The interactive OFFER
+    # is archetype-gated; these keys and the flags are not.
+    "design_steering_enabled",
+    "design_review_skill_enabled",
     "commands_test",
     "commands_lint",
     "commands_format",
@@ -162,6 +167,11 @@ def default_answers(proposal: dict) -> dict:
         # autonomous modes). The operator flips it in the ANSWERS block or the
         # interactive prompt.
         "telemetry_export_enabled": False,
+        # DS-01 (v2.5.0): both default skip (opt-in only). The operator flips
+        # design_steering_enabled in the ANSWERS block or the archetype-gated
+        # interactive prompt; the skill is a second decision gated on the first.
+        "design_steering_enabled": False,
+        "design_review_skill_enabled": False,
         # NEVER guessed - emitted empty, flagged HUMAN-REQUIRED.
         "commands_test": "",
         "commands_lint": "",
@@ -203,6 +213,14 @@ def answers_to_config(ans: dict) -> dict:
         # key off this exact top-level path.
         "telemetry_export_enabled": bool(ans.get("telemetry_export_enabled",
                                                   False)),
+        # DS-01 (v2.5.0): standalone TOP-LEVEL booleans — deliberately NOT nested
+        # under autonomous_modes (design steering is independent of every
+        # autonomous mode). build_plan's flag-gated add and _write_state both key
+        # off these exact top-level paths.
+        "design_steering_enabled": bool(ans.get("design_steering_enabled",
+                                                 False)),
+        "design_review_skill_enabled":
+            bool(ans.get("design_review_skill_enabled", False)),
         "principles": {
             "ranked": list(ans["principles_ranked"]),
             "tiebreakers": [],
@@ -285,6 +303,27 @@ ANSWERS_END = "# ===== END ANSWERS ====="
 # fail-loud-not-silent). Referenced in both places so the two cannot drift.
 TELEMETRY_SECTION_TITLE = "Observability / telemetry export"
 TELEMETRY_SECTION_MARKER = f"## {TELEMETRY_SECTION_TITLE}"
+
+# DS-01 (v2.5.0): the design-steering section title/marker, twin of
+# TELEMETRY_SECTION_MARKER (interview.py:286). render_interview emits the section
+# UNCONDITIONALLY (like telemetry), so its PRESENCE dates an interview file to
+# v2.5.0+ — the discriminator parse_interview_answers needs to tell "predates the
+# flag" (default false) from "a v2.5.0 file whose design line was deleted or
+# misspelled" (fail loud). The interactive OFFER is archetype-gated (see
+# run_interactive), but the section, the ANSWERS keys, and the flag itself are
+# NOT: an operator may hand-set design_steering_enabled: true on any archetype.
+DESIGN_SECTION_TITLE = "Design steering"
+DESIGN_SECTION_MARKER = f"## {DESIGN_SECTION_TITLE}"
+
+# DS-01 (v2.5.0): the Phase 0 step 6 design-steering question, VERBATIM from the
+# protocol doc (Bootstrap-Protocol-v2-5-0.md — the SOLE verbatim source; there is
+# no INTERVIEW-WORDING.md in this repo, exactly as for TEL-01). One combined block
+# covering BOTH the doc and the optional-skill offer (the protocol doc gives one
+# block, not two separate strings). test_interview.py pins this byte-for-byte
+# against the protocol doc so the code string and the doc can never drift.
+DESIGN_STEERING_QUESTION = (
+    """Generate a design steering doc? This writes `design.md` — a short, always-read reference for user-facing work: visual hierarchy, interaction cost, mobile reach, empty/loading states, accessibility floor, and an HONEST-USE-ONLY rule set for pricing and persuasion (no fake countdowns, no fictitious 'was' prices, no guilt-worded dismissals — the dark patterns regulators enforce against). It's guidance the implementer reads on every user-facing task, not a gate. I can also add an optional advisory review skill that checks changes against it at code-review time — it flags, it never blocks. Off by default; enable it now if this project has a user-facing surface, or add it any time later."""
+)
 
 
 def render_interview(proposal: dict, prd_path: str) -> str:
@@ -410,6 +449,20 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "turn them on against your own backend. Off by default; you can "
         "enable it any time later.\"",
     ])
+    # DS-01 (v2.5.0): emitted UNCONDITIONALLY (like the telemetry section) so the
+    # DESIGN_SECTION_MARKER dates any v2.5.0+ interview file — the discriminator
+    # parse_interview_answers uses to distinguish a pre-2.5.0 file (default the
+    # flags false) from a v2.5.0 file whose design line was deleted (fail loud).
+    # The offer is archetype-gated interactively, but the flag is accepted for
+    # any archetype an operator hand-sets in the ANSWERS block below. Question
+    # text is the protocol doc's verbatim Phase 0 step 6 string (single source).
+    section(DESIGN_SECTION_TITLE, [
+        "**Proposed:** `design_steering_enabled = false` (default skip; opt-in "
+        "only, independent of every autonomous mode; the optional "
+        "`design_review_skill_enabled` is a second decision, gated on this one)",
+        "",
+        f"\"{DESIGN_STEERING_QUESTION}\"",
+    ])
     section("Project commands — HUMAN-REQUIRED (left empty by design)", [
         "`commands.test`, `commands.lint`, `commands.format`, "
         "`commands.typecheck`, `commands.ci_local`",
@@ -474,6 +527,8 @@ def parse_interview_answers(text: str) -> dict:
         "secrets_enabled", "deps_enabled", "loop_mode_enabled",
         "goal_supervised_mode_enabled", "queue_mode_enabled",
         "telemetry_export_enabled",
+        # DS-01 (v2.5.0): twin top-level opt-in flags.
+        "design_steering_enabled", "design_review_skill_enabled",
     }
     list_keys = {"principles_ranked", "secrets_never_read_paths"}
 
@@ -539,6 +594,24 @@ def parse_interview_answers(text: str) -> dict:
                     "misspelled rather than predating the flag. Restore "
                     "`telemetry_export_enabled: true` or `: false` — an "
                     "opt-in decision is never defaulted silently.")
+            # DS-01 (v2.5.0): same section-marker discriminator as telemetry.
+            # A pre-2.5.0 ANSWERS block carries no design section => default the
+            # flag false (never reject a valid older file). A v2.5.0 file DOES
+            # carry the marker, so a missing key there is a deleted/misspelled
+            # opt-in and fails loud rather than resolving silently. Both design
+            # keys share the one marker (the section renders both).
+            if k in ("design_steering_enabled",
+                     "design_review_skill_enabled"):
+                if DESIGN_SECTION_MARKER not in text:
+                    out[k] = False
+                    continue
+                raise ValueError(
+                    f"ANSWERS block missing key: {k}. This interview file "
+                    f"carries the '{DESIGN_SECTION_TITLE}' section, so it was "
+                    "rendered by v2.5.0 or later and the key was deleted or "
+                    "misspelled rather than predating the flag. Restore "
+                    f"`{k}: true` or `: false` — an opt-in decision is never "
+                    "defaulted silently.")
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
         if k in bool_keys:
@@ -735,6 +808,36 @@ def run_interactive(prd_text: str, *, instream, outstream,
              str(ans["telemetry_export_enabled"]).lower(),
              instream=instream, outstream=outstream, eof=eof)
     ans["telemetry_export_enabled"] = v.lower() in ("true", "1", "yes", "on")
+
+    # DS-01 (v2.5.0): the archetype-GATED offer — the ONE site with no telemetry
+    # twin. Telemetry is asked unconditionally; design steering is offered only
+    # for user-facing archetypes. Excluded archetypes (cli, library, service,
+    # data-ml) record false WITHOUT prompting (interview stays short). NB: the
+    # flag is NOT gated — an operator hand-setting design_steering_enabled: true
+    # in the ANSWERS block on any archetype still emits design.md (build_plan
+    # does no archetype check); only this interactive prompt is gated. show()
+    # takes (title, rationale) [verified :679]; _ask passes stream args BY
+    # KEYWORD [verified :623]. ans["archetype"] is a validated archetype string
+    # by this point. The rationale is the protocol doc's VERBATIM Phase 0 step 6
+    # question (one combined block covering the doc + the skill offer), so no
+    # separate verbatim follow-up string exists; the skill _ask uses a plain
+    # functional prompt.
+    _DESIGN_OFFER_ARCHETYPES = {"fullstack", "mobile", "ai-agent",
+                                "platform", "other"}
+    if ans["archetype"] in _DESIGN_OFFER_ARCHETYPES:
+        show(DESIGN_SECTION_TITLE, DESIGN_STEERING_QUESTION)
+        v = _ask("Generate design steering doc? true|false",
+                 str(ans["design_steering_enabled"]).lower(),
+                 instream=instream, outstream=outstream, eof=eof)
+        ans["design_steering_enabled"] = v.lower() in ("true", "1", "yes", "on")
+        if ans["design_steering_enabled"]:
+            v2 = _ask("Add the optional advisory design-review skill? "
+                      "true|false",
+                      str(ans["design_review_skill_enabled"]).lower(),
+                      instream=instream, outstream=outstream, eof=eof)
+            ans["design_review_skill_enabled"] = \
+                v2.lower() in ("true", "1", "yes", "on")
+    # else: both flags stay at their False default, no prompt shown.
 
     o("\n--- Project commands (HUMAN-REQUIRED) ---\n"
       "A PRD cannot supply these. Empty => the installer emits gates that "
