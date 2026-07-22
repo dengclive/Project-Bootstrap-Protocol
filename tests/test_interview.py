@@ -552,5 +552,179 @@ except ValueError as _e:
     check("TEL-01 back-compat: other missing keys still fail loud",
           "queue_mode_enabled" in str(_e))
 
+# --------------------------------------------------------------------------- #
+# DS-01 (v2.5.0): design_steering_enabled (+ optional design_review_skill_
+# enabled) — a top-level opt-in wired like telemetry, PLUS an archetype-gated
+# interactive offer (the one net-new mechanism). Default skip.
+# --------------------------------------------------------------------------- #
+_dp = IV.build_proposal("a full-stack web app with a dashboard for users")
+_dans = IV.default_answers(_dp)
+check("DS-01: default answers skip design steering (false)",
+      _dans["design_steering_enabled"] is False
+      and _dans["design_review_skill_enabled"] is False)
+_dcfg = IV.answers_to_config(_dans)
+check("DS-01: default emitted config has top-level design_steering_enabled: "
+      "false", _dcfg.get("design_steering_enabled") is False
+      and _dcfg.get("design_review_skill_enabled") is False)
+check("DS-01: design flags are NOT nested under autonomous_modes",
+      "design_steering_enabled" not in _dcfg["autonomous_modes"]
+      and "design_review_skill_enabled" not in _dcfg["autonomous_modes"])
+
+# VERBATIM assertion (guards drift): the code constant equals the protocol
+# doc's Phase 0 step 6 design-steering question, byte-for-byte.
+with io.open(os.path.join(ROOT, "Bootstrap-Protocol-v2-5-0.md"),
+             "r", encoding="utf-8", newline="") as _pfh:
+    _doc_lines = _pfh.read().split("\n")
+_qline = [l for l in _doc_lines
+          if "Question phrasing for design steering (use verbatim)" in l]
+check("DS-01 verbatim: protocol doc has exactly one design-steering question "
+      "line", len(_qline) == 1)
+if _qline:
+    _doc_q = _qline[0][_qline[0].index('*"') + 2: _qline[0].rindex('"*')]
+    check("DS-01 verbatim: code DESIGN_STEERING_QUESTION == protocol doc "
+          "(byte-identical, no paraphrase)",
+          IV.DESIGN_STEERING_QUESTION == _doc_q)
+
+# Render carries the section marker + the verbatim question + both keys.
+_drender = IV.render_interview(_dp, "x")
+check("DS-01: render carries the design section marker",
+      IV.DESIGN_SECTION_MARKER in _drender)
+check("DS-01: render carries the verbatim question (not paraphrased)",
+      IV.DESIGN_STEERING_QUESTION in _drender)
+check("DS-01: ANSWERS block emits both design flags false",
+      "design_steering_enabled: false" in _drender
+      and "design_review_skill_enabled: false" in _drender)
+
+# Hand-set true round-trips through parse.
+_dyes = _drender.replace("design_steering_enabled: false",
+                         "design_steering_enabled: true").replace(
+                         "design_review_skill_enabled: false",
+                         "design_review_skill_enabled: true")
+_dparsed = IV.parse_interview_answers(_dyes)
+check("DS-01: hand-set design flags true round-trip through parse",
+      _dparsed["design_steering_enabled"] is True
+      and _dparsed["design_review_skill_enabled"] is True)
+
+# Fail-loud discriminator (same design as telemetry).
+# (a) v2.5.0 file with the primary key DELETED must fail loud.
+_ddel = "\n".join(l for l in _drender.splitlines()
+                  if not l.strip().startswith("design_steering_enabled:"))
+try:
+    IV.parse_interview_answers(_ddel)
+    check("DS-01 back-compat: deleted key in a v2.5.0 file fails loud", False)
+except ValueError as _e:
+    check("DS-01 back-compat: deleted key in a v2.5.0 file fails loud",
+          "design_steering_enabled" in str(_e))
+# (b) A genuinely pre-2.5.0 file (no design section, no keys) parses,
+#     defaulting both flags to skip.
+_pre250 = "\n".join(
+    l for l in _ddel.splitlines()
+    if IV.DESIGN_SECTION_TITLE not in l
+    and IV.DESIGN_STEERING_QUESTION not in l
+    and "design_steering_enabled = false" not in l
+    and not l.strip().startswith("design_review_skill_enabled:"))
+check("DS-01 back-compat: the pre-2.5.0 fixture has no design section marker",
+      IV.DESIGN_SECTION_MARKER not in _pre250)
+_predp = IV.parse_interview_answers(_pre250)
+check("DS-01 back-compat: pre-2.5.0 file parses, design flags default false",
+      _predp["design_steering_enabled"] is False
+      and _predp["design_review_skill_enabled"] is False)
+
+
+class _Responder:
+    """A prompt-aware stdin stub (robust to prompt ordering): answers the
+    archetype + design prompts by inspecting the CURRENT prompt just written,
+    and accepts the default (empty line) for everything else. A call cap
+    prevents any accidental infinite validated-loop from hanging the test.
+
+    Anchoring: `_ask` writes `{question}\\n  [default: X] > ` and then reads, so
+    the current question is the last line BEFORE the final `[default:` marker.
+    Matching on that single line (not a fixed-size tail slice) isolates each
+    prompt — otherwise the just-answered design prompt still sits in the window
+    when the skill prompt fires and would shadow it (feeding the design answer
+    to the skill question), and the archetype prompt would leak into the tier
+    prompt."""
+
+    def __init__(self, out, archetype, design, skill):
+        self.out, self.arche = out, archetype
+        self.design, self.skill = design, skill
+        self.n = 0
+
+    def _current_prompt(self):
+        before = self.out.getvalue().rsplit("[default:", 1)[0]
+        return before.rstrip("\n ").rsplit("\n", 1)[-1]
+
+    def readline(self):
+        self.n += 1
+        if self.n > 60:
+            return ""  # safety EOF
+        prompt = self._current_prompt()
+        if "Archetype [" in prompt:
+            return self.arche + "\n"
+        if "advisory design-review skill?" in prompt:
+            return self.skill + "\n"
+        if "Generate design steering doc?" in prompt:
+            return self.design + "\n"
+        return "\n"
+
+
+# Interactive: fullstack IS offered; accepting true+true records both flags.
+_fs_out = _io.StringIO()
+_fs_ans = IV.run_interactive(
+    "a full-stack web app with a user dashboard",
+    instream=_Responder(_fs_out, "fullstack", "true", "true"),
+    outstream=_fs_out, project_fallback="p")
+check("DS-01 interactive: fullstack is OFFERED design steering",
+      IV.DESIGN_SECTION_MARKER.replace("## ", "--- ") in _fs_out.getvalue()
+      or "--- Design steering ---" in _fs_out.getvalue())
+check("DS-01 interactive: fullstack accept records both flags true",
+      _fs_ans["design_steering_enabled"] is True
+      and _fs_ans["design_review_skill_enabled"] is True)
+
+# Interactive: design=YES, skill=NO — the skill prompt MUST receive its own
+# answer, not the design answer. This guards the _Responder anchoring AND the
+# run_interactive skill wiring: with design and skill DIFFERENT, a stub that
+# shadowed the skill prompt (or code that read the wrong variable) records
+# skill True and fails here.
+_dn_out = _io.StringIO()
+_dn_ans = IV.run_interactive(
+    "a full-stack web app with a user dashboard",
+    instream=_Responder(_dn_out, "fullstack", "true", "false"),
+    outstream=_dn_out, project_fallback="p")
+check("DS-01 interactive: design=yes skill=no records steering True, skill False",
+      _dn_ans["design_steering_enabled"] is True
+      and _dn_ans["design_review_skill_enabled"] is False)
+
+# Interactive: DECLINE design steering (offered archetype, design=false) — the
+# nested skill prompt MUST NOT be shown (guards the `if design_steering_enabled:`
+# gate false-branch). skill is fed "true" but must never be read.
+_dd_out = _io.StringIO()
+_dd_ans = IV.run_interactive(
+    "a full-stack web app with a user dashboard",
+    instream=_Responder(_dd_out, "fullstack", "false", "true"),
+    outstream=_dd_out, project_fallback="p")
+check("DS-01 interactive: declining design does NOT show the skill prompt",
+      "advisory design-review skill?" not in _dd_out.getvalue())
+check("DS-01 interactive: declining design records both flags false",
+      _dd_ans["design_steering_enabled"] is False
+      and _dd_ans["design_review_skill_enabled"] is False)
+
+# Interactive OFFER gating across EVERY archetype (mutation guard: dropping any
+# offered archetype from _DESIGN_OFFER_ARCHETYPES, or adding any excluded one,
+# must be caught). The expected set here is the SPEC (independent of the
+# production constant). design/skill are declined so the loop only probes offer
+# visibility, not acceptance.
+_OFFERED_SPEC = {"fullstack", "mobile", "ai-agent", "platform", "other"}
+for _arch in sorted(__import__("defaults").ARCHETYPES):
+    _ao = _io.StringIO()
+    IV.run_interactive("a project with some surface",
+                       instream=_Responder(_ao, _arch, "false", "false"),
+                       outstream=_ao, project_fallback="p")
+    _offered = "--- Design steering ---" in _ao.getvalue()
+    check(f"DS-01 interactive: archetype '{_arch}' offered == "
+          f"{_arch in _OFFERED_SPEC}",
+          _offered == (_arch in _OFFERED_SPEC))
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

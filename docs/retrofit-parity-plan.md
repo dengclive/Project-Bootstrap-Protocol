@@ -59,7 +59,8 @@ state **today**.
 - **Genuine in-lane gaps — neglect within the retrofit lane:** TEL-01
   `telemetry_export_enabled` **state field is not written** by
   `_write_retrofit_state` (retrofit emits `telemetry.md` but no matching state
-  field — backlog **C-2**); plus tracked items C-1 (GR2-03a surfacing, both
+  field — backlog **C-2**; as of v2.5.0 the two DS-01 design-steering flags share
+  the identical gap, folded into C-2 — see Phase 2); plus tracked items C-1 (GR2-03a surfacing, both
   tracks), D-7 (assumption-ledger drift row), G-F1 (version-mismatch check),
   F-1 (test-gate grandfather clause).
 
@@ -166,6 +167,16 @@ From `project_retrofit_installer.md` (PR #1 invariants) and the seam:
   `test_retrofit.py:902` check 8.4 → `1.7.0`), extend `test_retrofit.py` for the new
   field, and set the RETROFIT doc headers to 1.7.0. Closes the clearest half-folded
   2.4.0 feature.
+  - **[v2.5.0 update] C-2 now also covers the two DS-01 design-steering flags.**
+    DS-01 added `design_steering_enabled` + `design_review_skill_enabled` to
+    `_write_state` (`installer.py:976`) but — exactly like telemetry — left
+    `_write_retrofit_state` carrying neither. A hand-set `design_steering_enabled:
+    true` on a retrofit install (the DELTA-02 headless-project path the protocol
+    blesses) emits `design.md` (+ optional skill/command) yet records no matching
+    retrofit-state field. Same class as C-2, same fix site: when extending
+    `_write_retrofit_state`, add the two design fields alongside
+    `telemetry_export_enabled` (the skill field gated on the primary, mirroring
+    `installer.py:986`). Fold into C-2 — no new backlog ID.
 - Then, as capacity allows: **C-1** GR2-03a surfacing (both tracks), **D-7**
   assumption-ledger drift row when `hooks.drift_detector:false`, **G-F1** startup
   `bootstrap_protocol_version` mismatch check, **F-1** test-gate grandfather clause.

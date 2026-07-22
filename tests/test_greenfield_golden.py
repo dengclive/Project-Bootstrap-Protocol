@@ -79,6 +79,33 @@ commands:
   ci_local: "make ci"
 """
 
+# Fixture C: DS-01 (v2.5.0) design steering ON with the optional advisory skill.
+# Exercises the three flag-gated additions the default and full_autonomous
+# fixtures never reach (both leave design_steering_enabled off, which is exactly
+# why their digests prove off-by-default byte-identity):
+#   .claude/steering/design.md
+#   .claude/skills/design-review/SKILL.md
+#   .claude/commands/design-review.md
+# This fixture PINS the flag-on bytes so the three frozen artifact bodies (and
+# their emission) cannot drift silently. Its digest is a deliberate golden
+# ADDITION (GOLDEN_UPDATE protocol), NOT a re-baseline of an existing fixture.
+FIXTURE_DESIGN_STEERING = """project:
+  name: golden-design
+  archetype: fullstack
+  prd_tier: standard
+  cicd_opt_out: false
+design_steering_enabled: true
+design_review_skill_enabled: true
+principles:
+  tdd_policy: "off"
+commands:
+  test: ""
+  lint: ""
+  format: ""
+  typecheck: ""
+  ci_local: ""
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Digest
@@ -320,7 +347,15 @@ EXPECTED_DIGESTS = {
     #   CLAUDE.md, .claude/agents/implementer.md — pointers re-aimed at
     #     progress-template.md (a stale pointer here is the dangling-reference
     #     class this revision closes).
-    "default": "d8b4bdab48f31c17a54530f49c26935a4a86bcbffc1b356ae3df3260b3f6a7ff",
+    # [v2.5.0 DS-01 — version stamp] settings.json `_generatedBy`
+    # "protocol 2.4.0" -> "protocol 2.5.0" (PROTOCOL_VERSION bump, Step 7). The
+    # ONLY default-fixture change; zero files added/removed; count stable at 57.
+    # PROVEN by per-file diff (PV 2.4.0 vs 2.5.0): exactly ONE body moved,
+    # .claude/settings.json. The design_steering feature itself contributes ZERO
+    # to this fixture — design_steering_enabled is off here, so its build_plan
+    # add is skipped; the pre-bump feature-complete tree already matched the old
+    # digest (off-by-default byte-identity, verified before the bump).
+    "default": "a04a5aea7899ac00b4266994a9929325cf3396ff2c9c8662adaba172ef32785f",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -371,8 +406,21 @@ EXPECTED_DIGESTS = {
     #   [v2.4.0 review-fix re-baseline, part 3 — GR2-01 template ownership]
     #   Same +1 file and same three body moves as the default column
     #   (68 -> 69); the split is archetype- and mode-independent.
+    #   [v2.5.0 DS-01 — version stamp] same settings.json `_generatedBy`
+    #   "protocol 2.4.0" -> "protocol 2.5.0"; the ONLY full_autonomous change at
+    #   this step (count stable at 69). full_autonomous leaves
+    #   design_steering_enabled off, so DS-01 adds nothing here either.
     "full_autonomous":
-        "99784eb9bafd017e0cd0fa7a7c5f229d9b5b4cbdc80ba66a722abd093dcdd753",
+        "32ef5d3481862716c55a2a2c982b629856293c6723795846e69052401be99270",
+    # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
+    # re-baseline): a fullstack config with design_steering_enabled: true AND
+    # design_review_skill_enabled: true. Pins the three flag-gated artifact
+    # bodies byte-for-byte (.claude/steering/design.md, .claude/skills/
+    # design-review/SKILL.md, .claude/commands/design-review.md — the frozen
+    # DR-2-final bodies) so they cannot drift silently. Verified: flag-on vs
+    # flag-off delta on the same fixture is EXACTLY these 3 files, none removed.
+    "design_steering":
+        "5bdf4dee302449fb214dd527825f0f8da41b2c47226f3eb3d9430760e70a598a",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -382,8 +430,13 @@ EXPECTED_ACTION_COUNTS = {
     # for the unconditional .claude/specs/progress-template.md, split out of
     # the operator-edited INDEX.md so it is deliverable on upgrade
     # (56 -> 57, 68 -> 69).
+    # [v2.5.0 DS-01] default/full_autonomous counts UNCHANGED (57/69): the
+    # version bump moves one body (settings.json), adds no file; design steering
+    # is off in both. The flag-on design_steering fixture is 59 = a 56-file
+    # fullstack baseline + the 3 design artifacts.
     "default": 57,
     "full_autonomous": 69,
+    "design_steering": 59,
 }
 
 
@@ -435,6 +488,7 @@ def run_fixture(label, yaml_text):
 
 run_fixture("default", FIXTURE_DEFAULT)
 run_fixture("full_autonomous", FIXTURE_FULL_AUTONOMOUS)
+run_fixture("design_steering", FIXTURE_DESIGN_STEERING)
 
 # Determinism: same fixture digests identically across two construction
 # passes in the same process. Guards against non-determinism creeping into
@@ -442,7 +496,8 @@ run_fixture("full_autonomous", FIXTURE_FULL_AUTONOMOUS)
 # patterns, or a hidden time/uuid read).
 if os.environ.get("GOLDEN_UPDATE") != "1":
     for label, fixt in [("default", FIXTURE_DEFAULT),
-                        ("full_autonomous", FIXTURE_FULL_AUTONOMOUS)]:
+                        ("full_autonomous", FIXTURE_FULL_AUTONOMOUS),
+                        ("design_steering", FIXTURE_DESIGN_STEERING)]:
         _, p1 = plan_actions(fixt)
         _, p2 = plan_actions(fixt)
         check(f"determinism[{label}]: two passes produce identical digests",
