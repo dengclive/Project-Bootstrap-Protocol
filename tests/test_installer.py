@@ -1469,6 +1469,33 @@ try:
 finally:
     shutil.rmtree(_dsg2, ignore_errors=True)
 
+# (steering ON, skill OFF) — the default "opt into the doc, decline the skill"
+# path, which is the (T,F) corner the other state tests miss. State must record
+# skill False (not the primary's True) and emit design.md but no SKILL.md. This
+# is the case that most directly exercises the `and`-gating: dropping the skill
+# term from the _write_state field records True here (state/emission disagree).
+_DS_DOC_NO_SKILL = """project:
+  name: dsdns
+  archetype: fullstack
+  prd_tier: standard
+design_steering_enabled: true
+design_review_skill_enabled: false
+"""
+_dsn = _install(_DS_DOC_NO_SKILL)
+try:
+    _dsns = _json.load(open(os.path.join(_dsn, ".claude",
+                                         ".bootstrap-state.json")))
+    check("DS-01[gate]: steering on + skill off records steering True, "
+          "skill False",
+          _dsns.get("design_steering_enabled") is True
+          and _dsns.get("design_review_skill_enabled") is False)
+    check("DS-01[gate]: steering on + skill off emits design.md but no SKILL.md",
+          os.path.exists(os.path.join(_dsn, ".claude", "steering", "design.md"))
+          and not os.path.exists(os.path.join(
+              _dsn, ".claude", "skills", "design-review", "SKILL.md")))
+finally:
+    shutil.rmtree(_dsn, ignore_errors=True)
+
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

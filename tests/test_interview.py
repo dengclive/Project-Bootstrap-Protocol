@@ -695,17 +695,35 @@ check("DS-01 interactive: design=yes skill=no records steering True, skill False
       _dn_ans["design_steering_enabled"] is True
       and _dn_ans["design_review_skill_enabled"] is False)
 
-# Interactive: data-ml (excluded) is NOT offered and records false.
-_dm_out = _io.StringIO()
-_dm_ans = IV.run_interactive(
-    "a data pipeline and ML training system, headless",
-    instream=_Responder(_dm_out, "data-ml", "true", "true"),
-    outstream=_dm_out, project_fallback="p")
-check("DS-01 interactive: data-ml is NOT offered design steering",
-      "--- Design steering ---" not in _dm_out.getvalue())
-check("DS-01 interactive: data-ml records design flags false (no prompt)",
-      _dm_ans["design_steering_enabled"] is False
-      and _dm_ans["design_review_skill_enabled"] is False)
+# Interactive: DECLINE design steering (offered archetype, design=false) — the
+# nested skill prompt MUST NOT be shown (guards the `if design_steering_enabled:`
+# gate false-branch). skill is fed "true" but must never be read.
+_dd_out = _io.StringIO()
+_dd_ans = IV.run_interactive(
+    "a full-stack web app with a user dashboard",
+    instream=_Responder(_dd_out, "fullstack", "false", "true"),
+    outstream=_dd_out, project_fallback="p")
+check("DS-01 interactive: declining design does NOT show the skill prompt",
+      "advisory design-review skill?" not in _dd_out.getvalue())
+check("DS-01 interactive: declining design records both flags false",
+      _dd_ans["design_steering_enabled"] is False
+      and _dd_ans["design_review_skill_enabled"] is False)
+
+# Interactive OFFER gating across EVERY archetype (mutation guard: dropping any
+# offered archetype from _DESIGN_OFFER_ARCHETYPES, or adding any excluded one,
+# must be caught). The expected set here is the SPEC (independent of the
+# production constant). design/skill are declined so the loop only probes offer
+# visibility, not acceptance.
+_OFFERED_SPEC = {"fullstack", "mobile", "ai-agent", "platform", "other"}
+for _arch in sorted(__import__("defaults").ARCHETYPES):
+    _ao = _io.StringIO()
+    IV.run_interactive("a project with some surface",
+                       instream=_Responder(_ao, _arch, "false", "false"),
+                       outstream=_ao, project_fallback="p")
+    _offered = "--- Design steering ---" in _ao.getvalue()
+    check(f"DS-01 interactive: archetype '{_arch}' offered == "
+          f"{_arch in _OFFERED_SPEC}",
+          _offered == (_arch in _OFFERED_SPEC))
 
 
 print(f"\n{passed} passed, {failed} failed")
