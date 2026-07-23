@@ -3299,6 +3299,15 @@ description: Use when a task changes a user-facing surface — screens, componen
 Advisory design pass. **Not** a deterministic gate — it flags issues; it never
 blocks a commit. (Must-run checks are hooks; design taste is guidance.)
 
+**Honest scope [DELTA-03].** This skill is a design-time floor and an advisory
+flag — **not a compliance control**. Against LLM-generated UIs that can reproduce
+dark patterns at scale, advisory flagging *reduces but does not prevent*
+dark-pattern emission, and it is **no substitute for legal review** under regimes
+such as the FTC's dark-patterns enforcement or the EU Digital Fairness Act. Its
+real weight lives in `design.md`'s ranked honest-use prose; this pass is a
+second, non-blocking check (hook enforcement — Path C — stays rejected because
+"is this countdown fake?" is a semantic judgment, not a deterministic gate).
+
 ## Lifecycle placement  [SR-02]
 
 Runs **as part of / alongside gate 6** (the reviewer subagent's code-review

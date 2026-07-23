@@ -1329,6 +1329,16 @@ check("DS-01[on+skill]: skill is advisory (flags, not a deterministic gate)",
       _dsf_skill is not None and "Advisory design pass" in _dsf_skill
       and "it flags issues" in _dsf_skill
       and "Not** a deterministic gate" in _dsf_skill)
+# [DELTA-03] The PRD (Phase 7) and Companion (migration §) require the skill to
+# carry an explicit honest-scope clause labelling its ceiling: a design-time
+# floor / advisory flag, NOT a compliance control and no substitute for legal
+# review. The original DR-2-final frozen body omitted it; guard so it cannot
+# silently drop from the emitted artifact again.
+check("DS-01[on+skill]: skill carries the DELTA-03 honest-scope clause",
+      _dsf_skill is not None
+      and "not a compliance control" in _dsf_skill
+      and "no substitute for legal review" in _dsf_skill
+      and "EU Digital Fairness Act" in _dsf_skill)
 
 # Skill is a SKILL, never a hook: absent from every hook body + settings.json.
 _ds_hooks = [a for a in _dsf_plan if a["kind"] == "hook"]
