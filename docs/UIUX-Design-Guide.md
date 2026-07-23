@@ -76,6 +76,27 @@ How something is presented can matter as much as what it is. The source's own ex
 
 The durable lesson is the discipline, not the number: **form a hypothesis, test it, measure, and iterate.** Treat every high-stakes screen as testable rather than final.
 
+## **1.5 Design to a Perceivable, Operable Floor**
+
+| **VALIDATED —  **WCAG 2.2 AA is the current, stable benchmark (W3C Rec.; ISO/IEC 40500:2025); WCAG 3.0 remains a Working Draft with no settled contrast algorithm. The design-time subset below is uncontested practice. |
+| --- |
+
+The principles above rank elements by *importance*. This one sets the floor under them: a hierarchy no one can perceive, and a control no one can hit, has failed regardless of how well it is ranked. Four checks belong to design time, not to a later audit — each is cheap while a screen is still a mockup and expensive afterward:
+
+- **Text contrast.** Body text ≥ 4.5:1 against its background; large text (≥ 18pt, or 14pt bold) and non-text UI — icons, input borders, focus rings — ≥ 3:1. The muted supporting labels 1.1 asks for are the usual casualty; mute by *weight and size*, not by fading toward the background.
+
+- **Target size.** Interactive targets ≥ 24×24 CSS px, or spaced so a 24px circle centred on each does not overlap its neighbour. That is the *web pointer* floor (Level AA) and the absolute minimum anywhere. Native platform guidance is higher and expressed in its own units — iOS 44pt, Material 48dp — which are density-independent rather than convertible to CSS px; on touch surfaces design to the platform figure, not the 24px one. Primary actions in the thumb zone (2.1) should clear all of these comfortably.
+
+- **Never color alone.** Any state, error, required field, or selection carries a second signal: an icon, a label, an underline, a shape. Test with a red-green (deutan/protan) simulator rather than by desaturating: red-green deficiency affects roughly 8% of men — mostly deuteranomaly (~5–6%), with deuteranopia and protanopia around 1% each — and it collapses red and green *toward each other*, not into gray. Grayscale approximates achromatopsia instead (~1 in 30,000), so a red/green pairing can pass a desaturation check and still fail the people the rule exists for.
+
+- **Visible focus.** Every interactive element is reachable by keyboard and shows an obvious focus indicator when it is. Removing the browser default without replacing it is the common failure; a 2px offset outline that contrasts with both the component and its background is the safe replacement.
+
+Two things this floor is *not*. It is not a conformance claim — meeting these four does not make a product WCAG-conformant, which requires testing this guide does not cover. And it is not a constraint on ambition: soft shadows (1.3), emotional imagery (4.3), and card layouts (2.3) all survive it intact. Only the choices that were illegible to begin with do not.
+
+*Principle: the floor is checked while the screen is still a mockup, because that is the only point at which it is free.*
+
+*(Where this section is the numbers behind an obligation stated elsewhere — the accessibility invariant in the Part 6 steering doc and the one-line check in the design-review skill — those name the four checks; this section is where their values live. Set the project's own baseline once, in the steering doc's Project-specifics block, and let both cite it.)*
+
 # **Part 2 · Layout ****&**** Interaction**
 
 How the interface is arranged for the body holding the device and the effort required to act.
@@ -311,6 +332,8 @@ The persuasion principles in Parts 4 and 5 are genuinely powerful, and that is e
 
 *Research validation drew on current (2025–2026) sources including Laws of UX, Nielsen-tradition thumb-zone research (Hoober), 2025 IKEA-effect meta-analyses, the Scheibehenne choice-overload meta-analysis, and FTC dark-patterns guidance and enforcement records. Promotional content in the source transcripts (product discounts, sponsor mentions) was filtered out and excluded.*
 
+*One section is **not** transcript-derived. §1.5 has no basis in the five sources — none of them offers accessibility guidance (the two closest moments are a passing note in the thumb-zone source that hard-to-reach controls penalize users on the go or with limited mobility, and a complaint that one category-screen mockup's text stays hard to read even behind a dark overlay — the latter is a text-contrast failure observed on a single mockup, not a stated rule, and it is captured as a scannability point in §3.3). It was written directly against W3C WCAG 2.2 (W3C Recommendation, 5 October 2023; editorial update 12 December 2024; the October 2023 text is also ISO/IEC 40500:2025), specifically SC 1.4.1 Use of Color, 1.4.3 Contrast (Minimum), 1.4.11 Non-text Contrast, 2.1.1 Keyboard, 2.4.7 Focus Visible, and 2.5.8 Target Size (Minimum). Note that SC 2.4.13 Focus Appearance and SC 2.5.5 Target Size (Enhanced) — the sources of the widely-quoted focus-indicator and 44×44 figures — are Level AAA, not AA; several secondary sources report them wrongly, which is why §1.5 frames focus through 2.1.1/2.4.7 and offers the outline spec as advice. It is included because the guide's Part 6 steering doc obligates projects to an accessibility floor, and an obligation with no stated content is not actionable.*
+
 # **Part 6 · Bootstrap Protocol Integration**
 
 This part lets a **Bootstrap Protocol**–certified project (v2.4.0) adopt everything above with minimal friction. It maps each part of the guide onto the protocol's existing artifact hierarchy, tells you where in the wizard it attaches, and ends with a ready-to-commit steering doc you can drop straight into *.claude/steering/*. Nothing here changes the protocol or its conformance surface — the guide composes as a project-level design reference, filling a gap the protocol leaves open (UI/UX appears today only as a few Phase 2 *tech.md* questions, and accessibility audit is explicitly out of scope).
@@ -413,7 +436,7 @@ Below is a complete **.claude/steering/design.md**, written in the protocol's st
 
 Source of truth for detailed rationale: The UI/UX Design
 
-Guide (docs/design/uiux-guide.*). This file is the distilled,
+Guide (docs/UIUX-Design-Guide.md). This file is the distilled,
 
 always-read version; the guide is the reference.
 
