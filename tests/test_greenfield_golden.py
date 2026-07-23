@@ -419,8 +419,24 @@ EXPECTED_DIGESTS = {
     # design-review/SKILL.md, .claude/commands/design-review.md — the frozen
     # DR-2-final bodies) so they cannot drift silently. Verified: flag-on vs
     # flag-off delta on the same fixture is EXACTLY these 3 files, none removed.
+    #
+    # [DR2-04 freeze-exception] Re-baselined for exactly one byte class in the
+    # design.md body (verified by plan diff; default and full_autonomous
+    # digests are UNCHANGED, and all three action counts are unchanged at
+    # 57/69/59 - no artifact added or removed):
+    #   1. [DR-01] guide pointer corrected, docs/design/uiux-guide.docx ->
+    #      docs/UIUX-Design-Guide.md. The old path named a directory, basename
+    #      and extension that never existed in this repo, so invariant 8's
+    #      citation trail terminated nowhere.
+    #   2. [DR2-02] invariant 8's baseline parenthetical disambiguated: under
+    #      WCAG 2.2, target size at AA is 24x24 CSS px, while the widely-quoted
+    #      44x44 is SC 2.5.5 at AAA. The prior wording ("WCAG 2.2 AA
+    #      target-size and contrast ratios") invited the AAA figure to be read
+    #      as the AA requirement.
+    # Only the flag-on fixture moves because design_steering_enabled is
+    # default-off (installer.py:93, interview.py:173), per DELTA-01.
     "design_steering":
-        "5bdf4dee302449fb214dd527825f0f8da41b2c47226f3eb3d9430760e70a598a",
+        "2216c622ea9fca3d6a656c9f42d04fb70aa0a74d49a7aa31c7dc6bfa353c0d59",
 }
 
 EXPECTED_ACTION_COUNTS = {

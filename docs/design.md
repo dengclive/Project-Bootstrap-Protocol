@@ -6,7 +6,7 @@
 > pipeline), **skip this doc.**
 
 **This doc is self-contained for agents.** [DR-01] The UI/UX Design Guide
-(`docs/design/uiux-guide.docx`, if present in this repo) is the operator-facing
+(`docs/UIUX-Design-Guide.md`, if present in this repo) is the operator-facing
 rationale and research record behind these rules; no task-time behavior depends
 on reading it. When a rule here seems wrong for a case, escalate to the
 operator rather than consulting the guide mid-task.
@@ -48,8 +48,9 @@ property above. [XR2-01]
    the implementer applies per change — not an audit.** Formal WCAG/ADA
    conformance testing stays out of scope (Companion: "Accessibility audit and
    compliance frameworks … no protocol for ongoing audit"); the project's
-   specific accessibility *baseline* (e.g. WCAG 2.2 AA target-size and contrast
-   ratios) lives in the Project-specifics block below and/or `tech.md`, and
+   specific accessibility *baseline* (e.g. WCAG 2.2 AA contrast ratios, and its
+   target-size floor of 24×24 CSS px — the widely-quoted 44×44 figure is Level
+   AAA) lives in the Project-specifics block below and/or `tech.md`, and
    this invariant means "meet that baseline as you build," not "certify against
    it."
 
