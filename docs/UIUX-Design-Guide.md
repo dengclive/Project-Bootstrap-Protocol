@@ -338,6 +338,8 @@ The persuasion principles in Parts 4 and 5 are genuinely powerful, and that is e
 
 This part lets a **Bootstrap Protocol**–certified project (v2.4.0) adopt everything above with minimal friction. It maps each part of the guide onto the protocol's existing artifact hierarchy, tells you where in the wizard it attaches, and ends with a ready-to-commit steering doc you can drop straight into *.claude/steering/*. Nothing here changes the protocol or its conformance surface — the guide composes as a project-level design reference, filling a gap the protocol leaves open (UI/UX appears today only as a few Phase 2 *tech.md* questions, and accessibility audit is explicitly out of scope).
 
+> **Status — shipped in v2.5.0 (DS-01).** The integration described in this Part is no longer a proposal: when `design_steering_enabled` is set, the wizard emits `.claude/steering/design.md` (sourced from the protocol's frozen `docs/design.md`), and that emitted file is canonical. The guide text below is unchanged as a v2.4.0-authored record; where it reads as a proposal (“a steering doc you can drop straight into…”), read it as documentation of what now ships. See 6.6.
+
 ## **6.1 Where the Guide Lives: It****'****s a Steering Doc**
 
 The protocol's mental model has three governing artifact types. This guide maps cleanly onto the first:
@@ -418,100 +420,33 @@ The protocol's central test for any constraint: "if the model ignores this 30% o
 
 If a project later wants a deterministic slice, the only defensible hook-able rules are narrow and literal — e.g. "no *<**meta**>* countdown element whose target timestamp is generated client-side per session" — and even those belong in the project's own CI, not the protocol's gate set. Recommended default: keep it all guidance.
 
-## **6.6 Ready-to-Commit Steering Doc**
+## **6.6 The Design Steering Doc (Emitted)**
 
-Below is a complete **.claude/steering/design.md**, written in the protocol's steering-doc voice: project-wide invariants, distilled, with an applicability header so a subagent on an unrelated task skips it cleanly. It *links* back to this guide as the detailed rationale rather than duplicating it. Copy it into the workspace and commit it with the other steering docs. Replace the bracketed placeholders during Phase 2 or at adoption time.
+As of Bootstrap **v2.5.0** (DS-01), a certified project does not hand-write this doc. When `design_steering_enabled` is set, the wizard emits `.claude/steering/design.md` for you — the Phase-2 offer on Core/Partial archetypes (6.3). That emitted file is the canonical, always-current steering doc; its source of truth is the protocol's frozen `docs/design.md`, embedded byte-for-byte in the installer. The block below is an **illustrative excerpt** — it shows the doc's shape and its load-bearing invariants, not a copy to maintain in parallel with the emitter. A certified project *not* re-running the wizard adopts by copying the emitted body from `docs/design.md` (plus the one-line CLAUDE.md pointer at the end of this section); it should not copy this excerpt in its place.
 
-# Design Steering (design.md)
+# Design Steering (design.md) — *illustrative excerpt; the emitted doc is canonical*
 
- 
+> Applicability: user-facing surfaces only. If this task touches no UI (backend, migration, CLI-internal), skip this doc. Archetype applicability: see the guide, Part 6.2.
 
-> Applicability: user-facing surfaces only. If this task
-
-> touches no UI (backend, migration, CLI-internal), skip
-
-> this doc. Archetype applicability: see the guide, Part 6.2.
-
- 
-
-Source of truth for detailed rationale: The UI/UX Design
-
-Guide (docs/UIUX-Design-Guide.md). This file is the distilled,
-
-always-read version; the guide is the reference.
-
- 
+Source of truth for detailed rationale: The UI/UX Design Guide (docs/UIUX-Design-Guide.md). This distilled doc is always-read; the guide is the reference.
 
 ## Invariants (apply to every user-facing change)
 
-1. Visual hierarchy: emphasize the value the user came for;
+The emitted doc states a one-paragraph rule under each heading; the eight are:
 
-   mute supporting labels. No flat, single-weight screens.
-
-2. Cut interaction cost: show value before asking for a tap,
-
-   an account, or payment. Expose content directly.
-
-3. Mobile: place primary actions in the thumb's easy zone
-
-   (bottom/center). Bottom nav over top nav. Test on-device.
-
-4. Never ship a bare empty or loading state: headline +
-
-   one action + (where it helps) an illustration.
-
-5. Match input to context: sliders/wheels for one-time
-
-   low-precision; text/steppers for frequent/precise entry.
-
-6. Adapt to journey stage (new / returning / power) rather
-
-   than shipping one generic screen.
-
- 
+1. **Visual hierarchy** · 2. **Cut interaction cost** · 3. **Mobile reach** · 4. **No bare empty or loading states** · 5. **Match input to context** · 6. **Adapt to journey stage** · 7. **Design for scanning** · 8. **Accessible by default** — the §1.5 perceivable-and-operable floor.
 
 ## Persuasion & pricing — HONEST USE ONLY (highest within this doc)
 
-These override conversion goals when in tension. Cross-domain ties
-(design vs. non-design principles) resolve in principles.md, which
-remains the sole ranking surface.
+Keep every promise you imply; show one real price per option with no fabricated 'was' prices; use loss framing only when the loss is true — fake countdowns and manufactured scarcity are FTC-enforced dark patterns. Cross-domain ties resolve in principles.md, which remains the sole ranking surface. **Tiebreaker:** honest persuasion over short-term conversion — trust is the conversion strategy.
 
-- Reframe to the easy question, but keep every promise you
-
-  imply (e.g. an implied trial-ending reminder must be real).
-
-- Show one clear price per option; anchor only against real
-
-  reference prices. No fabricated 'was' prices.
-
-- Loss framing is allowed only when the loss is true. Fake
-
-  countdowns, manufactured scarcity, or guilt/confusion in
-
-  dismiss controls are prohibited (dark patterns; FTC-
-
-  enforced). When unsure, don't.
-
- 
-
-## Tiebreaker
-
-Honest persuasion over short-term conversion. Trust is the
-
-conversion strategy.
-
- 
-
-## Project specifics  [fill during Phase 2]
+## Project specifics  [fill during Phase 2 / at adoption]
 
 - Styling approach: [e.g. Tailwind + design tokens]
-
 - Component library: [e.g. shadcn/ui]
-
 - Accessibility baseline: [e.g. WCAG 2.2 AA]
-
-- Brand palette / shadow tint rules: [link or values]
+- Brand palette / shadow-tint rules: [link or values]
 
 A matching CLAUDE.md pointer keeps the thin-invariants file honest — one line, no restatement: *"**Design: user-facing work follows .claude/steering/design.md.**"* That single pointer plus the committed doc is the entire adoption cost for a project that isn't re-running the wizard.
 
-**Alignment summary: **the standalone guide (Parts 1–5) is unchanged; Part 6 makes it a first-class, per-archetype-aware steering doc that drops into any Bootstrap v2.4.0 workspace with one committed file and one pointer line, treated as guidance throughout, with the ethical rules preserved as ranked steering prose rather than unenforceable hooks.
+**Alignment summary: **the standalone guide (Parts 1–5) is unchanged; Part 6 makes it a first-class, per-archetype-aware steering doc that the wizard **emits** into any Bootstrap workspace (v2.5.0+) as one committed file plus a one-line pointer, treated as guidance throughout, with the ethical rules preserved as ranked steering prose rather than unenforceable hooks.
