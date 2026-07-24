@@ -433,10 +433,19 @@ EXPECTED_DIGESTS = {
     #      44x44 is SC 2.5.5 at AAA. The prior wording ("WCAG 2.2 AA
     #      target-size and contrast ratios") invited the AAA figure to be read
     #      as the AA requirement.
+    #   3. [DELTA-03 freeze-exception] the design-review SKILL.md body gains the
+    #      honest-scope clause the PRD (Phase 7) and Companion (migration §)
+    #      specify but the original DR-2-final frozen body omitted: "design-time
+    #      floor / advisory flag, NOT a compliance control; no substitute for
+    #      legal review (FTC, EU Digital Fairness Act); reduces-but-does-not-
+    #      prevent dark-pattern emission at scale." Byte-synced into
+    #      lib/templates.py _design_review_skill; asserted present by
+    #      test_installer DS-01[on+skill]. Moves ONLY this fixture (the skill is
+    #      emitted only under design_review_skill_enabled).
     # Only the flag-on fixture moves because design_steering_enabled is
     # default-off (installer.py:93, interview.py:173), per DELTA-01.
     "design_steering":
-        "2216c622ea9fca3d6a656c9f42d04fb70aa0a74d49a7aa31c7dc6bfa353c0d59",
+        "77fd4aced1c83126776d7cbae5deabdb9eb7a860ec0de333b5148e0d9b95268a",
 }
 
 EXPECTED_ACTION_COUNTS = {
