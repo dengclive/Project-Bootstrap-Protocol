@@ -6,7 +6,7 @@ A formalized reference synthesizing five practitioner sources,
 
 cross-checked against current (2025–2026) UX research.
 
-**Draft v1.1  ·  July 2026  ·  Bootstrap Protocol v2.4.0–aligned**
+**Draft v1.1  ·  July 2026  ·  Bootstrap Protocol v2.5.0–aligned** *(authored in the v2.4.0 era; DS-01 shipped its integration at v2.5.0 — the Part-6 status banner reconciles the tense)*
 
 # **How to Read This Guide**
 
@@ -336,7 +336,7 @@ The persuasion principles in Parts 4 and 5 are genuinely powerful, and that is e
 
 # **Part 6 · Bootstrap Protocol Integration**
 
-This part lets a **Bootstrap Protocol**–certified project (v2.4.0) adopt everything above with minimal friction. It maps each part of the guide onto the protocol's existing artifact hierarchy, tells you where in the wizard it attaches, and ends with a ready-to-commit steering doc you can drop straight into *.claude/steering/*. Nothing here changes the protocol or its conformance surface — the guide composes as a project-level design reference, filling a gap the protocol leaves open (UI/UX appears today only as a few Phase 2 *tech.md* questions, and accessibility audit is explicitly out of scope).
+This part lets a **Bootstrap Protocol**–certified project (authored against v2.4.0; shipped at v2.5.0 — see the status banner below) adopt everything above with minimal friction. It maps each part of the guide onto the protocol's existing artifact hierarchy, tells you where in the wizard it attaches, and ends with a ready-to-commit steering doc you can drop straight into *.claude/steering/*. Nothing here changes the protocol or its conformance surface — the guide composes as a project-level design reference, filling a gap the protocol leaves open (UI/UX appears today only as a few Phase 2 *tech.md* questions, and accessibility audit is explicitly out of scope).
 
 > **Status — shipped in v2.5.0 (DS-01).** The integration described in this Part is no longer a proposal: when `design_steering_enabled` is set, the wizard emits `.claude/steering/design.md` (sourced from the protocol's frozen `docs/design.md`), and that emitted file is canonical. The guide text below is unchanged as a v2.4.0-authored record; where it reads as a proposal (“a steering doc you can drop straight into…”), read it as documentation of what now ships. See 6.6.
 

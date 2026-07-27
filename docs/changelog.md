@@ -1,5 +1,71 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.4.0 → 2.5.0 (DS-01 design steering + release-review fixes)
+
+The 2.5.0 span landed across five PRs; this entry is the release record the
+span's own convention owes (every prior bump added one, plus a
+`test_ic_gate` tripwire asserting it — both restored here after the final
+release review found them missing).
+
+- **DS-01 design steering (PR #13, merge `3967422`).** Opt-in
+  `design_steering_enabled` (+ gated `design_review_skill_enabled`) wired as
+  a TEL-01 twin across interview → config → emission → state, plus the one
+  net-new mechanism: the archetype-gated interactive offer
+  ({fullstack, mobile, ai-agent, platform, other}; the flag itself is
+  accepted on any archetype — DELTA-02). Emits committed
+  `.claude/steering/design.md` and, on the second opt-in, the advisory
+  `design-review` skill + command (frozen bodies byte-verbatim from
+  `docs/{design,SKILL,design-review}.md`). Off-by-default byte-identity
+  golden-proven; `PROTOCOL_VERSION` 2.4.0 → 2.5.0 (installer, templates,
+  plugin.json). Skill state field `and`-gated on the primary at
+  `installer.py` so state can never disagree with emission.
+- **UI/UX guide hardening (PRs #14 `854b47e` + #15 `e2c5a98`).** §1.5
+  accessibility floor; DR-01 dead guide-pointer fixed in all three copies;
+  DR2-02 target-size baseline disambiguated (AA = 24×24 CSS px; 44×44 is
+  AAA); §6.6 de-forked to documentation-of-shipped.
+- **DELTA-03 honest-scope clause (PR #16, merge `35c70b7`).** The emitted
+  design-review skill gains the PRD/Companion-mandated honest-scope clause
+  (design-time floor / advisory flag, not a compliance control; no
+  substitute for legal review — FTC, EU Digital Fairness Act). Root cause:
+  the implementation prompt (a lossy channel) folded only DELTA-01.
+- **v2.5.0 release-review fixes (this PR).** A final holistic adversarial
+  review (2026-07-27) of the tagged candidate against the PRD + Companion,
+  including scratch-directory installs that *executed* the emitted hooks,
+  produced three emitted-byte fixes — **golden freeze-exception no. 16**
+  (all three fixtures re-baselined; zero files added/removed; counts stable
+  57/69/59; changed set = every hook + `audio-alerts.config`, diff-verified
+  vs HEAD; full record in `tests/test_greenfield_golden.py`):
+  - **F3** — the `jget` Python fallback rendered booleans as `str(True)` =
+    `"True"` where `jq -r` emits `"true"`, so every
+    `[ "$(jget ...)" = "true" ]` guard — including the §6.D
+    `stop_hook_active` loop guard in `cost-log` and `task-done-alarm` —
+    silently failed open on jq-less installs. Booleans now render
+    lowercase; runtime-verified with jq removed from PATH.
+  - **F2/A-5** — `iteration-summary-enforcement` is wired as an
+    unconditional `Stop` hook, so on goal-enabled installs every ordinary
+    interactive session end errored rc=1 demanding a summary nothing
+    writes. Now gated on a live `.goal-active-*` marker; enforcement inside
+    a goal iteration unchanged. Residual stale-glob match recorded as
+    backlog I-13.
+  - **F1** — honest-scope corrections: `audio-alerts.config` no longer
+    claims `drift_tier3_enforced=true` (nothing emitted writes a
+    `.drift-tier3-*` sentinel or denies at tier 3) and now states that the
+    emitted drift layer is a tier-1 tool-call notice only and that
+    thresholds are baked at install time; the drift-detector and
+    loop-cooperation hook comments say the same. The unimplemented §6.E
+    surface (tier-2/3 escalation, hard block, audio dispatch,
+    duration/file-read triggers) is recorded as backlog **I-1**; the absent
+    agent-side autonomous cooperation contract (CLAUDE.md addenda,
+    implementer variants, greenfield spec-decompose classifiers) as
+    **I-2**. See `docs/deferred-backlog.md` cluster I for the review's full
+    deferred set (I-1 … I-14) and README "Honest limitations" for the
+    operator-facing statement.
+- **Release mechanics.** README gains a v2.5.0 section and the consumer pin
+  target (the annotated `v2.5.0` tag — the repo's first); the changelog
+  tripwire chain in `test_ic_gate` extends to 2.5.0; the UI/UX guide
+  masthead now names v2.5.0 alignment (superseding the earlier
+  keep-at-v2.4.0 call, which predated the tag decision).
+
 ## Test harness & isolation (PR #9) — adversarial-review fixes
 
 Multi-lens adversarial review of PR #9 (7 finder lenses → 3 refutation-seeking

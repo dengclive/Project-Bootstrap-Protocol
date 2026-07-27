@@ -1,6 +1,15 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-This answers the question: *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
+> **Current release: v2.5.0.** `PROTOCOL_VERSION = 2.5.0`; the normative spec
+> is `Bootstrap-Protocol-v2-5-0.md` + `Bootstrap-Protocol-Companion-v2-5-0.md`
+> (older PRD/Companion pairs are retained as historical record). **External
+> consumers pin the annotated git tag `v2.5.0`** — the repo's first tag;
+> pinning a moving `main` is pinning a branch, not a release. Release record:
+> `docs/changelog.md` "2.4.0 → 2.5.0". Known deferrals:
+> `docs/deferred-backlog.md` (cluster I is the v2.5.0 release-review set).
+
+This answers the question (as originally posed against the v2-0-0 document —
+the two-layer split below is unchanged through v2.5.0): *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
 deterministic code that configures Claude Code with all the hooks, commands,
 etc.?"*
 
@@ -140,7 +149,7 @@ bootstrap-installer/
   digests) and skipped, not clobbered. `--force` overrides.
 - **Reversible** — `--uninstall` removes exactly what it created.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
-- **Faithful to Bootstrap-Protocol-v2-0-0.md** — encodes the skip-policy invariants
+- **Faithful to Bootstrap-Protocol-v2-5-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
   starter sets, the conditional hook set (eval-gate only for ai-agent,
   tdd-gate only when TDD is required, loop-cooperation hooks only when an
@@ -196,6 +205,20 @@ deterministic installer).
 - The emitted skill/command/agent bodies are faithful stubs (frontmatter +
   intent). They are correct and load, but the deep prompt engineering for
   each skill is a separate effort from the structural scaffolding.
+- **The stub posture extends further than skills (v2.5.0 release review):**
+  the emitted **drift/alarm layer is a tier-1 tool-call notice only** —
+  tier-2/tier-3 escalation, the tier-3 hard block and its `.drift-tier3-*`
+  sentinel, audio dispatch, and the duration/file-read triggers described in
+  the PRD's §6.E are **not implemented** by the emitted hooks, and
+  `audio-alerts.config` says so (`drift_tier3_enforced=false`; thresholds are
+  baked at install time). Likewise the **agent-side autonomous cooperation
+  contract is not emitted**: `CLAUDE.md` carries no loop/goal behavioral
+  addenda, the implementer agent has no mode-variant blocks, and the
+  greenfield `spec-decompose` stub does not teach the
+  `loop_eligible`/`goal_supervised_eligible` fields the wrappers hard-require
+  (the wrappers fail closed — they refuse rather than run). Backlog I-1/I-2
+  track both; complete them (or work operator-in-the-loop, where none of
+  this binds) before relying on the autonomous modes.
 
 ## Tests
 
@@ -606,6 +629,29 @@ are intentionally operator-completed per BOOTSTRAP.md's own trust ramp.
 Unattended overnight use remains out of scope by construction and must not
 be certified until those loops are implemented and smoke-tested per
 Phase 9 stages 4–6.
+
+### v2.5.0 (DS-01 design steering) + release-review fixes
+
+**DS-01 (PRs #13–#16).** Opt-in `design_steering_enabled` (+ gated
+`design_review_skill_enabled`), a TEL-01 twin with one net-new mechanism: the
+archetype-gated interactive offer (the flag itself is accepted on any
+archetype — DELTA-02). Emits committed `.claude/steering/design.md` and the
+optional advisory `design-review` skill + command (frozen bodies byte-verbatim
+from `docs/{design,SKILL,design-review}.md`; DELTA-03 honest-scope clause
+included per PR #16). Off-by-default byte-identity is golden-proven; the skill
+state flag is `and`-gated on the primary so state can never disagree with
+emission.
+
+**Release-review fixes (2026-07-27, freeze-exception no. 16).** A final
+holistic adversarial review — spec-tracing the PRD/Companion plus scratch
+installs that *executed* the emitted hooks — produced three emitted-byte
+fixes before tagging: the `jget` jq-less fallback now renders booleans like
+`jq -r` (the `stop_hook_active` guards were failing open without jq);
+`iteration-summary-enforcement` gates on a live `.goal-active-*` marker
+(it errored on every ordinary session end of goal-enabled installs); and the
+drift/alarm layer's emitted files now state their real (tier-1-only) scope —
+see "Honest limitations" above and `docs/deferred-backlog.md` cluster I for
+everything the review recorded rather than fixed.
 
 ### v2.4.0 code fold (GR2-EX / TEL-EX) — mandated-artifact emissions the frozen templates omit
 

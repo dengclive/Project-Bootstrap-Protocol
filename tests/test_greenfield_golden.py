@@ -355,7 +355,9 @@ EXPECTED_DIGESTS = {
     # to this fixture — design_steering_enabled is off here, so its build_plan
     # add is skipped; the pre-bump feature-complete tree already matched the old
     # digest (off-by-default byte-identity, verified before the bump).
-    "default": "a04a5aea7899ac00b4266994a9929325cf3396ff2c9c8662adaba172ef32785f",
+    # [v2.5.0 freeze-exception no. 16] see the design_steering column for the
+    # full record; default moves for byte classes 1 and 3 (12 files).
+    "default": "1d39061df9cf6cf17ae682f6ce86acd05a5edbbfc850d120521735ff5d6333bf",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -410,8 +412,12 @@ EXPECTED_DIGESTS = {
     #   "protocol 2.4.0" -> "protocol 2.5.0"; the ONLY full_autonomous change at
     #   this step (count stable at 69). full_autonomous leaves
     #   design_steering_enabled off, so DS-01 adds nothing here either.
+    #   [v2.5.0 freeze-exception no. 16] see the design_steering column for
+    #   the full record; full_autonomous moves for all three byte classes
+    #   (16 files: the 12 shared ones + tdd-gate, eval-gate,
+    #   drift-detector-loop-cooperation, iteration-summary-enforcement).
     "full_autonomous":
-        "32ef5d3481862716c55a2a2c982b629856293c6723795846e69052401be99270",
+        "97fb264da6b208648e429ddd09bfefad0e64fce1b6a8faafc463689ece2cfc86",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -444,8 +450,39 @@ EXPECTED_DIGESTS = {
     #      emitted only under design_review_skill_enabled).
     # Only the flag-on fixture moves because design_steering_enabled is
     # default-off (installer.py:93, interview.py:173), per DELTA-01.
+    #
+    # [v2.5.0 freeze-exception no. 16 (release-review fixes F1/F2/F3,
+    # 2026-07-27)] ALL THREE fixtures re-baselined. Diff-verified vs the
+    # pre-fix HEAD (scratch HEAD-vs-worktree plan diff, all four plan shapes
+    # incl. a retrofit probe): zero files added, zero removed, counts stable
+    # at 57/69/59; the changed set is EXACTLY every emitted hook plus
+    # audio-alerts.config (12 files default/design_steering, 16
+    # full_autonomous — the four goal/loop-gated hooks add there). Three
+    # byte classes:
+    #   1. [F3] _HOOK_HEADER jget Python fallback renders booleans
+    #      lowercase like `jq -r` ("true"/"false", not str(True)="True").
+    #      Without this, every [ "$(jget ...)" = "true" ] guard — notably
+    #      the 6.D stop_hook_active loop guard in cost-log and
+    #      task-done-alarm — silently failed on jq-less installs. Touches
+    #      every hook body (shared header). Runtime-verified in a scratch
+    #      install with jq removed from PATH: guarded Stop appends nothing,
+    #      normal Stop appends one line.
+    #   2. [F2/A-5] iteration-summary-enforcement gains a .goal-active-*
+    #      gate: it is wired as an unconditional Stop hook, so on any
+    #      goal-enabled install every ORDINARY interactive session end
+    #      errored rc=1 demanding a summary no non-goal session writes.
+    #      Runtime-verified: no marker rc=0; marker without summary rc=1;
+    #      marker with summary rc=0. Residual stale-glob match is backlog
+    #      I-13.
+    #   3. [F1] honest-scope corrections: audio-alerts.config header states
+    #      the emitted hooks implement the tier-1 notice only and that
+    #      thresholds are baked at install time; drift_tier3_enforced
+    #      true -> false (nothing emitted writes .drift-tier3-* or denies at
+    #      tier 3 — the old value advertised enforcement that does not
+    #      exist); drift-detector and drift-detector-loop-cooperation
+    #      comments corrected to say so (backlog I-1).
     "design_steering":
-        "77fd4aced1c83126776d7cbae5deabdb9eb7a860ec0de333b5148e0d9b95268a",
+        "a28155688b1e6224209c6a049add2b400eb04e2e48e826aaf53ae4ef380c59cd",
 }
 
 EXPECTED_ACTION_COUNTS = {
