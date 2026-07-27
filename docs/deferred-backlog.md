@@ -35,7 +35,7 @@ work) · `no-action` (reviewed, judged fine as-is; listed so it isn't re-derived
 | ID | Item | Source |
 |---|---|---|
 | C-1 | GR2-03a surfacing notice — fail-loud, non-blocking on model/runtime change (constraints locked, not built) | changelog / milestone memory. `open` |
-| C-2 | Retrofit telemetry state-schema — retrofit plans emit `telemetry.md` without a matching state field | changelog "recorded but NOT fixed". `open` |
+| C-2 | Retrofit opt-in state-schema — retrofit plans emit `telemetry.md` (and, if hand-set, `design.md`) without matching state fields; `_write_retrofit_state` carries neither `telemetry_export_enabled` nor the two design flags | changelog "recorded but NOT fixed"; extended 2026-07-27 (release review) to cover the design flags. `open` |
 | C-3 | Doc-citation normalization pass — pre-existing hook/wrapper citations at older versions (incl. `§6.D` refs) | changelog. `open` |
 | C-4 | R8 — eighth IC check (AR2-09b): NOT added at 2.2.0 (golden fixtures + R7 cover the repo-side risk); a forward feature with a recorded cost-of-deferral | changelog `### R8 — Eighth IC check: deferred (AR2-09b)`; `ic_checks.py` has only IC-1..IC-7. `decision` |
 | C-5 | AR2-09a — no standalone run-summary template file is emitted (the run-summary is inline in the wrappers) | `templates.py:1083` "[AR2-09a]"; milestone memory. `decision` |
@@ -105,6 +105,36 @@ Recorded so they aren't re-derived; each judged defensible as-is. All `no-action
 | H-3.1 | jq-garbage discrimination — already T2-safe via strict `[ "$_val" = "true" ]` |
 | H-3.3 | Two-seam independence — a third runtime seam would significantly grow the preamble |
 | H-2.2 | TEMPLATES dict cardinality arithmetic in a commit message — pedantic |
+
+## I. v2.5.0 release-review findings (2026-07-27)
+
+Source: the final holistic adversarial review of the v2.5.0 release candidate
+(PRD/Companion requirement-tracing plus scratch installs that executed the
+emitted hooks). The review's three fix-before-tag items (F1 disclosure, F2/A-5
+Stop-hook gate, F3 jq-fallback booleans) were fixed in the tagged release
+(freeze-exception no. 16); the rows below are the recorded residue.
+
+| ID | Item | Notes |
+|---|---|---|
+| I-1 | Emitted drift/alarm layer is a tier-1 tool-call notice only — tier-2/tier-3 escalation, the tier-3 hard block + `.drift-tier3-*` sentinel, audio dispatch, and the duration/file-read triggers of PRD §6.E are NOT implemented; `audio-alerts.config` now says so and thresholds are baked at install time | `decision` — implement §6.E, or keep the layer advisory and ripple the honest scope into the next PRD rev |
+| I-2 | Agent-side autonomous cooperation contract absent from the emitted greenfield tree: no CLAUDE.md loop/goal addenda (Phase 8), no implementer variant blocks (Phase 7 step 3 — sentinel/decision-log/iteration-summary protocol), greenfield `spec-decompose` is a stub with no five-criterion/sixth-criterion classifier or queue-population step while the wrappers hard-require `loop_eligible`/`goal_supervised_eligible`; retrofit DOES emit a real classifier skill (parity inversion) | `open` — highest-value cluster; pairs with E-1/E-2 |
+| I-3 | Spec-side: PRD self-contradicts on the version literal Phase 0 writes (`:312` says "2.0.1"; `:1298/:1478/:1837` say "2.0.0"; Companion says a v2.5.0 wizard writes "2.5.0" — impl correctly writes 2.5.0); PRD DELTA-01 head note asserts a header string the artifact never carried | `open` — next PRD doc rev |
+| I-4 | Phase 0 step 6 "use verbatim" strings for 9.6/9.7 + the 9.7 trust-ramp surfacing never reached `interview.py` (TEL-01/DS-01 twins ARE byte-pinned; the autonomous-mode asks are plain true/false) | `open` |
+| I-5 | Shell `test-gate` staleness check finds only `src/`; the SDK gate covers `("src","lib")` and claims parity — a lib/-only project passes the shell gate forever after one green run | `open` |
+| I-6 | Empty-command degradation: only `commands.test` fails loud with a TODO; empty lint/format degrade to `true` and `ci-mirror` silently passes pushes printing "CI mirror: true" | `open` |
+| I-7 | Retrofit `rollout-schedule.md` week table vs behavior: only 3 of 11 hooks honor `ROLLOUT_WEEK` (dependency-gate and ci-mirror block in week 1 against the table's "Nothing" row; the week-2 lint row is unreachable — format-lint never blocks) | `open` |
+| I-8 | Second site of the D-9 escape-doubling class: the `O_CREAT\|O_EXCL` claim sentinel is written with `printf '%s\\n'`, so `.loop-active-*`/`.goal-active-*` contain `<pid>` plus a literal backslash-n (templates.py:1519); pair with D-9 for one fix | `open` |
+| I-9 | Garbage values for the three opt-in flags exit via an uncaught `ValueError` traceback with exit 1, unlike `resolve_config`'s clean validation block with exit 2 | `open` |
+| I-10 | `_command_warnings` / `_retrofit_warnings` are computed but never surfaced by the shipped CLI (`bin/bootstrap-install`); only the plugin command references them | `open` |
+| I-11 | `dependency-gate` pattern list misses `uv add`, `poetry add`, `pipenv install`, `cargo add`, `bun add` (all verified rc=0) | `open` |
+| I-12 | `sdk_gates/gates.py` callables raise `AttributeError` on a non-dict payload where the shell hooks degrade gracefully; fail-open/fail-closed disposition of a raising PreToolUse hook is the consumer's | `decision` |
+| I-13 | `iteration-summary-enforcement` matches ANY `.iteration-summary-*` file, not the current iteration's (the Stop payload carries no task/iteration identity); a stale summary satisfies it forever | `open` |
+| I-14 | PRD Phase 2 says interview answers fill `design.md`'s Project-specifics block; the emitted body deliberately ships a signposted placeholder (pre-specified in VALIDATION §5 — don't-guess). Recorded as an intended divergence so it stops being re-derived | `no-action` |
+
+Also verified and left alone by the review (do not re-derive): the seam
+binding `2.4.0 @ 251f82f` while main tags 2.5.0 is conformant (commit-pinned
+consumers; pin-bump on adoption); wrapper skeletons are conformant under
+B-1(b); secrets-gate path-only matching matches its spec.
 
 ## Priority reading
 

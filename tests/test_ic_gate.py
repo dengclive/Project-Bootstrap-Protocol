@@ -230,6 +230,8 @@ check("R6 (2.2.0): changelog carries the 2.1.0 -> 2.2.0 entry",
       "2.1.0 → 2.2.0" in changelog)
 check("v2.4.0 fold: changelog carries the 2.2.0 -> 2.4.0 entry",
       "2.2.0 → 2.4.0" in changelog)
+check("v2.5.0: changelog carries the 2.4.0 -> 2.5.0 entry",
+      "2.4.0 → 2.5.0" in changelog)
 conformance = open(os.path.join(
     ROOT, "Bootstrap-Protocol-v2-0-0.md")).read()
 check("AC-9-5: conformance note marks the substrate operative",
