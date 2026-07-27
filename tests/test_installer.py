@@ -1507,5 +1507,41 @@ finally:
     shutil.rmtree(_dsn, ignore_errors=True)
 
 
+# --------------------------------------------------------------------------- #
+# v2.5.0 release-review fixes (F1/F2/F3, 2026-07-27) — regression pins.
+# Freeze-exception no. 16; full record in tests/test_greenfield_golden.py.
+# --------------------------------------------------------------------------- #
+_rr_cfg, _ = cfg_from(FULL)
+_rr_plan = build_plan(_rr_cfg)
+_rr_cost = _body_of(_rr_plan, ".claude/hooks/cost-log.sh")
+# F3: the jq-less Python fallback must render booleans like `jq -r` —
+# lowercase — or every [ "$(jget ...)" = "true" ] guard (notably the 6.D
+# stop_hook_active loop guard) fails open on installs without jq.
+check("RR-F3: jget fallback renders booleans lowercase (jq -r parity)",
+      'sys.stdout.write("true" if cur else "false")' in _rr_cost)
+check("RR-F3: jget fallback special-cases bool before str()",
+      "isinstance(cur, bool)" in _rr_cost)
+# F2/A-5: iteration-summary-enforcement is wired as an unconditional Stop
+# hook; it must no-op outside a goal iteration or every ordinary session end
+# on a goal-enabled install errors rc=1.
+_rr_iter = _body_of(_rr_plan,
+                    ".claude/hooks/iteration-summary-enforcement.sh")
+check("RR-F2: iteration-summary hook gates on .goal-active-*",
+      'if ! ls "$S"/.goal-active-* >/dev/null 2>&1; then' in _rr_iter)
+check("RR-F2: the gate precedes the summary demand",
+      0 < _rr_iter.find(".goal-active-*")
+      < _rr_iter.find("iteration-summary missing/empty"))
+# F1: emitted artifacts must not advertise tier-3 enforcement nothing
+# implements (nothing emitted writes .drift-tier3-* or denies at tier 3).
+_rr_audio = _body_of(_rr_plan, ".claude/hooks/audio-alerts.config")
+check("RR-F1: audio config records drift_tier3_enforced=false",
+      "drift_tier3_enforced=false" in _rr_audio
+      and "drift_tier3_enforced=true" not in _rr_audio)
+check("RR-F1: audio config carries the honest-scope header",
+      "HONEST SCOPE" in _rr_audio and "BAKED" in _rr_audio)
+check("RR-F1: drift-detector body admits tier-1-only scope",
+      "TIER-1 TOOL-CALL COUNTER ONLY" in
+      _body_of(_rr_plan, ".claude/hooks/drift-detector.sh"))
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

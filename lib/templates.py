@@ -265,7 +265,13 @@ for k in sys.argv[1].split("."):
     else:
         sys.exit(0)
 if cur is not None and not isinstance(cur, (dict, list)):
-    sys.stdout.write(str(cur))
+    # Render like `jq -r`: booleans lowercase. str(True) would emit "True",
+    # which silently fails every [ "$(jget ...)" = "true" ] guard on
+    # jq-less installs (v2.5.0 release review F3, 2026-07-27).
+    if isinstance(cur, bool):
+        sys.stdout.write("true" if cur else "false")
+    else:
+        sys.stdout.write(str(cur))
 PYEOF
   fi
 }
@@ -730,8 +736,13 @@ exit 0
         dm = th["drift_session_duration_minutes"]
         fr = th["drift_file_read_threshold"]
         return _HOOK_HEADER + f'''
-# PostToolUse: soft drift notice (tiers 1-2). Tier-3 enforcement is wired
-# via settings.json + the loop-cooperation hook when enabled.
+# PostToolUse: soft drift notice - TIER-1 TOOL-CALL COUNTER ONLY. Honest
+# scope (v2.5.0 release review F1, 2026-07-27): tier-2/tier-3 escalation, the hard
+# block, audio dispatch, and the session-duration / repeated-file-read
+# triggers described in Bootstrap-Protocol-v2-5-0.md 6.E are NOT implemented
+# by this emitted stub. The thresholds below are BAKED at install time from
+# bootstrap.config.yaml; editing audio-alerts.config does not change them.
+# See README "Honest limitations" and docs/deferred-backlog.md I-1.
 CFG="${{CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/audio-alerts.config"
 SID="${{CLAUDE_SESSION_ID:-default}}"
 ST="${{CLAUDE_PROJECT_DIR:-.}}/.claude/sessions/.drift-state-$SID"
@@ -770,6 +781,10 @@ exit 0
         return _HOOK_HEADER + '''
 # Augments tier-3: inside loop.sh/goal-loop.sh, tier-3 fire => checkpoint and
 # end turn instead of hard-block-until-/clear. No-ops outside loop/goal mode.
+# Honest scope (v2.5.0 release review F1, 2026-07-27): the emitted drift-detector stub
+# never WRITES a .drift-tier3-* sentinel, so the branch below is reachable
+# only if the operator implements tier-3 enforcement themselves (backlog I-1).
+# Retained as the documented cooperation point for that implementation.
 SID="${CLAUDE_SESSION_ID:-default}"
 S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
 if ls "$S"/.loop-active-* "$S"/.goal-active-* >/dev/null 2>&1; then
@@ -784,8 +799,18 @@ exit 0
     if name == "iteration-summary-enforcement":
         return _HOOK_HEADER + '''
 # goal-loop.sh post-iteration: require a well-formed iteration summary file.
+# Gated on a live goal-mode marker (v2.5.0 release review F2/A-5, 2026-07-27): this
+# fires on EVERY Stop event via settings.json, and outside a goal-supervised
+# iteration there is no summary to demand - without the gate, every ordinary
+# interactive session end on a goal-enabled install errored rc=1.
+# Residual (backlog I-13): the glob matches ANY summary file, not the current
+# iteration's; the Stop payload carries no task/iteration identity to scope by.
 SID="${CLAUDE_SESSION_ID:-default}"
 S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
+if ! ls "$S"/.goal-active-* >/dev/null 2>&1; then
+  log "iteration-summary-enforcement: no goal-active marker; not a goal iteration"
+  exit 0
+fi
 latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   echo "iteration-summary missing/empty - feeding error to next iteration." >&2
@@ -862,7 +887,15 @@ def _settings_json(cfg):
 
 def _audio_config(cfg):
     th = cfg["hooks"]
-    return f"""# === Drift detector ===
+    return f"""# HONEST SCOPE (v2.5.0 release review F1, 2026-07-27): the emitted hooks implement
+# the tier-1 tool-call notice only. Tier-2/tier-3 escalation, the tier-3 hard
+# block, audio dispatch, and the duration / file-read triggers are NOT
+# implemented by the emitted stubs (docs/deferred-backlog.md I-1). Threshold
+# values are BAKED into the hooks at install time from bootstrap.config.yaml;
+# editing this file does not change runtime behavior. The keys below document
+# the Bootstrap-Protocol-v2-5-0.md 6.E surface an operator-completed
+# implementation would honor.
+# === Drift detector ===
 drift_enabled=true
 drift_tool_call_threshold={th['drift_tool_call_threshold']}
 drift_session_duration_minutes={th['drift_session_duration_minutes']}
@@ -870,7 +903,7 @@ drift_file_read_threshold={th['drift_file_read_threshold']}
 drift_alert_1_delay_minutes=0
 drift_alert_2_delay_minutes=10
 drift_alert_3_delay_minutes=15
-drift_tier3_enforced=true
+drift_tier3_enforced=false  # tier-3 enforcement is NOT implemented by the emitted hooks (was: true)
 quiet_mode_overridden_by_drift_tier3=true
 
 # === Task done ===
