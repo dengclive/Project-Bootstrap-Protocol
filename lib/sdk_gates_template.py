@@ -164,7 +164,20 @@ def _bash_candidates(cmd):
         # Unbalanced quote. shlex refuses; the shell gate takes the rest of
         # the line as the quoted run. Fall back to a whitespace split rather
         # than returning nothing - a parse failure must not become an allow.
-        toks = cmd.split()
+        #
+        # [v2.6.2] ...which is exactly what it DID become. A bare split
+        # leaves the quote glued to the token, so `cat "secrets/prod.yaml`
+        # yielded `"secrets/prod.yaml`, matched no pattern, and this
+        # substrate ALLOWED what the shell blocked - the direction the
+        # module's own binding rule forbids, in the fallback whose comment
+        # promises the opposite. Emit the quote-stripped form as well; on a
+        # parse failure the deny-list bias has to be over-match.
+        toks = []
+        for raw in cmd.split():
+            toks.append(raw)
+            stripped = raw.replace('"', "").replace("'", "")
+            if stripped and stripped != raw:
+                toks.append(stripped)
     out = []
     for tok in toks:
         for part in _SH_OPS.split(tok):
@@ -201,24 +214,31 @@ def _secrets_gate(config):
         # That is the original P0-2 finding, unfixed on this substrate,
         # while the table above claimed the two wirings were in sync.
         ti = _tool_input(input_data)
-        targets = [ti.get(k) or ""
-                   for k in ("file_path", "notebook_path", "path", "pattern")]
-        targets = [t for t in targets if t]
-        targets += _bash_candidates(ti.get("command") or "")
-        if not targets:
+        # Structured path parameters and Bash-derived tokens are judged
+        # apart: `dir_ok` says whether a bare directory NAME counts as
+        # naming the directory, and that is true of a `path` parameter and
+        # not of a word in a shell command. See _match_secret. Shell parity
+        # (the gate's two-phase $_dir_ok loop).
+        path_targets = [ti.get(k) or ""
+                        for k in ("file_path", "notebook_path", "path",
+                                  "pattern")]
+        path_targets = [t for t in path_targets if t]
+        cmd_targets = _bash_candidates(ti.get("command") or "")
+        if not path_targets and not cmd_targets:
             return {}
-        for target in targets:
-            if os.path.basename(target).lower() in _DOTENV_TEMPLATES:
-                continue
-            deny = _match_secret(target, patterns)
-            if deny:
-                return deny
+        for targets, dir_ok in ((path_targets, True), (cmd_targets, False)):
+            for target in targets:
+                if os.path.basename(target).lower() in _DOTENV_TEMPLATES:
+                    continue
+                deny = _match_secret(target, patterns, dir_ok)
+                if deny:
+                    return deny
         return {}
 
     return secrets_gate
 
 
-def _match_secret(target, patterns):
+def _match_secret(target, patterns, dir_ok=True):
     # [upstream P2-4] Mirrors the shell's three-form matching exactly.
     # '*.pem'-style patterns keep the implicit leading '*' (free). The
     # '.env*' dotenv family is matched on a DOT-SEGMENT boundary so
@@ -234,7 +254,10 @@ def _match_secret(target, patterns):
         # Grep{"path": "secrets"} allowed - and a Grep whose path is the
         # directory returns the matching file CONTENTS. Naming the directory
         # reaches everything under it. Empty for non-directory patterns.
-        dstem = cpat[:-2] if cpat.endswith("/*") else ""
+        # [v2.6.2] Gated on dir_ok: applied to every candidate it made
+        # `grep secrets README.md` and `git commit -m secrets` block, which
+        # is lens B finding 4's failure mode reintroduced. Shell parity.
+        dstem = cpat[:-2] if (dir_ok and cpat.endswith("/*")) else ""
         if cpat.startswith("*"):
             hit = (fnmatch.fnmatchcase(base, cpat)
                    or fnmatch.fnmatchcase(base, "*" + cpat)
@@ -432,14 +455,28 @@ _VALUE_FLAGS = frozenset({
     "--git", "--branch", "--rev", "--path", "-p", "--package", "--profile",
     "--bin", "--example", "--vers", "-f",
 })
-_FLAG_VALUE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~|=|^[0-9]")
+# [v2.6.2] See the shell gate's is_flag_value for the full account. The
+# first version matched `=` and `^[0-9]` and therefore swallowed real
+# package names - `7zip-bin`, `0x`, `2to3`, `evil==1.0` - as if they were
+# flag values, installing them unapproved on BOTH substrates.
+_FLAG_VALUE_SHAPE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~")
+# `==` `>=` `<=` `~=` `!=` `<` `>` are pip/npm PACKAGE syntax, not flag
+# values, and every one of them contains or implies `=`, so they are tested
+# first.
+_VERSION_SPEC = re.compile(r"==|>=|<=|~=|!=|<|>")
+_BARE_VERSION = re.compile(r"^[0-9.]+$")
 
 
 def _is_flag_value(tok):
-    """True if `tok` is shaped like a FLAG'S VALUE rather than a package
-    name: a URL, a `:all:`-style spec, a path, a key=value, a version.
-    Shell parity (is_flag_value)."""
-    return _FLAG_VALUE.search(tok) is not None
+    """True if `tok` could NOT be a package name and is therefore the
+    preceding flag's value. Shell parity (is_flag_value)."""
+    if _FLAG_VALUE_SHAPE.search(tok):
+        return True
+    if _VERSION_SPEC.search(tok):
+        return False
+    if "=" in tok:
+        return True
+    return bool(_BARE_VERSION.match(tok))
 
 
 def _pkg_name(tok):
@@ -467,7 +504,20 @@ def _dependency_gate(config):
         cmd = _tool_input(input_data).get("command") or ""
         blocked = ""
         for line in cmd.splitlines() or [cmd]:
-            blocked += _scan_install_line(line, approved)
+            # [v2.6.2] _scan_install_line returns (reason, names). It used
+            # to fold its three non-package refusals into the package-name
+            # string, so a piped remote script, an unverifiable requirements
+            # file and a package-index override all denied with
+            # "not in deps.md approved list: <package-index-override>" and
+            # told the operator to add that literal to deps.md - advice that
+            # cannot work, for a refusal that has nothing to do with the
+            # approved list. SEAM-CONTRACT §3.3 requires reason strings
+            # "semantically equivalent to the shell gates'", and the shell
+            # emits a distinct explanation for each of the three.
+            reason, names = _scan_install_line(line, approved)
+            if reason:
+                return _deny(reason)
+            blocked += names
         if blocked:
             return _deny("Dependency gate: not in deps.md approved list:"
                          + blocked
@@ -478,13 +528,18 @@ def _dependency_gate(config):
 
 
 def _scan_install_line(line, approved):
-    # Returns a space-prefixed string of unapproved package names on this
-    # single command line (empty if none / not an install command).
+    # Returns (reason, names): `reason` is a complete refusal message for
+    # the three cases that are NOT about the approved list (and stops the
+    # scan), `names` is a space-prefixed string of unapproved package names
+    # on this single command line. Shell parity: the shell gate prints a
+    # distinct two-line explanation for each of the three.
     norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
     # Checked on the WHOLE line and BEFORE segmenting: the pattern
     # deliberately reads across a pipe. Shell parity.
     if _PIPE_TO_SHELL.search(norm):
-        return " <piped-remote-script>"
+        return ("Dependency gate: piping a downloaded script into a shell "
+                "is blocked.\\nVendor the installer, review it, then run it "
+                "explicitly.", "")
     # SEGMENT FIRST, then judge each segment on its own. Searching the line
     # for ONE install invocation failed in both directions: `.search()` found
     # the FIRST, so `npm install requests && npm install evil` inspected only
@@ -500,7 +555,10 @@ def _scan_install_line(line, approved):
             continue
         rest = seg[m.end():]
         if _INDEX_OVERRIDE.search(m.group(0)):
-            return " <package-index-override>"
+            return ("Dependency gate: a package-index override is not "
+                    "verifiable.\\nIt redirects even an APPROVED package to "
+                    "another server. Remove it,\\nor set the index in the "
+                    "project's own package-manager config.", "")
         # A verb with no arguments is a lockfile restore (`npm install`), not
         # an install of anything to approve - but that is a fact about THIS
         # invocation, never about the line. Shell parity.
@@ -515,7 +573,9 @@ def _scan_install_line(line, approved):
             if tok in ("-r", "--requirement", "-c", "--constraint"):
                 # Packages listed in a FILE are invisible to the gate;
                 # allowing them would defeat it entirely. Shell parity.
-                return " <unverifiable-requirements-file>"
+                return ("Dependency gate: cannot verify packages listed in "
+                        "a file.\\nInstall them explicitly, or approve in "
+                        ".claude/steering/deps.md.", "")
             if tok in _VALUE_FLAGS:
                 skip_next = True
                 continue
@@ -526,7 +586,7 @@ def _scan_install_line(line, approved):
             name_only = _pkg_name(tok)
             if name_only and name_only not in approved:
                 blocked += " " + name_only
-    return blocked
+    return (None, blocked)
 
 
 def _test_gate(config):

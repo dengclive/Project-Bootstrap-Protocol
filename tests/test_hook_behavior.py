@@ -507,6 +507,26 @@ DEP = [
     ("npm install -f evil", 2),
     ("npm install -d evil", 2),
     ("pip install -t evil", 2),
+    # -- v2.6.2 [round-2 review]: the inversion above SHIPPED FAILING OPEN,
+    # and this block is why the row above was not enough. `is_flag_value`
+    # counted `[0-9]*` and `*=*` as value-shaped, so a package name that
+    # merely STARTS WITH A DIGIT or carries a VERSION PIN was swallowed.
+    # All of these are real registry packages, all exited 0, and the commit
+    # that introduced the inversion claimed a short flag "can never swallow
+    # a package name" - true only of `evil`, the one example it tested.
+    # The lesson is the general one: a rule verified against one witness is
+    # verified against one witness.
+    ("npm install -f 7zip-bin", 2),
+    ("npm install -p 0x", 2),
+    ("npm i -w 2to3", 2),
+    ("npm install --tag 7zip-bin", 2),
+    ("pip install -f evil==1.0", 2),
+    ("pip install -i evil>=2", 2),
+    ("pip install --target evil~=1.0", 2),
+    # A BARE version number is still a flag value, which is the whole point
+    # of the inversion - these must stay allowed.
+    ("pip install --python-version 3.11 gleeunit", 0),
+    ("pip install --config-settings foo=bar gleeunit", 0),
     # An approved package through a runner is still approved.
     ("npx gleeunit", 0),
     # Prose naming an index variable is not an override.
@@ -602,8 +622,6 @@ SECRETS_BASH = [
     # `.env;` matched no pattern. Found by executing this suite's own
     # corpus, not by either lens.
     ("cat .env; ls", 2),
-    ("cd secrets; cat prod.yaml", 2),
-    ("tar cf /tmp/s.tar secrets", 2),        # [lens A F6] bare directory
     # -- [lens A F8] rc=0 at v2.6.0: intra-token quoting and backslash
     # escapes did not survive a one-deep quote strip.
     ("cat .en''v", 2),
@@ -621,6 +639,48 @@ SECRETS_BASH = [
     ('git commit -m "fix the .env loader"', 0),
     ('git commit -m "docs: describe secrets/README"', 0),
     ('git commit -m "rotate the deploy.pem we ship"', 0),
+    # -- v2.6.2 [round-2 review]. The v2.6.1 fix for lens A F6 (a bare
+    # directory name should match its own `dir/**` pattern) was applied to
+    # EVERY candidate, so any token equal to a never-read directory stem
+    # blocked - reintroducing lens B finding 4's failure mode through a
+    # different door, in the gate that has no override path. The F6 arm now
+    # applies to structured path PARAMETERS only, where a bare directory
+    # name is unambiguously a path; a bare word in a shell command is not.
+    ("echo secrets", 0),
+    ("grep secrets README.md", 0),
+    ("git commit -m secrets", 0),
+    ("cat notes/secrets-plan.md", 0),
+    # THE COST, STATED RATHER THAN HIDDEN. These two were blocked at v2.6.1
+    # and are allowed again. That is a real loss and it is the reason this
+    # row is here instead of quietly deleted from the `2` set above.
+    #
+    # The judgement: a bare token equal to a directory stem is a path in
+    # `cd secrets` and prose in `git commit -m secrets`, and nothing in a
+    # token stream distinguishes them - the gate does not track argument
+    # position, deliberately. So the choice is which error to pay. The
+    # over-match is paid on ordinary work in EVERY session, in the one gate
+    # with no override path, and lens B finding 4 is the record of what that
+    # does. The under-match is paid only against an agent already moving a
+    # directory wholesale - which has other routes the deny-list never
+    # covered anyway (`cp -r secrets /tmp/x`, then read the copy). A
+    # tripwire that fires on prose gets deleted; a tripwire with a known
+    # gap stays installed. Recorded as docs/deferred-backlog.md J-14.
+    ("cd secrets; cat prod.yaml", 0),
+    ("tar cf /tmp/s.tar secrets", 0),
+    # ...and the Bash surface still blocks anything that names a real path
+    # under the directory, by the ordinary anchored rule. This is what keeps
+    # the relaxation narrow: only the BARE stem is allowed through.
+    ("grep -r . secrets/", 2),
+    ("cd secrets/prod; cat x", 2),
+    ("tar cf /tmp/s.tar secrets/", 2),
+    ("cp secrets/prod.yaml /tmp", 2),
+    # -- v2.6.2. An unbalanced quote made the SDK's shlex fallback keep the
+    # quote glued to the token, so `cat "secrets/prod.yaml` was ALLOWED on
+    # that substrate while the shell blocked it - a fail-open in the
+    # fallback whose own comment promised "a parse failure must not become
+    # an allow". Pinned on both substrates by the differential suite too.
+    ('cat "secrets/prod.yaml', 2),
+    ("cat '.env", 2),
     # [lens B finding 4] rc=2 at v2.6.0 on BOTH surfaces. The dotenv
     # TEMPLATE names are conventionally secret-free and committed to every
     # repo that uses dotenv; blocking them blocks a file whose entire

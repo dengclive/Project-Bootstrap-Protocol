@@ -109,7 +109,7 @@ Required outputs:
 
 Required hooks per archetype (filtered per R8.A — see §R8.A.3 for the archetype-conditional matrix):
 
-- ✓ **Always recommended (BOOTSTRAP Phase 6 `(all)`):** spec gate (entry+commit), secrets gate, test gate, format/lint, cost log, dependency gate, drift detector, task-done alarm, decision-required alarm.
+- ✓ **Always recommended (BOOTSTRAP Phase 6 `(all)`):** spec gate (entry+commit), secrets gate, test gate, format/lint, session-event log, dependency gate, drift detector, task-done alarm, decision-required alarm.
   - ✓\* **Test gate — INTENTIONAL VARIATION (brownfield grandfather):** always installed; modules listed in `inventory/testing.md` as having no tests are exempted via the runtime grandfather list (new modules unaffected). A no-test-framework project records this as ✓\* in `tech.md`, **not** as a silently dropped hook. Skip the script body entirely only if no test framework exists at all (rare; `debt.md` entry).
   - **Dependency gate:** always recommended; skip only if R5.5 deps was skipped for a stdlib-only project (BOOTSTRAP's sole carve-out), not by archetype.
 - ✓ **CI mirror:** recommended whenever CI exists (mirrors BOOTSTRAP's `(all *with CI*)`); skipped when R8.F is opt-out (no CI to mirror). This conditionality is BOOTSTRAP-faithful, not a re-tier.
@@ -1129,7 +1129,7 @@ The sub-phase ordering aligns with BOOTSTRAP's ordering (5 → 6 → 6.5 → 7 �
 ### A.1 — Caveats (same as BOOTSTRAP §6.A)
 
 - Hooks run per-tool-call, not per-task.
-- Hooks may not have direct access to model token counts; cost log is session-end summary.
+- Hooks may not have direct access to model token counts; the session-event log is a session-end record and carries NO cost figure. **[Corrected 2026-07-29, upstream P3 — the retrofit twin of the same correction made in BOOTSTRAP §6.A.]** The artifact is `.claude/logs/session-events.jsonl` (was `cost.jsonl`) and each line is `{"event","session_id","ts"}`. Cost belongs to the telemetry surface.
 - Hooks can be disabled by renaming `.claude/settings.json` to `.disabled`.
 - **Don't block file writes mid-plan.** Spec gate is split into entry-warn + commit-block per BOOTSTRAP §6.A. Secrets are the only mid-plan exception.
 - **Never `async: true` on a hook whose exit code matters.** An async hook **cannot block a tool call** and its stderr is suppressed, so a slow gate made async is a no-op that prints nothing — `test-gate` printed "Commit blocked" and the commit went through. Give slow hooks an explicit `timeout` instead (the emitted `settings.json` carries 600 s / 900 s / 120 s for `test-gate` / `ci-mirror` / `format-lint-gate`). **[Corrected 2026-07-28, upstream P1-1.]** This section previously carried the pre-fix recommendation verbatim while the BOOTSTRAP §6.A section it claims to mirror had already been corrected; retrofit installs share `_settings_json`, so it also misdescribed the emitted config.
@@ -1163,7 +1163,7 @@ The sub-phase ordering aligns with BOOTSTRAP's ordering (5 → 6 → 6.5 → 7 �
 
    - **Format/lint gate** — `PostToolUse` on Write/Edit. **Retrofit adjustment: warning mode for the first week.** Existing code may not pass current lint config. After a week, the operator can flip to blocking via `.claude/hooks/lint-mode` (`warn` or `block`). Default is `warn` for retrofit; `block` for greenfield.
 
-   - **Cost log** — session-end summary. Same as BOOTSTRAP.
+   - **Session-event log** — session-end record. Same as BOOTSTRAP. **[Corrected 2026-07-29, upstream P3.]** Emits `.claude/logs/session-events.jsonl`; the old `cost.jsonl` name promised a cost figure the `Stop` payload does not carry.
 
    - **Drift detector** — soft notice for tiers 1–2; **hard block for tier 3**. Same as BOOTSTRAP (tier-3 enforcement is standard as of the BOOTSTRAP v1.9.0 this protocol targets; see BOOTSTRAP Phase 6 §6.D/§6.E). One of three audio alert categories — see A.5.
 

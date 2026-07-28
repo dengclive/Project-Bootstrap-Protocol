@@ -1,5 +1,115 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — round-2 review of the fix batch (2026-07-29)
+
+**Three consecutive fix commits have now introduced a defect into the class
+they were fixing.** `0ec72d0` introduced F1/F2/F5 while fixing the upstream
+report. `4cc9742` shipped a stronger laundering primitive than the bug it
+replaced. And the batch below (`311bd67`) shipped a **fail-open** and a
+**false positive** of its own. Every one of them landed on a fully green
+suite.
+
+This round was not planned. Three independent lenses were run at the
+*handoff prompt* for the next review, before it was handed off; two of them
+went past the prompt to the commit and found the defects. The lesson worth
+keeping is the one that generalises: **a rule verified against one witness is
+verified against one witness.** The commit message for `311bd67` asserted that
+a short flag "can never swallow a package name" on the strength of a single
+example, and that assertion was false for four real registry packages.
+
+### Fixed — two of these were live fail-opens
+
+- **`dependency-gate` FAIL-OPEN.** The value-shaped-flag inversion — *"a flag
+  consumes the following token only if that token is value-shaped"* — counted
+  `[0-9]*` and `*=*` as value-shaped. So after any of ~60 flags, a package
+  name that merely **starts with a digit** or carries a **version pin** was
+  swallowed and installed unapproved:
+  `npm install -f 7zip-bin`, `npm install -p 0x`, `npm i -w 2to3`,
+  `pip install -f evil==1.0`, `pip install -i evil>=2` — all `rc=0`, all real
+  registry packages, on **both** substrates. Value-shape is now a URL, a
+  `:spec:`, a path, a `key=value` carrying **no** version-comparison
+  operator, or a bare digits-and-dots version. `==`, `>=`, `<=`, `~=` and
+  `!=` are pip's own package syntax and are tested first, before the
+  `key=value` arm they all contain.
+- **`secrets-gate` FALSE POSITIVE — lens B finding 4's failure mode,
+  reintroduced by its own fix.** The lens A F6 repair (a bare directory name
+  should match its own `dir/**` pattern) was applied to every candidate, so
+  **any token equal to a never-read directory stem blocked**:
+  `grep secrets README.md`, `git commit -m secrets`, `echo secrets` all
+  `rc=2` — in the one gate with no override path, which is precisely the
+  pressure the previous round documented. The arm is now scoped to
+  **structured path parameters** (`file_path`, `notebook_path`, `path`,
+  `pattern`), where a bare directory name is unambiguously a path; a bare
+  word in a shell command is not. F6's finding as executed —
+  `Grep{"path":"secrets"}` returning file contents — stays fixed.
+- **SDK fail-open on an unbalanced quote.** `shlex.split` raises, and the
+  fallback split kept the quote glued to the token, so
+  `cat "secrets/prod.yaml` was **allowed** on the SDK while the shell blocked
+  it — in the fallback whose own comment promises *"a parse failure must not
+  become an allow"*. It now also emits the quote-stripped form.
+- **SDK reason strings violated seam §3.3.** `_scan_install_line` folded its
+  three non-package refusals into the package-**name** string, so a
+  package-index override, a piped remote script and an unverifiable
+  requirements file all denied with *"not in deps.md approved list:
+  `<package-index-override>`"* and advised the operator to add that literal
+  to `deps.md` — advice that cannot work, for a refusal that has nothing to
+  do with the approved list. Each now carries the shell's own explanation.
+- **`secrets-gate` had no timeout.** It was the only `PreToolUse` gate
+  without one, while being the one that runs on every `Bash` call *and* every
+  file tool, and its pure-bash tokenizer is superlinear in command length
+  (measured on the emitted hook: 0.29 s / 1.38 s / **6.01 s** at 100 / 500 /
+  2000 lines). Now 60 s. A `PreToolUse` timeout fails closed at the seam's
+  runtime floor, so this bounds the hot path in the safe direction.
+- **`RETROFIT.md` cost-log twin.** `:112`, `:1132` and `:1166` still named
+  the `cost log` / `cost.jsonl` artifact after P3 renamed it
+  `session-events.jsonl`. The same commit that fixed *"P1-1 surviving in the
+  retrofit twin"* left P3's twin standing.
+
+### Newly allowed, and why — `docs/deferred-backlog.md` J-14
+
+Scoping the bare-directory arm to structured parameters means the **bare
+stem** is allowed again on the Bash surface: `cd secrets; cat prod.yaml` and
+`tar cf /tmp/s.tar secrets` were blocked at `311bd67` and are not now. That is
+a real loss, stated here rather than deleted from the invariant matrix.
+
+The judgement: nothing in a token stream distinguishes the path in
+`cd secrets` from the prose in `git commit -m secrets`, because the gate does
+not track argument position — deliberately. So the choice is which error to
+pay. The over-match is paid on ordinary work in **every session**; the
+under-match is paid only against an agent already moving a directory
+wholesale, which has routes the deny-list never covered anyway (`cp -r
+secrets /tmp/x`, then read the copy). A tripwire that fires on prose gets
+deleted; a tripwire with a known gap stays installed. Anything naming a path
+*under* the directory still blocks, which is what keeps the relaxation narrow.
+
+### Testing
+
+Every defect above is pinned as a regression case on both substrates, and two
+structural gaps in the round-1 suite are closed:
+
+- `tests/test_substrate_differential.py` compared **verdicts only**, so it
+  structurally could not see the reason-string divergence. It now asserts the
+  reason for each of `dependency-gate`'s three non-package refusals against
+  both substrates — the seam §3.3 obligation had no test at all.
+- Its corpus had **no unbalanced-quote case**, which is why the SDK fail-open
+  passed it. Added, along with the digit-initial and version-pinned package
+  names that defeated the value-flag inversion.
+- `tests/test_sdk_gates.py`'s requirements-file check asserted the literal
+  `requirements-file` appeared *anywhere in the deny dict* — which it did, as
+  the sentinel. It passed on a reason that named a sentinel as a package.
+
+Suite 1400 → **1441 checks across 17 suites**, 0 failed.
+
+**Golden re-baseline: freeze-exception no. 20.** Exactly four emitted files
+move, identically on all three fixtures: `dependency-gate.sh`,
+`secrets-gate.sh`, `sdk_gates/gates.py`, `settings.json`. Action counts
+unchanged at 57/69/59, zero added, zero removed, zero frozen twins moved
+(verified by a body diff against `311bd67`). `settings.json` moves on all
+three this time — unlike no. 19, where it moved on `full_autonomous` only —
+because the new `secrets-gate` timeout is unconditional while the eval-marker
+denies were archetype-gated. No `PROTOCOL_VERSION` bump: same reasoning as
+no. 18 and no. 19, and 2.6.0 is still unreleased.
+
 ## 2.6.0 in-version fix — two-lens adversarial-review batch (2026-07-28)
 
 Sources: `docs/lens-a-execution-findings-2026-07-28.md` (F1–F10, execution:

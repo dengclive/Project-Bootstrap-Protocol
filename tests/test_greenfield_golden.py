@@ -535,8 +535,57 @@ EXPECTED_DIGESTS = {
     # unreleased (the only tag is v2.5.0, 2026-07-27, an ancestor of HEAD),
     # so the defects never shipped under a version number and are fixed in
     # place. The §8.4 trigger walk is recorded in docs/changelog.md.
+    #
+    # [freeze-exception no. 20 - round-2 review of the no. 19 batch,
+    # 2026-07-29] Three independent lenses were run at the no. 19 HANDOFF
+    # PROMPT before it was handed off; two of them went past the prompt to
+    # the commit and found that no. 19 had shipped a fail-open and a
+    # false-positive of its own. That makes THREE consecutive fix commits
+    # that introduced a defect into the class they were fixing. Exactly FOUR
+    # emitted files move, identically on all three fixtures - action counts
+    # unchanged at 57/69/59, zero added, zero removed, zero frozen twins
+    # moved (verified by a body diff against 311bd67, not asserted):
+    #   .claude/hooks/dependency-gate.sh, .claude/hooks/secrets-gate.sh,
+    #   .claude/sdk_gates/gates.py, .claude/settings.json
+    # settings.json moves on ALL THREE this time (unlike no. 19, where it
+    # moved on full_autonomous only) because the new secrets-gate timeout is
+    # unconditional while the eval-marker denies were archetype-gated.
+    #
+    #   1. dependency-gate FAIL-OPEN. no. 19's "a flag consumes its value
+    #      only when the value is value-SHAPED" inversion counted `[0-9]*`
+    #      and `*=*` as value-shaped, so a package name starting with a
+    #      digit (`7zip-bin`, `0x`, `2to3`) or carrying a version pin
+    #      (`evil==1.0`) was swallowed after any of ~60 flags and installed
+    #      unapproved. no. 19's commit message claimed a short flag "can
+    #      never swallow a package name" - true only of `evil`, its one
+    #      witness. Value-shape is now a URL, a `:spec:`, a path, a
+    #      key=value with NO version-comparison operator, or a bare
+    #      digits-and-dots version.
+    #   2. secrets-gate FALSE POSITIVE. no. 19's fix for lens A F6 (a bare
+    #      directory name should match its own `dir/**` pattern) applied to
+    #      every candidate, so any token equal to a never-read directory
+    #      stem blocked: `grep secrets README.md`, `git commit -m secrets`,
+    #      `echo secrets`. That is lens B finding 4's failure mode - the one
+    #      no. 19 existed to fix - returning through a different door, in
+    #      the gate with no override path. The arm is now scoped to
+    #      STRUCTURED path parameters, where a bare directory name is
+    #      unambiguously a path. Cost: the bare stem is allowed again on the
+    #      Bash surface (docs/deferred-backlog.md J-14).
+    #   3. sdk_gates/gates.py: the unbalanced-quote fallback kept the quote
+    #      glued to the token, so `cat "secrets/prod.yaml` was ALLOWED on
+    #      the SDK while the shell blocked it - a fail-open in the fallback
+    #      whose own comment promised "a parse failure must not become an
+    #      allow". Plus real reason strings for dependency-gate's three
+    #      non-package refusals, which had all been rendering as
+    #      "not in deps.md approved list: <sentinel>" with advice that
+    #      cannot work (SEAM-CONTRACT §3.3 semantic equivalence).
+    #   4. settings.json: secrets-gate gains an explicit 60 s timeout. It
+    #      was the ONLY PreToolUse gate with no bound while being the one
+    #      that runs on every Bash call, and its tokenizer is superlinear
+    #      (0.29/1.38/6.01 s at 100/500/2000 lines). A PreToolUse timeout
+    #      fails closed, so this bounds it in the safe direction.
     "default":
-        "919223e4a62fd64b5e2ccbad46bbfafb2e8db3010fec825cb687aaee393b60ea",
+        "0ee3d342842823248c2f09e9f50e0a701289e5aed6b9d8a7aaf7b7c24bd10c25",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -600,7 +649,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "3fc44c6f4b40595aad174f6108b48d32822c28f69a30f4495b5ac816bf9984b6",
+        "afa51e7840cb87092eb93344ec698beb1bb08a145e3ac31ea5a12f295ac3ed7b",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -669,7 +718,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "006b263d8a3f0042e31b3df8dfd960690aab36e8efdddd40fe6821726d915d57",
+        "1b189e2d9abbdd98c443587c0a7abd89f749a38b3f1073c1f1a9a6459437ba30",
 }
 
 EXPECTED_ACTION_COUNTS = {

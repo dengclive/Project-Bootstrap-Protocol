@@ -780,7 +780,11 @@ exit 0
 #   * Grep and Glob supply `path`/`pattern` and were unmatched entirely.
 #   * Bash supplies `command`; every never-read path was reachable through a
 #     shell call. Each ARGUMENT of the command is checked as a candidate path.
+# Structured path parameters and Bash-derived tokens are kept APART, because
+# one thing is decided differently for each: whether a bare directory NAME
+# counts as naming the directory. See the $_dir_ok discussion below.
 CANDIDATES=()
+CMD_CANDIDATES=()
 for _k in file_path notebook_path path pattern; do
   _v="$(jget ".tool_input.$_k")"
   [ -n "$_v" ] && CANDIDATES+=("$_v")
@@ -817,12 +821,12 @@ done
 _sg_push(){{
   local _lhs
   if [ -n "$_CUR" ]; then
-    CANDIDATES+=("$_CUR")
+    CMD_CANDIDATES+=("$_CUR")
     # A backslash escapes the next character, so `cat .en\\v` names `.env`.
     # Emitted as an ADDITIONAL candidate rather than a replacement: deny-list
     # bias is over-match, and a path may legitimately contain a backslash.
     case "$_CUR" in
-      *\\\\*) CANDIDATES+=("${{_CUR//\\\\/}}") ;;
+      *\\\\*) CMD_CANDIDATES+=("${{_CUR//\\\\/}}") ;;
     esac
     # `F=.env; cat $F` hides the path behind an expansion this gate cannot
     # perform, but the ASSIGNMENT is in plain sight. Strictly shaped (a
@@ -832,7 +836,7 @@ _sg_push(){{
         _lhs="${{_CUR%%=*}}"
         case "$_lhs" in
           *[!A-Za-z0-9_]*) ;;
-          *) CANDIDATES+=("${{_CUR#*=}}") ;;
+          *) CMD_CANDIDATES+=("${{_CUR#*=}}") ;;
         esac ;;
     esac
   fi
@@ -888,7 +892,7 @@ if [ -n "$_cmd" ]; then
     _sg_line "$_line"
   done <<< "$_cmd"
 fi
-if [ "${{#CANDIDATES[@]}}" -eq 0 ]; then
+if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
 fi
 # Case-insensitive matching ('.PEM'/'.ENV' are just as sensitive) done with
@@ -906,7 +910,30 @@ shopt -s nocasematch
 mapfile -t PATS <<'PAT_EOF'
 {pat_body}
 PAT_EOF
-for TARGET in "${{CANDIDATES[@]}}"; do
+# Two phases. `path` = the structured tool parameters, where a bare
+# directory name is UNAMBIGUOUSLY a path. `cmd` = tokens recovered from a
+# Bash command string, where it is not.
+#
+# [v2.6.2 - the round-2 review found the F6 fix over-matching.] The
+# bare-directory arm was applied to every candidate, so ANY token equal to a
+# never-read directory stem blocked: `grep secrets README.md`,
+# `git commit -m secrets` and `echo secrets` all exited 2. That is lens B
+# finding 4's failure mode - the one this gate was just fixed for - coming
+# back through a different door, in the one gate with no override path.
+#
+# F6's finding as EXECUTED was `Grep{{"path":"secrets"}}` returning matching
+# file contents: a structured path parameter, where the fix stays. A bare
+# word in a shell command is not a path, so on that surface the arm is off,
+# and `secrets/anything` still blocks there by the ordinary anchored rule.
+# The residue - `tar cf /tmp/s.tar secrets` - is recorded as J-14 rather
+# than paid for with a false positive on ordinary prose.
+for _phase in path cmd; do
+if [ "$_phase" = "path" ]; then
+  _LIST=(${{CANDIDATES[@]+"${{CANDIDATES[@]}}"}}); _dir_ok=1
+else
+  _LIST=(${{CMD_CANDIDATES[@]+"${{CMD_CANDIDATES[@]}}"}}); _dir_ok=0
+fi
+for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
   base="$(basename -- "$TARGET" 2>/dev/null || printf '%s' "$TARGET")"
   # [lens B finding 4, THE ONE DELIBERATE RELAXATION IN THIS GATE] The
   # dotenv TEMPLATE names are conventionally secret-free and committed to
@@ -970,7 +997,7 @@ for TARGET in "${{CANDIDATES[@]}}"; do
       case "$base" in
         $cpat) _hit=1 ;; *) _hit=0 ;;
       esac
-      if [ "$_hit" = "0" ] && [ -n "$dstem" ]; then
+      if [ "$_hit" = "0" ] && [ -n "$dstem" ] && [ "$_dir_ok" = "1" ]; then
         case "$base" in $dstem) _hit=1 ;; esac
       fi
     fi
@@ -986,7 +1013,7 @@ for TARGET in "${{CANDIDATES[@]}}"; do
       case "$TARGET" in
         $cpat|*/$cpat) _hit=1 ;; *) _hit=0 ;;
       esac
-      if [ "$_hit" = "0" ] && [ -n "$dstem" ]; then
+      if [ "$_hit" = "0" ] && [ -n "$dstem" ] && [ "$_dir_ok" = "1" ]; then
         case "$TARGET" in $dstem|*/$dstem) _hit=1 ;; esac
       fi
     fi
@@ -995,6 +1022,7 @@ for TARGET in "${{CANDIDATES[@]}}"; do
       log "secrets-gate BLOCK $TARGET"; exit 2
     fi
   done
+done
 done
 log "secrets-gate ok"
 exit 0
@@ -1263,10 +1291,34 @@ blocked=""
 # That inversion is what makes it safe to include short flags whose meaning
 # differs by ecosystem - `npm install -d evil` and `npm i -f evil` must still
 # block `evil`, and they do, because `evil` is package-shaped.
+# [v2.6.2 - the round-2 review found this inversion FAILING OPEN, which is
+# the second time this exact spot has shipped a hole.] The first version
+# treated `[0-9]*` and `*=*` as value-shaped. Both are far too broad:
+#   npm install -f 7zip-bin   -> `7zip-bin` starts with a digit  -> swallowed
+#   npm install -p 0x         -> so does `0x`                    -> swallowed
+#   npm i -w 2to3             -> and `2to3`                      -> swallowed
+#   pip install -f evil==1.0  -> a VERSION PIN contains `=`       -> swallowed
+# All four are real registry packages, and all four installed unapproved.
+# The commit that introduced the inversion claimed "a short flag can never
+# swallow a package name"; that was true only of the one example tested
+# (`evil`), which happens to be neither digit-initial nor version-pinned.
+#
+# A token is the flag's VALUE only when it could not be a package name:
+#   * a URL, or a `:all:`-style spec, or a filesystem path;
+#   * a BARE VERSION NUMBER - digits and dots only, so `3.11` yes,
+#     `7zip-bin` / `0x` / `2to3` no;
+#   * a `key=value` setting that carries NO version-comparison operator -
+#     `evil==1.0`, `evil>=1`, `evil~=2` are pip's own package syntax and
+#     must stay package-shaped.
 is_flag_value(){{
   case "$1" in
-    ""|*://*|:*|.|./*|../*|/*|~*|*=*|[0-9]*) return 0 ;;
-    *) return 1 ;;
+    ""|*://*|:*|.|./*|../*|/*|~*) return 0 ;;
+    # A version specifier means the token NAMES A PACKAGE. Checked before
+    # the `key=value` arm, because `==` `>=` `<=` `~=` `!=` all contain `=`.
+    *==*|*'>='*|*'<='*|*'~='*|*'!='*|*'<'*|*'>'*) return 1 ;;
+    *=*) return 0 ;;
+    *[!0-9.]*) return 1 ;;          # not a bare version number
+    *) return 0 ;;
   esac
 }}
 while IFS= read -r nseg; do
@@ -1584,6 +1636,16 @@ HOOK_EXTRA_EVENTS = {
 TIMEOUTS = {
     "test-gate": 600,
     "ci-mirror": 900,
+    # [v2.6.2, round-2 review] secrets-gate was the ONLY PreToolUse gate with
+    # no bound, and it is the one that runs on every Bash call as well as
+    # every file tool - the hottest matcher in a session. Its pure-bash
+    # tokenizer is superlinear in command length (measured on the emitted
+    # hook: 0.29 s / 1.38 s / 6.01 s at 100 / 500 / 2000 lines), so an
+    # unusually large command had no ceiling at all. A PreToolUse timeout
+    # fails CLOSED at the seam's runtime floor, so this is a bound in the
+    # safe direction: a pathological command is refused, never allowed.
+    # 60 s is far above any real command and far below a stalled session.
+    "secrets-gate": 60,
     # PostToolUse and advisory, so async was defensible - except async also
     # suppresses stderr, which IS this hook's entire output. Synchronous with
     # a short timeout is what makes its feedback reach the model at all.

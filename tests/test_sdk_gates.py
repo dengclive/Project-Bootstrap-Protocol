@@ -273,8 +273,18 @@ check("AC-7-1 deps: approved packages allowed", r == {})
 r = run_gate("dependency-gate",
              {"tool_input": {"command":
                              "pip install -r requirements.txt"}})
+# [v2.6.2] This used to assert the literal `requirements-file` appeared
+# anywhere in the deny dict -- which it did, as the SENTINEL
+# `<unverifiable-requirements-file>` folded into the package-NAME string, so
+# the operator was told "not in deps.md approved list:
+# <unverifiable-requirements-file> / Approve in-session and update deps.md".
+# The assertion passed on a reason that named a sentinel as a package and
+# gave advice that cannot work. SEAM-CONTRACT §3.3 requires reasons
+# "semantically equivalent to the shell gates'"; assert that instead.
 check("AC-7-1 deps: a requirements FILE is unverifiable -> denied (P1-3)",
-      r != {} and "requirements-file" in json.dumps(r), repr(r))
+      is_deny(r)
+      and "cannot verify packages listed in a file" in deny_reason(r)
+      and "approved list" not in deny_reason(r), repr(r))
 # Anchoring: the verb must be at command position, not merely present.
 for _cmd, _want_denied in (
         ("npm  install evil", True),
