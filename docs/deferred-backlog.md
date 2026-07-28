@@ -152,6 +152,7 @@ recorded so they are not re-derived as new findings.
 | J-4 | Report acceptance criterion 6 — **a tagged release**. Still zero tags in this repo. Criterion 7 (re-run the two executing lenses against a fresh install of the FIXED version) is deliberately left to an independent reviewer | `open` — the release blocker |
 | J-5 | `permissions.deny` rules are emitted from `never_read_paths` verbatim. Claude Code's permission-rule glob dialect is not necessarily identical to the hook's `case` dialect; the deny list is defence in depth, and the hook remains the enforcement point | `decision` — verify the dialect against a live harness |
 | J-6 | `cost.jsonl` → `session-events.jsonl` is a rename of an emitted artifact. Anything downstream reading the old path breaks. Judged safe (it recorded no cost) but it is a consumer-visible rename inside a MINOR | `no-action` |
+| J-7 | **`dependency-gate` segments on separators inside quoted strings.** The finding-1 fix splits the command on newlines and `;&\|` and judges each segment on its own; a separator inside a quoted argument therefore starts a new segment, so `git commit -m "fix; npm install evil"` blocks. Deny-list bias is over-match (the same call the secrets-gate patterns make), and the message names the token, so the cause is legible. The obvious mitigation — skip segments with an unbalanced quote — fixes it in the **fail-open** direction and was declined | `no-action` — recorded trade-off, revisit only with a real operator report |
 
 ## Priority reading
 

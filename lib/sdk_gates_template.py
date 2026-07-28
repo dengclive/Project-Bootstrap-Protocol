@@ -273,10 +273,22 @@ def _git_verb(cmd, verb):
 _TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
           r"|composer|mix|rebar3|gleam|go|deno")
 _VERBS = r"install|i|add|get|require|get-deps|deps\\.get"
-_INSTALL_VERBS = re.compile(
-    r"(?:^|[;&|(])\\s*(?:env\\s+)?"
-    r"(?:python[0-9.]*\\s+-m\\s+pip\\s+install|(?:" + _TOOLS + r")\\s+(?:"
-    + _VERBS + r"))(?:\\s|$)")
+# Command-position prefixes that do not change WHICH program runs, so the
+# install verb is still the verb: `env`/`sudo` with their own flags, and one
+# or more VAR=value assignment runs. Shell parity (the shell gate's PFX).
+_PREFIX = r"(?:(?:env|sudo)(?:\\s+-\\S+)*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*"
+# An install invocation at the START of a segment - not merely present
+# somewhere in it. The tool may carry a path (`/usr/bin/pip install`);
+# `python -m pip install` and `uv pip install` are spelled out because the
+# token at command position is not the installer. Shell parity (HEAD).
+_INSTALL_HEAD = re.compile(
+    r"^\\s*" + _PREFIX
+    + r"(?:python[0-9.]*\\s+-m\\s+pip\\s+install"
+      r"|(?:\\S*/)?uv\\s+pip\\s+install"
+      r"|(?:\\S*/)?(?:" + _TOOLS + r")\\s+(?:" + _VERBS + r"))(?:\\s|$)")
+# Shell separators. A line is split into segments and each is judged on its
+# own; see _scan_install_line.
+_SEGMENT = re.compile(r"[;&|]")
 # Remote-script execution: same "unapproved software arrives" class, with no
 # inspectable package name, so it is always denied (shell parity).
 _PIPE_TO_SHELL = re.compile(
@@ -327,37 +339,48 @@ def _scan_install_line(line, approved):
     # Returns a space-prefixed string of unapproved package names on this
     # single command line (empty if none / not an install command).
     norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
+    # Checked on the WHOLE line and BEFORE segmenting: the pattern
+    # deliberately reads across a pipe. Shell parity.
     if _PIPE_TO_SHELL.search(norm):
         return " <piped-remote-script>"
-    m = _INSTALL_VERBS.search(norm)
-    if not m:
-        return ""
-    # Stop at the next command separator: a following `&& something` is not
-    # a package list. A verb with no arguments is a lockfile restore
-    # (`npm install`), not an install of anything to approve. Shell parity.
-    rest = re.split(r"[;&|]", norm[m.end():], maxsplit=1)[0]
-    if not rest.strip():
-        return ""
+    # SEGMENT FIRST, then judge each segment on its own. Searching the line
+    # for ONE install invocation failed in both directions: `.search()` found
+    # the FIRST, so `npm install requests && npm install evil` inspected only
+    # `requests` and allowed - while the shell's greedy sed found the LAST and
+    # allowed the mirror case. Neither substrate was safe on `A && B`. Making
+    # the verdict the OR over segments fixes both and is what a deny-list
+    # wants. Shell parity.
     blocked = ""
-    skip_next = False
-    for tok in rest.split():
-        if skip_next:
-            skip_next = False
+    for seg in _SEGMENT.split(norm):
+        seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
+        m = _INSTALL_HEAD.match(seg)
+        if not m:
             continue
-        if tok in ("-r", "--requirement", "-c", "--constraint"):
-            # Packages listed in a FILE are invisible to the gate; allowing
-            # them would defeat it entirely. Shell parity.
-            return " <unverifiable-requirements-file>"
-        if tok in _VALUE_FLAGS:
-            skip_next = True
+        rest = seg[m.end():]
+        # A verb with no arguments is a lockfile restore (`npm install`), not
+        # an install of anything to approve - but that is a fact about THIS
+        # invocation, never about the line. Shell parity.
+        if not rest.strip():
             continue
-        if tok == "." or tok.startswith(("./", "/", "../")):
-            continue                      # local path install, not a registry
-        if tok.startswith("-"):
-            continue
-        name_only = _pkg_name(tok)
-        if name_only and name_only not in approved:
-            blocked += " " + name_only
+        skip_next = False
+        for tok in rest.split():
+            if skip_next:
+                skip_next = False
+                continue
+            if tok in ("-r", "--requirement", "-c", "--constraint"):
+                # Packages listed in a FILE are invisible to the gate;
+                # allowing them would defeat it entirely. Shell parity.
+                return " <unverifiable-requirements-file>"
+            if tok in _VALUE_FLAGS:
+                skip_next = True
+                continue
+            if tok == "." or tok.startswith(("./", "/", "../")):
+                continue                  # local path install, not a registry
+            if tok.startswith("-"):
+                continue
+            name_only = _pkg_name(tok)
+            if name_only and name_only not in approved:
+                blocked += " " + name_only
     return blocked
 
 

@@ -972,7 +972,9 @@ pkg_name(){{
 }}
 
 # Remote-script execution is the same "unapproved software arrives" class the
-# gate exists for, and no package name is inspectable. Always block.
+# gate exists for, and no package name is inspectable. Always block. Checked
+# on the WHOLE command and BEFORE segmenting, because the pattern
+# deliberately reads across a pipe.
 if printf '%s' "$NCMD" \\
    | grep -qE '(curl|wget)[^;&|]*\\|[[:space:]]*(sudo +)?(sh|bash|zsh|python3?|perl|ruby)( |$)'; then
   echo "Dependency gate: piping a downloaded script into a shell is blocked." >&2
@@ -980,20 +982,55 @@ if printf '%s' "$NCMD" \\
   exit 2
 fi
 
-TOOLS='(npm|pnpm|yarn|bun|pip|pip3|pipx|poetry|uv|pipenv|cargo|gem|composer|mix|rebar3|gleam|go|deno)'
+TOOLS='(npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem|composer|mix|rebar3|gleam|go|deno)'
 VERBS='(install|i|add|get|require|get-deps|deps\\.get)'
-if printf '%s' "$NCMD" | grep -qE "(^|[;&|(]) *(env +)?$TOOLS +$VERBS( |\\$)"; then
-  # Take the argument list belonging to THIS verb only - never a chain of
-  # unconditional strips - and stop at the next command separator so a
-  # following `&& something` is not treated as packages.
-  rest="$(printf '%s' "$NCMD" \\
-    | sed -E "s/.*(^|[;&|(]) *(env +)?$TOOLS +$VERBS +//; s/[;&|].*//")"
+# Command-position prefixes that do not change WHICH program runs, so the
+# install verb is still the verb: `env`/`sudo` with their own flags, and one
+# or more VAR=value assignment runs [v2.6.1 defect 1c - the v2.6.0 anchor
+# admitted only a literal `env `, so `sudo pip install evil`,
+# `FOO=1 npm install evil` and `uv pip install evil` all sailed through,
+# every one of which the v2.5.0 substring match had caught].
+PFX='((env|sudo)( +-[^ ]+)* +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
+# An install invocation at the START of a segment. The tool may carry a path
+# (`/usr/bin/pip install`); `python -m pip install` and `uv pip install` are
+# spelled out because the token at command position is not the installer.
+HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
+
+# SEGMENT FIRST, then judge each segment on its own [v2.6.1 defects 1a/1b].
+# v2.6.0 searched the whole line for ONE install invocation and got both
+# halves wrong:
+#   1a. The extraction sed's leading `.*` is greedy, so it anchored on the
+#       LAST verb on the line - `npm install evil && npm install requests`
+#       scanned only `requests` and exited 0.
+#   1b. The lockfile-restore guard asked "does the COMMAND LINE end in a bare
+#       verb", not "does THIS invocation have no arguments" - so a trailing
+#       `&& npm install`, `; cargo add`, or even the comment `# npm install`
+#       blanked the package list and nothing was inspected at all.
+# Splitting on separators first makes the verdict the OR over segments, which
+# is what a deny-list wants, and makes "no arguments" a per-invocation fact.
+# Newlines are separators too: `norm_cmd` collapses them into spaces, so
+# without this a second line was never at command position.
+# Pure bash - no external binary, so this cannot degrade if `tr` is missing.
+#
+# KNOWN AND ACCEPTED: a separator inside a quoted string starts a new segment,
+# so `git commit -m "fix; npm install evil"` blocks. Deny-list bias is
+# over-match (the same call the secrets-gate patterns make); skipping
+# odd-quote segments would fix it in the FAIL-OPEN direction, so it is not
+# done. The message names the token, so the cause is legible.
+blocked=""
+segs="${{CMD//;/$'\\n'}}"
+segs="${{segs//&/$'\\n'}}"
+segs="${{segs//|/$'\\n'}}"
+while IFS= read -r seg; do
+  nseg="$(norm_cmd "$seg")"
+  nseg="${{nseg%% \\#*}}"                   # a trailing comment is not a command
+  printf '%s' "$nseg" | grep -qE "$HEAD" || continue
+  # Arguments belonging to THIS segment's verb, and nothing else.
+  rest="$(printf '%s' "$nseg" | sed -E "s@$HEAD@ @")"
   # A verb with no arguments is a lockfile restore (`npm install`,
-  # `mix deps.get`, `cargo add` alone). Nothing to approve; allow.
-  if printf '%s' "$NCMD" | grep -qE "$TOOLS +$VERBS *$"; then
-    rest=""
-  fi
-  blocked=""
+  # `mix deps.get`, `cargo add` alone). Nothing to approve; allow - but only
+  # this segment, never the line.
+  case "$rest" in *[![:space:]]*) ;; *) continue ;; esac
   set -f                                  # no globbing of package tokens
   read -ra TOKS <<< "$rest"
   set +f
@@ -1020,11 +1057,11 @@ if printf '%s' "$NCMD" | grep -qE "(^|[;&|(]) *(env +)?$TOOLS +$VERBS( |\\$)"; t
       blocked="$blocked $name_only"
     fi
   done
-  if [ -n "$blocked" ]; then
-    echo "Dependency gate: not in deps.md approved list:$blocked" >&2
-    echo "Approve in-session and update .claude/steering/deps.md." >&2
-    exit 2
-  fi
+done <<< "$segs"
+if [ -n "$blocked" ]; then
+  echo "Dependency gate: not in deps.md approved list:$blocked" >&2
+  echo "Approve in-session and update .claude/steering/deps.md." >&2
+  exit 2
 fi
 log "dependency-gate ok"
 exit 0

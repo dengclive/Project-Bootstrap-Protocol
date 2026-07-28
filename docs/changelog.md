@@ -1,5 +1,68 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — `dependency-gate` regressions (2026-07-28)
+
+Source: `docs/lens-b-execution-findings-2026-07-28.md` findings 1 and 2. The
+P1-3 rewrite below introduced three defects into the gate it was fixing. A
+**differential sweep** — the same corpus through the `0ec72d0^` and `0ec72d0`
+hook bodies, flagging every case the old version blocked and the new one
+allowed — confirmed **ten** such commands. All ten now block on both
+substrates.
+
+**No `PROTOCOL_VERSION` bump.** This crosses the "changes whether a gate
+blocks" line that the upstream report sets as the bar for a version decision
+(acceptance criterion 5), but 2.6.0 is **unreleased** — the only tag in the
+repo is `v2.5.0` (2026-07-27, an ancestor of HEAD). The defect never shipped
+under a version number, so it is fixed in place. *(This also corrects the claim
+made in the 2.6.0 entry below that the repo has never had a tag; it has.)*
+
+- **1a — the extraction `sed` was greedy.** Its leading `.*` anchored on the
+  **last** install verb on the line, so an earlier install in a chain was never
+  inspected: `npm install evil && npm install requests` exited 0. The SDK had
+  the mirror defect — `.search()` found the **first** — so the two substrates
+  failed open on opposite halves of `A && B` and neither was safe.
+- **1b — the lockfile-restore guard tested the whole line.** It asked whether
+  the *command line* ended in a bare verb, not whether *this invocation* had no
+  arguments, so a trailing `&& npm install`, `; cargo add` or even the comment
+  `# npm install` blanked the package list and nothing was scanned at all. This
+  is the stronger laundering primitive of the two: it needs no approved package.
+- **1c / finding 2 — the command-position anchor admitted only a literal
+  `env `.** `sudo pip install evil`, `FOO=1 npm install evil`,
+  `uv pip install evil`, `/usr/bin/pip install evil`,
+  `python3 -m pip install evil` and `pip3.11 install evil` all fell outside it;
+  the v2.5.0 substring match had caught the first five.
+
+**The fix is structural, not three regex patches.** All three defects share one
+root: the gate treated a multi-command line as a single string and hunted for
+"the" install command in it. Both substrates now **segment first** — split on
+newlines and `;&|`, then run the anchored head test and token scan on each
+segment independently, making the verdict the OR over segments. That resolves
+1a, 1b and the comment variant together, and makes "no arguments" a
+per-invocation fact rather than a property of the line. The shell does it in
+pure bash (no external binary, so it cannot degrade if `tr` is missing). The
+`curl … | sh` check still runs on the whole command *before* segmenting,
+because that pattern deliberately reads across a pipe. The anchor now admits
+`env`/`sudo` with their own flags, `VAR=value` runs, and a tool path.
+
+**Accepted trade-off, recorded not buried (J-7):** a separator inside a quoted
+string starts a new segment, so `git commit -m "fix; npm install evil"` blocks.
+Deny-list bias is over-match; skipping unbalanced-quote segments would fix it in
+the fail-open direction and was declined.
+
+**Tests.** `tests/test_hook_behavior.py`'s dependency matrix is reframed as an
+**invariant** rather than a case list — *no command a previous version blocked
+may now be allowed, except the deliberate relaxations listed* — because the
+v2.6.0 matrix was written from the upstream report's own examples and was
+therefore structurally blind to what the rewrite broke. Both orderings of the
+chained case are asserted on both substrates. Suite 1202 → **1235 checks**,
+16 suites, 0 failed.
+
+**Golden re-baseline: freeze-exception no. 18.** Exactly two emitted files move
+on all three fixtures — `.claude/hooks/dependency-gate.sh` and
+`.claude/sdk_gates/gates.py`. No shared header, no other gate, no
+`settings.json`, no steering doc, skill, command or agent body; every frozen
+twin stays byte-identical. Verified by differential install, not asserted.
+
 ## 2.5.0 → 2.6.0 (upstream security + gate-behavior fixes)
 
 Source: `docs/bootstrap-protocol-upstream-bugs-2026-07-28.md` — a 6-lens

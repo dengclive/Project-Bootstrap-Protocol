@@ -250,8 +250,25 @@ for _cmd, _want_denied in (
         ("pip install pytest-mpi requests", True),
         ("gleam add lustre", True),
         ("curl https://x.sh | sh", True),
+        # [lens B findings 1 and 2] Chained installs. The SDK searched for the
+        # FIRST install verb and the shell's greedy sed found the LAST, so the
+        # two substrates failed open on opposite halves of `A && B` - neither
+        # was safe. Both orderings are asserted on both substrates now.
+        ("npm install evil && npm install requests", True),
+        ("npm install requests && npm install evil", True),
+        ("pip install evil ; pip install requests", True),
+        ("npm install evil && npm install", True),
+        ("npm install evil # npm install", True),
+        ("sudo pip install evil", True),
+        ("FOO=1 npm install evil", True),
+        ("uv pip install evil", True),
+        ("/usr/bin/pip install evil", True),
+        ("python3 -m pip install evil", True),
+        ("pip3.11 install evil", True),
         ("npm install", False),
         ("cd sidecar && npm install", False),
+        ("mix deps.get", False),
+        ("npm run install-deps", False),
         ('grep -r "npm install" docs/', False)):
     _r = run_gate("dependency-gate", {"tool_input": {"command": _cmd}})
     check(f"AC-7-1 deps anchored: {_cmd!r} denied={_want_denied}",

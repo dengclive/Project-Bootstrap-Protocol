@@ -391,8 +391,53 @@ EXPECTED_DIGESTS = {
     #   6. Disclosure: audio_enabled true -> false, cost.jsonl renamed
     #      session-events.jsonl, .decision-pending swept on a 7-day window
     #      [P3]. sdk_gates/gates.py reconciled to the shell [P2-1/2/3].
+    # [freeze-exception no. 18 - dependency-gate regression fix, 2026-07-28]
+    # Source: docs/lens-b-execution-findings-2026-07-28.md findings 1 and 2.
+    # The v2.6.0 P1-3 rewrite introduced three defects in the gate it was
+    # fixing, and a differential sweep (same corpus through the 0ec72d0^ and
+    # 0ec72d0 hook bodies) confirmed TEN commands that v2.5.0 blocked and
+    # v2.6.0 allowed. Exactly TWO emitted files move, on all three fixtures:
+    #   .claude/hooks/dependency-gate.sh  and  .claude/sdk_gates/gates.py
+    # No shared header, no other gate, no settings.json, no steering doc,
+    # skill, command or agent body - so every frozen twin stays byte-identical
+    # and no §7.4 sentinel carrier or §7.5 skeleton moves. Verified by
+    # differential install, not asserted.
+    #
+    # NO PROTOCOL_VERSION BUMP. This change crosses the "changes whether a
+    # gate blocks" line that the upstream report names as the bar for a bump
+    # (acceptance criterion 5) - but 2.6.0 is UNRELEASED: the only tag in the
+    # repo is v2.5.0 (2026-07-27, an ancestor of HEAD). The defect never
+    # shipped under a version number, so it is fixed in place rather than
+    # bumped past. A bump is owed when 2.6.0 is actually tagged.
+    #
+    # What moved, and why:
+    #   1a. The argument-extraction sed's leading `.*` was greedy, anchoring
+    #       on the LAST install verb on the line, so an earlier install in a
+    #       chain was never inspected. Replaced by segment-first scanning:
+    #       the line is split on newlines and `;&|` (pure bash, no external
+    #       binary) and each segment is judged on its own, making the verdict
+    #       the OR over segments.
+    #   1b. The lockfile-restore guard asked whether the COMMAND LINE ended
+    #       in a bare verb, not whether THIS invocation had no arguments, so
+    #       a trailing `&& npm install`, `; cargo add` or `# npm install`
+    #       blanked the package list entirely. Now a per-segment fact.
+    #   1c. The command-position anchor admitted only a literal `env `, so
+    #       `sudo pip install`, `FOO=1 npm install`, `uv pip install` and
+    #       `/usr/bin/pip install` all fell outside it. Anchor now admits
+    #       env/sudo with their own flags, VAR=value runs, and a tool path.
+    #   2.  `python -m pip install` (the form the Python ecosystem documents
+    #       as canonical) and `pip[0-9.]*` added to the head pattern - the
+    #       SDK already carried both, so this is a port to the canonical
+    #       substrate, not a new rule.
+    # The `curl … | sh` check still runs on the WHOLE command before
+    # segmenting, because that pattern deliberately reads across a pipe.
+    # ACCEPTED TRADE-OFF, recorded not buried: a separator inside a quoted
+    # string now starts a new segment, so `git commit -m "fix; npm install
+    # evil"` blocks. Deny-list bias is over-match; the alternative (skipping
+    # odd-quote segments) fixes it in the FAIL-OPEN direction and was
+    # declined. See docs/deferred-backlog.md J-7.
     "default":
-        "5534c97af10de55188713ccc848a311e9d5f09b3ae030b276b82af7d82e6e1a3",
+        "29a670d01c6046b171086bd9e141af64c1b90422b0cf777d3d99d6d8e866c7ad",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -452,8 +497,11 @@ EXPECTED_DIGESTS = {
     #   (16 files: the 12 shared ones + tdd-gate, eval-gate,
     #   drift-detector-loop-cooperation, iteration-summary-enforcement).
     # [freeze-exception no. 17] same named set as `default` above.
+    # [freeze-exception no. 18] same two files as `default` above
+    # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
+    # fixture carries are untouched.
     "full_autonomous":
-        "158ca45d2cebb6dd174df7621d2c865937dcf42e8e0f1f57b4373630f4c1848e",
+        "4df3da117c2c13092fc0c10917b991164a633c95030247fce67a20b084af5bc5",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -519,8 +567,10 @@ EXPECTED_DIGESTS = {
     #      comments corrected to say so (backlog I-1).
     # [freeze-exception no. 17] same named set; the three design
     # artifacts themselves are UNCHANGED (frozen twins intact).
+    # [freeze-exception no. 18] same two files as `default` above; the three
+    # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "4f387f2a718db2aab7114c68cab8382001d03a5a494a7fc8f5de5c7f499ceb18",
+        "7b5d9144655090d1c16ab5dda76ed145130c2b08778d74c6846bf1ff169833d5",
 }
 
 EXPECTED_ACTION_COUNTS = {
