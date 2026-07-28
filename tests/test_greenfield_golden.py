@@ -357,7 +357,42 @@ EXPECTED_DIGESTS = {
     # digest (off-by-default byte-identity, verified before the bump).
     # [v2.5.0 freeze-exception no. 16] see the design_steering column for the
     # full record; default moves for byte classes 1 and 3 (12 files).
-    "default": "1d39061df9cf6cf17ae682f6ce86acd05a5edbbfc850d120521735ff5d6333bf",
+    # [freeze-exception no. 17 — upstream security/behavior fixes, 2026-07-28]
+    # Source: docs/bootstrap-protocol-upstream-bugs-2026-07-28.md, a 6-lens
+    # adversarial review that EXECUTED the emitted hooks against a real
+    # v2.5.0 install. Re-baselined for these byte classes, all three fixtures
+    # (16 files on `default`; no steering doc, skill, command or agent body
+    # moves, so every frozen twin stays byte-identical):
+    #   1. Shared _HOOK_HEADER (touches EVERY hook): the jq-less fallback
+    #      receives stdin on its own stdin instead of a 128 KiB-capped env
+    #      var [P0-3a]; FAIL_CLOSED + hook_fail + an ERR trap so a blocking
+    #      gate with no parser exits 2 rather than falling through to allow
+    #      [P0-3b]; logging made non-fatal so an unwritable project dir
+    #      cannot turn a block into exit 1 = tool-proceeds [P0-3c]; hooks.log
+    #      rotation at 1 MiB [P3]; norm_cmd/cmd_has_verb/git_verb helpers
+    #      [P1-4]; jq-parity for `false` -> empty [P3].
+    #   2. drift-detector: the arithmetic RCE - `n=$(( $(cat "$ST") + 1 ))`
+    #      executed command substitution from an agent-writable state file
+    #      [P0-1] - plus session id read from the payload, not the unexported
+    #      CLAUDE_SESSION_ID [P2-7].
+    #   3. settings.json: `async: true` removed from test-gate/ci-mirror/
+    #      format-lint-gate (an async hook CANNOT block) in favour of explicit
+    #      timeouts [P1-1]; secrets-gate matcher widened and given a second
+    #      Bash registration [P0-2/P2-4]; permissions.deny added [P0-2].
+    #   4. Gate bodies: dependency-gate rewritten [P1-3]; spec-gate-commit
+    #      scoped to implementation paths with ERE-escaped, array-quoted
+    #      corpus [P1-2]; test-gate absolute find + 127 vs failure [P2-5];
+    #      format-lint-gate no longer runs a MUTATING formatter [P2-6];
+    #      spec-gate-entry predicate made reachable [P2-8]; secrets-gate
+    #      dot-segment matching + multi-surface candidates [P0-2/P2-4].
+    #   5. PROTOCOL_VERSION 2.5.0 -> 2.6.0 (stamped into settings.json
+    #      _generatedBy, the state file and the manifest). MINOR, not
+    #      PATCH: gate BEHAVIOR changes. Not a seam event by §8.4.
+    #   6. Disclosure: audio_enabled true -> false, cost.jsonl renamed
+    #      session-events.jsonl, .decision-pending swept on a 7-day window
+    #      [P3]. sdk_gates/gates.py reconciled to the shell [P2-1/2/3].
+    "default":
+        "5534c97af10de55188713ccc848a311e9d5f09b3ae030b276b82af7d82e6e1a3",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -416,8 +451,9 @@ EXPECTED_DIGESTS = {
     #   the full record; full_autonomous moves for all three byte classes
     #   (16 files: the 12 shared ones + tdd-gate, eval-gate,
     #   drift-detector-loop-cooperation, iteration-summary-enforcement).
+    # [freeze-exception no. 17] same named set as `default` above.
     "full_autonomous":
-        "97fb264da6b208648e429ddd09bfefad0e64fce1b6a8faafc463689ece2cfc86",
+        "158ca45d2cebb6dd174df7621d2c865937dcf42e8e0f1f57b4373630f4c1848e",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -481,8 +517,10 @@ EXPECTED_DIGESTS = {
     #      tier 3 — the old value advertised enforcement that does not
     #      exist); drift-detector and drift-detector-loop-cooperation
     #      comments corrected to say so (backlog I-1).
+    # [freeze-exception no. 17] same named set; the three design
+    # artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "a28155688b1e6224209c6a049add2b400eb04e2e48e826aaf53ae4ef380c59cd",
+        "4f387f2a718db2aab7114c68cab8382001d03a5a494a7fc8f5de5c7f499ceb18",
 }
 
 EXPECTED_ACTION_COUNTS = {

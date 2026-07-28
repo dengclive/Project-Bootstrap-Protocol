@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 from defaults import resolve_config            # noqa: E402
 from installer import build_plan               # noqa: E402
 from minyaml import load_yaml                   # noqa: E402
+import templates as _tmpl                       # noqa: E402
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
 passed = failed = 0
@@ -262,9 +263,13 @@ try:
     check("S-2: --upgrade flag not treated as package",
           _run_hook(dg, {"tool_input":
                          {"command": "pip install --upgrade flask"}}) == 0)
-    check("S-2: -r requirements.txt not treated as package",
+    # [upstream P1-3] POSTURE REVERSED. Consuming the filename and allowing
+    # meant every package inside reqs.txt was installed unchecked - the gate
+    # was strictly decorative for the most common Python install form. A file
+    # the gate cannot read is not grounds to allow.
+    check("S-2: -r requirements.txt is unverifiable -> blocked (P1-3)",
           _run_hook(dg, {"tool_input":
-                         {"command": "pip install -r reqs.txt"}}) == 0)
+                         {"command": "pip install -r reqs.txt"}}) == 2)
     check("S-2: unapproved second package is caught",
           _run_hook(dg, {"tool_input":
                          {"command": "pip install requests evil"}}) == 2)
@@ -1043,7 +1048,9 @@ import json as _j4
 _EXPECT = {
     "spec-gate-entry": ("UserPromptSubmit", None),
     "spec-gate-commit": ("PreToolUse", "Bash"),
-    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    # [upstream P0-2/P2-4] Widened primary matcher; the Bash registration is
+    # separate and asserted below against templates.HOOK_EXTRA_EVENTS.
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "test-gate": ("PreToolUse", "Bash"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
     "ci-mirror": ("PreToolUse", "Bash"),
@@ -1073,16 +1080,28 @@ for arch in ("cli", "library", "service", "fullstack", "mobile",
             check(f"matrix[{arch}]: steering/{cond} present",
                   os.path.exists(os.path.join(cl, "steering", cond)))
         st = _j4.load(open(os.path.join(cl, "settings.json")))
+        # [upstream P0-2] A hook may now hold MORE than one registration:
+        # secrets-gate guards Read|Write|Edit|NotebookEdit|Grep|Glob AND
+        # Bash, because every never-read path was otherwise reachable through
+        # a shell command. Collect a SET of registrations per hook and assert
+        # the primary one is among them, rather than assuming exactly one.
         wired = {}
         for ev, groups in st["hooks"].items():
             for g in groups:
                 for hk in g["hooks"]:
                     nm = hk["command"].split("/")[-1].replace(".sh", "")
-                    wired[nm] = (ev, g.get("matcher"))
+                    wired.setdefault(nm, set()).add((ev, g.get("matcher")))
         hooks = [f[:-3] for f in os.listdir(os.path.join(cl, "hooks"))
                  if f.endswith(".sh")]
         bad = [h for h in hooks
-               if h in _EXPECT and wired.get(h) != _EXPECT[h]]
+               if h in _EXPECT and _EXPECT[h] not in wired.get(h, set())]
+        extra = {h: sorted(wired.get(h, set()) - {_EXPECT[h]})
+                 for h in hooks if h in _EXPECT
+                 and wired.get(h, set()) - {_EXPECT[h]}}
+        check(f"matrix[{arch}]: extra registrations are only the declared "
+              f"HOOK_EXTRA_EVENTS {extra!r}",
+              all(set(v) == set(_tmpl.HOOK_EXTRA_EVENTS.get(h, []))
+                  for h, v in extra.items()))
         missing = [h for h in hooks if h not in wired]
         orphan = [k for k in wired if k not in hooks]
         check(f"matrix[{arch}]: every hook wired correctly in settings",
@@ -1129,6 +1148,13 @@ finally:
 # usage-limit bump; [v2.4.0 code fold, GR2-EX/TEL-EX step 0] re-pinned
 # 2.2.0 -> 2.4.0 (single fold, no intermediate 2.3.0 code release; the
 # 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code);
+# [upstream fixes, 2.6.0] re-pinned 2.5.0 -> 2.6.0. Classified MINOR, not
+# PATCH: the emitted gates change BEHAVIOR, not just bytes - test-gate and
+# ci-mirror were async and therefore could not block at all, and now do; a
+# parser outage now fails closed where it used to allow. Not a seam event by
+# SEAM-CONTRACT §8.4 ("changes that touch only gate internals or dispatch
+# policy do not bump seam_version"): no §7.2 tier membership, §7.4 sentinel,
+# CLI flag, result/stream table, or `binds` entry moved.
 # [DS-01, 2.5.0] re-pinned 2.4.0 -> 2.5.0 at the design-steering fold (Step 7
 # version bump; PROTOCOL_VERSION is stamped into settings.json _generatedBy,
 # state, and the manifest — see the golden re-baseline for the emitted-byte
@@ -1137,10 +1163,10 @@ finally:
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.5.0",
-      _installer_mod.PROTOCOL_VERSION == "2.5.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.5.0",
-      _templates_mod.PROTOCOL_VERSION == "2.5.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.6.0",
+      _installer_mod.PROTOCOL_VERSION == "2.6.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.6.0",
+      _templates_mod.PROTOCOL_VERSION == "2.6.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 # The two constants are declared independently in installer.py and
@@ -1171,16 +1197,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.5.0",
-          state.get("bootstrap_protocol_version") == "2.5.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.6.0",
+          state.get("bootstrap_protocol_version") == "2.6.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.5.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.6.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.5.0)")
+          == "bootstrap-installer (protocol 2.6.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.5.0",
-          manifest.get("protocol_version") == "2.5.0")
+    check("AC-A0-3: manifest records protocol_version 2.6.0",
+          manifest.get("protocol_version") == "2.6.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -1517,8 +1543,12 @@ _rr_cost = _body_of(_rr_plan, ".claude/hooks/cost-log.sh")
 # F3: the jq-less Python fallback must render booleans like `jq -r` —
 # lowercase — or every [ "$(jget ...)" = "true" ] guard (notably the 6.D
 # stop_hook_active loop guard) fails open on installs without jq.
-check("RR-F3: jget fallback renders booleans lowercase (jq -r parity)",
-      'sys.stdout.write("true" if cur else "false")' in _rr_cost)
+# [upstream P3] Refined: `true` still renders lowercase (F3's point), but
+# FALSE now renders EMPTY, because jq's `.x // empty` treats false as absent.
+# The two parsers must be the same function or the next boolean guard added
+# diverges by substrate.
+check("RR-F3: jget fallback renders true lowercase, false empty (jq parity)",
+      'sys.stdout.write("true" if cur else "")' in _rr_cost)
 check("RR-F3: jget fallback special-cases bool before str()",
       "isinstance(cur, bool)" in _rr_cost)
 # F2/A-5: iteration-summary-enforcement is wired as an unconditional Stop

@@ -1,5 +1,174 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.5.0 → 2.6.0 (upstream security + gate-behavior fixes)
+
+Source: `docs/bootstrap-protocol-upstream-bugs-2026-07-28.md` — a 6-lens
+adversarial review of a **real v2.5.0 install** (greenfield `fullstack`, all
+autonomous modes off, design steering + telemetry on, `gate_substrate:
+"shell"`) that **executed** the emitted hooks with crafted payloads rather
+than reading them. Static review of these same files had found neither the
+RCE nor the dead-gate finding.
+
+**Version classification (the report asks for this explicitly).** **MINOR,
+not PATCH** — the emitted gates change *behavior*, not merely bytes:
+`test-gate` and `ci-mirror` were `async` and therefore could not block at
+all, and now do; a parser outage now fails closed where it used to allow.
+**Not a seam event** — `SEAM-CONTRACT-v2-0-0.md` §8.4 lists the triggers and
+none fire: no §7.2 security-critical tier membership change, no §7.4 shared
+sentinel change, no CLI entry point or contract-level flag, no §4.1/§5 table
+change, no `binds` change. §8.4's own closing line governs: *"changes that
+touch only gate internals or dispatch policy do not bump `seam_version`."*
+`seam_version` stays 2.0.0; consumers need no re-pin.
+
+### Priority 0 — security
+
+- **P0-1 (CONFIRMED, RCE).** `drift-detector` incremented its counter with
+  `n=$(( $(cat "$ST") + 1 ))`. Bash runs command substitution *inside*
+  arithmetic evaluation, and `.claude/sessions/.drift-state-<sid>` is
+  gitignored and writable by any ordinary `Write` call — so
+  `PATH[$(touch /tmp/PWNED)]` in that file executed `touch` on the next
+  PostToolUse event. A clean path from "the agent writes a file" (which no
+  gate blocks) to arbitrary command execution, bypassing every `PreToolUse`
+  `Bash` gate. Fixed by read → validate-as-unsigned-integer → add. **The
+  class was audited, not just the instance:** every emitted artifact across
+  all three autonomous modes was grepped for arithmetic over unvalidated
+  file/JSON input; this was the only site.
+- **P0-2 (CONFIRMED).** `secrets-gate` was registered only under
+  `Read|Write|Edit`, so every never-read path stayed reachable through a
+  shell command (`cat .env`, `grep -r . secrets/`, `git diff -- '*.pem'`)
+  while `secrets.md` told the operator those paths were blocked. The gate now
+  also guards `Bash` (each argument token treated as a candidate path, quotes
+  stripped) and `NotebookEdit|Grep|Glob`. `settings.json` additionally gains a
+  `permissions.deny` list mirroring the configured paths — defence in depth
+  the harness enforces even if the hook fails.
+- **P0-3 (CONFIRMED, three fail-open paths).** (a) The jq-less fallback
+  passed the whole payload in an environment variable; Linux caps one env var
+  at 128 KiB, so a 3 MB `Write` to `.env` failed exec, `|| true` swallowed it
+  and the gate **allowed** — while the same payload with `jq` present blocked.
+  It now receives the payload on its own stdin. (b) With neither `jq` nor
+  `python3`, every gate fell through its `case` and allowed, silently. Gates
+  now fail **closed** with a reason; advisory hooks declare `FAIL_CLOSED=0`
+  and degrade to a logged no-op. (c) `mkdir`/`mktemp` failures died under
+  `set -e` at exit 1 = "hook error, tool proceeds". Logging is now non-fatal,
+  the pattern list uses `mapfile` instead of `mktemp`, and an `ERR` trap
+  routes any unexpected failure through the fail-closed path.
+
+  **This decides backlog A-1** ("emitted-gate fail-open posture under a total
+  parser outage — leave inert vs. fail-closed"), which had been an open owner
+  decision. `tests/test_retrofit.py` T2.FS7b asserted the old inert
+  pass-through; its comment already flagged that as "a separate design
+  decision". The guarantee that case exists for — a parser outage cannot
+  fabricate the retrofit exemption — is unchanged and now stronger.
+
+### Priority 1 — gates that did not do what the operator was told
+
+- **P1-1 (CONFIRMED).** `test-gate`, `ci-mirror` and `format-lint-gate` were
+  emitted with `"async": true`. **An async hook's exit code cannot block a
+  tool call**, and its stderr is suppressed — so `test-gate` printed "Commit
+  blocked: tests failing." and the commit went through. The protocol presents
+  "implementation passes local gates" as gate 5 of 6; for these hooks that
+  gate did not exist. Replaced with explicit timeouts (600 s / 900 s / 120 s).
+  **The normative document was wrong too, not just the emission:**
+  `Bootstrap-Protocol-v2-5-0.md` recommended `async: true` for the CI mirror —
+  a gate whose whole purpose is to exit 2. Corrected in place at three sites.
+- **P1-2 (CONFIRMED).** `spec-gate-commit` blocked **every possible first
+  commit**, twice over: the bootstrap commit (harness files can never be
+  spec-referenced — it blocked its own `INDEX.md`) and the first code commit
+  (`spec-decompose` deliberately emits behaviors, not filenames). Plus
+  unescaped ERE interpolation (`src/a+b.gleam`, listed verbatim, false-blocked
+  because `+` is a quantifier) and an unquoted `$corpus` (a spec directory
+  named `my spec` word-split and bricked all commits). The predicate is now
+  scoped to implementation paths via an editable `ENFORCED_PREFIXES`,
+  filenames are ERE-escaped, and the corpus is a quoted array.
+- **P1-3 (CONFIRMED).** `dependency-gate` failed open on real installs and
+  fired on prose. Fail-open: `gleam add`/`cargo add`/`mix deps.get`/`pipx`/
+  `curl | sh` unmatched; `@evil/backdoor` blanked by `${tok%%[<>=@~ ]*}`;
+  token laundering (`pip install pytest-mpi gleeunit` passed because the `i `
+  inside `pytest-mpi` truncated the argument list); double-space and tab
+  forms. False positives: bare `npm install` (lockfile restore) blocked, and
+  any command merely *mentioning* an install phrase — which blocked the
+  reviewing agent's own tool call mid-review. Rewritten: anchored verb
+  matching, per-verb argument extraction (never chained strips), scope-aware
+  package names, `set -f` + `read -ra` so tokens neither word-split nor glob.
+- **P1-4 (CONFIRMED).** Four gates matched a fixed-spacing literal substring.
+  `git  commit`, a tab, `git --no-pager commit` and `git -C /repo commit` all
+  slipped through; conversely `git commit` inside a comment, a quoted string
+  or a grep pattern fired the gate — which, once combined with P1-1's fix,
+  would have turned a silent no-op into a multi-minute stall on innocuous
+  commands. Fixing this **before** P1-1 was load-bearing, per the report's own
+  sequencing. Shared `norm_cmd`/`cmd_has_verb`/`git_verb` helpers now anchor
+  to command position. **Accepted trade-off, recorded rather than buried:** a
+  verb inside a quoted argument to another program (`sh -c "git commit"`) no
+  longer matches. Substring matching did catch that, at the cost of every
+  false positive above.
+
+### Priority 2 / 3
+
+- **P2-1/P2-2/P2-3.** `gates.py` and the shell suite returned opposite
+  verdicts on five dependency cases and on commits. **Decision recorded: the
+  shell suite is canonical** (default substrate, ships everywhere, 11 gates to
+  the SDK's 7); the SDK module is a consistent *subset* that must neither
+  allow what the shell blocks nor block what the shell allows. The anchored
+  matching, extended verb set, remote-script and requirements-file rules are
+  ported; all 13 disputed cases now agree. The false "parity with the
+  installed shell suite" claim is corrected, `git push` is documented as
+  ungated under SDK dispatch, and the module states plainly that it is inert
+  unless `gate_substrate: "sdk-callable"`.
+- **P2-4.** `secrets-gate` over- and under-matched. The implicit leading `*`
+  turned `.env*` into `*.env*` and hard-blocked `src/my.envelope.gleam` and
+  `docs/dev.environment.md` mid-plan. Matching is now dot-segment aware, which
+  keeps the T-1 requirement (`config.env`, `prod.env` still block) while
+  dropping the word-interior false positives. `NotebookEdit` supplied
+  `notebook_path`, which the hook never read — it reported success while
+  checking nothing.
+- **P2-5.** `test-gate` used a **relative** `find src` against an absolute
+  marker, so in a project with no `src/` every commit passed with no test run,
+  forever, once the marker existed. Now absolute, covers `src lib app test
+  tests`, and distinguishes exit 127 (toolchain missing) from a real failure
+  instead of reporting "tests failing" either way.
+- **P2-6.** `format-lint-gate` ran the **mutating** `format` command (not
+  `--check`) after every `Write|Edit` with no file-type filter, reformatting
+  files the agent never touched. It now runs lint only.
+- **P2-7.** The drift counter keyed on `CLAUDE_SESSION_ID`, which Claude Code
+  does not export, so all sessions shared one never-resetting
+  `.drift-state-default` — observed at 274 against a threshold of 50, firing
+  on every tool call forever while invisible (PostToolUse stderr on exit 0 is
+  not surfaced). Now read from the payload's `.session_id`, sanitised for
+  path safety.
+- **P2-8.** `spec-gate-entry` was dead code: its warning was guarded by
+  `[ ! -s INDEX.md ]` and `INDEX.md` is always emitted non-empty, so the gate
+  never once fired. It now checks for an actual spec directory.
+- **P3 disclosure.** `audio_enabled=true` advertised a capability no emitted
+  hook has (no player is ever invoked) → `false`. `cost.jsonl` recorded no
+  cost → renamed `session-events.jsonl`. `.decision-pending-<sid>` was created
+  and cleared by nothing → swept on the documented 7-day window.
+  `hooks.log` had no rotation → rotates at 1 MiB. The jq-less fallback now
+  renders `false` as empty, matching jq's `//` semantics exactly.
+
+### Testing — a new class for this repo
+
+`tests/test_hook_behavior.py` (**121 checks**) EXECUTES the emitted hooks
+against a crafted-payload matrix and asserts exit codes. Every other suite
+asserts emission determinism, which by construction cannot catch anything in
+this report — a fully green 1016-check suite coexisted with an RCE and three
+dead gates. Verified to fail before the fixes: 10 failures on the pre-fix
+templates, 0 after. Suite total 1016 → **1201 checks across 16 suites**.
+
+**Golden re-baseline: freeze-exception no. 17.** All three fixtures move; the
+per-byte-class record is in `tests/test_greenfield_golden.py`. No steering
+doc, skill, command or agent body changes, so every frozen twin
+(`docs/{design,SKILL,design-review}.md`) stays byte-identical — verified.
+
+### Not addressed
+
+- The report's acceptance criterion 6 (**a tagged release**) is still open —
+  this repo has never had a tag. Criterion 7 (re-run the two executing lenses
+  against a fresh install of the fixed version) is the natural next step and
+  is deliberately left to an independent reviewer.
+- `ENFORCED_PREFIXES` (P1-2) is an editable constant in the emitted hook, not
+  yet a `bootstrap.config.yaml` field.
+
+
 ## 2.4.0 → 2.5.0 (DS-01 design steering + release-review fixes)
 
 The 2.5.0 span landed across five PRs; this entry is the release record the

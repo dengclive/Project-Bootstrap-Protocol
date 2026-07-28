@@ -12,7 +12,7 @@ import json
 
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 
-PROTOCOL_VERSION = "2.5.0"
+PROTOCOL_VERSION = "2.6.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -236,24 +236,69 @@ _HOOK_HEADER = """#!/usr/bin/env bash
 #
 # Security/correctness (Bootstrap-Protocol-v2-0-0.md 6.D checklist):
 #  * No eval/dynamic execution: the Python fallback walks keys explicitly.
-#  * stdin is consumed exactly once into $INPUT; the fallback receives it via
-#    the environment, NOT by re-reading already-consumed stdin (the bug that
-#    silently disabled every parsing hook when jq was absent).
+#  * stdin is consumed exactly once into $INPUT. The jq-less fallback now
+#    receives it on the fallback process's OWN stdin [upstream P0-3a]. The
+#    previous version passed it in the ENVIRONMENT; Linux caps a single env
+#    var at 128 KiB, so any larger payload failed exec with rc 126, `|| true`
+#    swallowed it, jget returned empty, and every parsing gate fell through
+#    its `case` and ALLOWED. A 3 MB Write to .env is precisely the case that
+#    matters. (Env-passing was itself the fix for an earlier bug where the
+#    fallback re-read already-consumed stdin - it traded one silent failure
+#    for another. Piping fixes both: fresh stdin, no size ceiling.)
+#  * FAIL-CLOSED [upstream P0-3b]: with neither jq nor python3 on PATH, jget
+#    used to return empty and every gate's `case` fell through to allow. A
+#    security substrate must never degrade to allow, so blocking gates now
+#    exit 2 with a loud reason. Advisory hooks set FAIL_CLOSED=0.
+#  * Logging is never fatal [upstream P0-3c]: an unwritable CLAUDE_PROJECT_DIR
+#    used to kill `mkdir -p` under `set -e`, yielding exit 1 = "hook error,
+#    tool proceeds" - i.e. the read the gate exists to stop went through.
 set -euo pipefail
+
+# Blocking gates leave this at 1. Advisory/informational hooks set it to 0
+# right after this header. The default is fail-closed on purpose: a hook that
+# forgets to declare its posture gets the safe one.
+FAIL_CLOSED=1
+
 LOG="${CLAUDE_PROJECT_DIR:-.}/.claude/logs/hooks.log"
-mkdir -p "$(dirname "$LOG")"
-log(){ printf '%s %s\\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }
+mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
+# [upstream P3] hooks.log had no rotation or size cap and grew without bound
+# (a 1500-line file accumulated in the protocol's own tree and was eventually
+# committed). It is gitignored and logs no credential values, so this was a
+# disclosure/hygiene gap rather than a leak - but the 7-day purge the
+# protocol advertises has to be implemented by something. One rotation at
+# 1 MiB, keeping a single .1 generation.
+_LOG_MAX=1048576
+_rotate_log(){
+  local sz
+  sz="$(wc -c <"$LOG" 2>/dev/null || echo 0)"
+  case "$sz" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$sz" -gt "$_LOG_MAX" ]; then
+    mv -f "$LOG" "$LOG.1" 2>/dev/null || true
+  fi
+}
+_rotate_log
+log(){ printf '%s %s\\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG" 2>/dev/null || true; }
+
+# The single exit path for "this hook could not do its job". Never silent.
+hook_fail(){
+  log "FAIL $*"
+  if [ "${FAIL_CLOSED:-1}" = "1" ]; then
+    printf 'BLOCKED (fail-closed): %s\\n' "$*" >&2
+    exit 2
+  fi
+  printf 'hook degraded: %s\\n' "$*" >&2
+  exit 1
+}
+trap 'hook_fail "unexpected hook error at line $LINENO"' ERR
+
 INPUT="$(cat || true)"
 have_jq(){ command -v jq >/dev/null 2>&1; }
-# jget '.a.b' -> value at path or empty. Safe with or without jq.
-jget(){
-  local jqpath="$1"
-  if have_jq; then
-    printf '%s' "$INPUT" | jq -r "$jqpath // empty" 2>/dev/null || true
-  else
-    INPUT="$INPUT" python3 - "${jqpath#.}" <<'PYEOF' 2>/dev/null || true
-import json, os, sys
-raw = os.environ.get("INPUT", "")
+have_py(){ command -v python3 >/dev/null 2>&1; }
+# Kept in a variable and passed with `python3 -c` so the program does not
+# occupy the fallback's stdin - that slot carries the payload now.
+JGET_PY='
+import json, sys
+raw = sys.stdin.read()
 try:
     d = json.loads(raw) if raw.strip() else {}
 except Exception:
@@ -264,17 +309,60 @@ for k in sys.argv[1].split("."):
         cur = cur[k]
     else:
         sys.exit(0)
+# Render exactly like `jq -r "PATH // empty"`. Two deliberate details:
+# booleans render lowercase (str(True) would emit "True" and silently fail
+# every [ "$(jget ...)" = "true" ] guard - v2.5.0 review F3), and False
+# renders as EMPTY because jq_s `//` treats false as absent. The two parsers
+# must be the same function or the next boolean guard added diverges by
+# substrate [upstream P3].
 if cur is not None and not isinstance(cur, (dict, list)):
-    # Render like `jq -r`: booleans lowercase. str(True) would emit "True",
-    # which silently fails every [ "$(jget ...)" = "true" ] guard on
-    # jq-less installs (v2.5.0 release review F3, 2026-07-27).
     if isinstance(cur, bool):
-        sys.stdout.write("true" if cur else "false")
+        sys.stdout.write("true" if cur else "")
     else:
         sys.stdout.write(str(cur))
-PYEOF
+'
+# jget '.a.b' -> value at path, or empty. Fails closed if no parser exists.
+jget(){
+  local jqpath="$1"
+  if have_jq; then
+    printf '%s' "$INPUT" | jq -r "$jqpath // empty" 2>/dev/null || true
+  elif have_py; then
+    printf '%s' "$INPUT" | python3 -c "$JGET_PY" "${jqpath#.}" 2>/dev/null \\
+      || true
+  else
+    hook_fail "no JSON parser available (need jq or python3)"
   fi
 }
+
+# --- Command matching [upstream P1-4] -------------------------------------- #
+# Four gates used to match a fixed-spacing literal SUBSTRING of the command.
+# That failed in both directions at once. It missed `git  commit` (two
+# spaces), a tab, `git --no-pager commit`, and `git -C /repo commit`; and it
+# fired on `git commit` appearing anywhere at all - inside a shell comment, a
+# quoted string, or a grep pattern. The second half is the dangerous one: it
+# makes a full build run on innocuous commands, which is the archetypal
+# "operator disables the gate" trainer.
+#
+# norm_cmd collapses whitespace runs and pads with single spaces, so `case`
+# patterns can token-match. cmd_has_verb anchors to COMMAND POSITION: start
+# of string or just after a ; & | ( separator, allowing an `env` prefix and
+# git's own global options.
+#
+# KNOWN AND ACCEPTED LIMITATION: a verb inside a quoted argument to another
+# program - `sh -c "git commit"` - no longer matches. Substring matching did
+# catch that, at the cost of every false positive above. Anchoring is the
+# recommended trade in the upstream report; it is recorded here rather than
+# left for the next reader to rediscover.
+norm_cmd(){ printf ' %s ' "$(printf '%s' "${1:-}" | tr -s '[:space:]' ' ')"; }
+
+# cmd_has_verb "<normalized cmd>" "<tool regex>" "<subcommand regex>"
+cmd_has_verb(){
+  printf '%s' "$1" | grep -qE \\
+    "(^|[;&|(]) *(env +)?$2( +-[Cc] +[^ ]+| +-[^ ]+)* +$3( |\\$)"
+}
+
+# git_verb "<normalized cmd>" "commit" - the common case.
+git_verb(){ cmd_has_verb "$1" "git" "$2"; }
 """
 
 
@@ -479,11 +567,28 @@ def _hook_body(name: str, cfg: dict):
 
     if name == "spec-gate-entry":
         return _HOOK_HEADER + '''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # UserPromptSubmit: warn (do not block) if writing files with no active spec.
 PROMPT="$(jget '.prompt')"
 case "$PROMPT" in
   *write*|*edit*|*create*|*implement*)
-    if [ ! -s "${CLAUDE_PROJECT_DIR:-.}/.claude/specs/INDEX.md" ]; then
+    # [upstream P2-8] The warning used to be guarded by [ ! -s INDEX.md ].
+    # INDEX.md is ALWAYS emitted non-empty by the installer, so the condition
+    # could never be true and this gate never once fired. "Non-empty file"
+    # was standing in for "an active spec exists"; those are different
+    # claims. Check for an actual spec directory instead - that is what
+    # /spec-new creates and what "active spec" means.
+    _specs="${CLAUDE_PROJECT_DIR:-.}/.claude/specs"
+    _active=0
+    for _d in "$_specs"/*/; do
+      [ -d "$_d" ] || continue
+      case "$_d" in */INDEX.md/) continue ;; esac
+      _active=1; break
+    done
+    if [ "$_active" = "0" ]; then
       echo "No active spec detected. Consider /spec-new before writing." >&2
     fi ;;
 esac
@@ -494,42 +599,78 @@ exit 0
     if name == "spec-gate-commit":
         return _HOOK_HEADER + '''
 # PreToolUse Bash(git commit): block files not referenced by an active spec.
+#
+# [upstream P1-2] As shipped this gate blocked EVERY possible first commit,
+# in two independent ways, plus two implementation bugs:
+#   1. The bootstrap commit itself was impossible. Harness files can never be
+#      referenced by a spec - they ARE the spec infrastructure - so the gate
+#      blocked .claude/specs/INDEX.md, i.e. its own index.
+#   2. The first CODE commit was impossible. spec-decompose deliberately
+#      produces tasks and behaviors, not filenames, so no source path is ever
+#      in the corpus. Passing required transcribing every filename into
+#      tasks/*.md - busywork that also pollutes the corpus.
+#   3. Filenames were interpolated raw into an ERE, so any path containing
+#      + ( ) [ ] { } ? false-blocked: `src/a+b.gleam`, listed verbatim in a
+#      task file, was reported unreferenced because `+` is a quantifier.
+#   4. `$corpus` was an unquoted space-joined string, so a spec directory
+#      named `my spec` word-split and bricked all commits. Spec slugs come
+#      from /spec-new, so an operator-typed name with a space was enough.
+#
+# The predicate is now scoped to IMPLEMENTATION paths. The gate's error text
+# says "Run /spec-new", so policing implementation files is its evident
+# intent; harness, docs and config files are exempt because no spec will ever
+# name them. Edit ENFORCED_PREFIXES to match this project's layout.
+ENFORCED_PREFIXES='src/ lib/ app/ test/ tests/'
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git commit"*)
+NCMD="$(norm_cmd "$CMD")"
+if git_verb "$NCMD" "commit"; then
     PROJ="${CLAUDE_PROJECT_DIR:-.}"
     INDEX="$PROJ/.claude/specs/INDEX.md"
     staged="$(git diff --cached --name-only 2>/dev/null || true)"
     [ -z "$staged" ] && { log "spec-gate-commit: no staged files"; exit 0; }
-    # Collect the corpus of spec/task files once. nullglob-safe.
-    corpus=""
-    [ -f "$INDEX" ] && corpus="$INDEX"
+    # Corpus as an ARRAY: a path containing a space must not word-split.
+    corpus=()
+    [ -f "$INDEX" ] && corpus+=("$INDEX")
     for d in "$PROJ"/.claude/specs/*/tasks/; do
       [ -d "$d" ] || continue
-      for tf in "$d"*; do [ -f "$tf" ] && corpus="$corpus $tf"; done
+      for tf in "$d"*; do [ -f "$tf" ] && corpus+=("$tf"); done
     done
-    if [ -z "$corpus" ]; then
-      echo "Commit blocked: no active spec/task files exist yet." >&2
-      echo "Run /spec-new before committing." >&2
-      exit 2
-    fi
+    # Escape ERE metacharacters so a filename is matched as a LITERAL.
+    ere_esc(){ printf '%s' "$1" | sed 's/[][\\.*^$(){}?+|]/\\\\&/g'; }
     miss=""
+    checked=0
     while IFS= read -r f; do
       [ -z "$f" ] && continue
+      # Only implementation paths are policed.
+      enforced=0
+      for pfx in $ENFORCED_PREFIXES; do
+        case "$f" in "$pfx"*) enforced=1; break ;; esac
+      done
+      [ "$enforced" = "1" ] || continue
+      checked=$((checked + 1))
+      if [ "${#corpus[@]}" -eq 0 ]; then
+        miss="$miss $f"; continue
+      fi
       # Word-boundary match on the path or its basename, not a loose
       # substring (S-3: 'a.py' must not be "referenced" by 'data.py').
-      b="$(basename "$f")"
-      if ! grep -rqE "(^|[^[:alnum:]_./-])($f|$b)([^[:alnum:]_-]|$)" \
-             $corpus 2>/dev/null; then
+      b="$(basename -- "$f")"
+      fe="$(ere_esc "$f")"; be="$(ere_esc "$b")"
+      if ! grep -rqE "(^|[^[:alnum:]_./-])($fe|$be)([^[:alnum:]_-]|$)" \
+             "${corpus[@]}" 2>/dev/null; then
         miss="$miss $f"
       fi
     done <<< "$staged"
+    if [ "$checked" -gt 0 ] && [ "${#corpus[@]}" -eq 0 ]; then
+      echo "Commit blocked: no active spec/task files exist yet." >&2
+      echo "Run /spec-new before committing implementation files." >&2
+      exit 2
+    fi
     if [ -n "$miss" ]; then
       echo "Commit blocked: files not referenced by any active spec:$miss" >&2
       echo "Run /spec-new or add them to a tasks/*.md file." >&2
       exit 2
-    fi ;;
-esac
+    fi
+fi
 log "spec-gate-commit ok"
 exit 0
 '''
@@ -552,40 +693,116 @@ exit 0
         # path that was blocked before becomes allowed.
         pat_body = "\n".join(sec_paths)
         return _HOOK_HEADER + f'''
-# PreToolUse Read/Write/Edit: hard-block never-read paths. Blocks mid-plan
-# by design (secret exposure is catastrophic).
-TARGET="$(jget '.tool_input.file_path')"
-[ -z "$TARGET" ] && {{ log "secrets-gate: no path"; exit 0; }}
-base="$(basename "$TARGET")"
+# PreToolUse: hard-block never-read paths. Blocks mid-plan by design (secret
+# exposure is catastrophic).
+#
+# [upstream P0-2/P2-4] This hook now guards every tool surface that can reach
+# a file, not just Read/Write/Edit's `file_path`:
+#   * NotebookEdit supplies `notebook_path` - it was already matched by the
+#     old matcher SUBSTRING but the path key was never read, so the hook
+#     logged "no path", exited 0, and reported success while checking
+#     nothing. A gate that passes without looking is worse than no gate.
+#   * Grep and Glob supply `path`/`pattern` and were unmatched entirely.
+#   * Bash supplies `command`; every never-read path was reachable through a
+#     shell call. Each token of the command is checked as a candidate path.
+CANDIDATES=()
+for _k in file_path notebook_path path pattern; do
+  _v="$(jget ".tool_input.$_k")"
+  [ -n "$_v" ] && CANDIDATES+=("$_v")
+done
+# Bash: treat each argument token as a candidate path. Quotes are stripped
+# because `git diff -- '*.pem'` must be caught as *.pem, not '*.pem'.
+_cmd="$(jget '.tool_input.command')"
+if [ -n "$_cmd" ]; then
+  set -f
+  read -ra _toks <<< "$_cmd"
+  set +f
+  for _t in ${{_toks[@]+"${{_toks[@]}}"}}; do
+    _t="${{_t%\\"}}"; _t="${{_t#\\"}}"
+    _t="${{_t%\\'}}"; _t="${{_t#\\'}}"
+    [ -n "$_t" ] && CANDIDATES+=("$_t")
+  done
+fi
+if [ "${{#CANDIDATES[@]}}" -eq 0 ]; then
+  log "secrets-gate: no path"; exit 0
+fi
 # Case-insensitive matching ('.PEM'/'.ENV' are just as sensitive) done with
 # bash's built-in `nocasematch` - NO external binary (T-1 follow-up: an
 # earlier `tr`-based version exited 127 when `tr` was off PATH, which under
 # the exit-code convention would let the secret read proceed; a pure-bash
 # `shopt` cannot fail open that way).
 shopt -s nocasematch
-PAT_FILE="$(mktemp)"
-trap 'rm -f "$PAT_FILE"' EXIT
-cat >"$PAT_FILE" <<'PAT_EOF'
+# [upstream P0-3c] The pattern list used to go through mktemp. Under `set -e`
+# a failed mktemp (unwritable TMPDIR, exhausted inodes) killed the hook at
+# exit 1 = "hook error, tool proceeds" - the secret read the gate exists to
+# stop went through. mapfile keeps the S-5 property that matters (a QUOTED
+# heredoc, so patterns are never interpolated into shell) while needing no
+# temp file, no trap, and no external binary.
+mapfile -t PATS <<'PAT_EOF'
 {pat_body}
 PAT_EOF
-while IFS= read -r pat; do
-  [ -z "$pat" ] && continue
-  cpat="$(printf '%s' "$pat" | sed 's/\\*\\*/*/g')"   # ** -> * for `case`
-  # Match the pattern as-given (prefix/exact) AND with an implicit leading
-  # '*' (suffix form) so 'config.env' is caught by '.env*'. Deny-list =>
-  # over-match is safe; under-match is the catastrophic failure.
-  case "$base" in
-    $cpat|*$cpat)
+for TARGET in "${{CANDIDATES[@]}}"; do
+  base="$(basename -- "$TARGET" 2>/dev/null || printf '%s' "$TARGET")"
+  for pat in ${{PATS[@]+"${{PATS[@]}}"}}; do
+    [ -z "$pat" ] && continue
+    cpat="${{pat//'**'/'*'}}"   # ** -> * for `case`; pure bash, no `sed`
+    # [upstream P2-4] The implicit leading '*' is kept for EXTENSION patterns
+    # (*.pem, *.key) where over-match is cheap, but a dotfile family like
+    # '.env*' is anchored to a path-segment boundary. Unanchored, '.env*'
+    # became '*.env*' and hard-blocked 'src/my.envelope.gleam',
+    # 'docs/dev.environment.md' and 'docs/no-secrets/plan.md' mid-plan with
+    # no override path - which is exactly what gets secrets-gate deleted.
+    # Deny-list bias is still over-match; this trims only the segment-
+    # interior false positives, never a real dotenv file.
+    case "$cpat" in
+      \\**) form=free ;;          # '*.pem', '*.key': already unanchored
+      .*)  form=dotfile ;;       # '.env*': the dotenv family
+      *)   form=anchored ;;      # 'secrets/*': path-segment anchored
+    esac
+    # The dotfile family needs BOTH corrections at once, and they pull in
+    # opposite directions. T-1 established that realistic dotenv names which
+    # do not START with the pattern - config.env, prod.env, staging.env - must
+    # still be blocked, so a bare prefix match under-matches (the catastrophic
+    # direction). But an implicit leading '*' turns '.env*' into '*.env*',
+    # which hard-blocked src/my.envelope.gleam and docs/dev.environment.md
+    # mid-plan with no override [upstream P2-4]. The discriminator is a
+    # DOT-SEGMENT boundary: '.env' must end the name or be followed by '.',
+    # never by more word characters. So `config.env` and `.env.production`
+    # block; `my.envelope.gleam` and `dev.environment.md` do not.
+    stem="${{cpat%\\*}}"
+    if [ "$form" = "free" ]; then
+      case "$base" in
+        $cpat|*$cpat) _hit=1 ;; *) _hit=0 ;;
+      esac
+    elif [ "$form" = "dotfile" ]; then
+      case "$base" in
+        $cpat|*$stem|*$stem.*) _hit=1 ;; *) _hit=0 ;;
+      esac
+    else
+      case "$base" in
+        $cpat) _hit=1 ;; *) _hit=0 ;;
+      esac
+    fi
+    if [ "$_hit" = "1" ]; then
       echo "BLOCKED: $TARGET matches never-read pattern $pat" >&2
-      log "secrets-gate BLOCK $TARGET"; exit 2 ;;
-  esac
-  case "$TARGET" in
-    $cpat|*/$cpat|*$cpat)
+      log "secrets-gate BLOCK $TARGET"; exit 2
+    fi
+    if [ "$form" = "free" ]; then
+      case "$TARGET" in
+        $cpat|*/$cpat|*$cpat) _hit=1 ;; *) _hit=0 ;;
+      esac
+    else
+      case "$TARGET" in
+        $cpat|*/$cpat) _hit=1 ;; *) _hit=0 ;;
+      esac
+    fi
+    if [ "$_hit" = "1" ]; then
       echo "BLOCKED: $TARGET matches never-read pattern $pat" >&2
-      log "secrets-gate BLOCK $TARGET"; exit 2 ;;
-  esac
-done <"$PAT_FILE"
-log "secrets-gate ok $TARGET"
+      log "secrets-gate BLOCK $TARGET"; exit 2
+    fi
+  done
+done
+log "secrets-gate ok"
 exit 0
 '''
 
@@ -594,16 +811,40 @@ exit 0
         return _HOOK_HEADER + f'''
 # PreToolUse git commit: block unless tests passed since last source edit.
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git commit"*)
-    MARK="${{CLAUDE_PROJECT_DIR:-.}}/.claude/.last-test-pass"
-    newest_src="$(find src -type f -newer "$MARK" 2>/dev/null | head -1 || true)"
+NCMD="$(norm_cmd "$CMD")"
+if git_verb "$NCMD" "commit"; then
+    PROJ="${{CLAUDE_PROJECT_DIR:-.}}"
+    MARK="$PROJ/.claude/.last-test-pass"
+    # [upstream P2-5] `find src` used a RELATIVE path while MARK used $PROJ.
+    # In a project with no src/ - or whenever the hook's cwd differed - find
+    # failed silently, newest_src stayed empty, and once .last-test-pass
+    # existed EVERY commit passed with no test run, forever. Watch every
+    # source root that exists, absolutely, and watch test/ too: editing only
+    # tests must invalidate the marker.
+    newest_src=""
+    for d in src lib app test tests; do
+      [ -d "$PROJ/$d" ] || continue
+      hit="$(find "$PROJ/$d" -type f -newer "$MARK" 2>/dev/null | head -1 || true)"
+      if [ -n "$hit" ]; then newest_src="$hit"; break; fi
+    done
     if [ ! -f "$MARK" ] || [ -n "$newest_src" ]; then
       echo "Running test gate: {cmd}" >&2
-      if ( {cmd} ); then touch "$MARK"; else
-        echo "Commit blocked: tests failing." >&2; exit 2; fi
-    fi ;;
-esac
+      set +e
+      ( {cmd} ); rc=$?
+      set -e
+      if [ "$rc" -eq 0 ]; then
+        touch "$MARK"
+      elif [ "$rc" -eq 127 ]; then
+        # [upstream P2-5] Do not claim "tests failing" when the toolchain is
+        # simply absent - that sends the operator to debug the wrong thing.
+        echo "Commit blocked: test command not found (exit 127): {cmd}" >&2
+        echo "Install the toolchain or fix commands.test in bootstrap.config.yaml." >&2
+        exit 2
+      else
+        echo "Commit blocked: tests failing (exit $rc)." >&2; exit 2
+      fi
+    fi
+fi
 log "test-gate ok"
 exit 0
 '''
@@ -612,10 +853,24 @@ exit 0
         fmt = c["format"] or "true"
         lint = c["lint"] or "true"
         return _HOOK_HEADER + f'''
-# PostToolUse Write/Edit: non-blocking format + lint feedback.
-( {fmt} ) >/dev/null 2>&1 || echo "format reported issues" >&2
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
+# PostToolUse Write/Edit: non-blocking lint feedback.
+#
+# [upstream P2-6] This used to invoke the configured FORMAT command - not
+# `format --check` - after every Write|Edit, with no file-type filter. On a
+# project whose commands.format is `gleam format`, that reformatted files the
+# agent never touched, project-wide, on every single edit. A PostToolUse hook
+# must not mutate the working tree behind the operator's back: it makes the
+# agent's diff and the operator's diff disagree.
+#
+# Only the lint/check command runs now. It reports; it never rewrites. The
+# hook is no longer async either - async suppressed this hook's stderr, which
+# is its entire output [upstream P1-1].
 ( {lint} ) 2>&1 | tail -20 >&2 || true
-log "format-lint-gate ran"
+log "format-lint-gate ran (lint only; formatting is never applied here)"
 exit 0
 '''
 
@@ -624,26 +879,38 @@ exit 0
         return _HOOK_HEADER + f'''
 # PreToolUse git push: run the same checks CI runs, locally.
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git push"*)
-    echo "CI mirror: {ci}" >&2
-    if ! ( {ci} ); then echo "Push blocked: CI mirror failed." >&2; exit 2; fi
-  ;;
-esac
+NCMD="$(norm_cmd "$CMD")"
+if git_verb "$NCMD" "push"; then
+  echo "CI mirror: {ci}" >&2
+  if ! ( {ci} ); then echo "Push blocked: CI mirror failed." >&2; exit 2; fi
+fi
 log "ci-mirror ok"
 exit 0
 '''
 
     if name == "cost-log":
         return _HOOK_HEADER + '''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # Stop hook: session-end cost summary. Guards against infinite loop.
 if [ "$(jget '.stop_hook_active')" = "true" ]; then
   exit 0
 fi
-OUT="${CLAUDE_PROJECT_DIR:-.}/.claude/logs/cost.jsonl"
-mkdir -p "$(dirname "$OUT")"
-printf '{"event":"session_end","ts":"%s"}\\n' "$(date -u +%FT%TZ)" >>"$OUT"
-log "cost-log appended"
+# [upstream P3] This artifact was named cost.jsonl but recorded no cost -
+# every entry was {"event":"session_end","ts":...}. The Stop payload carries
+# no token or dollar figure, so the hook cannot obtain one; renaming is the
+# honest fix rather than inventing a number. Cost data belongs to the
+# telemetry surface (.claude/steering/telemetry.md documents Claude Code's
+# OTel `token.usage` by agent.name against an operator-owned backend).
+OUT="${CLAUDE_PROJECT_DIR:-.}/.claude/logs/session-events.jsonl"
+mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
+SID="$(jget '.session_id')"
+[ -z "$SID" ] && SID="${CLAUDE_SESSION_ID:-default}"
+printf '{"event":"session_end","session_id":"%s","ts":"%s"}\\n' \\
+  "$SID" "$(date -u +%FT%TZ)" >>"$OUT"
+log "session-events appended"
 exit 0
 '''
 
@@ -658,42 +925,107 @@ exit 0
         approved_body = "\n".join(approved)
         return _HOOK_HEADER + f'''
 # PreToolUse Bash: block package installs not on the approved list.
+#
+# [upstream P1-3] The previous version failed open on real installs and fired
+# on prose. Every defect below was confirmed by execution:
+#   * Only npm/pip/yarn/pnpm verbs matched, so `gleam add`, `cargo add`,
+#     `mix deps.get`, `rebar3 get-deps`, `pipx install` and `curl | sh` all
+#     sailed through - the gate guarded ecosystems the project did not use
+#     and ignored the one it did.
+#   * `${{tok%%[<>=@~ ]*}}` BLANKED a scoped npm package: `@evil/backdoor`
+#     starts with `@`, so name_only became empty and the empty-guard skipped
+#     it entirely.
+#   * The three strips were chained unconditionally, so any unapproved
+#     package could be laundered by appending an approved one after a token
+#     ending in `i`: `pip install pytest-mpi gleeunit` truncated `rest` at
+#     the `i ` inside `pytest-mpi` and never inspected it.
+#   * `$rest` was unquoted, so it word-split AND glob-expanded against the
+#     cwd: `pip install *` reported the package as `src`.
+#   * Bare `npm install` (routine lockfile restore) was BLOCKED, with the
+#     "package" reported as `npm install`.
+# Approved names stay in a quoted heredoc (S-5: never interpolated into
+# shell) but now land in an array rather than a mktemp file, which under
+# `set -e` could kill the gate at exit 1 = tool proceeds [upstream P0-3c].
 CMD="$(jget '.tool_input.command')"
-APPROVED_FILE="$(mktemp)"
-trap 'rm -f "$APPROVED_FILE"' EXIT
-cat >"$APPROVED_FILE" <<'APPROVED_EOF'
+NCMD="$(norm_cmd "$CMD")"
+mapfile -t APPROVED <<'APPROVED_EOF'
 {approved_body}
 APPROVED_EOF
-is_approved(){{ grep -qxF -- "$1" "$APPROVED_FILE"; }}
-case " $CMD " in
-  *" npm install "*|*" npm i "*|*" pip install "*|*" pip3 install "*\
-|*" yarn add "*|*" pnpm add "*)
-    # Strip everything up to and including the verb, then inspect each token.
-    rest="${{CMD#*install }}"; rest="${{rest#*add }}"; rest="${{rest#*i }}"
-    blocked=""
-    skip_next=0
-    for tok in $rest; do
-      if [ "$skip_next" = "1" ]; then skip_next=0; continue; fi
-      case "$tok" in
-        # Value-taking flags consume the NEXT token (a file/path, not a pkg):
-        -r|--requirement|-e|--editable|-c|--constraint|-t|--target\
-|--prefix|--root|-d|--dest)
-          skip_next=1; continue ;;
-        -*) continue ;;                       # valueless flags (--upgrade...)
-        *) ;;                                 # candidate package token
-      esac
-      name_only="${{tok%%[<>=@~ ]*}}"          # drop version specifiers
-      [ -z "$name_only" ] && continue
-      if ! is_approved "$name_only"; then
-        blocked="$blocked $name_only"
-      fi
-    done
-    if [ -n "$blocked" ]; then
-      echo "Dependency gate: not in deps.md approved list:$blocked" >&2
-      echo "Approve in-session and update .claude/steering/deps.md." >&2
-      exit 2
-    fi ;;
-esac
+is_approved(){{
+  local n="$1" a
+  for a in ${{APPROVED[@]+"${{APPROVED[@]}}"}}; do
+    if [ -n "$a" ] && [ "$a" = "$n" ]; then return 0; fi
+  done
+  return 1
+}}
+
+# Package name from a token, keeping npm scopes intact.
+#   express@4.1.0 -> express      @scope/pkg@1.2 -> @scope/pkg
+#   requests>=2   -> requests     pytest~=7      -> pytest
+pkg_name(){{
+  local t="$1"
+  case "$t" in
+    @*/*) local scope="${{t%%/*}}" rest="${{t#*/}}"
+          printf '%s/%s' "$scope" "${{rest%%[<>=@~]*}}" ;;
+    *)    printf '%s' "${{t%%[<>=@~]*}}" ;;
+  esac
+}}
+
+# Remote-script execution is the same "unapproved software arrives" class the
+# gate exists for, and no package name is inspectable. Always block.
+if printf '%s' "$NCMD" \\
+   | grep -qE '(curl|wget)[^;&|]*\\|[[:space:]]*(sudo +)?(sh|bash|zsh|python3?|perl|ruby)( |$)'; then
+  echo "Dependency gate: piping a downloaded script into a shell is blocked." >&2
+  echo "Vendor the installer, review it, then run it explicitly." >&2
+  exit 2
+fi
+
+TOOLS='(npm|pnpm|yarn|bun|pip|pip3|pipx|poetry|uv|pipenv|cargo|gem|composer|mix|rebar3|gleam|go|deno)'
+VERBS='(install|i|add|get|require|get-deps|deps\\.get)'
+if printf '%s' "$NCMD" | grep -qE "(^|[;&|(]) *(env +)?$TOOLS +$VERBS( |\\$)"; then
+  # Take the argument list belonging to THIS verb only - never a chain of
+  # unconditional strips - and stop at the next command separator so a
+  # following `&& something` is not treated as packages.
+  rest="$(printf '%s' "$NCMD" \\
+    | sed -E "s/.*(^|[;&|(]) *(env +)?$TOOLS +$VERBS +//; s/[;&|].*//")"
+  # A verb with no arguments is a lockfile restore (`npm install`,
+  # `mix deps.get`, `cargo add` alone). Nothing to approve; allow.
+  if printf '%s' "$NCMD" | grep -qE "$TOOLS +$VERBS *$"; then
+    rest=""
+  fi
+  blocked=""
+  set -f                                  # no globbing of package tokens
+  read -ra TOKS <<< "$rest"
+  set +f
+  skip_next=0
+  for tok in ${{TOKS[@]+"${{TOKS[@]}}"}}; do
+    if [ "$skip_next" = "1" ]; then skip_next=0; continue; fi
+    case "$tok" in
+      # A requirements/constraints FILE lists packages this gate cannot see.
+      # Allowing it would defeat the gate entirely, so it blocks with its own
+      # reason rather than silently consuming the filename [upstream P1-3].
+      -r|--requirement|-c|--constraint)
+        echo "Dependency gate: cannot verify packages listed in a file." >&2
+        echo "Install them explicitly, or approve in .claude/steering/deps.md." >&2
+        exit 2 ;;
+      -e|--editable|-t|--target|--prefix|--root|-d|--dest)
+        skip_next=1; continue ;;
+      -*) continue ;;
+      .|./*|/*|../*) continue ;;          # local path install, not a registry
+      *) ;;
+    esac
+    name_only="$(pkg_name "$tok")"
+    [ -z "$name_only" ] && continue
+    if ! is_approved "$name_only"; then
+      blocked="$blocked $name_only"
+    fi
+  done
+  if [ -n "$blocked" ]; then
+    echo "Dependency gate: not in deps.md approved list:$blocked" >&2
+    echo "Approve in-session and update .claude/steering/deps.md." >&2
+    exit 2
+  fi
+fi
 log "dependency-gate ok"
 exit 0
 '''
@@ -736,6 +1068,10 @@ exit 0
         dm = th["drift_session_duration_minutes"]
         fr = th["drift_file_read_threshold"]
         return _HOOK_HEADER + f'''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # PostToolUse: soft drift notice - TIER-1 TOOL-CALL COUNTER ONLY. Honest
 # scope (v2.5.0 release review F1, 2026-07-27): tier-2/tier-3 escalation, the hard
 # block, audio dispatch, and the session-duration / repeated-file-read
@@ -743,11 +1079,31 @@ exit 0
 # by this emitted stub. The thresholds below are BAKED at install time from
 # bootstrap.config.yaml; editing audio-alerts.config does not change them.
 # See README "Honest limitations" and docs/deferred-backlog.md I-1.
-CFG="${{CLAUDE_PROJECT_DIR:-.}}/.claude/hooks/audio-alerts.config"
-SID="${{CLAUDE_SESSION_ID:-default}}"
+# [upstream P2-7] The session id arrives in the stdin payload as
+# `.session_id`; CLAUDE_SESSION_ID is NOT exported by Claude Code. Keying on
+# the env var alone meant every session shared one file, .drift-state-default,
+# which never reset: it was observed at 274 against a threshold of 50, so the
+# notice fired on every tool call forever - simultaneously permanent noise and
+# invisible, because PostToolUse stderr on exit 0 is not surfaced. Payload
+# first, env var as fallback.
+SID="$(jget '.session_id')"
+[ -z "$SID" ] && SID="${{CLAUDE_SESSION_ID:-default}}"
+# Path-safety: the session id reaches a filename, so allow only benign chars.
+case "$SID" in *[!A-Za-z0-9._-]*) SID="default" ;; esac
 ST="${{CLAUDE_PROJECT_DIR:-.}}/.claude/sessions/.drift-state-$SID"
 mkdir -p "$(dirname "$ST")"
-n=$(( $(cat "$ST" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$ST"
+# SECURITY (upstream P0-1): the state file is gitignored and writable by any
+# ordinary Write call, so its contents are UNTRUSTED. Bash performs command
+# substitution inside arithmetic evaluation - including within array
+# subscripts - so the former `n=$(( $(cat "$ST") + 1 ))` executed whatever
+# the file contained: `PATH[$(touch /tmp/PWNED)]` ran `touch`. That is a
+# clean path from "the agent writes a file" (an operation no gate blocks) to
+# arbitrary command execution, bypassing every PreToolUse Bash gate. Read
+# first, validate as an unsigned integer, and only then do arithmetic. Never
+# let file or JSON content reach $(( )) unvalidated.
+n=$(cat "$ST" 2>/dev/null || echo 0)
+case "$n" in ''|*[!0-9]*) n=0 ;; esac
+n=$((n + 1)); echo "$n" >"$ST"
 if [ "$n" -ge {tc} ]; then
   echo "DRIFT: $n tool calls (threshold {tc}). Consider /checkpoint." >&2
 fi
@@ -757,6 +1113,10 @@ exit 0
 
     if name == "task-done-alarm":
         return _HOOK_HEADER + '''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # SubagentStop: informational completion cue. Never blocks.
 if [ "$(jget '.stop_hook_active')" = "true" ]; then
   exit 0
@@ -768,10 +1128,26 @@ exit 0
 
     if name == "decision-required-alarm":
         return _HOOK_HEADER + '''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # Notification: persistent cue when the AI hits an urgent escalation.
-SID="${CLAUDE_SESSION_ID:-default}"
-P="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions/.decision-pending-$SID"
-mkdir -p "$(dirname "$P")"; : >"$P"
+# [upstream P3] The sentinel was created here and cleared by nothing, so it
+# accumulated one stale file per session forever and its presence stopped
+# meaning "a decision is pending". Two changes: key it on the payload's
+# session_id (CLAUDE_SESSION_ID is not exported - see P2-7), and sweep
+# sentinels older than the documented 7-day state window on each fire, which
+# is the retention policy the protocol already advertises.
+SID="$(jget '.session_id')"
+[ -z "$SID" ] && SID="${CLAUDE_SESSION_ID:-default}"
+case "$SID" in *[!A-Za-z0-9._-]*) SID="default" ;; esac
+S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
+P="$S/.decision-pending-$SID"
+mkdir -p "$S" 2>/dev/null || true
+find "$S" -maxdepth 1 -name '.decision-pending-*' -mtime +7 -delete \\
+  2>/dev/null || true
+: >"$P" 2>/dev/null || true
 echo "DECISION REQUIRED: operator action needed (see chat)." >&2
 log "decision-required-alarm fired"
 exit 0
@@ -779,6 +1155,10 @@ exit 0
 
     if name == "drift-detector-loop-cooperation":
         return _HOOK_HEADER + '''
+# Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
+# call, so a missing JSON parser degrades to a logged no-op rather
+# than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
+FAIL_CLOSED=0
 # Augments tier-3: inside loop.sh/goal-loop.sh, tier-3 fire => checkpoint and
 # end turn instead of hard-block-until-/clear. No-ops outside loop/goal mode.
 # Honest scope (v2.5.0 release review F1, 2026-07-27): the emitted drift-detector stub
@@ -832,7 +1212,11 @@ exit 0
 HOOK_EVENT_MAP = {
     "spec-gate-entry": ("UserPromptSubmit", None),
     "spec-gate-commit": ("PreToolUse", "Bash"),
-    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    # [upstream P0-2 / P2-4] NotebookEdit was already being matched by the
+    # old "Read|Write|Edit" SUBSTRING, but it supplies `notebook_path`, which
+    # the hook never read - so it logged "no path", exited 0, and reported
+    # success while checking nothing. Grep and Glob were unmatched entirely.
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "test-gate": ("PreToolUse", "Bash"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
     "ci-mirror": ("PreToolUse", "Bash"),
@@ -847,38 +1231,89 @@ HOOK_EVENT_MAP = {
     "iteration-summary-enforcement": ("Stop", None),
 }
 
+# [upstream P0-2] ADDITIONAL registrations for a hook that must guard more
+# than one tool surface. Kept separate from HOOK_EVENT_MAP so the seam SS7.2
+# tier partition (which is keyed on hook NAME, one entry per hook) is
+# unaffected. secrets-gate was registered only under Read|Write|Edit, so
+# every never-read path stayed readable through a shell command: `cat .env`,
+# `grep -r . secrets/`, `base64 id_rsa`, `git diff -- '*.pem'`. The policy
+# constrained one access route out of several while secrets.md told the
+# operator the paths were blocked.
+HOOK_EXTRA_EVENTS = {
+    "secrets-gate": [("PreToolUse", "Bash")],
+}
+
+
+# [upstream P1-1] These three used to be emitted with "async": true.
+# An async hook's exit code CANNOT block a tool call, and its stderr is
+# suppressed by default - so `test-gate` printed "Commit blocked: tests
+# failing.", exited 2, and the commit went through silently. Confirmed by
+# execution: a Bash call containing `git push` took ci-mirror's exit-2
+# path and the tool still completed, while the synchronous
+# dependency-gate blocked a real call in the same session. The protocol
+# presents "implementation passes local gates" as gate 5 of 6 in the
+# per-task lifecycle; for these hooks that gate did not exist.
+#
+# They are slow, which is why async was reached for. The correct lever is
+# an explicit timeout. Values are generous because a blocked commit is
+# cheaper than a false block. This only became tolerable after P1-4:
+# while these gates still substring-matched, making them synchronous
+# would have turned a silent no-op into a multi-minute stall on
+# innocuous commands - the fastest route to an operator disabling the
+# suite. Fix order there was load-bearing, not incidental.
+TIMEOUTS = {
+    "test-gate": 600,
+    "ci-mirror": 900,
+    # PostToolUse and advisory, so async was defensible - except async also
+    # suppresses stderr, which IS this hook's entire output. Synchronous with
+    # a short timeout is what makes its feedback reach the model at all.
+    "format-lint-gate": 120,
+}
+
 
 def _settings_json(cfg):
     hooks = cfg["_resolved_hooks"]
-    slow = {"ci-mirror", "test-gate", "format-lint-gate"}
     by_event: dict = {}
     for hk in hooks:
-        ev, matcher = HOOK_EVENT_MAP[hk]
-        entry = {
-            "type": "command",
-            "command": f"$CLAUDE_PROJECT_DIR/.claude/hooks/{hk}.sh",
-        }
-        if hk in slow:
-            entry["async"] = True
-        bucket = by_event.setdefault(ev, [])
-        if matcher:
-            grp = next((g for g in bucket if g.get("matcher") == matcher), None)
-            if grp is None:
-                grp = {"matcher": matcher, "hooks": []}
-                bucket.append(grp)
-            grp["hooks"].append(entry)
-        else:
-            grp = next((g for g in bucket if "matcher" not in g), None)
-            if grp is None:
-                grp = {"hooks": []}
-                bucket.append(grp)
-            grp["hooks"].append(entry)
+        registrations = [HOOK_EVENT_MAP[hk]] + HOOK_EXTRA_EVENTS.get(hk, [])
+        for ev, matcher in registrations:
+            entry = {
+                "type": "command",
+                "command": f"$CLAUDE_PROJECT_DIR/.claude/hooks/{hk}.sh",
+            }
+            if hk in TIMEOUTS:
+                entry["timeout"] = TIMEOUTS[hk]
+            bucket = by_event.setdefault(ev, [])
+            if matcher:
+                grp = next((g for g in bucket
+                            if g.get("matcher") == matcher), None)
+                if grp is None:
+                    grp = {"matcher": matcher, "hooks": []}
+                    bucket.append(grp)
+                grp["hooks"].append(entry)
+            else:
+                grp = next((g for g in bucket if "matcher" not in g), None)
+                if grp is None:
+                    grp = {"hooks": []}
+                    bucket.append(grp)
+                grp["hooks"].append(entry)
 
     settings = {
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "_generatedBy": f"bootstrap-installer (protocol {PROTOCOL_VERSION})",
         "hooks": by_event,
     }
+
+    # [upstream P0-2] Defence in depth. The hook is the enforcement point, but
+    # a deny rule is evaluated by the harness itself and cannot be defeated by
+    # a hook bug, a missing parser, or an unwritable log dir. Deliberately
+    # narrow: these mirror the configured never-read paths and nothing else.
+    if cfg["secrets"]["enabled"] and cfg["secrets"]["never_read_paths"]:
+        deny = []
+        for pat in cfg["secrets"]["never_read_paths"]:
+            for tool in ("Read", "Edit", "Write"):
+                deny.append(f"{tool}({pat})")
+        settings["permissions"] = {"deny": deny}
     if cfg["mcp"]["servers"]:
         settings["_note_mcp"] = ("MCP servers are added via `claude mcp add`; "
                                  "see .claude/steering/tools.md")
@@ -915,7 +1350,12 @@ decision_required_enabled=true
 decision_required_persistent_notification=true
 
 # === Audio ===
-audio_enabled=true
+# [upstream P3] Was `true`. No emitted hook invokes any audio player
+# (paplay/aplay/afplay/ffplay/mpv/sox appear in none of them), so `true`
+# advertised a capability that does not exist. The header below is honest
+# about the limitation; this value now agrees with it. Set to true only
+# after wiring a player yourself.
+audio_enabled=false
 audio_file_drift_gentle=~/.claude/sounds/drift-gentle.wav
 audio_file_drift_insistent=~/.claude/sounds/drift-insistent.wav
 audio_file_drift_firm=~/.claude/sounds/drift-firm.wav

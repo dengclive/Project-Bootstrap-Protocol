@@ -17,10 +17,10 @@ work) · `no-action` (reviewed, judged fine as-is; listed so it isn't re-derived
 
 | ID | Item | Notes |
 |---|---|---|
-| A-1 | Emitted-gate fail-open posture under a total parser outage | No `jq` AND no `python3` → git-commit gates + `secrets-gate` become inert pass-throughs. Leave inert vs. fail-closed. Golden-changing, RETROFIT-contract decision. `decision` |
+| A-1 | Emitted-gate fail-open posture under a total parser outage | **DECIDED 2026-07-28 → fail-closed** (v2.6.0, upstream P0-3b). Blocking gates exit 2 with a reason when neither `jq` nor `python3` exists; advisory hooks declare `FAIL_CLOSED=0` and degrade to a logged no-op. `tests/test_retrofit.py` T2.FS7b re-pointed to the new posture. `done` |
 | A-2 | Accept-or-schedule this deferred set | Formally treat as deferred-not-forgotten, or queue clusters. `decision` |
 | A-3 | Shell-parity judgment call (Milestone B) | SDK gates stricter than the 2.0.0 shell gates on edge cases; parity is a follow-up PR if wanted. `decision` |
-| A-4 | Trajectory pruning | `purge_old_state_after_days` has no consumer; auto-deletion unimplemented (new destructive behavior). `decision` |
+| A-4 | Trajectory pruning | `purge_old_state_after_days` has no consumer; auto-deletion unimplemented (new destructive behavior). Partially addressed at v2.6.0 — `.decision-pending-*` is swept on a 7-day window and `hooks.log` rotates at 1 MiB (upstream P3) — but trajectory files under `.claude/logs/` remain unpruned. `decision` |
 
 ## B. Seam follow-ups (from the 2.0.0 re-cut, PR #10)
 
@@ -136,6 +136,22 @@ Also verified and left alone by the review (do not re-derive): the seam
 binding `2.4.0 @ 251f82f` while main tags 2.5.0 is conformant (commit-pinned
 consumers; pin-bump on adoption); wrapper skeletons are conformant under
 B-1(b); secrets-gate path-only matching matches its spec.
+
+## J. v2.6.0 upstream-fix residue (2026-07-28)
+
+Source: `docs/bootstrap-protocol-upstream-bugs-2026-07-28.md`. Every P0/P1/P2/P3
+finding in that report was fixed at v2.6.0 (see `docs/changelog.md`); the rows
+below are what those fixes deliberately left, plus the accepted trade-offs —
+recorded so they are not re-derived as new findings.
+
+| ID | Item | Notes |
+|---|---|---|
+| J-1 | **Quoted-argument verbs no longer match.** `sh -c "git commit"` and friends were caught by the old substring matching; anchoring to command position (P1-4) drops them. Accepted deliberately — the alternative is every false positive the report documented | `no-action` — recorded trade-off, revisit only with a real bypass |
+| J-2 | `ENFORCED_PREFIXES` (spec-gate-commit, P1-2) is an editable constant baked into the emitted hook, not a `bootstrap.config.yaml` field. The report called the predicate "configurable"; this is the cheap half | `open` |
+| J-3 | The SDK substrate carries no Bash-side `secrets-gate` closure, so under `gate_substrate: "sdk-callable"` the shell-command access route (P0-2) is guarded by `permissions.deny` only. Asserted as a known divergence in `test_sdk_gates.py`, not silently tolerated | `open` |
+| J-4 | Report acceptance criterion 6 — **a tagged release**. Still zero tags in this repo. Criterion 7 (re-run the two executing lenses against a fresh install of the FIXED version) is deliberately left to an independent reviewer | `open` — the release blocker |
+| J-5 | `permissions.deny` rules are emitted from `never_read_paths` verbatim. Claude Code's permission-rule glob dialect is not necessarily identical to the hook's `case` dialect; the deny list is defence in depth, and the hook remains the enforcement point | `decision` — verify the dialect against a live harness |
+| J-6 | `cost.jsonl` → `session-events.jsonl` is a rename of an emitted artifact. Anything downstream reading the old path breaks. Judged safe (it recorded no cost) but it is a consumer-visible rename inside a MINOR | `no-action` |
 
 ## Priority reading
 

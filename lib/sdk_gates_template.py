@@ -21,6 +21,16 @@ import json
 # The seven gates the SDK substrate carries (R-7). ci-mirror and the
 # observability hooks stay shell-only; SessionStart/SessionEnd-class events
 # have no Python-SDK HookEvent and remain shell (AC-7-3).
+#
+# [upstream P2-2] This is a SUBSET, not parity. `git push` has no gate here
+# at all. Do not describe this module as equivalent to the shell suite.
+#
+# [upstream P2-3] WHEN THIS MODULE IS LIVE: only when the install resolved
+# `gate_substrate: "sdk-callable"` AND the consumer runtime calls
+# build_hooks(). On a `gate_substrate: "shell"` install the file is still
+# emitted but NOTHING references it - `grep -c sdk_gates .claude/settings.json`
+# returns 0 - so it enforces nothing. That is intended, but it was never
+# stated, and a reader reasonably assumes an emitted gate module is active.
 SDK_GATES = (
     "secrets-gate", "spec-gate-commit", "dependency-gate", "test-gate",
     "eval-gate", "tdd-gate", "format-lint-gate",
@@ -132,21 +142,56 @@ def _secrets_gate(config):
         # under-match (shell T-1 semantics) - each pattern is tried
         # as-given AND with an implicit leading '*', case-insensitively,
         # against both basename and full path.
-        target = _tool_input(input_data).get("file_path") or ""
-        if not target:
+        # [upstream P0-2/P2-4] Every tool surface that can reach a file,
+        # not just file_path. NotebookEdit supplies notebook_path and was
+        # already matched by the old matcher substring while the path key
+        # went unread - the gate reported success while checking nothing.
+        ti = _tool_input(input_data)
+        targets = [ti.get(k) or ""
+                   for k in ("file_path", "notebook_path", "path", "pattern")]
+        targets = [t for t in targets if t]
+        if not targets:
             return {}
-        base = os.path.basename(target).lower()
-        full = target.lower()
-        for pat, cpat in patterns:
-            if (fnmatch.fnmatchcase(base, cpat)
-                    or fnmatch.fnmatchcase(base, "*" + cpat)
-                    or fnmatch.fnmatchcase(full, cpat)
-                    or fnmatch.fnmatchcase(full, "*/" + cpat)
-                    or fnmatch.fnmatchcase(full, "*" + cpat)):
-                return _deny(f"BLOCKED: {target} matches never-read "
-                             f"pattern {pat}")
+        for target in targets:
+            deny = _match_secret(target, patterns)
+            if deny:
+                return deny
         return {}
+
     return secrets_gate
+
+
+def _match_secret(target, patterns):
+    # [upstream P2-4] Mirrors the shell's three-form matching exactly.
+    # '*.pem'-style patterns keep the implicit leading '*' (free). The
+    # '.env*' dotenv family is matched on a DOT-SEGMENT boundary so
+    # config.env / prod.env still block (shell T-1) while my.envelope.gleam
+    # and dev.environment.md no longer false-block mid-plan. Everything else
+    # ('secrets/*') is path-segment anchored.
+    base = os.path.basename(target).lower()
+    full = target.lower()
+    for pat, cpat in patterns:
+        stem = cpat[:-1] if cpat.endswith("*") else cpat
+        if cpat.startswith("*"):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or fnmatch.fnmatchcase(full, "*" + cpat))
+        elif cpat.startswith("."):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + stem)
+                   or fnmatch.fnmatchcase(base, "*" + stem + ".*")
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat))
+        else:
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat))
+        if hit:
+            return _deny(f"BLOCKED: {target} matches never-read "
+                         f"pattern {pat}")
+    return {}
 
 
 def _spec_gate_commit(config):
@@ -155,7 +200,7 @@ def _spec_gate_commit(config):
         # spec. Word-boundary match on path or basename (shell S-3
         # semantics), never a loose substring.
         cmd = _tool_input(input_data).get("command") or ""
-        if "git commit" not in cmd:
+        if not _git_verb(cmd, "commit"):
             return {}
         proj = _proj()
         try:
@@ -203,9 +248,40 @@ def _spec_gate_commit(config):
     return spec_gate_commit
 
 
+# [upstream P2-1, decision recorded] CANONICAL SUBSTRATE = THE SHELL SUITE.
+# The shell is the default gate_substrate, ships on every install, and
+# carries 11 gates to this module's 7. The binding rule is therefore: this
+# module MUST NOT allow what the shell blocks, and MUST NOT block what the
+# shell allows. Where the two disagreed, five dependency cases the shell
+# allowed this module denied, and the reverse held on commits - so whichever
+# substrate was live changed project behavior completely.
+#
+# [upstream P1-4 port] Matching is anchored to COMMAND POSITION, not a bare
+# substring. `"git commit" not in cmd` had the identical weakness as the
+# shell's `case *"git commit"*`: it missed `git  commit`, a tab,
+# `git --no-pager commit` and `git -C /repo commit`, and it fired on the
+# string appearing in a comment, a quoted argument or a grep pattern.
+_GIT_VERB_TMPL = (r"(?:^|[;&|(])\\s*(?:env\\s+)?git"
+                  r"(?:\\s+-[Cc]\\s+\\S+|\\s+-\\S+)*\\s+%s(?:\\s|$)")
+
+
+def _git_verb(cmd, verb):
+    """True if `cmd` invokes `git <verb>` at a command position."""
+    return re.search(_GIT_VERB_TMPL % verb, cmd) is not None
+
+
+_TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
+          r"|composer|mix|rebar3|gleam|go|deno")
+_VERBS = r"install|i|add|get|require|get-deps|deps\\.get"
 _INSTALL_VERBS = re.compile(
-    r" (?:python[0-9.]* -m pip install|pip[0-9.]* install|pipx install"
-    r"|npm install|npm i|yarn add|pnpm add) ")
+    r"(?:^|[;&|(])\\s*(?:env\\s+)?"
+    r"(?:python[0-9.]*\\s+-m\\s+pip\\s+install|(?:" + _TOOLS + r")\\s+(?:"
+    + _VERBS + r"))(?:\\s|$)")
+# Remote-script execution: same "unapproved software arrives" class, with no
+# inspectable package name, so it is always denied (shell parity).
+_PIPE_TO_SHELL = re.compile(
+    r"(?:curl|wget)[^;&|]*\\|\\s*(?:sudo\\s+)?"
+    r"(?:sh|bash|zsh|python3?|perl|ruby)(?:\\s|$)")
 _VALUE_FLAGS = frozenset({
     "-r", "--requirement", "-e", "--editable", "-c", "--constraint",
     "-t", "--target", "--prefix", "--root", "-d", "--dest",
@@ -251,19 +327,32 @@ def _scan_install_line(line, approved):
     # Returns a space-prefixed string of unapproved package names on this
     # single command line (empty if none / not an install command).
     norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
+    if _PIPE_TO_SHELL.search(norm):
+        return " <piped-remote-script>"
     m = _INSTALL_VERBS.search(norm)
     if not m:
         return ""
-    rest = norm[m.end():]
+    # Stop at the next command separator: a following `&& something` is not
+    # a package list. A verb with no arguments is a lockfile restore
+    # (`npm install`), not an install of anything to approve. Shell parity.
+    rest = re.split(r"[;&|]", norm[m.end():], maxsplit=1)[0]
+    if not rest.strip():
+        return ""
     blocked = ""
     skip_next = False
     for tok in rest.split():
         if skip_next:
             skip_next = False
             continue
+        if tok in ("-r", "--requirement", "-c", "--constraint"):
+            # Packages listed in a FILE are invisible to the gate; allowing
+            # them would defeat it entirely. Shell parity.
+            return " <unverifiable-requirements-file>"
         if tok in _VALUE_FLAGS:
             skip_next = True
             continue
+        if tok == "." or tok.startswith(("./", "/", "../")):
+            continue                      # local path install, not a registry
         if tok.startswith("-"):
             continue
         name_only = _pkg_name(tok)
@@ -279,7 +368,7 @@ def _test_gate(config):
         # Block `git commit` unless tests passed since the last source
         # edit (mark file .claude/.last-test-pass, as in the shell gate).
         cmd = _tool_input(input_data).get("command") or ""
-        if "git commit" not in cmd:
+        if not _git_verb(cmd, "commit"):
             return {}
         proj = _proj()
         mark = proj / ".claude" / ".last-test-pass"
@@ -304,13 +393,13 @@ def _test_gate(config):
             # interpolation site "echo 'TODO: commands.test unset' &&
             # exit 1" (AC-7-2) - deny, never allow-by-omission.
             return _deny("TODO: commands.test unset\\n"
-                         "Commit blocked: tests failing.")
+                         "Commit blocked: test command not found (exit 127)")
         rc, _, _ = await _run(test_cmd, cwd=proj, shell=True)
         if rc == 0:
             mark.parent.mkdir(parents=True, exist_ok=True)
             mark.touch()
             return {}
-        return _deny("Commit blocked: tests failing.")
+        return _deny("Commit blocked: tests failing (exit %d)." % rc)
     return test_gate
 
 
@@ -319,7 +408,7 @@ def _eval_gate(config):
         # Block `git push` touching prompt files unless an eval passed
         # (mark file .claude/.last-eval-pass, as in the shell gate).
         cmd = _tool_input(input_data).get("command") or ""
-        if "git push" not in cmd:
+        if not _git_verb(cmd, "push"):
             return {}
         proj = _proj()
         # Inspect the WHOLE outgoing range, not just the newest commit:
@@ -387,19 +476,20 @@ def _tdd_gate(config):
 
 
 def _format_lint_gate(config):
-    fmt = (config["commands"].get("format") or "").strip()
+    # [upstream P2-6] commands.format is deliberately NOT read here.
     lint = (config["commands"].get("lint") or "").strip()
 
     async def format_lint_gate(input_data, tool_use_id, context):
         # PostToolUse: non-blocking format + lint feedback, exactly like
         # the shell gate (it never denies; empty commands are no-ops,
         # mirroring the shell's interpolated `true`).
+        # [upstream P2-6] The FORMAT command is no longer run here. It is
+        # a mutating command with no file-type filter, so it reformatted
+        # files the agent never touched, project-wide, on every edit - a
+        # PostToolUse hook must not rewrite the tree behind the operator.
+        # Lint only; it reports and never mutates. Shell parity.
         proj = _proj()
         msgs = []
-        if fmt:
-            rc, _, _ = await _run(fmt, cwd=proj, shell=True, merge=True)
-            if rc != 0:
-                msgs.append("format reported issues")
         if lint:
             # merge=True mirrors the shell's `2>&1 | tail -20`: the last 20
             # lines of the CHRONOLOGICALLY interleaved stream, not stdout-
@@ -426,7 +516,7 @@ _GATE_FACTORIES = {
 # Event/matcher per gate - mirrors the shell suite's settings.json wiring
 # (templates.HOOK_EVENT_MAP); tests assert the two stay in sync.
 _GATE_MATCHERS = {
-    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "spec-gate-commit": ("PreToolUse", "Bash"),
     "dependency-gate": ("PreToolUse", "Bash"),
     "test-gate": ("PreToolUse", "Bash"),
@@ -514,8 +604,15 @@ def sdk_gates_module(cfg: dict) -> str:
         "_resolved_hooks": list(gates),
     }
     dynamic = (
-        "# The gates enabled for THIS project at emission (subset of the\n"
-        "# resolved hook set; parity with the installed shell suite).\n"
+        "# The gates enabled for THIS project at emission.\n"
+        "#\n"
+        "# [upstream P2-2] NOT parity with the shell suite - the\n"
+        "# earlier claim of parity was false. 7 gates here; 11 in the\n"
+        "# shell suite. Shell-only, ABSENT here: ci-mirror (so\n"
+        "# `git push` is UNGATED under SDK dispatch), drift-detector,\n"
+        "# cost-log, task-done-alarm, decision-required-alarm,\n"
+        "# spec-gate-entry. The shell suite is canonical; this module\n"
+        "# is a consistent SUBSET of it.\n"
         f"GATES = {json.dumps(gates)}\n\n"
         "# Emission-time snapshot of the gate-relevant resolved config.\n"
         "# build_hooks(config) uses the config the CALLER passes (per the\n"
