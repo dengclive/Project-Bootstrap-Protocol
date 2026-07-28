@@ -56,7 +56,7 @@ ancestor of HEAD.
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
-| 1 | dependency-gate allows chained installs — regression vs 2.5.0 | **Blocker** | CONFIRMED |
+| 1 | dependency-gate: 3 defects, 8 regressions vs 2.5.0 (chaining, bare-verb guard, prefix anchor) | **Blocker** | CONFIRMED |
 | 2 | dependency-gate allows `python -m pip install` — regression vs 2.5.0 | **Blocker** | CONFIRMED |
 | 3 | test-gate ERR trap: P2-5's fix is unreachable, every failure misreports | High | CONFIRMED |
 | 4 | secrets-gate on Bash blocks ordinary commit messages and `.env.example` | High | CONFIRMED |
@@ -74,36 +74,74 @@ ancestor of HEAD.
 
 ---
 
-## 1. `dependency-gate` allows chained installs — **regression vs v2.5.0** — CONFIRMED
+## 1. `dependency-gate` — three defects, eight confirmed regressions vs v2.5.0 — CONFIRMED
 
-**Blocker.** A command that v2.5.0 blocked, v2.6.0 allows.
+**Blocker.** *(Scope revised upward after a differential sweep: this finding
+originally described one defect and two regressions. It is three defects. The
+differential — run the same corpus through the `0ec72d0^` and `0ec72d0` hook
+bodies and flag every case where old=2 and new=0 — is the measurement the
+rewrite needed and did not get.)*
 
 ```
-2.5.0 (pre-fix)   npm install evil && npm install requests   -> exit 2 (blocked)
-2.5.0 (pre-fix)   pip install evil ; pip install requests    -> exit 2 (blocked)
-2.6.0 (post-fix)  npm install evil && npm install requests   -> exit 0 (ALLOWED)
-2.6.0 (post-fix)  pip install evil ; pip install requests    -> exit 0 (ALLOWED)
-2.6.0 (post-fix)  pip install requests && pip install evil   -> exit 2 (blocked)
+command                                            2.5.0  2.6.0
+npm install evil && npm install requests               2      0   REGRESSION
+pip install evil ; pip install requests                2      0   REGRESSION
+npm install evil | tee log && npm install requests     2      0   REGRESSION
+npm install evil && npm install                        2      0   REGRESSION
+pip install evil && npm install                        2      0   REGRESSION
+npm install evil ; cargo add                           2      0   REGRESSION
+npm install evil # npm install                         2      0   REGRESSION
+sudo pip install evil                                  2      0   REGRESSION
+FOO=1 npm install evil                                 2      0   REGRESSION
+uv pip install evil                                    2      0   REGRESSION
+npm install evil                                       2      2   ok
+pip install requests && pip install evil               0      2   ok (fixed)
+npm install                                            2      0   ok (intended false-positive fix)
+cd sidecar && npm install                              2      0   ok (intended false-positive fix)
 ```
 
-**Cause.** `lib/templates.py:989-990`:
+**Defect 1a — the greedy `sed` selects the last verb.** `lib/templates.py:989-990`:
 
 ```bash
 rest="$(printf '%s' "$NCMD" \
   | sed -E "s/.*(^|[;&|(]) *(env +)?$TOOLS +$VERBS +//; s/[;&|].*//")"
 ```
 
-The leading `.*` is **greedy**, so the substitution anchors on the *last*
-install verb in the command; the second expression then truncates at the next
-separator. Every package installed by an earlier command in the chain is never
-inspected. The pre-fix code used `rest="${CMD#*install }"` — a *shortest*-match
-prefix strip — which retained the whole tail and therefore caught `evil`.
+The leading `.*` is greedy, so the substitution anchors on the **last** install
+verb on the line and the second expression truncates at the next separator.
+Every package installed by an earlier command in the chain is unscanned. The
+pre-fix code used `rest="${CMD#*install }"` — a *shortest*-match prefix strip —
+which retained the whole tail and caught `evil`.
+
+**Defect 1b — the lockfile-restore guard tests the whole line.**
+`lib/templates.py:993-995`:
+
+```bash
+if printf '%s' "$NCMD" | grep -qE "$TOOLS +$VERBS *$"; then
+    rest=""
+fi
+```
+
+This asks "does the **command line** end in a bare verb?", not "does *this*
+install invocation have no arguments?". So appending a bare `&& npm install` —
+or a trailing comment `# npm install`, or any second tool with a bare verb —
+blanks `rest` entirely and nothing is scanned at all. This is a *stronger*
+laundering primitive than 1a: it needs no approved package, only a trailing
+bare verb.
+
+**Defect 1c — the command-position anchor admits only a literal `env` prefix.**
+`lib/templates.py:985` allows `(env +)?` and git-style flags, so `sudo pip
+install`, `FOO=1 npm install` (a `VAR=value` assignment prefix) and `uv pip
+install` all fall outside the anchor. The pre-fix substring match caught all
+three.
 
 **Why this matters more than the bug it replaced.** The upstream report's
 laundering primitive (P1-3, "token laundering") required an approved package
-whose name ended in `i`. This one requires nothing but appending
-`&& npm install <any-approved-package>`, and is available for every tool in
-`TOOLS`. The changelog's own claim for this fix is *"no token laundering"*.
+whose name ended in `i`. Defect 1b requires nothing but a trailing bare verb,
+and 1a requires only appending `&& <tool> install <any-approved-package>`. Both
+work for every tool in `TOOLS`. The changelog's claim for this fix
+(`docs/changelog.md:90-92`) is *"per-verb argument extraction (never chained
+strips)"*; it is one greedy `sed` over the whole line.
 
 **Normative citation.** `Bootstrap-Protocol-v2-5-0.md` §6.A line 537: *"**Dependency
 gate** (all) — `PreToolUse` on `Bash` calls matching package-install patterns.
@@ -123,12 +161,16 @@ direction is absent, and so is any `;`-separated case.
 
 ## 2. `dependency-gate` allows `python -m pip install` — **regression vs v2.5.0** — CONFIRMED
 
-**Blocker.** Same class, independent cause.
+**Blocker.** Same class as defect 1c, but worth its own row because it is the
+form the Python ecosystem documents as canonical.
 
 ```
 2.5.0 (pre-fix)   python3 -m pip install evil   -> exit 2 (blocked)
-2.6.0 (post-fix)  python3 -m pip install evil   -> exit 0 (ALLOWED)
-2.6.0 (post-fix)  pip3.11 install evil          -> exit 0 (ALLOWED)
+2.5.0 (pre-fix)   python  -m pip install evil   -> exit 2 (blocked)
+2.6.0 (post-fix)  python3 -m pip install evil   -> exit 0 (ALLOWED)   REGRESSION
+2.6.0 (post-fix)  python  -m pip install evil   -> exit 0 (ALLOWED)   REGRESSION
+2.6.0 (post-fix)  pip3.11 install evil          -> exit 0 (ALLOWED)   (pre-existing gap)
+2.6.0 (post-fix)  /usr/bin/pip install evil     -> exit 0 (ALLOWED)   (pre-existing gap)
 ```
 
 The pre-fix gate matched the substring `*" pip install "*`, which fires inside
@@ -788,11 +830,49 @@ Three qualifications, none of which change the verdict:
 
 ## Recommended disposition
 
-**Release-blocking:** findings 1 and 2. They are security-gate fail-opens that
-the previous released version blocked, in the gate whose rewrite this release is
-partly about. Fix (`.*` → non-greedy or first-match, add `python[0-9.]*\s+-m\s+pip`
-and `pip[0-9.]*` to `TOOLS`), add the adversarial chained case and the
-`python -m pip` case to `tests/test_hook_behavior.py`, and re-run.
+**Release-blocking:** findings 1 and 2 — ten confirmed fail-opens that the
+previous released version blocked, in the gate whose rewrite this release is
+partly about.
+
+The three defects share one root cause: the gate treats a multi-command line as
+a single string and hunts for "the" install command in it with regex. Patching
+the regexes individually will keep producing this class. **Split the line into
+command segments first, then run the existing anchored verb test and token scan
+on each segment independently.** That resolves 1a (each segment is scanned),
+1b (a bare verb is a lockfile restore only for its own segment) and the
+`# comment` variant, and it makes the gate's verdict the OR over segments,
+which is the posture a deny-list wants. Two constraints on that change:
+
+- **It is coupled to Lens A's F2.** `norm_cmd` collapses `\n` to a space and the
+  separator class is `[;&|(]`, so newline-separated commands are already one
+  segment. Segment splitting has to happen before or alongside normalization, or
+  it inherits F2 and every multi-line command remains one segment.
+- **The `curl … | sh` detector must keep seeing the whole line**, since it
+  deliberately reads across a `|`. Run it before splitting.
+
+For 1c / finding 2, widen the command-position prefix to admit `sudo`, a
+`VAR=value` assignment run, and an absolute path, and add
+`python[0-9.]*\s+-m\s+pip\s+install` plus `pip[0-9.]*` (the SDK already carries
+both — `lib/sdk_gates_template.py:346-350`). Lens A F3's `npx` / `uvx` /
+`pnpm dlx` / `npm exec` arrival channels are the same edit site but are
+pre-existing gaps, not regressions; fix them in the same pass or record them.
+
+**Add the differential as a test, not just the cases.** A fixed case list is
+what produced this: `tests/test_hook_behavior.py:370-385` was written from the
+upstream report's examples, so it validates the rewrite against the bugs that
+were already known and is structurally blind to the ones it introduced. The
+invariant a security-gate rewrite actually needs is *no command that the
+previous version blocked may now be allowed* — cheap to assert by running a
+corpus through both hook bodies and failing on any old=2/new=0 pair, with
+deliberate false-positive fixes listed as explicit exemptions.
+
+**Design note, larger than this fix.** The `-r requirements.txt` case shows the
+gate already has a third state — "I cannot verify this" — which it currently
+resolves to a hard deny. Claude Code's `PreToolUse` supports
+`permissionDecision: "ask"`. Routing unverifiable-but-plausible commands to
+*ask* rather than *deny* would let the gate be far more aggressive about the
+cases above without paying the false-positive cost that, per the upstream
+report's own framing, is what gets a gate disabled.
 
 **Should ship with it:** finding 3 (move the test invocation out of the ERR
 trap's reach, e.g. `if ( {cmd} ); then … else rc=$?; …`, and assert the *emitted
