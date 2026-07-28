@@ -50,7 +50,9 @@ reflected in the PRD. The version classification is **right**. But the
 dependency-gate rewrite introduced **two new fail-opens** in the same class it
 was fixing, the `test-gate` reason-path fix is **dead code**, and the
 `secrets-gate` Bash widening blocks routine commands. Several committed
-documents describe the fixes as more complete than they are.
+documents describe the fixes as more complete than they are — including two
+that state the repo has never been tagged when an annotated `v2.5.0` tag is an
+ancestor of HEAD.
 
 | # | Finding | Severity | Status |
 |---|---|---|---|
@@ -64,8 +66,11 @@ documents describe the fixes as more complete than they are.
 | 8 | Four surviving shell/SDK divergences vs "all 13 disputed cases now agree" | Medium | CONFIRMED |
 | 9 | Backlog J-3 claims `permissions.deny` guards a route it does not | Medium | CONFIRMED |
 | 10 | Stale normative text in three root documents | Medium | CONFIRMED |
-| 11 | Two of the new "behavioural" tests assert nothing / miss the hole | Medium | CONFIRMED |
-| 12 | Freeze-exception no. 17 — enumeration verified complete and honest | — | CONFIRMED OK |
+| 11 | Three tests assert nothing; the new matrix misses the hole | Medium | CONFIRMED |
+| 12 | Freeze-exception no. 17 — classes honest, file count wrong (14, not 16) | Low | CONFIRMED |
+| 13 | Two documents claim zero tags; an annotated `v2.5.0` tag exists | Medium | CONFIRMED |
+| 14 | Changelog says 1201 checks; the suite reports 1202 | Low | CONFIRMED |
+| 15 | Every hook writes a spurious stderr line on a fresh install | Low | CONFIRMED |
 
 ---
 
@@ -371,13 +376,29 @@ disagreements remain, in both directions:
 | Case | Shell | SDK | Rule violated |
 |---|---|---|---|
 | `npm install evil && npm install requests` | allow | **deny** | "must not block what the shell allows" |
-| `python3 -m pip install evil` | allow | **deny** | same |
+| `npm install requests && npm install evil` | **block** | allow | "must not allow what the shell blocks" |
+| `python3 -m pip install evil` | allow | **deny** | "must not block what the shell allows" |
 | `pip3.11 install evil` | allow | **deny** | same |
 | `cat .env` (Bash) | **block** | allow | "must not allow what the shell blocks" |
 | `echo "git push"` (eval-gate) | **block** | allow | same |
+| `git commit` of a docs-only staging set | allow | **deny** | "must not block what the shell allows" |
 
-The first three are the shell failing open (findings 1 and 2) — the canonical
-substrate is the weaker one, which inverts the stated design.
+Rows 1 and 2 are the sharpest result: on a chained install the **shell** fails
+open on the first command and the **SDK** fails open on the last, because one
+takes the greedy-last verb match and the other the first. Neither substrate is
+safe on `A && B`, and they are unsafe on opposite halves of it. The shell rows
+where the shell allows are findings 1 and 2 — the canonical substrate is the
+weaker one, which inverts the stated design.
+
+**The last row is a second, unrecorded survival of P1-2.** The `ENFORCED_PREFIXES`
+scoping that fixes the bootstrap-commit half in the shell
+(`lib/templates.py:623`) was **never ported to the SDK** —
+`lib/sdk_gates_template.py:234` still iterates every staged file. Executed
+against a repo staging only `README.md` and `.claude/specs/INDEX.md`: shell exit
+0, SDK deny. So under `gate_substrate: "sdk-callable"` the bootstrap commit is
+still impossible, which is the failure the changelog reports as fixed. Combined
+with finding 6, **neither half of P1-2 is fixed on the SDK substrate and only
+one half is fixed on the shell.**
 
 The `eval-gate` row is a straightforward miss: the P1-4 anchoring was applied
 to four gates (`spec-gate-commit`, `test-gate`, `ci-mirror`, `dependency-gate`)
@@ -510,7 +531,20 @@ new suite does and does not measure.
   `format-lint-gate` from the parity table is acceptable (no fixed literal
   survives), but it removes a check without replacing it.
 
-**Two new tests assert nothing useful:**
+**Three tests assert nothing useful:**
+
+- `tests/test_sdk_gates.py:183-184`, cited by backlog J-3 as the reason the
+  SDK's missing Bash-side secrets closure is *"not silently tolerated"*:
+  ```python
+  check("SDK is a documented SUBSET: no Bash-side secrets closure yet",
+        "secrets-gate" not in getattr(gates_mod, "_BASH_GATES", {}))
+  ```
+  `_BASH_GATES` has never existed —
+  `grep -rn "_BASH_GATES" lib/ tests/` returns this line and nothing else. The
+  `getattr` default reduces the assertion to `"secrets-gate" not in {}`, which
+  is unconditionally true, and would stay true if a Bash-side closure *were*
+  added under any other name. The divergence it claims to pin is real; the pin
+  is not.
 
 - `tests/test_hook_behavior.py:490-494`, the P2-6 regression test:
   ```python
@@ -535,35 +569,104 @@ fixes and are blind to what the fixes broke.
 
 ---
 
-## 12. Freeze-exception no. 17 — the enumeration is complete and honest — CONFIRMED
+## 12. Freeze-exception no. 17 — class enumeration honest, file count wrong — CONFIRMED
 
-**Checked and it is fine**, with one wording nit.
+The **class enumeration is complete and honest**; the **count attached to it is
+not**, and the error comes from counting a different thing than the digest
+covers.
 
-Method: `git archive 0ec72d0` and `git archive 0ec72d0^` into two temp trees,
-ran each version's own `bin/bootstrap-install` against the same config, and
-diffed the emitted trees.
+`tests/test_greenfield_golden.py:125-135` hashes **plan actions only** — the
+list `build_plan(cfg)` returns. `.bootstrap-state.json` and
+`.installer-manifest.json` are written outside the plan and are **not in the
+digest**. Measured both ways, against `git archive` trees of `0ec72d0` and
+`0ec72d0^`:
 
-| Fixture | Emitted | Changed | Record's claim |
-|---|---|---|---|
-| `default` (committed `bootstrap.config.yaml`) | 59 | **16** | *"16 files on `default`"* ✔ |
-| `full_autonomous` (ai-agent, all three modes, tdd required) | 71 | **20** | *"same named set"* — 16 shared + `tdd-gate`, `eval-gate`, `drift-detector-loop-cooperation`, `iteration-summary-enforcement`, matching the v2.5.0 no.16 structure ✔ |
+| Fixture | Plan actions | Changed *in the digest* | Changed *on disk* | Record says |
+|---|---|---|---|---|
+| `default` | 57 | **14** | 16 | *"16 files on `default`"* ✗ |
+| `full_autonomous` | 69 | **18** | 20 | *"same named set"* |
 
-The 16 on `default`: 11 hook scripts, `settings.json`, `audio-alerts.config`,
-`.bootstrap-state.json`, `.installer-manifest.json`, `sdk_gates/gates.py`. Every
-one is accounted for by a named byte class (1, 3, 4, 5 or 6). No emitted file
-changed that the record does not name, and no named class failed to move.
+The digest moved over **14** files on `default`, not 16. The two extra
+on-disk files are exactly the state file and the manifest — which byte class 5
+names (*"stamped into settings.json `_generatedBy`, the state file and the
+manifest"*), even though neither is inside the digest the record annotates. 16
+is the count from freeze-exception **no. 16's `full_autonomous` row**
+(`tests/test_greenfield_golden.py:452`, *"16 files: the 12 shared ones + …"*),
+apparently copied from the wrong row.
 
-The commit-message claim — *"no steering doc, skill, command or agent body
-moved, so every frozen twin stays byte-identical"* — **holds on both fixtures**:
-`diff -rq` over `steering/`, `skills/`, `commands/`, `agents/`, `CLAUDE.md`,
-`auto.sh`, `loop.sh` and `goal-loop.sh` returns nothing. That also independently
-re-confirms the not-a-seam-event verdict: `SEAM-CONTRACT-v2-0-0.md` §7.5's
-protocol skeletons and the §7.4 sentinel carriers are byte-identical.
+*(I initially confirmed "16 ✔" by diffing two installed trees. That measured the
+installed tree, not the digest, and was the wrong basis; the corrected figure
+is above.)*
 
-**Nit.** Byte class 4 lists *"test-gate absolute find + **127 vs failure**
-[P2-5]"*. The bytes did move, so the record is accurate as a *byte* record — but
-it states an effect that finding 3 shows is unreachable. A byte-class record
-that asserts delivered behaviour inherits the obligation to be right about it.
+**The class enumeration itself holds.** Every one of the 14/18 changed artifacts
+maps to a named class: hook scripts → 1, `drift-detector.sh` → 2,
+`settings.json` → 3 and 5, the named gate bodies → 4, `audio-alerts.config` /
+`cost-log.sh` / `decision-required-alarm.sh` / `sdk_gates/gates.py` → 6. No
+unnamed file moved and no named class failed to move.
+
+**The frozen-twin claim is true.** *"No steering doc, skill, command or agent
+body moved"* — `diff -rq` over `steering/`, `skills/`, `commands/`, `agents/`,
+`CLAUDE.md`, `auto.sh`, `loop.sh`, `goal-loop.sh` returns nothing on either
+fixture. That independently re-confirms the not-a-seam-event verdict:
+`SEAM-CONTRACT-v2-0-0.md` §7.5's protocol skeletons and the §7.4 sentinel
+carriers are byte-identical.
+
+**Two nits.** Class 4 lists *"test-gate absolute find + **127 vs failure**
+[P2-5]"* — the bytes moved, but finding 3 shows that effect is unreachable; a
+byte-class record that asserts delivered behaviour inherits the obligation to be
+right about it. Class 4 also omits `ci-mirror.sh`, whose body changed beyond the
+shared header (`case "$CMD" in *"git push"*)` → `git_verb "$NCMD" "push"`);
+class 1's `norm_cmd/cmd_has_verb/git_verb` line arguably covers it, but it is
+not named.
+
+---
+
+## 13. Two documents state the repo has never been tagged; an annotated tag exists — CONFIRMED
+
+**Medium.** Both the changelog and the backlog assert zero tags, and both are
+false as written:
+
+- `docs/changelog.md:165` — *"this repo has never had a tag."*
+- `docs/deferred-backlog.md:152` (J-4) — *"**Still zero tags in this repo.**"*
+
+```
+$ git for-each-ref refs/tags --format='%(refname:short) %(objecttype) %(taggerdate:short) %(subject)'
+v2.5.0 tag 2026-07-27 Project Bootstrap Protocol v2.5.0
+$ git merge-base --is-ancestor v2.5.0 HEAD && echo ancestor
+ancestor
+```
+
+An **annotated** tag `v2.5.0`, dated 2026-07-27 — the day *before* `0ec72d0`
+(2026-07-28) — pointing at an ancestor of HEAD. Upstream acceptance criterion 6
+(*"Downstream consumers pin annotated tags; `main` is not a release"*) is
+therefore satisfied for 2.5.0 and merely pending for 2.6.0. J-4 is labelled
+*"the release blocker"* on the strength of a claim the repo contradicts.
+
+---
+
+## 14. Changelog understates its own suite total — CONFIRMED
+
+**Low.** `docs/changelog.md:155`: *"Suite total 1016 → **1201 checks across 16
+suites**."* The measured total is **1202** (`python3 bin/run-tests`; the commit
+message says 1202 correctly). Trivial in itself, but it is a number in a
+committed release record that does not match the artifact it describes.
+
+---
+
+## 15. A fresh install emits a spurious stderr line from every hook's first run — CONFIRMED
+
+**Low.** `_rotate_log` (`lib/templates.py:271-279`, added for the P3 rotation
+fix) runs `wc -c <"$LOG"` before `hooks.log` exists. The redirection failure is
+reported by the shell *before* the `2>/dev/null` on `wc` can apply:
+
+```
+.../.claude/hooks/spec-gate-commit.sh: line 41: .../.claude/logs/hooks.log: No such file or directory
+```
+
+Confirmed that a fresh install does not pre-create the directory:
+`ls -d <install>/.claude/logs` → *No such file or directory*. Exit codes are
+unaffected, so this is cosmetic — but it attaches shell-error noise to a
+security gate's first decision on every new install, and it is recorded nowhere.
 
 ---
 
@@ -625,15 +728,31 @@ Three qualifications, none of which change the verdict:
    verbs, **no token laundering**"*. A simpler laundering primitive was
    introduced (finding 1).
 4. **Commit message / changelog** — *"the SDK reconciled to it (**all 13
-   disputed cases now agree**)"*. Four confirmed disagreements survive
-   (finding 8).
+   disputed cases now agree**)"*. Seven confirmed disagreements survive
+   (finding 8). The report's five *named* P2-1 dependency cases do now agree;
+   the new ones were introduced by the fix itself.
 5. **Commit message** — *"secrets-gate dot-segment matching satisfies T-1 and
    **P2-4 together**"*. The Over half only (finding 7).
-6. **Cluster J omits** the two new fail-opens, the unreachable `test-gate`
-   branches, the shell `eval-gate` anchoring miss, the retrofit warn-week
-   interaction, and P1-2's surviving half. J's stated purpose is *"what those
-   fixes deliberately left"* — these were not deliberate, which is exactly why
-   they need rows.
+6. **`docs/changelog.md:90-92`** — *"per-verb argument extraction (**never
+   chained strips**)"*. It is one greedy `sed`, and it is the cause of
+   finding 1.
+7. **`docs/changelog.md:165` and `docs/deferred-backlog.md:152`** — *"this repo
+   has never had a tag"* / *"still zero tags"*. An annotated `v2.5.0` tag
+   exists (finding 13).
+8. **`docs/deferred-backlog.md:151` (J-3)** — *"Asserted as a known divergence
+   in `test_sdk_gates.py`, not silently tolerated"*. The assertion is vacuous
+   (finding 11).
+9. **`docs/deferred-backlog.md:150` (J-2)** — records P1-2's residual as a
+   *configurability* gap (`ENFORCED_PREFIXES` is a baked constant, *"the cheap
+   half"*). The actual residual is that the first code commit of every adopting
+   project is still blocked, and that the SDK never received the fix at all
+   (findings 6 and 8). Materially milder than the code warrants.
+10. **Cluster J omits** the two shell fail-opens, the SDK's mirror-image
+    chained-install fail-open, the unreachable `test-gate` branches, the shell
+    `eval-gate` anchoring miss, the un-ported `ENFORCED_PREFIXES`, the retrofit
+    warn-week interaction, and P2-4's Under half. J's stated purpose is *"what
+    those fixes deliberately left"* — these were not deliberate, which is
+    exactly why they need rows.
 
 ## Things I checked that are fine
 
@@ -686,6 +805,15 @@ R8.A.6 ramp — reopen A-1 for the retrofit half) and finding 6 (what
 `spec-gate-commit`'s predicate should actually be, which the upstream report
 also escalated as a maintainer question).
 
-**Record, do not fix:** findings 7, 8, 9 and the J-5 resolution belong in
-cluster J so the next reviewer does not re-derive them, and the "every finding
-was fixed" sentence at `docs/deferred-backlog.md:142` needs to come out.
+**Record, do not fix:** findings 7, 8, 9, 12, 14, 15 and the J-5 resolution
+belong in cluster J so the next reviewer does not re-derive them; the "every
+finding was fixed" sentence at `docs/deferred-backlog.md:142` needs to come out;
+and J-4's "zero tags" claim (finding 13) should be corrected — criterion 6 looks
+satisfied for 2.5.0, so J-4's status as *"the release blocker"* rests on a
+premise the repo contradicts.
+
+**Also worth fixing in the same pass, since it is one line each:** the vacuous
+`_BASH_GATES` assertion (finding 11) either names a real symbol or comes out —
+as written it lets J-3's "not silently tolerated" claim stand on nothing — and
+the SDK's `ENFORCED_PREFIXES` port (finding 8), without which P1-2 is unfixed
+on that substrate.
