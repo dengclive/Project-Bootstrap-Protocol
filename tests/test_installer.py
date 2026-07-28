@@ -1095,13 +1095,34 @@ for arch in ("cli", "library", "service", "fullstack", "mobile",
                  if f.endswith(".sh")]
         bad = [h for h in hooks
                if h in _EXPECT and _EXPECT[h] not in wired.get(h, set())]
-        extra = {h: sorted(wired.get(h, set()) - {_EXPECT[h]})
-                 for h in hooks if h in _EXPECT
-                 and wired.get(h, set()) - {_EXPECT[h]}}
-        check(f"matrix[{arch}]: extra registrations are only the declared "
-              f"HOOK_EXTRA_EVENTS {extra!r}",
-              all(set(v) == set(_tmpl.HOOK_EXTRA_EVENTS.get(h, []))
-                  for h, v in extra.items()))
+        # [round-2 review] This check was VACUOUS, and it guarded the P0-2
+        # fix's actual production wiring. `extra` was built with a filter
+        # that admitted a hook only when it ALREADY carried a registration
+        # beyond the primary one, so a DROPPED extra removed the key
+        # entirely and `all()` ran over `{}`. Confirmed by mutation:
+        # changing templates.py's `registrations = [HOOK_EVENT_MAP[hk]] +
+        # HOOK_EXTRA_EVENTS.get(hk, [])` to drop the second term deletes
+        # secrets-gate's PreToolUse(Bash) entry from every emitted
+        # settings.json - the shell gate is then never invoked on shell
+        # commands at all, i.e. upstream P0-2 (`cat .env` unguarded)
+        # restored at the harness layer - and the entire suite stayed green
+        # except the three golden byte-digests.
+        #
+        # Assert the EXACT registration set for every hook instead, so
+        # presence and absence both fail. Every other guard in the repo
+        # (test_sdk_gates equality, the differential) compares table to
+        # table or drives hook scripts directly, bypassing this wiring
+        # layer, so this is the only place a dropped registration can be
+        # caught.
+        want_reg = {h: {_EXPECT[h]}
+                    | {tuple(e) for e in _tmpl.HOOK_EXTRA_EVENTS.get(h, [])}
+                    for h in hooks if h in _EXPECT}
+        wrong = {h: {"emitted": sorted(wired.get(h, set())),
+                     "declared": sorted(w)}
+                 for h, w in want_reg.items() if wired.get(h, set()) != w}
+        check(f"matrix[{arch}]: every hook's registration set is exactly "
+              f"its primary matcher plus its declared HOOK_EXTRA_EVENTS "
+              f"{wrong if wrong else ''}", wrong == {})
         missing = [h for h in hooks if h not in wired]
         orphan = [k for k in wired if k not in hooks]
         check(f"matrix[{arch}]: every hook wired correctly in settings",

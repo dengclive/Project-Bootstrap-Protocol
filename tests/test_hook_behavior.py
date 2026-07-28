@@ -747,12 +747,24 @@ rc, _, err = run("test-gate", pre("Bash", command="git commit -m x"),
                  env={"PWD": TMP})
 check("test-gate runs the tests even with a touched marker present (F4)",
       "Running test gate" in err, err[:200])
-check("test-gate writes no marker for an agent to forge (F4)",
-      not os.path.exists(mark) or os.path.getsize(mark) == 0,
-      "a re-created marker is a re-created bypass")
 os.path.exists(mark) and os.remove(mark)
 rc, _, err = run("test-gate", pre("Bash", command="git commit -m x"))
 check("test-gate still allows when the tests pass", rc == 0, f"rc={rc}")
+# [round-2 review] The marker assertion used to sit ABOVE this point, two
+# lines after the test created `mark` itself, and read `not exists(mark) or
+# getsize(mark) == 0`. Every marker any version of this gate ever wrote was
+# written with `touch`, i.e. EMPTY - so the second arm was unconditionally
+# true and the check could not fail. Confirmed by mutation: re-adding
+# `touch "${CLAUDE_PROJECT_DIR:-.}/.claude/.last-test-pass"` to the gate's
+# rc==0 branch, verbatim the bypass lens A F4 removed, left the whole suite
+# green except the golden digests.
+#
+# It runs HERE instead: after the marker was removed and a PASSING commit
+# went through, which is the only path that ever wrote it. Plain absence,
+# no size escape arm.
+check("test-gate writes no marker on the passing path (F4)",
+      not os.path.exists(mark),
+      "a re-created marker is a re-created bypass")
 
 # [lens B finding 3] The rc dispatch was UNREACHABLE. `set +e` suppresses
 # exiting; it does NOT disarm an ERR trap, so the subshell's non-zero status
