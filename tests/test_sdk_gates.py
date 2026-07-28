@@ -151,10 +151,20 @@ check("seam §9: __all__ is exactly ['build_hooks']",
 hooks_map = gates_mod.build_hooks(gates_mod.RESOLVED_CONFIG)
 check("build_hooks returns PreToolUse + PostToolUse mapping",
       set(hooks_map) == {"PreToolUse", "PostToolUse"}, repr(set(hooks_map)))
+def expected_matchers(mod, gate_names):
+    """One HookMatcher per enabled gate, PLUS one per extra registration.
+    [lens A F7] secrets-gate now carries two, mirroring the shell suite's
+    settings.json, so a bare len(GATES) would under-count and re-passing it
+    would mean the Bash registration had silently vanished again."""
+    return sum(1 + len(mod._GATE_EXTRA_MATCHERS.get(g, ()))
+               for g in gate_names)
+
+
 n_matchers = sum(len(v) for v in hooks_map.values())
-check("one HookMatcher per enabled gate",
-      n_matchers == len(gates_mod.GATES),
-      f"{n_matchers} matchers vs {gates_mod.GATES}")
+check("one HookMatcher per enabled gate, plus each extra registration",
+      n_matchers == expected_matchers(gates_mod, gates_mod.GATES),
+      f"{n_matchers} matchers vs {gates_mod.GATES} + "
+      f"{gates_mod._GATE_EXTRA_MATCHERS}")
 
 # fail-loud on malformed config, never a smaller gate set
 try:
@@ -167,10 +177,7 @@ except KeyError:
 # [upstream P0-2] secrets-gate gained NotebookEdit|Grep|Glob on its primary
 # matcher and a second PreToolUse(Bash) registration, because every never-read
 # path was reachable through a shell command while secrets.md told the
-# operator those paths were blocked. The SDK carries no Bash-side secrets
-# closure yet, so the primary matchers must still agree exactly and the extra
-# registration is recorded as a KNOWN, asserted divergence rather than
-# silently tolerated.
+# operator those paths were blocked.
 sdk_side = {name: gates_mod._GATE_MATCHERS[name] for name in SDK_GATES}
 shell_side = {name: templates.HOOK_EVENT_MAP[name] for name in SDK_GATES}
 check("gate event/matcher table == HOOK_EVENT_MAP subset",
@@ -180,8 +187,33 @@ check("gate event/matcher table == HOOK_EVENT_MAP subset",
 check("secrets-gate guards the shell-command surface too (P0-2)",
       ("PreToolUse", "Bash") in templates.HOOK_EXTRA_EVENTS["secrets-gate"],
       repr(templates.HOOK_EXTRA_EVENTS))
-check("SDK is a documented SUBSET: no Bash-side secrets closure yet",
-      "secrets-gate" not in getattr(gates_mod, "_BASH_GATES", {}))
+
+# [lens A F7 / lens B finding 11] THIS BLOCK REPLACES A VACUOUS ASSERTION.
+# What stood here was:
+#
+#   check("SDK is a documented SUBSET: no Bash-side secrets closure yet",
+#         "secrets-gate" not in getattr(gates_mod, "_BASH_GATES", {}))
+#
+# `_BASH_GATES` has never existed anywhere in lib/ or tests/ -- the getattr
+# default reduced the whole thing to `"secrets-gate" not in {}`, which is
+# unconditionally true and would have stayed true if a Bash-side closure
+# were added under any other name. It was cited by backlog J-3 as the reason
+# the divergence was "not silently tolerated"; it pinned nothing. The
+# divergence itself is now FIXED, so the replacement asserts the two wiring
+# tables agree by EQUALITY (no default, no fallback) and then executes the
+# closure on the Bash surface it is supposed to guard.
+sdk_extra = {n: v for n, v in gates_mod._GATE_EXTRA_MATCHERS.items()
+             if n in SDK_GATES}
+shell_extra = {n: v for n, v in templates.HOOK_EXTRA_EVENTS.items()
+               if n in SDK_GATES}
+check("extra-registration table == HOOK_EXTRA_EVENTS (equality, no default)",
+      sdk_extra == shell_extra, f"sdk={sdk_extra} shell={shell_extra}")
+check("build_hooks registers secrets-gate on PreToolUse(Bash) (F7)",
+      any(m.matcher == "Bash"
+          and m.hooks[0].__name__ == "secrets_gate"
+          for m in hooks_map["PreToolUse"]),
+      repr([(m.matcher, m.hooks[0].__name__)
+            for m in hooks_map["PreToolUse"]]))
 
 
 def _gate(name):
@@ -299,8 +331,16 @@ subprocess.run(["git", "init", "-q"], cwd=proj, check=True)
 subprocess.run(["git", "-C", proj, "config", "user.email", "t@t"],
                check=True)
 subprocess.run(["git", "-C", proj, "config", "user.name", "t"], check=True)
-open(os.path.join(proj, "newfile.py"), "w").write("pass\n")
-subprocess.run(["git", "-C", proj, "add", "newfile.py"], check=True)
+# [lens B finding 8] The staged path is now under src/. ENFORCED_PREFIXES
+# (upstream P1-2) reached the shell gate at v2.6.0 and was NOT ported here,
+# so this module still policed every staged file and the bootstrap commit
+# stayed impossible under `gate_substrate: "sdk-callable"` - the half of
+# P1-2 the changelog reported as fixed. A root-level `newfile.py` is exactly
+# the case the scoping exempts, so asserting on it would now assert the
+# absence of the fix.
+os.makedirs(os.path.join(proj, "src"), exist_ok=True)
+open(os.path.join(proj, "src", "newfile.py"), "w").write("pass\n")
+subprocess.run(["git", "-C", proj, "add", "-f", "src/newfile.py"], check=True)
 os.chdir(proj)
 r = run_gate("spec-gate-commit",
              {"tool_input": {"command": "git commit -m x"}})
@@ -316,10 +356,20 @@ r = run_gate("spec-gate-commit",
 check("AC-7-1 spec-commit: unreferenced staged file -> deny naming it",
       is_deny(r) and deny_reason(r).startswith(
           "Commit blocked: files not referenced by any active spec: "
-          "newfile.py"),
+          "src/newfile.py"),
       repr(r))
+# ENFORCED_PREFIXES: a staging set OUTSIDE the enforced prefixes is exempt
+# on this substrate exactly as it is on the shell - the bootstrap commit.
+subprocess.run(["git", "-C", proj, "reset", "-q"], check=True)
+open(os.path.join(proj, "toplevel.md"), "w").write("docs\n")
+subprocess.run(["git", "-C", proj, "add", "-f", "toplevel.md"], check=True)
+r = run_gate("spec-gate-commit",
+             {"tool_input": {"command": "git commit -m bootstrap"}})
+check("AC-7-1 spec-commit: docs-only staging set allowed (P1-2 port)",
+      r == {}, repr(r))
+subprocess.run(["git", "-C", proj, "add", "-f", "src/newfile.py"], check=True)
 open(os.path.join(proj, ".claude", "specs", "INDEX.md"), "a").write(
-    "covers newfile.py here\n")
+    "covers src/newfile.py here\n")
 r = run_gate("spec-gate-commit",
              {"tool_input": {"command": "git commit -m x"}})
 check("AC-7-1 spec-commit: referenced staged file -> allow", r == {})
@@ -340,16 +390,45 @@ open(os.path.join(proj, ".claude", ".last-eval-pass"), "w").write("ok\n")
 r = run_gate("eval-gate", {"tool_input": {"command": "git push"}})
 check("AC-7-1 eval: with eval pass -> allow", r == {})
 
-# test-gate (fresh mark => runs commands.test = "true")
+# test-gate: runs commands.test = "true" on every commit attempt.
+# [lens A F4] There is no pass marker any more, on either substrate. It was
+# gitignored, agent-writable and protected by no gate, so `touch
+# .claude/.last-test-pass` disabled the gate for the next commit - a
+# one-word bypass of the P0-1 class. Verifying its CONTENT is not a repair
+# (an agent with a Write tool can compute whatever the gate can), so the
+# trusted input is gone instead. Asserting the marker is NOT written is the
+# regression pin: re-introducing the cache re-introduces the bypass.
 r = run_gate("test-gate", {"tool_input": {"command": "git commit -m x"}})
-check("AC-7-1 test: passing commands.test -> allow + mark written",
-      r == {} and os.path.isfile(
-          os.path.join(proj, ".claude", ".last-test-pass")))
+check("AC-7-1 test: passing commands.test -> allow", r == {}, repr(r))
+check("AC-7-1 test: no pass marker is written (F4 - nothing to forge)",
+      not os.path.isfile(os.path.join(proj, ".claude", ".last-test-pass")))
+# A touched marker must not buy a skip: the gate runs regardless.
+open(os.path.join(proj, ".claude", ".last-test-pass"), "w").close()
+gate_fail = gates_mod._GATE_FACTORIES["test-gate"](
+    {"commands": {"test": "exit 3", "lint": "", "format": ""},
+     "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+r = asyncio.run(gate_fail({"tool_input": {"command": "git commit -m x"}},
+                          "tu-1", None))
+check("AC-7-1 test: a touched marker does not skip the run (F4)",
+      is_deny(r) and "tests failing (exit 3)" in deny_reason(r), repr(r))
+os.remove(os.path.join(proj, ".claude", ".last-test-pass"))
+# [upstream P2-5, lens B finding 3] 127 is distinguished from a real
+# failure. On the shell this branch was UNREACHABLE - the ERR trap fired on
+# the subshell's status before the dispatch ran - so the literal-in-body
+# parity check below was standing in for a behaviour that did not exist.
+gate_127 = gates_mod._GATE_FACTORIES["test-gate"](
+    {"commands": {"test": "definitely-not-a-real-command", "lint": "",
+                  "format": ""},
+     "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+r = asyncio.run(gate_127({"tool_input": {"command": "git commit -m x"}},
+                         "tu-1", None))
+check("AC-7-1 test: 127 reports a missing toolchain, not a red suite",
+      is_deny(r) and "test command not found (exit 127)" in deny_reason(r),
+      repr(r))
 
 # ---- AC-7-2: empty commands.test still fails loud ------------------------ #
 cfg_empty = dict(gates_mod.RESOLVED_CONFIG)
 cfg_empty["commands"] = {"test": "", "lint": "", "format": ""}
-os.remove(os.path.join(proj, ".claude", ".last-test-pass"))
 gate = gates_mod._GATE_FACTORIES["test-gate"](cfg_empty)
 r = asyncio.run(gate({"tool_input": {"command": "git commit -m x"}},
                      "tu-1", None))
@@ -453,12 +532,20 @@ check("fix: subset fixture emits FEWER than 7 gates (precondition)",
 big = dict(g_sub["RESOLVED_CONFIG"])
 big["_resolved_hooks"] = list(g_sub["_GATE_FACTORIES"])   # all 7
 hm_big = g_sub["build_hooks"](big)
+
+
+class _Mod:                       # exec'd body has no module object
+    _GATE_EXTRA_MATCHERS = g_sub["_GATE_EXTRA_MATCHERS"]
+
+
 check("fix: build_hooks ENLARGES membership beyond emission GATES",
-      sum(len(v) for v in hm_big.values()) == 7 and n_emitted < 7)
+      sum(len(v) for v in hm_big.values())
+      == expected_matchers(_Mod, big["_resolved_hooks"]) and n_emitted < 7)
 small = dict(g_sub["RESOLVED_CONFIG"])
 small["_resolved_hooks"] = ["secrets-gate"]
-check("fix: build_hooks shrinks membership from config (1 gate)",
-      sum(len(v) for v in g_sub["build_hooks"](small).values()) == 1)
+check("fix: build_hooks shrinks membership from config (1 gate, 2 matchers)",
+      sum(len(v) for v in g_sub["build_hooks"](small).values())
+      == expected_matchers(_Mod, ["secrets-gate"]))
 # B1: an EMPTY _resolved_hooks must NOT silently disable all gates -
 # it falls back to the emission GATES (a security substrate never builds
 # zero gates from a stray []).
@@ -466,7 +553,7 @@ empty = dict(g_sub["RESOLVED_CONFIG"])
 empty["_resolved_hooks"] = []
 check("fix: empty _resolved_hooks falls back to GATES (not zero)",
       sum(len(v) for v in g_sub["build_hooks"](empty).values())
-      == n_emitted)
+      == expected_matchers(_Mod, g_sub["GATES"]) and n_emitted > 0)
 
 # ---- B3/B4: versioned pip + cross-line verb-merge -------------------------#
 gdep = gates_mod._GATE_FACTORIES["dependency-gate"](

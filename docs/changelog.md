@@ -1,5 +1,313 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — two-lens adversarial-review batch (2026-07-28)
+
+Sources: `docs/lens-a-execution-findings-2026-07-28.md` (F1–F10, execution:
+scratch install, payloads piped into the emitted hooks, exit codes read) and
+`docs/lens-b-execution-findings-2026-07-28.md` (findings 1–15, spec
+conformance and regression). Two independent adversarial reviews of v2.6.0,
+run blind of each other. Both baselined against a **fully green suite** — the
+third consecutive release where that was true while the defects below were
+live.
+
+**The version decision, stated rather than inherited.** No `PROTOCOL_VERSION`
+bump. This batch changes whether gates block in **both** directions, which is
+past the bar the upstream report sets for a version decision — but 2.6.0 is
+**unreleased**: the only tag in the repo is `v2.5.0` (2026-07-27, an ancestor
+of HEAD). The defects never shipped under a version number, so they are fixed
+in place rather than bumped past. A bump is owed when 2.6.x is actually
+tagged. The previous entry inherited this reasoning silently; it is restated
+here because the premise ("unreleased") is the whole argument and stops being
+true the moment someone tags.
+
+**Seam §8.4 trigger walk** (the one change that could plausibly fire is the
+SDK matcher-table addition):
+
+| §8.4 trigger | Fires? | Evidence |
+|---|---|---|
+| New CLI entry point / contract-level flag (§3.2) | No | No CLI surface touched. |
+| Field added/changed in the result-parsing table (§4.1) | No | Deny **shape** unchanged; reason strings are §4.3 relay, not §4.1 pins. |
+| Event added/changed in the stream-event table (§5) | No | No stream event touched. |
+| Shared sentinel names/locations/scope (§7.4) | No | No sentinel carrier moved — re-confirmed by a frozen-twin body diff, 42/44 artifacts, 0 moved. |
+| Security-critical hook set **membership** (§7.2) | No | §7.2 membership is keyed on gate **name**. All names unchanged; `secrets-gate` gains a second *matcher*, not a second identity. |
+| Provenance markers / synthesize contract (§7.3) | No | Untouched. |
+| `binds` compatibility set (§8.1a) | No | `SEAM-CONTRACT-v2-0-0.md` not modified except a §3.3 prose correction. |
+
+§8.4's closing line governs the remainder: *"changes that touch only gate
+internals or dispatch policy do not bump `seam_version`."* `seam_version`
+stays 2.0.0. §3.3's Coverage prose **was** stale (it described the pre-P0-2
+matchers) and is corrected in place, per the seam's own DR-03
+heading/prose-staleness precedent.
+
+### Removed, and newly blocked
+
+Stated first because a changelog that only lists fixes is how the last two
+rounds' regressions got past review.
+
+- **REMOVED: the `test-gate` pass marker**, on both substrates. The gate used
+  to skip the test run when `.claude/.last-test-pass` existed and no watched
+  source file was newer. That file is gitignored, agent-writable, and
+  protected by no gate — so `touch .claude/.last-test-pass`, through a Bash
+  call every gate allows, disabled the test gate for the next commit
+  (lens A F4). This is the P0-1 class (a gate trusting agent-writable state)
+  reached by one word. *"Verify the contents instead"* is not a repair:
+  whatever the gate can compute from the tree, an agent holding a Write tool
+  can compute and write too. So there is no trusted input — **the tests now
+  run on every `git commit` attempt**, bounded by the hook's existing 600 s
+  timeout, exactly as `ci-mirror` already runs on every push. Removed with
+  it: P2-5's staleness walk and backlog **I-5** (a divergence between two
+  caches that no longer exist).
+- **REMOVED: `permissions.deny` grew** `Write`/`Edit` rules for
+  `.claude/.last-eval-pass` (ai-agent installs). `eval-gate` has no
+  configured eval command to run in the marker's place, so its marker stays
+  and is defended at the harness layer instead. A Bash `touch` still reaches
+  it — the deny list carries no `Bash` rule — recorded as **J-9**.
+- **NEWLY BLOCKED: run-without-installing channels.** `npx <pkg>`,
+  `uvx <pkg>`, `pnpm dlx <pkg>`, `bunx <pkg>`, `npm exec <pkg>`,
+  `yarn dlx <pkg>` now require the package to be on the `deps.md` approved
+  list. The gate exists for *"unapproved software arrives"*, and not
+  installing it first is not a mitigation. This is the batch's largest new
+  false-positive surface (`npx tsc` on a local devDependency now needs an
+  entry) — recorded as **J-13** rather than left to be discovered.
+- **NEWLY BLOCKED: package-index overrides.** `PIP_INDEX_URL=…`,
+  `NPM_CONFIG_REGISTRY=…` and nine siblings, when they are a command-position
+  prefix of an install. These redirect even an **approved** package to
+  another server, which no package-name check can see. Tested against the
+  matched command head only, so prose naming the variable does not block.
+- **NEWLY ALLOWED (the batch's only relaxations, both in `secrets-gate`).**
+  (a) A quoted argument is one token, so `git commit -m "fix the .env
+  loader"` and `git commit -m "docs: describe secrets/README"` no longer
+  block — `RETROFIT.md:1134` scopes the mid-plan exception to *secrets*, not
+  to prose containing the substring. (b) The conventional dotenv **template**
+  basenames (`.env.example`, `.env.sample`, `.env.template`, `.env.dist`,
+  `.env.defaults`, and the `env.`-prefixed spellings) are exact-matched and
+  allowed on every surface; blocking a file whose entire purpose is to be
+  read is the "operator deletes the gate" pressure the gate's own comments
+  warn about. Exact basenames only: `.env.example.real` and `.env.production`
+  are untouched. Both are pinned as explicit exemptions in the invariant
+  matrix, not left implicit.
+
+### Fixed
+
+**Shared `_HOOK_HEADER`** (touches every emitted hook — which is why the
+whole batch is one re-baseline):
+
+- **F5 — a missing `grep` or `tr` silently turned every command gate into a
+  no-op.** `cmd_has_verb`'s `grep -qE` sat inside an `if` condition and
+  `norm_cmd`'s `tr` inside a command substitution. Both contexts are exempt
+  from `set -e` and therefore from the `ERR` trap, so the fail-closed
+  machinery never engaged: rc=0, no message, no log line, no `hook_fail`.
+  Both helpers are pure bash now. This is the same class the `secrets-gate`
+  header says was designed out (*"a pure-bash `shopt` cannot fail open that
+  way"*) — the lesson had been applied to the pattern matcher and not to the
+  two helpers every gate shares.
+- **F2 — `norm_cmd` erased the newline as a command separator.**
+  `tr -s '[:space:]' ' '` turned `\n` into a space while `cmd_has_verb`
+  anchored on `(^|[;&|(])`, which does not contain a space, so any verb on a
+  second line was unreachable: `git add -A\ngit commit -m wip` exited **0**
+  on `spec-gate-commit`, `test-gate` and `ci-mirror`. Parsing is
+  line-oriented now, which is what the SDK already did.
+- **One segmentation mechanism, not two.** The new shared `cmd_segments`
+  splits on newlines and `;&|()`, strips a trailing `#` comment, and is what
+  both `cmd_has_verb` and `dependency-gate` consume. `dependency-gate`'s
+  local newline split (added by `4cc9742`) is gone rather than left as a
+  second mechanism. The command-position prefix also now admits `env`/`sudo`
+  with their own flags, `VAR=value` runs and a tool path, so
+  `env GIT_AUTHOR=x git commit` and `/usr/bin/git commit` match.
+- **Lens B finding 3 — the `ERR` trap made `test-gate`'s rc dispatch
+  unreachable.** `set +e` suppresses *exiting*; it does not disarm an `ERR`
+  trap. `( <commands.test> ); rc=$?` fired `hook_fail` before the
+  `if`/`elif`/`else` ran, so **every failing test suite** reported
+  `BLOCKED (fail-closed): unexpected hook error at line 156` and the entire
+  P2-5 fix (127 = toolchain missing vs. a real failure) was dead code — while
+  §6.2 obliges a consumer to relay that reason faithfully, i.e. to tell the
+  operator their red suite was a broken hook. Now `rc=0; ( … ) || rc=$?`: the
+  left operand of `||` is exempt from both errexit and the trap. *Note for
+  anyone reading lens A first: its "did not reproduce" entry for this trap
+  varied the **payload** across 8582 runs; this trap fires on the exit status
+  of the **configured** `commands.test`, which no payload reaches. Both
+  results were correct; the conclusion "the trap never fires" was not.*
+- **F10 / lens B 15 — spurious stderr on every hook's first run.** In
+  `_rotate_log`, `wc -c <"$LOG" 2>/dev/null` applies redirections left to
+  right, so the failing input redirection reported before `2>/dev/null` took
+  effect, and a fresh install has no `.claude/logs/`. Guarded on `[ -f ]`.
+
+**`secrets-gate`** (F1 and lens B finding 4 are the same twelve lines pulling
+opposite ways — fixed together or not at all):
+
+- **F1 — one newline disabled the whole Bash surface.** `read -ra _toks <<<
+  "$_cmd"` consumes **one line**, so every token after the first newline was
+  invisible: `cd /app\ncat .env` → rc=0 while `cd /app; cat .env` → rc=2.
+  Multi-line is the *normal* shape of an agent's Bash call, so P0-2 was
+  undone in ordinary use, no attacker required. Under-match is the
+  catastrophic direction.
+- **Lens B finding 4 — the same tokenizer blocked ordinary commands**, because
+  splitting on whitespace made every word of a quoted argument a candidate
+  path. Both are fixed by tokenizing the way a shell does: split on
+  **unquoted** whitespace only, join adjacent quoted and unquoted runs into
+  one token. A quoted argument is then one candidate; `cat ".env"` still
+  resolves to `.env`.
+- **F8 — token smuggling.** The one-deep quote strip did not survive
+  intra-token quoting. Joining runs fixes `cat .en''v` and `cat 'sec'rets/…`
+  for free; backslash-stripped and assignment-RHS candidates are emitted
+  additionally, closing `cat .en\v` and `F=.env; cat $F`. `cat .en?` and
+  `cat .{env}` require *evaluating* shell syntax and remain open — **J-11**.
+- **Found by this batch's own corpus, in neither lens:** an unquoted shell
+  operator stayed attached to the token, so `cd secrets; cat prod.yaml`
+  yielded `secrets;` and matched nothing. Operators now delimit candidates.
+- **F6 — `secrets` without a trailing slash was uncovered on both
+  substrates.** `secrets/**` normalizes to `secrets/*`, which the anchored
+  form matched only with the slash — so `Grep{"path":"secrets"}` returned
+  matching file *contents*. The directory itself is a candidate now.
+  `not-secrets/` and `docs/no-secrets/` still pass.
+
+**`dependency-gate`:**
+
+- **F9 — value-taking flags false-blocked, and named the wrong token.** Only
+  seven flags consumed their value, so `pip install --index-url <url>
+  requests` blocked and blamed the URL. The flag list is much longer now, but
+  the safety does not rest on its completeness: **a flag consumes the next
+  token only if that token is value-*shaped*** (a URL, `:all:`, a path, a
+  `key=value`, a version). That inversion is what makes it safe to list short
+  flags whose meaning differs by ecosystem — `npm install -f evil` and
+  `npm install -d evil` still block `evil`, because `evil` is
+  package-shaped. Two more `grep`/`sed` fail-open paths went with it.
+
+**SDK substrate** — one audit: what did the shell get that this did not.
+
+- **F7 — `secrets-gate` was not wired to `Bash`.** `settings.json` registered
+  the shell gate on **both** `Bash` and the file matchers at v2.6.0;
+  `_GATE_MATCHERS` carried only the second, so under `gate_substrate:
+  "sdk-callable"` `cat .env`, `grep -r . secrets/` and `cat deploy.pem` were
+  unguarded — the original P0-2 finding, unfixed on this substrate. New
+  `_GATE_EXTRA_MATCHERS`, mirroring `HOOK_EXTRA_EVENTS`.
+- **Lens B finding 8 — `ENFORCED_PREFIXES` was never ported**, so the
+  bootstrap commit was still impossible under SDK dispatch: the half of P1-2
+  the changelog reported as fixed.
+- **Lens B finding 8 — the shell `eval-gate` was never anchored** while the
+  SDK's was, so `echo "git push"` blocked on one substrate and not the other.
+- **Two claims in the emitted module were false and are now true rather than
+  softened.** The `_GATE_MATCHERS` comment (*"tests assert the two stay in
+  sync"*) and the P2-1 binding rule (*"MUST NOT allow what the shell blocks,
+  and MUST NOT block what the shell allows"*) — violated in both directions
+  at once. The rule is now enforced by a test, not by a comment.
+
+### Testing — the meta-fix
+
+Two lenses independently concluded the findings existed because *the tests
+were written from the same reading as the implementation*. Two structural
+changes, not just more cases:
+
+- **`tests/test_substrate_differential.py` (new, 85 checks).** One payload
+  corpus pushed through **both** the emitted shell hooks (subprocess, exit
+  code) and `build_hooks(RESOLVED_CONFIG)` (awaited, deny shape), asserting
+  the verdicts are **identical** — and asserting the expected verdict too, so
+  a case where both substrates are wrong the same way still fails. This is
+  the test that would have caught F7; the "parity" test that existed compares
+  reason-string *literals against the emitted body* and a matcher table
+  against a matcher table, and runs no payload. **Verified: 32 failures
+  against the pre-fix templates, 0 after.**
+- **The invariant shape, extended to every gate touched.** `secrets-gate`'s
+  Bash and file surfaces now carry the same append-only matrix the dependency
+  gate got at `4cc9742` — *no command a previous version blocked may now be
+  allowed, except the deliberate relaxations, which are listed* — with the
+  two relaxations above as the complete exemption list. `test-gate` asserts
+  the **emitted message** behaviourally (`tests failing (exit 3)`, `test
+  command not found (exit 127)`, and the *absence* of `unexpected hook
+  error`) instead of asserting a literal is present in the body.
+- **Two tests that could not fail were replaced.**
+  `test_sdk_gates.py`'s `"secrets-gate" not in getattr(gates_mod,
+  "_BASH_GATES", {})` — a symbol that has never existed in this repo, so the
+  `getattr` default made it unconditionally true, while backlog J-3 cited it
+  as proof the divergence was "not silently tolerated". And
+  `test_hook_behavior.py`'s P2-6 check, `"true" in code or "lint" in
+  code.lower()`, against a body that always contains the word `lint` — and a
+  fixture whose `format` and `lint` commands were both `"true"`, so even a
+  correct substring check could not tell them apart. Both now assert
+  something that can fail.
+- **Verified to fail before the fixes:** 45 failures in
+  `test_hook_behavior.py` and 32 in `test_substrate_differential.py` against
+  the pre-fix templates; 0 after. Suite total 1235 → **1400 checks across 17
+  suites**, 0 failed.
+
+**Golden re-baseline: freeze-exception no. 19.** One re-baseline for the whole
+batch — F1, F2, F5 and lens B finding 3 all live in the shared header, so any
+one alone would move every hook. Measured against **plan actions** (what the
+digest hashes), not the installed tree, which is the error no. 17's count
+made: `default` 12 bodies, `full_autonomous` 17, `design_steering` 12; action
+counts unchanged at 57/69/59; zero files added or removed. `settings.json`
+moves on `full_autonomous` **only** (the eval-marker denies are emitted only
+where `eval-gate` is). No steering doc, skill, command, agent body, wrapper
+skeleton or spec template moves on any fixture — 42 and 44 frozen-twin
+artifacts diffed, 0 moved.
+
+### Corrections to the committed record
+
+Each of these described behavior the code did not have. A committed document
+that misdescribes a security gate is the P0-2 complaint itself, one layer up.
+
+- `RETROFIT.md:1135` — *"Use `async: true` for slow hooks (>2 seconds)"*, the
+  verbatim **pre-fix** recommendation, sitting inside a section headed
+  *"Caveats (same as BOOTSTRAP §6.A)"* whose referent had already been
+  corrected. P1-1 surviving in the retrofit twin.
+- `RETROFIT.md:1162`, `Bootstrap-Protocol-v2-5-0.md:531` and `:419` — all
+  still described `secrets-gate` as `PreToolUse` on Read/Write/Edit only.
+- `Bootstrap-Protocol-v2-5-0.md:535` — named `.claude/logs/cost.jsonl` and
+  claimed it records task ID, token spend and tool-call count. It is
+  `session-events.jsonl` and records `{event, session_id, ts}`.
+- `Bootstrap-Protocol-v2-5-0.md` test-gate bullet — described the marker file
+  this batch removed.
+- `SEAM-CONTRACT-v2-0-0.md:155` — §3.3 Coverage mapped the six denies to
+  `Read|Write|Edit`/`Bash`/`Write`. Corrected, with the §8.4 walk above.
+- `docs/changelog.md:165` and `docs/deferred-backlog.md:152` (J-4) — both
+  said the repo has never been tagged. An annotated `v2.5.0` dated 2026-07-27
+  is an ancestor of HEAD, so criterion 6 is satisfied for 2.5.0 and J-4's
+  label as *"the release blocker"* rested on a premise the repo contradicts.
+- `docs/deferred-backlog.md:142` — *"Every P0/P1/P2/P3 finding in that report
+  was fixed at v2.6.0."* False when written: P2-4's Under half, P1-2's
+  first-code-commit half and P2-5's message half were not.
+- `docs/deferred-backlog.md:151` (J-3) — claimed `permissions.deny` guarded
+  the shell-command route under SDK dispatch. The emitted deny list contains
+  only `Read`/`Edit`/`Write` rules; Claude Code's path rules do not evaluate
+  `Bash` command strings, so that route was guarded by **nothing**.
+- `tests/test_greenfield_golden.py` freeze-exception **no. 17** — *"16 files
+  on `default`"*. The digest hashes plan actions; the state file and manifest
+  are written outside the plan. The digest moved over **14**.
+- `docs/changelog.md` 2.6.0 entry — *"1201 checks"*; the suite reported 1202.
+
+### Escalated, not decided
+
+Two items are the owner's, and silently deciding an open owner decision is
+the exact criticism lens B makes of the previous round. Both are written up
+with options in `docs/deferred-backlog.md`; **current behavior is left in
+place**.
+
+- **A-5 (lens B finding 5) — retrofit fail-closed vs. the R8.A.6 warn-only
+  ramp.** A-1 was closed for greenfield by the previous session, defensibly.
+  It was not the implementer's to close for **retrofit**: on `mode: retrofit`
+  with `ROLLOUT_WEEK: 1`, a parser outage blocks three gates in a week
+  `RETROFIT.md:1250-1255` says blocks *"Nothing (warn-only mode)"*. The fix
+  is mechanically available (the rollout week is read with `grep`, no parser
+  needed), but whether brownfield *should* fail closed is a policy call.
+  `secrets-gate` stays fail-closed unconditionally either way.
+- **A-6 (lens B finding 6) — what `spec-gate-commit`'s predicate should be.**
+  Scoping to `src/` fixes the bootstrap-commit half and *targets exactly* the
+  files a behavior-oriented task corpus will never name, so the first **code**
+  commit of every adopting project is still blocked. The upstream report
+  escalated this as *"a design question for the maintainer, not just a
+  patch."* It still is.
+
+### Recorded, not fixed
+
+`docs/deferred-backlog.md` cluster J gains **J-8** through **J-13**: P2-4's
+Under half with an explicit statement of what was deliberately *not* done
+(no project-boundary check, no traversal check, no content inspection, and no
+widening of the default `never_read_paths` — that list is operator policy);
+the surviving `.last-eval-pass` trust; two-step remote-script execution; the
+glob/expansion classes a static command scan cannot reach; the
+`git -c core.editor='vi x' commit` anchor gap; and the `npx` false-positive
+surface this batch introduces. J-3 and J-5 are closed with their findings.
+
 ## 2.6.0 in-version fix — `dependency-gate` regressions (2026-07-28)
 
 Source: `docs/lens-b-execution-findings-2026-07-28.md` findings 1 and 2. The
@@ -215,7 +523,10 @@ against a crafted-payload matrix and asserts exit codes. Every other suite
 asserts emission determinism, which by construction cannot catch anything in
 this report — a fully green 1016-check suite coexisted with an RCE and three
 dead gates. Verified to fail before the fixes: 10 failures on the pre-fix
-templates, 0 after. Suite total 1016 → **1201 checks across 16 suites**.
+templates, 0 after. Suite total 1016 → **1202 checks across 16 suites**.
+*(Corrected 2026-07-28, lens B finding 14: this line said 1201; the measured
+total was 1202. A number in a release record has to match the artifact it
+describes.)*
 
 **Golden re-baseline: freeze-exception no. 17.** All three fixtures move; the
 per-byte-class record is in `tests/test_greenfield_golden.py`. No steering
@@ -224,8 +535,11 @@ doc, skill, command or agent body changes, so every frozen twin
 
 ### Not addressed
 
-- The report's acceptance criterion 6 (**a tagged release**) is still open —
-  this repo has never had a tag. Criterion 7 (re-run the two executing lenses
+- The report's acceptance criterion 6 (**a tagged release**) is open for
+  *this* version only. ~~this repo has never had a tag~~ — **corrected
+  2026-07-28, lens B finding 13:** an annotated `v2.5.0` tag dated 2026-07-27
+  points at an ancestor of HEAD, so criterion 6 is satisfied for 2.5.0 and
+  merely pending for 2.6.0. Criterion 7 (re-run the two executing lenses
   against a fresh install of the fixed version) is the natural next step and
   is deliberately left to an independent reviewer.
 - `ENFORCED_PREFIXES` (P1-2) is an editable constant in the emitted hook, not

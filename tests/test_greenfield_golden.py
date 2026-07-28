@@ -361,8 +361,19 @@ EXPECTED_DIGESTS = {
     # Source: docs/bootstrap-protocol-upstream-bugs-2026-07-28.md, a 6-lens
     # adversarial review that EXECUTED the emitted hooks against a real
     # v2.5.0 install. Re-baselined for these byte classes, all three fixtures
-    # (16 files on `default`; no steering doc, skill, command or agent body
-    # moves, so every frozen twin stays byte-identical):
+    # (**14** files on `default`; no steering doc, skill, command or agent
+    # body moves, so every frozen twin stays byte-identical):
+    #
+    # [COUNT CORRECTED 2026-07-28, lens B finding 12.] This record said "16
+    # files on `default`". The class enumeration was complete and honest; the
+    # count was measured against the wrong thing. plan_digest_full hashes
+    # PLAN ACTIONS, and `.bootstrap-state.json` and `.installer-manifest.json`
+    # are written OUTSIDE the plan - so they are not in the digest this
+    # record annotates, even though byte class 5 correctly names them as
+    # places the version stamp lands. Measured inside the digest: 14 on
+    # `default`, 18 on `full_autonomous` (16 and 20 on disk). 16 was the
+    # figure from freeze-exception no. 16's `full_autonomous` row, copied
+    # across. A count in a freeze record must state what the digest covers.
     #   1. Shared _HOOK_HEADER (touches EVERY hook): the jq-less fallback
     #      receives stdin on its own stdin instead of a 128 KiB-capped env
     #      var [P0-3a]; FAIL_CLOSED + hook_fail + an ERR trap so a blocking
@@ -381,7 +392,11 @@ EXPECTED_DIGESTS = {
     #      Bash registration [P0-2/P2-4]; permissions.deny added [P0-2].
     #   4. Gate bodies: dependency-gate rewritten [P1-3]; spec-gate-commit
     #      scoped to implementation paths with ERE-escaped, array-quoted
-    #      corpus [P1-2]; test-gate absolute find + 127 vs failure [P2-5];
+    #      corpus [P1-2]; test-gate absolute find + 127 vs failure [P2-5]
+    #      (the BYTES moved; lens B finding 3 later showed the 127-vs-failure
+    #      EFFECT was unreachable behind the ERR trap - a byte-class record
+    #      that asserts delivered behaviour inherits the obligation to be
+    #      right about it, so this is noted rather than left standing);
     #      format-lint-gate no longer runs a MUTATING formatter [P2-6];
     #      spec-gate-entry predicate made reachable [P2-8]; secrets-gate
     #      dot-segment matching + multi-surface candidates [P0-2/P2-4].
@@ -436,8 +451,92 @@ EXPECTED_DIGESTS = {
     # evil"` blocks. Deny-list bias is over-match; the alternative (skipping
     # odd-quote segments) fixes it in the FAIL-OPEN direction and was
     # declined. See docs/deferred-backlog.md J-7.
+    #
+    # [freeze-exception no. 19 - two-lens adversarial-review fixes,
+    # 2026-07-28] Sources: docs/lens-a-execution-findings-2026-07-28.md
+    # (F1-F10) and docs/lens-b-execution-findings-2026-07-28.md (1-15), two
+    # independent adversarial reviews of v2.6.0 that EXECUTED the emitted
+    # hooks. ONE re-baseline for the whole batch, deliberately: F1, F2, F5
+    # and lens B finding 3 all live in the shared _HOOK_HEADER, so any one of
+    # them alone would re-baseline every hook and burn an exception - and
+    # `0ec72d0` introduced F1/F2/F5 WHILE fixing the previous round, which is
+    # the hazard being avoided.
+    #
+    # MEASURED AGAINST PLAN ACTIONS - what plan_digest_full actually hashes -
+    # not against the installed tree, which is the error freeze-exception
+    # no. 17's count made (see the correction in its block above). Verified
+    # by a HEAD-vs-worktree plan-body diff, all three fixtures:
+    #   default          12 bodies move, 57 actions (unchanged), 0 added/removed
+    #   full_autonomous  17 bodies move, 69 actions (unchanged), 0 added/removed
+    #   design_steering  12 bodies move, 59 actions (unchanged), 0 added/removed
+    # The `default` twelve: the eleven emitted hooks (every one of them, via
+    # the shared header) plus sdk_gates/gates.py. full_autonomous adds the
+    # four mode-gated hooks (tdd-gate, eval-gate,
+    # drift-detector-loop-cooperation, iteration-summary-enforcement) AND
+    # settings.json - the latter ONLY there, because the new
+    # Write/Edit(.claude/.last-eval-pass) denies are emitted only when
+    # eval-gate is (ai-agent archetype). No steering doc, skill, command,
+    # agent body, wrapper skeleton or spec template moves on any fixture
+    # (42 and 44 frozen-twin artifacts diffed, 0 moved), so every §7.5
+    # skeleton and §7.4 sentinel carrier stays byte-identical and the
+    # not-a-seam-event verdict is re-confirmed by measurement.
+    #
+    # Byte classes:
+    #   1. Shared _HOOK_HEADER, so EVERY hook body moves:
+    #      * norm_cmd / cmd_has_verb are pure bash now - no `tr`, no
+    #        `grep -qE`. Both sat in `set -e`-exempt contexts (a command
+    #        substitution and an `if` condition), so removing either binary
+    #        from PATH turned every command gate into a SILENT no-op: rc=0,
+    #        no message, no hook_fail [lens A F5].
+    #      * Parsing is line-oriented. `tr -s '[:space:]' ' '` turned a
+    #        newline into a space while the anchor class was `[;&|(]`, so any
+    #        verb on a second line was unreachable: `git add -A\\ngit commit`
+    #        exited 0 on spec-gate-commit, test-gate and ci-mirror
+    #        [lens A F2].
+    #      * New shared `cmd_segments` - the ONE segmentation mechanism.
+    #        dependency-gate's local copy is gone.
+    #      * The command-position prefix admits env/sudo with flags,
+    #        VAR=value runs and a tool path.
+    #      * _rotate_log guards on [ -f "$LOG" ]: a fresh install has no
+    #        hooks.log, and redirections apply left to right, so every hook
+    #        wrote a shell error to stderr on its first run
+    #        [lens A F10 / lens B 15].
+    #   2. secrets-gate: a quote-aware Bash tokenizer replacing `read -ra`
+    #      plus a one-deep quote strip. That was wrong in BOTH directions -
+    #      it saw one line only [lens A F1] and split quoted arguments into
+    #      per-word path candidates [lens B 4] - so the two are fixed
+    #      together or not at all. Also: shell operators delimit candidates
+    #      (`cat .env; ls` yielded `.env;`), the bare directory form matches
+    #      [lens A F6], and the ONE deliberate relaxation in the batch, the
+    #      dotenv TEMPLATE basenames.
+    #   3. test-gate: the pass marker is REMOVED, not repaired. It was
+    #      gitignored, agent-writable and protected by no gate, so `touch
+    #      .claude/.last-test-pass` disabled the gate [lens A F4]. The rc
+    #      dispatch is also reachable for the first time - `set +e` does not
+    #      disarm an ERR trap, so every failing suite reported "unexpected
+    #      hook error" and the whole P2-5 fix was dead code [lens B 3].
+    #   4. dependency-gate: generic value-taking flags (a flag consumes its
+    #      value only when the value is value-SHAPED, so a short flag cannot
+    #      swallow a package name) [lens A F9]; npx/uvx/dlx/exec arrival
+    #      channels and package-index overrides NEWLY BLOCKED [lens A F3
+    #      residue].
+    #   5. eval-gate: anchored to command position like the other four -
+    #      the shell's was left substring-matched while the SDK's was
+    #      anchored [lens B 8].
+    #   6. settings.json (full_autonomous only): Write/Edit denies for
+    #      .claude/.last-eval-pass.
+    #   7. sdk_gates/gates.py: the Bash-surface secrets closure and its
+    #      _GATE_EXTRA_MATCHERS registration [lens A F7], the
+    #      ENFORCED_PREFIXES port [lens B 8], and every dependency/test-gate
+    #      change above, mirrored.
+    #
+    # NO PROTOCOL_VERSION BUMP - same reasoning as no. 18, restated because
+    # this batch changes whether gates block in BOTH directions: 2.6.0 is
+    # unreleased (the only tag is v2.5.0, 2026-07-27, an ancestor of HEAD),
+    # so the defects never shipped under a version number and are fixed in
+    # place. The §8.4 trigger walk is recorded in docs/changelog.md.
     "default":
-        "29a670d01c6046b171086bd9e141af64c1b90422b0cf777d3d99d6d8e866c7ad",
+        "919223e4a62fd64b5e2ccbad46bbfafb2e8db3010fec825cb687aaee393b60ea",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -501,7 +600,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "4df3da117c2c13092fc0c10917b991164a633c95030247fce67a20b084af5bc5",
+        "3fc44c6f4b40595aad174f6108b48d32822c28f69a30f4495b5ac816bf9984b6",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -570,7 +669,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "7b5d9144655090d1c16ab5dda76ed145130c2b08778d74c6846bf1ff169833d5",
+        "006b263d8a3f0042e31b3df8dfd960690aab36e8efdddd40fe6821726d915d57",
 }
 
 EXPECTED_ACTION_COUNTS = {

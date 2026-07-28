@@ -1132,7 +1132,7 @@ The sub-phase ordering aligns with BOOTSTRAP's ordering (5 → 6 → 6.5 → 7 �
 - Hooks may not have direct access to model token counts; cost log is session-end summary.
 - Hooks can be disabled by renaming `.claude/settings.json` to `.disabled`.
 - **Don't block file writes mid-plan.** Spec gate is split into entry-warn + commit-block per BOOTSTRAP §6.A. Secrets are the only mid-plan exception.
-- **Use `async: true` for slow hooks** (>2 seconds).
+- **Never `async: true` on a hook whose exit code matters.** An async hook **cannot block a tool call** and its stderr is suppressed, so a slow gate made async is a no-op that prints nothing — `test-gate` printed "Commit blocked" and the commit went through. Give slow hooks an explicit `timeout` instead (the emitted `settings.json` carries 600 s / 900 s / 120 s for `test-gate` / `ci-mirror` / `format-lint-gate`). **[Corrected 2026-07-28, upstream P1-1.]** This section previously carried the pre-fix recommendation verbatim while the BOOTSTRAP §6.A section it claims to mirror had already been corrected; retrofit installs share `_settings_json`, so it also misdescribed the emitted config.
 
 ### A.2 — Complementary built-ins (same as BOOTSTRAP §6.B)
 
@@ -1159,7 +1159,7 @@ The sub-phase ordering aligns with BOOTSTRAP's ordering (5 → 6 → 6.5 → 7 �
      - Honors the **retrofit-active allowlist** while `.claude/.retrofit-state.json` shows `retrofit_active: true`. This allows commits that touch only `.claude/` paths during the retrofit itself. R7 disables this when retrofit completes.
      - Both allowlists are read at hook runtime, not baked into the script — so updating `spec-strategy.md` doesn't require re-installing the hook.
 
-   - **Secrets gate** — `PreToolUse` on Read/Write/Edit. Same as BOOTSTRAP. No retrofit adjustment — secrets are catastrophic regardless of legacy status. **Skip only if R0.5 confirmed no secrets in any form (rare).**
+   - **Secrets gate** — `PreToolUse` on `Read|Write|Edit|NotebookEdit|Grep|Glob` **and on `Bash`**. Same as BOOTSTRAP. No retrofit adjustment — secrets are catastrophic regardless of legacy status. **Skip only if R0.5 confirmed no secrets in any form (rare).** **[Corrected 2026-07-28, upstream P0-2.]** The Read/Write/Edit-only wiring left every never-read path reachable through a shell command; the Bash surface is now scanned with a quote-aware tokenizer, so a quoted commit message that merely mentions `.env` is one argument and not a path.
 
    - **Format/lint gate** — `PostToolUse` on Write/Edit. **Retrofit adjustment: warning mode for the first week.** Existing code may not pass current lint config. After a week, the operator can flip to blocking via `.claude/hooks/lint-mode` (`warn` or `block`). Default is `warn` for retrofit; `block` for greenfield.
 

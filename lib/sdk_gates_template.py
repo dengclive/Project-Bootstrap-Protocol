@@ -63,6 +63,7 @@ import asyncio
 import fnmatch
 import os
 import re
+import shlex
 from pathlib import Path
 
 from claude_agent_sdk import HookMatcher
@@ -130,6 +131,52 @@ def _norm_pat(pat):
     return pat.replace("**", "*").replace("[^", "[!").lower()
 
 
+# Shell operators are not part of a word when unquoted, so they delimit
+# path candidates: `cd secrets; cat prod.yaml` must yield `secrets`, not
+# `secrets;`. shlex keeps them attached (it is not a shell parser), so they
+# are split out here. Shell parity (the gate's _sg_raw).
+_SH_OPS = re.compile(r"[;&|()<>]")
+# A strictly-shaped assignment hides a path behind an expansion the gate
+# cannot perform: `F=.env; cat $F`. The assignment itself is in plain sight.
+_ASSIGN = re.compile(r"^[A-Za-z_]\\w*=(.*)$", re.S)
+# [lens B finding 4] The ONE deliberate relaxation: dotenv TEMPLATE names are
+# conventionally secret-free and committed, so `.env*` blocking
+# `cat .env.example` blocks a file whose whole purpose is to be read. Exact
+# basenames only, so `.env.production` and `.env.example.real` are untouched.
+_DOTENV_TEMPLATES = frozenset({
+    ".env.example", ".env.sample", ".env.template", ".env.dist",
+    ".env.defaults", "env.example", "env.sample", "env.template",
+})
+
+
+def _bash_candidates(cmd):
+    # [lens A F1 / lens B finding 4] Tokenize the way the SHELL does: split
+    # on UNQUOTED whitespace only, joining adjacent quoted and unquoted runs
+    # into one token. A quoted argument is then ONE candidate (the words
+    # inside a commit message are not paths), while `cat ".env"` still
+    # yields `.env` and `cat .en''v` reassembles to `.env`. shlex.split in
+    # POSIX mode is exactly that tokenizer, including backslash escapes and
+    # multi-line input - the shell gate's hand-rolled equivalent exists only
+    # because bash has no shlex.
+    try:
+        toks = shlex.split(cmd, posix=True)
+    except ValueError:
+        # Unbalanced quote. shlex refuses; the shell gate takes the rest of
+        # the line as the quoted run. Fall back to a whitespace split rather
+        # than returning nothing - a parse failure must not become an allow.
+        toks = cmd.split()
+    out = []
+    for tok in toks:
+        for part in _SH_OPS.split(tok):
+            if not part:
+                continue
+            out.append(part)
+            m = _ASSIGN.match(part)
+            if m and m.group(1):
+                out.append(m.group(1))
+    return out
+
+
 def _secrets_gate(config):
     # Precompute the normalized pattern once (config-constant) rather than
     # per PreToolUse event - this is the hottest matcher in a session.
@@ -146,13 +193,23 @@ def _secrets_gate(config):
         # not just file_path. NotebookEdit supplies notebook_path and was
         # already matched by the old matcher substring while the path key
         # went unread - the gate reported success while checking nothing.
+        # [lens A F7] ...and the Bash surface, which this module never
+        # received. settings.json wired the shell gate to BOTH `Bash` and
+        # the file matchers; _GATE_MATCHERS carried only the second, so
+        # under `gate_substrate: "sdk-callable"` `cat .env`,
+        # `grep -r . secrets/` and `cat deploy.pem` were entirely unguarded.
+        # That is the original P0-2 finding, unfixed on this substrate,
+        # while the table above claimed the two wirings were in sync.
         ti = _tool_input(input_data)
         targets = [ti.get(k) or ""
                    for k in ("file_path", "notebook_path", "path", "pattern")]
         targets = [t for t in targets if t]
+        targets += _bash_candidates(ti.get("command") or "")
         if not targets:
             return {}
         for target in targets:
+            if os.path.basename(target).lower() in _DOTENV_TEMPLATES:
+                continue
             deny = _match_secret(target, patterns)
             if deny:
                 return deny
@@ -172,6 +229,12 @@ def _match_secret(target, patterns):
     full = target.lower()
     for pat, cpat in patterns:
         stem = cpat[:-1] if cpat.endswith("*") else cpat
+        # [lens A F6, both substrates] 'secrets/**' normalizes to 'secrets/*',
+        # which the anchored form matched only WITH the slash present, so
+        # Grep{"path": "secrets"} allowed - and a Grep whose path is the
+        # directory returns the matching file CONTENTS. Naming the directory
+        # reaches everything under it. Empty for non-directory patterns.
+        dstem = cpat[:-2] if cpat.endswith("/*") else ""
         if cpat.startswith("*"):
             hit = (fnmatch.fnmatchcase(base, cpat)
                    or fnmatch.fnmatchcase(base, "*" + cpat)
@@ -187,11 +250,24 @@ def _match_secret(target, patterns):
         else:
             hit = (fnmatch.fnmatchcase(base, cpat)
                    or fnmatch.fnmatchcase(full, cpat)
-                   or fnmatch.fnmatchcase(full, "*/" + cpat))
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or bool(dstem) and (fnmatch.fnmatchcase(base, dstem)
+                                       or fnmatch.fnmatchcase(full, dstem)
+                                       or fnmatch.fnmatchcase(
+                                           full, "*/" + dstem)))
         if hit:
             return _deny(f"BLOCKED: {target} matches never-read "
                          f"pattern {pat}")
     return {}
+
+
+# [upstream P1-2, lens B finding 8] Enforcement is scoped to IMPLEMENTATION
+# paths. The shell gate got this at v2.6.0 and this module did NOT - it still
+# iterated every staged file - so under `gate_substrate: "sdk-callable"` the
+# bootstrap commit was still impossible (the gate blocked its own
+# `.claude/specs/INDEX.md`), which is the half of P1-2 the changelog reported
+# as fixed. Same constant, same order, so the two substrates cannot drift.
+_ENFORCED_PREFIXES = ("src/", "lib/", "app/", "test/", "tests/")
 
 
 def _spec_gate_commit(config):
@@ -210,6 +286,10 @@ def _spec_gate_commit(config):
         except OSError:
             staged_raw = ""            # mirrors shell `2>/dev/null || true`
         staged = [f for f in staged_raw.splitlines() if f.strip()]
+        if not staged:
+            return {}
+        staged = [f for f in staged
+                  if f.startswith(_ENFORCED_PREFIXES)]
         if not staged:
             return {}
         corpus_files = []
@@ -256,6 +336,20 @@ def _spec_gate_commit(config):
 # allowed this module denied, and the reverse held on commits - so whichever
 # substrate was live changed project behavior completely.
 #
+# [lens A F7 / lens B finding 8] THAT RULE WAS ASSERTED AND NOT TRUE. At
+# v2.6.0 it was violated in BOTH directions at once: this module allowed
+# `cat .env` on the Bash surface (which the shell blocked, because
+# _GATE_MATCHERS carried no Bash entry for secrets-gate), and it denied
+# `python3 -m pip install evil` and a docs-only `git commit` (which the shell
+# allowed, because ENFORCED_PREFIXES was never ported). Seven confirmed
+# disagreements survived a commit message claiming "all 13 disputed cases now
+# agree". The rule is now enforced by a TEST rather than by this comment:
+# tests/test_substrate_differential.py pushes one payload corpus through the
+# emitted shell hooks AND build_hooks(RESOLVED_CONFIG) and fails on any
+# verdict that differs. Note what "canonical" means in the two cases where
+# the SHELL was the weaker substrate (the chained-install fail-open, the
+# unanchored eval-gate): reconcile to the shell's INTENT, never copy its bug.
+#
 # [upstream P1-4 port] Matching is anchored to COMMAND POSITION, not a bare
 # substring. `"git commit" not in cmd` had the identical weakness as the
 # shell's `case *"git commit"*`: it missed `git  commit`, a tab,
@@ -281,23 +375,71 @@ _PREFIX = r"(?:(?:env|sudo)(?:\\s+-\\S+)*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*"
 # somewhere in it. The tool may carry a path (`/usr/bin/pip install`);
 # `python -m pip install` and `uv pip install` are spelled out because the
 # token at command position is not the installer. Shell parity (HEAD).
+# [lens A F3 residue] Run-without-installing channels: `npx evil`, `uvx
+# evil`, `pnpm dlx evil`, `bunx evil`, `npm exec evil`, `yarn dlx evil` all
+# fetch and EXECUTE an unapproved package. Not installing it first is not a
+# mitigation. NEWLY BLOCKED on both substrates. Shell parity (RUNNERS).
+_RUNNERS = (r"(?:\\S*/)?(?:npx|uvx|bunx)"
+            r"|(?:\\S*/)?(?:npm|pnpm|yarn|bun)\\s+(?:dlx|exec)")
 _INSTALL_HEAD = re.compile(
     r"^\\s*" + _PREFIX
     + r"(?:python[0-9.]*\\s+-m\\s+pip\\s+install"
       r"|(?:\\S*/)?uv\\s+pip\\s+install"
-      r"|(?:\\S*/)?(?:" + _TOOLS + r")\\s+(?:" + _VERBS + r"))(?:\\s|$)")
+      r"|" + _RUNNERS
+    + r"|(?:\\S*/)?(?:" + _TOOLS + r")\\s+(?:" + _VERBS + r"))(?:\\s|$)")
+# [lens A F3 residue] A package-index override redirects even an APPROVED
+# package to another server, which no package-name check can see. Tested
+# against the matched HEAD only - an assignment that is genuinely a
+# command-position prefix of an install - so prose naming the variable does
+# not block. Shell parity (_IDX_RE).
+_INDEX_OVERRIDE = re.compile(
+    r"(?:^|\\s)(?:PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS"
+    r"|UV_INDEX_URL|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY"
+    r"|npm_config_registry|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER"
+    r"|COMPOSER_REPOSITORIES|GOPROXY|GEM_SOURCE)=")
 # Shell separators. A line is split into segments and each is judged on its
-# own; see _scan_install_line.
-_SEGMENT = re.compile(r"[;&|]")
+# own; see _scan_install_line. Parens included so `(cd sub && pip install
+# evil)` segments the same way the shell's cmd_segments does.
+_SEGMENT = re.compile(r"[;&|()]")
 # Remote-script execution: same "unapproved software arrives" class, with no
 # inspectable package name, so it is always denied (shell parity).
 _PIPE_TO_SHELL = re.compile(
     r"(?:curl|wget)[^;&|]*\\|\\s*(?:sudo\\s+)?"
     r"(?:sh|bash|zsh|python3?|perl|ruby)(?:\\s|$)")
+# [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
+# every other value-taking flag left its argument to be read as a package
+# name and the gate blocked - naming the wrong token:
+#   pip install --index-url <url> requests
+#     -> "not in deps.md approved list: https://..."
+# The list is long but the safety does not rest on its completeness: a flag
+# consumes the following token ONLY IF that token is value-SHAPED. That
+# inversion is what makes it safe to include short flags whose meaning
+# differs by ecosystem - `npm install -f evil` and `npm install -d evil`
+# must still block `evil`, and they do, because `evil` is package-shaped.
+# Shell parity.
 _VALUE_FLAGS = frozenset({
-    "-r", "--requirement", "-e", "--editable", "-c", "--constraint",
-    "-t", "--target", "--prefix", "--root", "-d", "--dest",
+    "-i", "--index-url", "--extra-index-url", "--find-links", "--no-binary",
+    "--only-binary", "--platform", "--python-version", "--implementation",
+    "--abi", "--progress-bar", "--cache-dir", "--log", "--proxy", "--cert",
+    "--client-cert", "--trusted-host", "--config-settings", "--report",
+    "--timeout", "--retries", "--exists-action", "--upgrade-strategy",
+    "--src", "-e", "--editable", "-t", "--target", "--prefix", "--root",
+    "-d", "--dest", "--registry", "--userconfig", "--globalconfig",
+    "--cache", "--workspace", "-w", "--omit", "--include",
+    "--install-strategy", "--before", "--tag", "--scope", "--access",
+    "--store-dir", "--virtual-store-dir", "--modules-folder", "--reporter",
+    "--filter", "--dir", "-C", "--manifest-path", "--features", "--index",
+    "--git", "--branch", "--rev", "--path", "-p", "--package", "--profile",
+    "--bin", "--example", "--vers", "-f",
 })
+_FLAG_VALUE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~|=|^[0-9]")
+
+
+def _is_flag_value(tok):
+    """True if `tok` is shaped like a FLAG'S VALUE rather than a package
+    name: a URL, a `:all:`-style spec, a path, a key=value, a version.
+    Shell parity (is_flag_value)."""
+    return _FLAG_VALUE.search(tok) is not None
 
 
 def _pkg_name(tok):
@@ -357,6 +499,8 @@ def _scan_install_line(line, approved):
         if not m:
             continue
         rest = seg[m.end():]
+        if _INDEX_OVERRIDE.search(m.group(0)):
+            return " <package-index-override>"
         # A verb with no arguments is a lockfile restore (`npm install`), not
         # an install of anything to approve - but that is a fact about THIS
         # invocation, never about the line. Shell parity.
@@ -366,7 +510,8 @@ def _scan_install_line(line, approved):
         for tok in rest.split():
             if skip_next:
                 skip_next = False
-                continue
+                if _is_flag_value(tok):
+                    continue
             if tok in ("-r", "--requirement", "-c", "--constraint"):
                 # Packages listed in a FILE are invisible to the gate;
                 # allowing them would defeat it entirely. Shell parity.
@@ -388,40 +533,38 @@ def _test_gate(config):
     test_cmd = (config["commands"].get("test") or "").strip()
 
     async def test_gate(input_data, tool_use_id, context):
-        # Block `git commit` unless tests passed since the last source
-        # edit (mark file .claude/.last-test-pass, as in the shell gate).
+        # Block `git commit` unless the configured test command passes.
+        #
+        # [lens A F4] THE PASS MARKER IS GONE, on this substrate too. The
+        # gate used to skip the run when `.claude/.last-test-pass` existed
+        # and no source file was newer. That file is gitignored and
+        # agent-writable and no gate protects it, so `touch
+        # .claude/.last-test-pass` disabled the gate for the next commit.
+        # Verifying its CONTENT is not a repair: whatever the gate can
+        # compute from the tree, an agent holding a Write tool can compute
+        # and write too. The only honest fix is to have no trusted input.
+        # Removed with it: the src/-vs-lib/ staleness walk (and with it
+        # backlog I-5, which was a divergence between two caches that no
+        # longer exist).
         cmd = _tool_input(input_data).get("command") or ""
         if not _git_verb(cmd, "commit"):
             return {}
         proj = _proj()
-        mark = proj / ".claude" / ".last-test-pass"
-        stale = True
-        if mark.is_file():
-            m_mtime = mark.stat().st_mtime
-            # Source lives under src/ OR lib/ (parity with tdd_gate's
-            # source definition); a lib/-only project must still
-            # invalidate the mark on edits.
-            stale = False
-            for sub in ("src", "lib"):
-                d = proj / sub
-                if d.is_dir() and any(
-                        p.is_file() and p.stat().st_mtime > m_mtime
-                        for p in d.rglob("*")):
-                    stale = True
-                    break
-        if not stale:
-            return {}
         if not test_cmd:
             # fail-loud-on-empty-commands: parity with the shell
-            # interpolation site "echo 'TODO: commands.test unset' &&
-            # exit 1" (AC-7-2) - deny, never allow-by-omission.
+            # interpolation site "echo 'TODO: commands.test unset' >&2 &&
+            # exit 127" (AC-7-2) - deny, never allow-by-omission.
             return _deny("TODO: commands.test unset\\n"
                          "Commit blocked: test command not found (exit 127)")
         rc, _, _ = await _run(test_cmd, cwd=proj, shell=True)
         if rc == 0:
-            mark.parent.mkdir(parents=True, exist_ok=True)
-            mark.touch()
             return {}
+        if rc == 127:
+            # Parity with the shell's P2-5 branch: the toolchain being
+            # absent is not a red suite, and saying so sends the operator
+            # to debug the wrong thing.
+            return _deny("Commit blocked: test command not found (exit 127): "
+                         + test_cmd)
         return _deny("Commit blocked: tests failing (exit %d)." % rc)
     return test_gate
 
@@ -536,8 +679,9 @@ _GATE_FACTORIES = {
     "tdd-gate": _tdd_gate,
     "format-lint-gate": _format_lint_gate,
 }
-# Event/matcher per gate - mirrors the shell suite's settings.json wiring
-# (templates.HOOK_EVENT_MAP); tests assert the two stay in sync.
+# PRIMARY event/matcher per gate - mirrors templates.HOOK_EVENT_MAP, which is
+# the shell suite's settings.json wiring. One entry per gate, exactly as the
+# shell table has, so the two can be compared for equality.
 _GATE_MATCHERS = {
     "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "spec-gate-commit": ("PreToolUse", "Bash"),
@@ -546,6 +690,23 @@ _GATE_MATCHERS = {
     "eval-gate": ("PreToolUse", "Bash"),
     "tdd-gate": ("PreToolUse", "Write"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
+}
+# ADDITIONAL registrations for a gate that must guard more than one tool
+# surface - the mirror of templates.HOOK_EXTRA_EVENTS, kept separate for the
+# same reason: the seam §7.2 tier partition is keyed on gate NAME, one entry
+# per gate, and must not be perturbed by a second matcher.
+#
+# [lens A F7] This table did not exist. settings.json registered the shell
+# secrets-gate on BOTH `Bash` and the file matchers at v2.6.0 (P0-2), while
+# the comment above claimed _GATE_MATCHERS "mirrors the shell suite's
+# settings.json wiring; tests assert the two stay in sync" - it carried only
+# the primary matcher, and the test that was supposed to assert the
+# divergence checked a symbol (`_BASH_GATES`) that has never existed in this
+# repo, so `getattr(..., {})` made it unconditionally true. Both the claim
+# and its guard were empty. tests/test_sdk_gates.py now asserts this table
+# against templates.HOOK_EXTRA_EVENTS by equality.
+_GATE_EXTRA_MATCHERS = {
+    "secrets-gate": [("PreToolUse", "Bash")],
 }
 # Command-running gates get explicit generous timeouts. At the seam
 # runtime floor (Claude Code >= 2.1.210) a PreToolUse hook timeout fails
@@ -592,14 +753,16 @@ def build_hooks(config: dict) -> dict:
         raise KeyError(f"build_hooks: resolved config missing {missing}")
     out: dict = {}
     for name in _enabled_gates(config):
-        event, matcher = _GATE_MATCHERS[name]
-        kwargs = {}
-        if name in _GATE_TIMEOUTS:
-            kwargs["timeout"] = _GATE_TIMEOUTS[name]
-        out.setdefault(event, []).append(HookMatcher(
-            matcher=matcher,
-            hooks=[_GATE_FACTORIES[name](config)],
-            **kwargs))
+        registrations = ([_GATE_MATCHERS[name]]
+                         + _GATE_EXTRA_MATCHERS.get(name, []))
+        for event, matcher in registrations:
+            kwargs = {}
+            if name in _GATE_TIMEOUTS:
+                kwargs["timeout"] = _GATE_TIMEOUTS[name]
+            out.setdefault(event, []).append(HookMatcher(
+                matcher=matcher,
+                hooks=[_GATE_FACTORIES[name](config)],
+                **kwargs))
     return out
 '''
 

