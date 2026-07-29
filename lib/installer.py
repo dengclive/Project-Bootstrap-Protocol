@@ -44,6 +44,13 @@ RETROFIT_PROTOCOL_VERSION = "1.6.2"
 RUNTIME_FLOOR = "2.1.210"
 INSTALLER_VERSION = "1.1.0"
 
+# Exit code for "files were written, but this install does not ENFORCE".
+# Distinct from 2 (config validation refused; nothing was written) because the
+# operator's next move differs: 2 means fix the config, 3 means the tree on
+# disk is live but the gates in it are not wired. 0 is reserved for an install
+# whose enforcement was verified.
+EXIT_UNENFORCED = 3
+
 
 # TEL-01 (v2.4.0 fold): `telemetry_export_enabled` is a top-level flag that
 # post-dates the frozen defaults.py schema, so resolve_config neither coerces
@@ -614,6 +621,66 @@ def _digest(body: str) -> str:
     return hashlib.sha256(body.encode()).hexdigest()[:16]
 
 
+# --------------------------------------------------------------------------- #
+# --force safety net
+# --------------------------------------------------------------------------- #
+# Backups are NOT manifest-tracked and `--uninstall` never touches them: they
+# are the operator's recovery material, not an installer artifact. They are
+# also not covered by the emitted `.claude/.gitignore` - adding a line there
+# would move every golden digest, which is a re-baseline decision rather than
+# a drive-by, so the directory name is deliberately obvious and the run prints
+# where it is.
+BACKUP_DIR = ".claude/.installer-backups"
+
+
+def _is_operator_content(known: dict | None, on_disk: str) -> bool:
+    """Is the file on disk something the installer did not author?
+
+    Three ways, all of which mean "overwriting this destroys someone's work":
+      1. UNTRACKED - the manifest has never recorded this path, yet a
+         differing file is there, so we did not write it. This is the upgrade
+         case (a version that adds a planned path meeting a workspace where
+         the operator hand-created that artifact).
+      2. EDITED SINCE - digest drift against what we wrote.
+      3. ALREADY SKIPPED ONCE - a skip records the OPERATOR's digest, which on
+         the next run would otherwise read as "we wrote that" and fall through
+         to overwrite, protecting the edit exactly once.
+    A co-owned entry (settings.json merge, gitignore block) carries no
+    whole-file `digest`, so it lands here too - correctly, since most of that
+    file is theirs.
+    """
+    return (known is None
+            or known.get("digest") != on_disk
+            or known.get("state") == "skipped-local-edit")
+
+
+def _backup_root(root: Path, manifest: dict) -> Path:
+    """One directory per run, named for the run. Filesystem-safe (no colons)
+    so the same tree works on Windows."""
+    stamp = manifest["generated_at"].split(".")[0].split("+")[0]
+    return root / BACKUP_DIR / (stamp.replace(":", "").replace("-", "") + "Z")
+
+
+def _save_forced_copy(bak_root: Path, root: Path, rel: str, text: str,
+                      *, dry: bool) -> str:
+    """Copy the operator's version aside before --force overwrites it.
+    Returns the project-relative backup path (for the message)."""
+    dest = bak_root / rel
+    # Two --force runs inside the same second share a directory (the name is
+    # the run timestamp). Never let the second overwrite the first one's
+    # copy: a backup that can be silently clobbered is not a backup. The
+    # uniquifier runs in --dry-run too, so the previewed path is the one a
+    # real run would use.
+    n = 1
+    while dest.exists():
+        dest = bak_root / f"{rel}.{n}"
+        n += 1
+    if not dry:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+    return str(dest.relative_to(root))
+
+
 def _classify(root: Path, action: dict) -> str:
     target = root / action["path"]
     if not target.exists():
@@ -632,11 +699,20 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         "files": [],
     }
     summary = {"create": 0, "update": 0, "unchanged": 0, "skipped": 0,
-               "removed": 0}
+               "removed": 0,
+               # Paths whose tier is security-critical and which this run
+               # DECLINED to write. `_hook_tier` already computes that tier
+               # and the manifest already records it; before this key existed
+               # nothing read it back, so a run that installed no enforcement
+               # printed one SKIP line among ~60 on stdout and exited 0.
+               "skipped_security": [],
+               # Project-relative paths of operator content --force displaced.
+               "backups": []}
 
     prev = _load_manifest(root)
     prev_files = {f["path"]: f for f in prev.get("files", [])} if prev else {}
     planned_paths = {a["path"] for a in plan}
+    bak_root = _backup_root(root, manifest)
 
     for action in plan:
         # IC-2 [SR-17 decision (a)]: the project-root .gitignore is co-owned
@@ -644,6 +720,14 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         # whole-file overwrite/skip logic below.
         if action["kind"] == "gitignore_root":
             _apply_root_gitignore(root, action, manifest, summary, dry=dry)
+            continue
+
+        # settings.json is co-owned the same way: the installer owns the
+        # `hooks` key, the operator owns everything else. Whole-file
+        # overwrite/skip is wrong for it in both directions.
+        if action["kind"] == "settings":
+            _apply_settings_json(root, action, manifest, summary, prev_files,
+                                 bak_root, dry=dry, force=force)
             continue
 
         verdict = _classify(root, action)
@@ -668,27 +752,42 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         #     clobbering it on the following run. The state marker keeps
         #     operator ownership sticky until they --force or revert (a revert
         #     to our bytes classifies "unchanged" and never reaches here).
-        if verdict == "update" and not force:
+        note = ""
+        if verdict == "update":
             known = prev_files.get(action["path"])
-            on_disk = _digest(target.read_text())
+            disk_text = target.read_text()
+            on_disk = _digest(disk_text)
             untracked = known is None
-            if (untracked or known.get("digest") != on_disk
-                    or known.get("state") == "skipped-local-edit"):
-                summary["skipped"] += 1
-                reason = ("pre-existing and not installer-generated"
-                          if untracked else "locally modified")
-                print(f"  SKIP   {action['path']}  ({reason}; "
-                      f"use --force to overwrite)")
-                manifest["files"].append(
-                    {"path": action["path"], "digest": on_disk,
-                     "state": "skipped-local-edit",
-                     "tier": _hook_tier(action)})
-                continue
+            if _is_operator_content(known, on_disk):
+                if force:
+                    # --force is the documented escape hatch, so it proceeds -
+                    # but it is destroying content the installer did not
+                    # author, and doing that irrecoverably is not a property
+                    # any of the four in the module docstring claims.
+                    saved = _save_forced_copy(bak_root, root, action["path"],
+                                              disk_text, dry=dry)
+                    summary["backups"].append(saved)
+                    note = f"  (forced; previous version saved to {saved})"
+                else:
+                    summary["skipped"] += 1
+                    reason = ("pre-existing and not installer-generated"
+                              if untracked else "locally modified")
+                    print(f"  SKIP   {action['path']}  ({reason}; "
+                          f"use --force to overwrite)")
+                    tier = _hook_tier(action)
+                    if tier == TIER_SECURITY:
+                        summary["skipped_security"].append(
+                            {"path": action["path"], "reason": reason})
+                    manifest["files"].append(
+                        {"path": action["path"], "digest": on_disk,
+                         "state": "skipped-local-edit",
+                         "tier": tier})
+                    continue
 
         summary[verdict] += 1
         tag = {"create": "CREATE", "update": "UPDATE",
                "unchanged": "  ok  "}[verdict]
-        print(f"  {tag} {action['path']}")
+        print(f"  {tag} {action['path']}{note}")
 
         if not dry and verdict != "unchanged":
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -761,6 +860,480 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         (root / MANIFEST).write_text(json.dumps(manifest, indent=2) + "\n")
 
     return summary
+
+
+# --------------------------------------------------------------------------- #
+# .claude/settings.json - co-owned, managed by key rather than by file
+# --------------------------------------------------------------------------- #
+# The TOP-LEVEL keys templates._settings_json emits that this installer owns
+# OUTRIGHT. Everything else belongs to the operator and is preserved
+# byte-for-byte.
+#
+# `hooks` and `permissions.deny` are deliberately NOT here. Both are shared:
+# an operator may register hooks of their own and write deny rules of their
+# own, so we contribute ENTRIES to each and own only the entries we
+# contributed - tracked per-install in the manifest (`owned_hooks`,
+# `owned_deny`) so a later run can retire ours without touching theirs.
+# Owning `hooks` wholesale would silently delete an operator's own hook, which
+# is the same class of harm this whole change exists to remove.
+#
+# tests/test_wiring_verification.py asserts that every top-level key our own
+# emission produces is claimed here or is one of the two shared keys, so a key
+# added to _settings_json without a co-ownership decision fails loudly instead
+# of silently becoming operator-owned and never updated again.
+_SETTINGS_OWNED_KEYS = ("$schema", "_generatedBy", "_note_mcp")
+_SETTINGS_SHARED_KEYS = ("hooks", "permissions")
+
+
+def _settings_mergeable(theirs: dict) -> bool:
+    """Can the operator's settings.json accept our entries without guessing?
+
+    We refuse exactly the shapes where merging would mean destroying or
+    inventing meaning for operator content: a `permissions` that is not an
+    object, a `hooks` that is not an object, or an event whose value is not a
+    list of groups. Declining and saying so beats either alternative.
+    """
+    perms = theirs.get("permissions")
+    if perms is not None:
+        if not isinstance(perms, dict):
+            return False
+        # `deny` is the one key we WRITE INTO. A non-list there cannot be
+        # unioned, and coercing it to [] would silently delete an operator's
+        # rule - the exact failure this whole change exists to remove, so it
+        # is a refusal, not a coercion.
+        deny = perms.get("deny")
+        if deny is not None and not isinstance(deny, list):
+            return False
+    hooks = theirs.get("hooks")
+    if hooks is None:
+        return True
+    if not isinstance(hooks, dict):
+        return False
+    return all(isinstance(groups, list) for groups in hooks.values())
+
+
+def _hook_commands(hooks: dict) -> list[str]:
+    """Every `command` string in a well-formed `hooks` mapping (ours)."""
+    out: list[str] = []
+    for groups in hooks.values():
+        for grp in groups:
+            for entry in grp.get("hooks", []):
+                cmd = entry.get("command")
+                if isinstance(cmd, str):
+                    out.append(cmd)
+    return out
+
+
+def _settings_contribution(ours: dict) -> tuple[list, list]:
+    """What this emission contributes to a co-owned settings.json:
+    (deny rules, hook commands).
+
+    Recorded in the manifest on EVERY write path, including the wholesale
+    one. Without it, the first merge after a wholesale write has no record of
+    which registrations were ours and treats all of them as the operator's -
+    so a hook dropped from the plan stays registered forever, pointing at a
+    file the same run deletes.
+    """
+    deny = list((ours.get("permissions") or {}).get("deny") or [])
+    return deny, _hook_commands(ours.get("hooks") or {})
+
+
+def _merge_hooks(ours: dict, theirs: dict,
+                 prev_owned: list) -> tuple[dict, list]:
+    """Merge hook registrations by COMMAND identity rather than by replacing
+    the `hooks` key. Returns (merged, the commands this run contributed).
+
+    Groups and entries we cannot parse are passed through untouched: an
+    operator's malformed-to-us registration is still theirs, and dropping it
+    would be the data loss this function exists to avoid.
+    """
+    ours_cmds = _hook_commands(ours)
+    drop = set(prev_owned) | set(ours_cmds)
+
+    merged: dict = {}
+    for event, groups in theirs.items():
+        kept_groups = []
+        for grp in groups:
+            if not isinstance(grp, dict) \
+                    or not isinstance(grp.get("hooks"), list):
+                kept_groups.append(grp)            # opaque; leave it alone
+                continue
+            kept = [e for e in grp["hooks"]
+                    if not (isinstance(e, dict) and e.get("command") in drop)]
+            if kept:
+                kept_groups.append(dict(grp, hooks=kept))
+        if kept_groups:
+            merged[event] = kept_groups
+
+    for event, groups in ours.items():
+        bucket = merged.setdefault(event, [])
+        for grp in groups:
+            match = next((g for g in bucket
+                          if isinstance(g, dict)
+                          and g.get("matcher") == grp.get("matcher")
+                          and isinstance(g.get("hooks"), list)), None)
+            if match is None:
+                bucket.append(dict(grp, hooks=list(grp["hooks"])))
+            else:
+                match["hooks"].extend(grp["hooks"])
+    return merged, ours_cmds
+
+
+def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
+                    prev_owned_hooks: list) -> tuple[dict, list, list]:
+    """Overlay the installer's contribution onto the operator's `theirs`.
+    Returns (merged, deny rules contributed, hook commands contributed).
+
+    Ordering is chosen for IDEMPOTENCE: keys already present keep their
+    position (dict assignment does not move them) and ours append only when
+    absent, so merging our output into itself is a fixed point and a re-apply
+    reports `ok` rather than churning the digest every run.
+
+    `permissions.deny` is a union, never an overwrite - a deny rule is
+    strictly restrictive, so contributing one can never fail open. Rules we
+    contributed on a PREVIOUS run are dropped before the union, which is what
+    lets a shrinking `never_read_paths` actually shrink. When the manifest is
+    absent (a fresh clone) `prev_owned_deny` is empty and the union simply
+    keeps everything - the degradation is a stale, visible deny rule, never a
+    missing one.
+    """
+    merged = dict(theirs)
+    for key in _SETTINGS_OWNED_KEYS:
+        if key in ours:
+            merged[key] = ours[key]
+        else:
+            merged.pop(key, None)
+
+    their_hooks = theirs.get("hooks")
+    merged_hooks, owned_hooks = _merge_hooks(
+        ours.get("hooks") or {},
+        their_hooks if isinstance(their_hooks, dict) else {},
+        prev_owned_hooks)
+    if merged_hooks:
+        merged["hooks"] = merged_hooks
+    else:
+        merged.pop("hooks", None)
+
+    ours_perms = ours.get("permissions") or {}
+    ours_deny = list(ours_perms.get("deny") or [])
+
+    their_perms = theirs.get("permissions")
+    new_perms = dict(their_perms) if isinstance(their_perms, dict) else {}
+    their_deny = new_perms.get("deny")
+    their_deny = their_deny if isinstance(their_deny, list) else []
+    kept = [r for r in their_deny
+            if r not in prev_owned_deny and r not in ours_deny]
+
+    deny = kept + ours_deny
+    if deny:
+        new_perms["deny"] = deny
+    else:
+        new_perms.pop("deny", None)
+    if new_perms:
+        merged["permissions"] = new_perms
+    else:
+        merged.pop("permissions", None)
+    return merged, ours_deny, owned_hooks
+
+
+def _apply_settings_json(root: Path, action: dict, manifest: dict,
+                         summary: dict, prev_files: dict, bak_root: Path, *,
+                         dry: bool, force: bool) -> None:
+    """Install the hook wiring WITHOUT clobbering an operator's settings.
+
+    settings.json is co-owned in exactly the way the project-root .gitignore
+    is, and for the same reason - so it gets the same treatment, by key
+    instead of by marker block. The whole-file skip it used to receive was
+    uniquely destructive here: this is the ONLY registration site for the
+    shell substrate, so declining to write it disabled every gate at once
+    while the hook bodies stayed on disk and still exited 2 when invoked by
+    hand. A skipped doc costs you that doc; a skipped settings.json cost you
+    the entire enforcement layer, silently, at rc=0.
+
+    Cases, in order:
+      * absent            - write our body verbatim (byte-identical to the
+                            pre-merge installer, so goldens do not move).
+      * already ours      - nothing to do.
+      * --force           - replace wholesale; the documented escape hatch
+                            for a file too broken to merge.
+      * ours, unmodified  - plain overwrite, as before.
+      * anything else     - MERGE our keys in, preserve theirs.
+      * unmergeable       - decline and say so loudly (see EXIT_UNENFORCED).
+    """
+    target = root / action["path"]
+    body = action["body"]
+    ours = json.loads(body)          # our own emission; always valid JSON
+
+    def _write(text: str) -> None:
+        # Co-ownership extends to metadata: preserve the operator's mode on a
+        # file that already exists (mirrors _apply_root_gitignore).
+        mode = (stat.S_IMODE(target.stat().st_mode) if target.exists()
+                else action["mode"])
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_text(text)
+        tmp.chmod(mode)
+        os.replace(tmp, target)
+
+    _own_deny, _own_hooks = _settings_contribution(ours)
+    tracked = {
+        "path": action["path"],
+        "digest": _digest(body),
+        "mode": oct(action["mode"]),
+        "kind": action["kind"],
+        # Recorded even when we own the whole file, so the FIRST merge after
+        # a wholesale write knows which registrations were ours to retire.
+        "owned_deny": _own_deny,
+        "owned_hooks": _own_hooks,
+        "tier": TIER_SECURITY,
+    }
+
+    if not target.exists():
+        summary["create"] += 1
+        print(f"  CREATE {action['path']}")
+        if not dry:
+            _write(body)
+        manifest["files"].append(tracked)
+        return
+
+    text = target.read_text()
+    if text == body:
+        summary["unchanged"] += 1
+        print(f"    ok   {action['path']}")
+        manifest["files"].append(tracked)
+        return
+
+    known = prev_files.get(action["path"])
+    theirs_here = _is_operator_content(known, _digest(text))
+    if not theirs_here or force:
+        note = ""
+        if theirs_here:
+            # --force on a co-owned file is the most destructive thing this
+            # installer does: everything outside our keys goes. Recoverably.
+            saved = _save_forced_copy(bak_root, root, action["path"], text,
+                                      dry=dry)
+            summary["backups"].append(saved)
+            note = f"  (forced; previous version saved to {saved})"
+        summary["update"] += 1
+        print(f"  UPDATE {action['path']}{note}")
+        if not dry:
+            _write(body)
+        manifest["files"].append(tracked)
+        return
+
+    def _decline(why: str) -> None:
+        summary["skipped"] += 1
+        print(f"  SKIP   {action['path']}  ({why}; use --force to overwrite)")
+        summary["skipped_security"].append(
+            {"path": action["path"], "reason": why})
+        manifest["files"].append(
+            {"path": action["path"], "digest": _digest(text),
+             "state": "skipped-local-edit", "kind": action["kind"],
+             "tier": TIER_SECURITY})
+
+    try:
+        theirs = json.loads(text)
+    except ValueError as exc:
+        _decline(f"existing settings.json is not valid JSON ({exc})")
+        return
+    if not isinstance(theirs, dict):
+        _decline(f"existing settings.json is a {type(theirs).__name__}, "
+                 f"not an object")
+        return
+    if not _settings_mergeable(theirs):
+        _decline("existing settings.json has a `permissions` key that is "
+                 "not an object")
+        return
+
+    merged, owned_deny, owned_hooks = _merge_settings(
+        ours, theirs,
+        (known or {}).get("owned_deny") or [],
+        (known or {}).get("owned_hooks") or [])
+    new_text = json.dumps(merged, indent=2) + "\n"
+
+    co_owned = {
+        "path": action["path"],
+        "kind": action["kind"],
+        "state": "settings-merged",
+        "block_digest": _digest(body),
+        "owned_deny": owned_deny,
+        "owned_hooks": owned_hooks,
+        "tier": TIER_SECURITY,
+    }
+    if new_text == text:
+        summary["unchanged"] += 1
+        print(f"    ok   {action['path']}  (hook wiring current; operator "
+              f"settings untouched)")
+    else:
+        summary["update"] += 1
+        print(f"  UPDATE {action['path']}  (hook wiring merged; operator "
+              f"settings untouched)")
+        if not dry:
+            _write(new_text)
+    manifest["files"].append(co_owned)
+
+
+def _uninstall_settings_merge(root: Path, entry: dict) -> str:
+    """Reverse a merged settings.json: drop our keys and our deny rules,
+    keep everything the operator put there. -> "removed" | "stripped" |
+    "kept". Removing the file only when nothing of theirs is left is what
+    keeps `--uninstall` honest for a co-owned file; leaving our `hooks` key
+    behind would point Claude Code at scripts uninstall just deleted."""
+    target = root / entry["path"]
+    try:
+        cur = json.loads(target.read_text())
+    except (OSError, ValueError):
+        return "kept"
+    if not isinstance(cur, dict):
+        return "kept"
+
+    for key in _SETTINGS_OWNED_KEYS:
+        cur.pop(key, None)
+
+    owned_cmds = set(entry.get("owned_hooks") or [])
+    hooks = cur.get("hooks")
+    if owned_cmds and isinstance(hooks, dict):
+        stripped: dict = {}
+        for event, groups in hooks.items():
+            if not isinstance(groups, list):
+                stripped[event] = groups
+                continue
+            kept_groups = []
+            for grp in groups:
+                if not isinstance(grp, dict) \
+                        or not isinstance(grp.get("hooks"), list):
+                    kept_groups.append(grp)
+                    continue
+                kept = [e for e in grp["hooks"]
+                        if not (isinstance(e, dict)
+                                and e.get("command") in owned_cmds)]
+                if kept:
+                    kept_groups.append(dict(grp, hooks=kept))
+            if kept_groups:
+                stripped[event] = kept_groups
+        if stripped:
+            cur["hooks"] = stripped
+        else:
+            cur.pop("hooks", None)
+
+    owned = entry.get("owned_deny") or []
+    perms = cur.get("permissions")
+    if isinstance(perms, dict):
+        deny = [r for r in (perms.get("deny") or []) if r not in owned]
+        if deny:
+            perms["deny"] = deny
+        else:
+            perms.pop("deny", None)
+        if not perms:
+            cur.pop("permissions", None)
+
+    if not cur:
+        target.unlink()
+        return "removed"
+    target.write_text(json.dumps(cur, indent=2) + "\n")
+    return "stripped"
+
+
+# --------------------------------------------------------------------------- #
+# Post-install wiring verification
+# --------------------------------------------------------------------------- #
+_CPD_PREFIX = "$CLAUDE_PROJECT_DIR/"
+
+
+def _registered_commands(settings: dict) -> list[str]:
+    """Every `command` string inside a settings.json `hooks` mapping.
+
+    Tolerant by construction: this file may be operator-authored and carry
+    any shape at all, so every level is isinstance-checked and nothing here
+    raises. An unreadable shape yields no commands, which the caller reports
+    as "nothing is registered" - the safe reading.
+    """
+    out: list[str] = []
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return out
+    for groups in hooks.values():
+        if not isinstance(groups, list):
+            continue
+        for grp in groups:
+            if not isinstance(grp, dict):
+                continue
+            entries = grp.get("hooks")
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if isinstance(entry, dict) \
+                        and isinstance(entry.get("command"), str):
+                    out.append(entry["command"])
+    return out
+
+
+def verify_wiring(root: Path, plan: list[dict]) -> list[str]:
+    """Does the installed tree actually ENFORCE what the plan describes?
+
+    Two directions, because review found one failure of each kind:
+
+      forward   every hook in the plan is registered in the on-disk
+                settings.json. settings.json is the ONLY registration site
+                for the shell substrate, so when it is skipped every gate
+                goes dead at once - while the hook bodies stay on disk and
+                still exit 2 when invoked by hand, so hand-verification
+                passes and the operator has no signal at all.
+      backward  every hook command settings.json registers exists on disk.
+                A re-apply that drops a hook from the plan deletes the file
+                while a skipped settings.json keeps pointing at it; the
+                harness then runs a missing script (rc=127) on every match,
+                and rc=127 is neither allow nor block.
+
+    Returns a list of human-readable problems; empty means coherent.
+
+    Deliberately a PROPERTY rather than a check for the two known causes: it
+    holds whatever the reason a registration is missing, including reasons
+    that do not exist yet. Only commands under `$CLAUDE_PROJECT_DIR/` resolve
+    to a path, so operator-authored entries naming anything else are left
+    alone rather than guessed at.
+    """
+    problems: list[str] = []
+    planned_hooks = sorted(a["path"] for a in plan if a["kind"] == "hook")
+    settings_path = root / ".claude" / "settings.json"
+
+    if not settings_path.exists():
+        if planned_hooks:
+            problems.append(
+                f".claude/settings.json is absent, so none of the "
+                f"{len(planned_hooks)} emitted hooks is registered.")
+        return problems
+
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (OSError, ValueError) as exc:
+        problems.append(
+            f".claude/settings.json could not be read as JSON ({exc}). Hook "
+            f"registration is unverifiable, and Claude Code will not load it "
+            f"either.")
+        return problems
+    if not isinstance(settings, dict):
+        problems.append(
+            f".claude/settings.json is a {type(settings).__name__}, not an "
+            f"object; no hook can be registered in it.")
+        return problems
+
+    registered = {c[len(_CPD_PREFIX):] for c in _registered_commands(settings)
+                  if c.startswith(_CPD_PREFIX)}
+
+    for hook_path in planned_hooks:
+        if hook_path not in registered:
+            problems.append(
+                f"{hook_path} was emitted but is NOT registered in "
+                f".claude/settings.json - nothing will dispatch it.")
+
+    for rel in sorted(registered):
+        if not (root / rel).exists():
+            problems.append(
+                f".claude/settings.json registers {rel}, which is not on "
+                f"disk - the harness runs a missing script (rc=127) on every "
+                f"matching tool call.")
+
+    return problems
 
 
 def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
@@ -1180,6 +1753,23 @@ def uninstall(root: Path) -> None:
         target = root / f["path"]
         if not target.exists():
             continue
+        # A merged settings.json carries no whole-file digest (the operator
+        # owns most of it), so the generic rule below would KEEP it wholesale
+        # - leaving our `hooks` key registering scripts this very run is
+        # about to delete. Strip our keys instead.
+        if f.get("state") == "settings-merged":
+            outcome = _uninstall_settings_merge(root, f)
+            if outcome == "removed":
+                print(f"  REMOVE {f['path']}")
+                removed += 1
+            elif outcome == "stripped":
+                print(f"  UPDATE {f['path']}  (hook wiring removed; "
+                      f"operator settings kept)")
+                removed += 1
+            else:
+                print(f"  KEEP   {f['path']}  (cannot verify; left in place)")
+                kept += 1
+            continue
         recorded = f.get("digest")
         try:
             on_disk = _digest(target.read_text())
@@ -1388,8 +1978,49 @@ def main(argv: list[str]) -> int:
     print(f"\nDone. create={summary['create']} update={summary['update']} "
           f"unchanged={summary['unchanged']} skipped={summary['skipped']} "
           f"removed={summary['removed']}")
+    if summary["backups"]:
+        print(f"\n--force displaced {len(summary['backups'])} file(s) the "
+              f"installer did not author. Previous versions:")
+        for saved in summary["backups"]:
+            print(f"  {saved}")
+        print("Nothing else reads that directory; delete it when you are "
+              "satisfied, or copy content back out of it.")
+
     if args.dry_run:
         print("(dry run - no files written)")
+        return 0
+
+    # --- Did this run actually install enforcement? ----------------------- #
+    # Two independent signals, both loud on stderr and both non-zero, because
+    # the failure they describe is invisible in the stdout transcript above:
+    # it looks exactly like a successful install.
+    unenforced = False
+
+    if summary["skipped_security"]:
+        unenforced = True
+        print("\nERROR: security-critical files were NOT written:",
+              file=sys.stderr)
+        for entry in summary["skipped_security"]:
+            print(f"  - {entry['path']}  ({entry['reason']})",
+                  file=sys.stderr)
+        print("The install left the gates these files carry UNENFORCED. "
+              "Reconcile them and re-run, or pass --force to overwrite "
+              "(--force replaces the whole file, including anything you "
+              "put there).", file=sys.stderr)
+
+    problems = verify_wiring(root, plan)
+    if problems:
+        unenforced = True
+        print("\nERROR: the installed tree does not enforce its own plan:",
+              file=sys.stderr)
+        for problem in problems:
+            print(f"  - {problem}", file=sys.stderr)
+
+    if unenforced:
+        print(f"\nExiting {EXIT_UNENFORCED}: files were written, but this "
+              f"install does not enforce. Do not treat it as installed.",
+              file=sys.stderr)
+        return EXIT_UNENFORCED
     return 0
 
 

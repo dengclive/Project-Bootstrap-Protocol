@@ -146,8 +146,23 @@ bootstrap-installer/
   plan, and never participate in the idempotency comparison.
 - **Idempotent** — re-running converges; a second run writes 0 files.
 - **Non-destructive** — files you hand-edit are detected (via a manifest of
-  digests) and skipped, not clobbered. `--force` overrides.
-- **Reversible** — `--uninstall` removes exactly what it created.
+  digests) and skipped, not clobbered. `--force` overrides, and copies
+  anything it displaces to `.claude/.installer-backups/<run>/` first, naming
+  the location in its output. A `--force` that destroys nothing writes no
+  backup and says nothing.
+- **Co-owned where it has to be** — the project-root `.gitignore` and
+  `.claude/settings.json` are shared with you, so they are merged rather than
+  skipped: the installer owns its managed block / its hook registrations and
+  its `never_read_paths` deny rules, and leaves your `permissions.allow`,
+  `model`, `env` and any hooks of your own untouched. Skipping `settings.json`
+  wholesale would be silently catastrophic — it is the only registration site
+  for the shell gates, so a skip disabled all of them at once.
+- **Reversible** — `--uninstall` removes exactly what it created, including
+  un-registering its hooks from a co-owned `settings.json` while leaving the
+  rest of that file alone.
+- **Loud when it did not enforce** — an install that could not write a
+  security-critical file, or whose tree does not dispatch its own plan, exits
+  **3** with the reason on stderr. Exit 0 means enforcement was verified.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
 - **Faithful to Bootstrap-Protocol-v2-5-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle

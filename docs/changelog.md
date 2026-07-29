@@ -1,5 +1,169 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — `--force` is recoverable (2026-07-29)
+
+`--force` is the documented escape hatch and the emitted SKIP line points
+operators straight at it, so it gets used. It was also irrecoverable: review
+measured a forced re-apply deleting an operator's `permissions.allow`, their
+own `Bash(rm:*)` deny rule, `model`, `env` and `statusLine` with **no backup
+anywhere** — `find` for `*.bak`/`*~`/`*.orig`/`*backup*` returned nothing. The
+remedy for one kind of data loss was another kind.
+
+Before overwriting a file the installer did not author, `--force` now copies
+it to `.claude/.installer-backups/<run-timestamp>/<original path>` and names
+the location in its output.
+
+Three properties that matter more than the copy itself:
+
+* **It only fires when something is actually lost.** The predicate is the same
+  one the skip branch uses — untracked, digest-drifted, or stickily skipped —
+  now extracted as `_is_operator_content()` and shared by both, so the two can
+  no longer disagree about what "operator content" means. A `--force` that
+  merely rewrites our own untouched bytes writes no backup and prints nothing
+  about backups. A signal that fires every time is not a signal.
+* **`--dry-run` previews it and writes nothing.**
+* **`--uninstall` never touches the backups.** They are the operator's
+  recovery material, not an installer artifact, so they are deliberately not
+  manifest-tracked.
+
+### One decision left open
+
+`.claude/.installer-backups/` is **not** in the emitted `.claude/.gitignore`.
+Adding the line is correct and is one line — but `.claude/.gitignore` is in
+the plan, so it moves every golden digest in every fixture and triggers the
+`GOLDEN_UPDATE=1` re-baseline plus a freeze exception. That is a release
+ritual, not a drive-by, so it is left for whoever next re-baselines. Until
+then the directory name is deliberately conspicuous and every run that creates
+one prints its path.
+
+**Blast radius.** `apply_plan` only; no emission changed, goldens unmoved.
+20 suites, **1703 → 1724 checks**, 0 failed. Mutation-tested: disabling the
+backup fails 7 checks, backing up unconditionally fails 1, and writing the
+backup during `--dry-run` fails 1.
+
+## 2.6.0 in-version fix — settings.json is co-owned, not skipped (2026-07-29)
+
+The fix the previous entry's detector was built for. `.claude/settings.json`
+now gets the treatment the co-owned project-root `.gitignore` already had —
+merged by key instead of overwritten or skipped wholesale.
+
+**Ownership is per-ENTRY, not per-key.** Owning the `hooks` key outright was
+the obvious implementation and it is wrong: it silently deletes an operator's
+own hook registration, which is the same class of harm this change exists to
+remove, just relocated. So:
+
+| | owner | mechanism |
+|---|---|---|
+| `$schema`, `_generatedBy`, `_note_mcp` | installer | set or removed outright |
+| `hooks` | **shared** | our entries identified by `command`; theirs untouched, merged into the matching matcher group |
+| `permissions.deny` | **shared** | union; a deny rule is strictly restrictive, so contributing one can never fail open |
+| everything else | operator | preserved byte-for-byte |
+
+`owned_hooks` / `owned_deny` in the manifest record what each install
+contributed, so a later run can retire ours without touching theirs — that is
+what lets a shrinking `never_read_paths` actually shrink, and a hook dropped
+from the plan actually de-register.
+
+**`--uninstall` reverses it properly:** our registrations and deny rules are
+stripped and the operator's file is handed back; the file is removed only when
+nothing of theirs remains. Leaving our `hooks` key behind would have pointed
+Claude Code at scripts the same run had just deleted.
+
+### Two defects found while building this, both caught by tests before landing
+
+1. **Owning `hooks` wholesale destroyed an operator's own hook.** Found by
+   executing the case rather than reasoning about it; fixed by moving to
+   per-entry ownership.
+2. **The wholesale write path did not record `owned_hooks`.** So the FIRST
+   merge after one had no record of which registrations were ours, and a hook
+   dropped from the plan stayed registered forever while the same run deleted
+   the file it named — the exact `rc=127` dangling reference this was meant to
+   fix, reintroduced one layer down. Now recorded on every write path.
+
+### What this dissolves
+
+The dangling-registration defect is gone at the root: registration and removal
+now happen in the same pass, so they cannot disagree. `--force` remains the
+escape hatch for a file too broken to merge (unparseable JSON, a non-object
+`permissions` or `hooks`, an event whose value is not a list) — those are
+declined with a reason rather than guessed at, and the previous entry's
+`EXIT_UNENFORCED` still fires for them.
+
+**Blast radius.** A fresh install is byte-identical to before (the merge path
+is only reached when a file already exists), so the golden freeze surface does
+not move. 20 suites, **1652 → 1703 checks**, 0 failed; corpus unchanged at
+HOLD 275 · LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3; sweep 0 of 17,268.
+Mutation-tested: owning `hooks` wholesale, overwriting `deny` instead of
+unioning, dropping `owned_hooks` from the wholesale write, and disabling the
+uninstall strip each fail 1–5 checks.
+
+## 2.6.0 in-version fix — post-install enforcement verification (2026-07-29)
+
+**The installer could report a fully successful install that enforced
+nothing.** Round-5 review, executing rather than reading: installing into a
+project that already carried a `.claude/settings.json` wrote all 11 hook
+scripts, registered **none** of them, and exited 0 with an empty stderr and a
+single `SKIP` line on stdout line 29 of 60. `settings.json` is the only
+registration site for the shell substrate, so every gate went dead at once —
+while the hook bodies stayed on disk and still exited 2 when invoked by hand,
+so hand-verification passed and the operator had no signal at all. Measured
+base rate on the author's own machine: 4 of 14 project directories carry that
+file. `mode: retrofit` — the mode aimed at existing projects — behaved
+identically.
+
+The installer already had the fact it needed. `_hook_tier(action)` returns
+`security-critical` for exactly that action, and the manifest already recorded
+it:
+
+```json
+{"path": ".claude/settings.json", "state": "skipped-local-edit",
+ "tier": "security-critical"}
+```
+
+Nothing ever read it back.
+
+### What landed
+
+Two independent signals, both on **stderr**, both non-zero:
+
+| signal | catches |
+|---|---|
+| `summary["skipped_security"]` | any security-critical path this run DECLINED to write — including a pre-placed stub at a hook path, which the wiring check structurally cannot see because the hook is registered and present |
+| `verify_wiring(root, plan)` | emitted-but-unregistered (the dead-suite case) **and** registered-but-absent (a re-apply drops a hook from the plan and deletes it while a skipped `settings.json` keeps pointing at it — the harness then runs a missing script, `rc=127`, on every matching call, and 127 is neither allow nor block) |
+
+New exit code **`EXIT_UNENFORCED = 3`**: files were written, but this install
+does not enforce. Deliberately distinct from 2 (config refused, nothing
+written) because the operator's next move differs, and 0 is now reserved for an
+install whose enforcement was *verified*.
+
+`verify_wiring` is written as a **property**, not as a check for the two known
+causes: it holds whatever the reason a registration is missing, including
+reasons that do not exist yet. Given that six consecutive fix commits on this
+branch shipped a defect into the class they were fixing, a detector that
+generalises was worth more than two special cases.
+
+### What this deliberately does NOT do
+
+It does not change the skip semantics. `settings.json` is genuinely co-owned —
+the operator owns `permissions`/`model`/`env`/`statusLine`, the installer owns
+`hooks` — and the right fix is the managed-merge treatment `_apply_root_gitignore`
+already gives the co-owned root `.gitignore`. That is a behaviour change; this
+is its detector, and it lands first on purpose. Until it does, `--force`
+remains the only remedy and still replaces the whole file with no backup.
+
+### Blast radius
+
+`apply_plan`/`main` only — **no emission changed**, so the golden freeze
+surface (`build_plan` body digests) does not move. Verified: 19 suites,
+**1618 → 1652 checks**, 0 failed; regression corpus unchanged at HOLD 275 ·
+LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3. Both new signals were
+mutation-tested — neutering `verify_wiring` fails 14 checks, removing the tier
+recording fails 3 — so neither can green vacuously.
+
+`plugin/commands/bootstrap-apply.md` gained a step: check the exit code before
+reporting, because its step 5 previously told the agent to report the
+stdout counts, which look like success in exactly this case.
+
 ## 2.6.0 in-version fix — round-4 review remediation (2026-07-29)
 
 **Six consecutive fix commits had shipped a defect into the class they were
