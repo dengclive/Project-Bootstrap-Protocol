@@ -278,12 +278,12 @@ def _invoker_at(toks):
 
 def _flatten_seg(seg):
     r"""Drop quote characters and turn whitespace inside a quoted run into a
-    non-space sentinel, so the run stays one token for the `\S+` patterns.
+    non-space sentinel, so the run stays one token for the `\\S+` patterns.
     Applied AFTER invoker expansion, which needs the quotes to find the
     argument. Shell parity (cmd_segments' _CS_WS handling).
 
     [round-4 D10] The `r` prefix is load-bearing. Without it this docstring
-    raised `SyntaxWarning: "\S" is an invalid escape sequence` in the EMITTED
+    raised `SyntaxWarning: "\\S" is an invalid escape sequence` in the EMITTED
     module - and under `-W error::SyntaxWarning`, or a future Python where
     the warning hardens into an error, the import fails and every SDK gate
     is disabled at once. Nothing compiled the emitted artifact, so the golden
@@ -335,7 +335,7 @@ def _invoker_arguments(seg):
     more than one way to spell one:
 
       quoted   sh -c 'pip install evil'      -> _quoted_runs
-      escaped  sh -c pip\ install\ evil      -> shlex
+      escaped  sh -c pip\\ install\\ evil      -> shlex
 
     [round-4 D5, third reproduction] Only the first source existed, so the
     escaped spelling had no quoted run to expand and reached dependency-gate
@@ -392,7 +392,7 @@ def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
     # its output to shlex and needs the quotes intact.
     # [round-4 D5] Backslash-aware, on both paths. Without it `bash -c "sh -c
     # \"pip install evil\""` desynced the scanner - the escaped quote closed
-    # the run - so the outer argument was read as `sh -c \` and everything
+    # the run - so the outer argument was read as `sh -c \\` and everything
     # after it fell outside any quote. An escaped separator was likewise
     # treated as a separator, which splits a command the shell would not.
     # `flatten` keeps the escaped character and drops the backslash (the run
@@ -404,7 +404,7 @@ def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
             esc = False
             # [round-4] An ESCAPED character is emitted literally, including a
             # space - it is NOT the same as whitespace inside a quoted run.
-            # Mapping it to _CS_WS glued `\ pip\ install\ evil` into one token
+            # Mapping it to _CS_WS glued `\\ pip\\ install\\ evil` into one token
             # and no install head could match it, so the SDK allowed what the
             # shell denied. The shell restores escapes to real characters when
             # it emits a segment (_cs_esc_restore); this is that parity. Found

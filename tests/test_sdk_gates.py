@@ -139,6 +139,49 @@ _pyc = subprocess.run(
 check("D10: emitted gates.py py_compiles under -W error::SyntaxWarning",
       _pyc.returncode == 0, _pyc.stderr.strip()[-300:])
 
+# ---- the TEMPLATE FILE itself, which D10 left uncovered ------------------ #
+# Both checks above compile the RENDERED artifact. Neither compiles the file
+# that renders it - and `lib/sdk_gates_template.py` carries the whole gate
+# module inside two NON-RAW `'''...'''` strings, so a bare `\S` in the
+# template body is an invalid escape in the OUTER string too. D10 hardened the
+# emitted end and the template end kept warning: eight of them, across five
+# lines, from the very docstring that says the `r` prefix is load-bearing.
+#
+# It survived because the warning fires only when Python COMPILES the file,
+# and a working checkout has a warm __pycache__ - so every local run was
+# silent while CI, which checks out fresh, failed five "writes nothing to
+# stderr" assertions on every commit. The installer's own contract is that a
+# clean run writes nothing to stderr; on a fresh clone it wrote a Python
+# warning. Compile it the way a fresh clone does.
+_tmpl_pyc = subprocess.run(
+    [sys.executable, "-W", "error::SyntaxWarning", "-c",
+     "import py_compile,sys;py_compile.compile(sys.argv[1],"
+     "cfile=sys.argv[2],doraise=True)",
+     os.path.join(ROOT, "lib", "sdk_gates_template.py"),
+     os.path.join(workdir, "sdk_gates_template.pyc")],
+    capture_output=True, text=True)
+check("the TEMPLATE file py_compiles under -W error::SyntaxWarning",
+      _tmpl_pyc.returncode == 0, _tmpl_pyc.stderr.strip()[-300:])
+
+# The same property stated where it actually bites: IMPORTING it with a cold
+# bytecode cache writes nothing to stderr. This has to import a COPY at a path
+# Python has never cached - importing it in place reads the __pycache__ this
+# very test file populated at its own import, which is precisely the warm-cache
+# blindness that let the bug live. `lib` stays on the path for the sibling
+# `cmdpos` import; the copy shadows it because its directory comes first.
+_cold_dir = tempfile.mkdtemp()
+shutil.copy(os.path.join(ROOT, "lib", "sdk_gates_template.py"), _cold_dir)
+_cold = subprocess.run(
+    [sys.executable, "-c",
+     "import sys;sys.path[:0]=sys.argv[1:3];import sdk_gates_template",
+     _cold_dir, os.path.join(ROOT, "lib")],
+    env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+    capture_output=True, text=True)
+check("importing the template with a COLD cache writes nothing to stderr",
+      _cold.returncode == 0 and _cold.stderr == "",
+      f"rc={_cold.returncode} stderr={_cold.stderr.strip()[-300:]}")
+shutil.rmtree(_cold_dir, ignore_errors=True)
+
 _probe_hits = []
 import builtins  # noqa: E402
 _real_open = builtins.open

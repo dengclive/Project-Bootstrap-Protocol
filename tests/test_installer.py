@@ -978,8 +978,14 @@ try:
           _after == _SENTINEL)
     check("upgrade: the skip is reported, not silent",
           "SKIP" in _r_up.stdout and "assumption-ledger.md" in _r_up.stdout)
-    check("upgrade: skip reason names it as not installer-generated",
-          "pre-existing and not installer-generated" in _r_up.stdout)
+    # [round-6 F6] This tree has no manifest, so "pre-existing and not
+    # installer-generated" — which this used to print — is a claim about
+    # authorship the installer cannot support: the manifest is gitignored, so
+    # a clone of an INSTALLED tree looks identical to this one. The reason now
+    # says what is actually known. "pre-existing and not installer-generated"
+    # is still used where a manifest exists and simply does not list the path.
+    check("upgrade: skip reason says what is actually known",
+          "no installer manifest" in _r_up.stdout)
     # Sticky across runs: a skip records the OPERATOR's digest, which must not
     # read as "we wrote that" on the next run and fall through to overwrite.
     subprocess.run([sys.executable, BIN, "-C", _d_up],

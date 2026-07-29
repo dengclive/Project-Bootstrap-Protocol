@@ -1,5 +1,482 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — five checks asserted a property of the developer's machine (2026-07-29)
+
+The second of the two causes behind the red CI below, and the one that kept it
+red after the first was fixed.
+
+`_runtime_floor_check` (AC-9-4) writes to stderr when the Claude Code CLI is
+absent from PATH or below `RUNTIME_FLOOR`. That is deliberate, and its
+docstring says so: *"Never fatal … but never silent either."* It is a property
+of the **machine**, not of the install.
+
+Five assertions spelled the enforcement contract as `stderr == ""`. On a
+developer box with the CLI on PATH that holds. On a CI runner, which has no
+Claude Code CLI, the installer correctly emits its advisory and all five fail.
+The suite was asserting "this machine has the CLI installed" without meaning
+to.
+
+Fixed in the tests, not the installer: silencing a deliberate safety advisory
+to make a test pass would be the wrong direction, and adding an opt-out
+env var would put a switch on exactly the warning that is documented never to
+be silent. A `stderr_sans_floor()` helper drops lines beginning
+`WARNING: Claude Code ` and asserts on the remainder — which is what these
+checks always meant: *the installer reported nothing of its own.*
+
+The helper is deliberately narrow, and that is verified rather than asserted:
+with the escape defect below restored, these five checks still **fail**, so
+the filter cannot mask the class of bug it sits next to.
+
+### Why this took two rounds to see
+
+The two causes were invisible in different ways, and both hid behind the same
+green local run:
+
+* `bin/run-tests` sets `PYTHONDONTWRITEBYTECODE=1` so suites cannot litter the
+  tree. That stops a `.pyc` being *written*, but an existing one is still
+  *read* — so a working checkout, which has `lib/__pycache__` from any earlier
+  direct `python3` run, never recompiles the template and never sees its
+  warning. A fresh CI checkout has no cache and, with writes disabled, never
+  gains one, so **every** subprocess compiles and warns.
+* The floor advisory needs the Claude Code CLI *absent*, which never happens on
+  the machine the tests were written on.
+
+Reproducing CI locally therefore needs both: `__pycache__` removed **and**
+`claude` off PATH. Under those two conditions the suite now reports 20 suites,
+1816 checks, 0 failed; reverting either fix alone puts it back to 7 and 5
+failures respectively.
+
+## 2.6.0 in-version fix — the SDK template warned on every fresh checkout (2026-07-29)
+
+CI had been red on every commit of this branch, on five assertions all reading
+*"… writes nothing to stderr"*. This was **one of two independent causes** —
+the second is the entry above, and fixing this one alone left CI red. Both were
+real, and the reason this one went unnoticed is worth recording.
+
+`lib/sdk_gates_template.py` carries the whole SDK gate module inside two
+**non-raw** `'''…'''` strings. A bare `\S` in the template body is therefore an
+invalid escape in the OUTER string as well as the inner one — eight of them,
+across five lines, including the very docstring that says *"the `r` prefix is
+load-bearing"*. Compiling the file emitted `SyntaxWarning` to stderr, so a
+clean install violated its own stated contract.
+
+Round-4 D10 fixed this one layer down: it hardened the **emitted** module and
+added two checks that compile the **rendered** source, one of them under
+`-W error::SyntaxWarning`. Nothing compiled the **template file itself**, so
+the identical defect survived in the file that generates the thing that was
+fixed — the same shape as the round-7 finding below, where a type check
+existed at one end of a value's journey and not the other.
+
+It stayed invisible locally because a working checkout has a warm
+`__pycache__`: the file is never recompiled, so the warning never fires. CI
+checks out fresh. Every local run showed 0 failed while CI showed 5.
+
+Fixed by doubling the eight escapes. In a non-raw string `\\S` and `\S` both
+render as `\S`, so **`_HEADER` and `_STATIC_BODY` hash byte-identical to before
+and no golden digest moves** — verified, along with a full emitted tree diffed
+file-by-file. One source line goes to 81 characters; it is a comment *inside*
+the template, so rewrapping it would change the emitted `gates.py`. The file
+already carries five longer lines.
+
+Two regression checks in `tests/test_sdk_gates.py`, both confirmed to fail with
+the defect restored: the template file py-compiles under
+`-W error::SyntaxWarning`, and importing it with a genuinely **cold** cache
+writes nothing to stderr. The second imports a COPY at a path Python has never
+cached — the first version of that check read the `__pycache__` the test file
+had populated at its own import and passed with the bug present, which is the
+warm-cache blindness that let this live in the first place.
+
+## 2.6.0 in-version fix — the ownership key crashed on the shapes it was built to tolerate (2026-07-29)
+
+Round-7 review of the previous entry found two defects. Both are the same
+shape as everything before them — *the code that exists to stop the installer
+destroying operator content, failing on operator content* — and both were
+found by executing shapes, not by reading. The suite was green at 1782 checks
+through both.
+
+* **A `matcher` the installer cannot key aborted the run.** Ownership is keyed
+  on `(event, matcher, command)`, and that tuple is hashed against a set. Two
+  of its three elements come out of the operator's file, which may carry any
+  JSON at all: a `matcher` that is a list or an object is **unhashable**, and
+  the lookup raised `TypeError` straight out of `apply_plan`. The install
+  aborted after 22 of 58 files — every hook script on disk, `settings.json`
+  untouched, so **not one gate registered** — with no manifest, so
+  `--uninstall` then reported "nothing removed" and left all 23 files. Worse,
+  the same lookup runs in `_uninstall_settings_merge`: an operator who added
+  such a group *after* a healthy install could not uninstall at all, at rc=1,
+  with no remedy but hand-editing the file. Both reproduce with
+  `{"matcher": ["Write", "Edit"], …}`; both worked at `844b8e0`, so this was a
+  regression introduced by the fix for round-6 F2.
+
+  `_split_owned_hooks` already type-checked this exact triple arriving from
+  the manifest — that check was added in the same commit, for the same reason.
+  Nothing checked it arriving from *their* file. The new `_is_ours_here`
+  applies one rule at both ends: we only ever emit a string `command` under a
+  string-or-absent `matcher`, so a site we cannot key is by construction not
+  ours and is left alone — which is what `_merge_hooks` already promised for
+  anything it could not parse. This also fixes an unhashable `command`, which
+  crashed identically and was pre-existing at `844b8e0`.
+
+* **`displaced_keys` was decided by a proxy that was false whenever it fired.**
+  `_displaced_owned_keys` treated "the manifest row carries a whole-file
+  digest" as "we owned this file wholesale, so it displaced nothing". But that
+  function is reached only from the MERGE branch, and the merge branch is
+  reached only when the file on disk is *not* ours wholesale — so the
+  condition was never true where it was tested. A decline records the
+  **operator's** digest under `skipped-local-edit`, so a `settings.json` the
+  installer had *refused to touch* read back as one it owned outright: every
+  top-level key of theirs was dropped from the record as `{}`, carried forward
+  as a decision on every subsequent run, and then **deleted** by
+  `--uninstall`. Every decline was a trigger, including the symlink decline
+  added in the entry below — declining is the correct action there, and it
+  still cost the operator their `$schema`. `--force` over their file, followed
+  by an operator edit, lost them the same way.
+
+  The proxy is gone. `displaced_keys` is now recorded by **every path that
+  writes** — `{}` on a create (there was no file, so nothing was displaced),
+  derived from the file on disk at the moment a wholesale write replaces it,
+  and carried forward through a decline rather than re-decided by one. A row
+  with no record at all now means only what it says: no run has decided yet,
+  so derive one — and deriving is now only ever reached for a file this
+  installer has never written. Absence and `{}` are different answers, and the
+  difference is load-bearing.
+
+  Deriving still happens on a genuinely record-less tree (a manifest lost with
+  a fresh clone). There it now also excludes a `_generatedBy` carrying our own
+  generator name at *any* protocol version: the value is version-stamped, so
+  an equality test against this run's emission read the previous release's
+  stamp as the operator's and handed it back at `--uninstall` — installer
+  residue, and a violation of "removes exactly what it created".
+
+Regression tests: 32 new checks in `tests/test_settings_merge.py`, the two
+sections this suite was missing. Every `matcher` fixture in it was a string,
+and nothing merged a tree whose previous run had declined — the two gaps the
+defects sat in. A fresh install remains byte-identical to `f1ed58c`; the merge
+is still a fixed point over three runs; the round trip on a messy operator
+file is still exact.
+
+### Not fixed — an inconsistency worth naming
+
+The symlink decline below applies only to `settings.json`. A symlink at any
+other planned path is skipped while it is untracked, but once tracked it is
+silently replaced by a regular file at rc=0, with no backup and no mention —
+`os.replace` swaps the link rather than writing through it, so the target's
+bytes survive but the link does not. The mechanism is pre-existing at
+`f1ed58c`; the inconsistency with `settings.json` is new, and the decline's
+own rationale ("neither orphan nor edit") applies verbatim. Left as an owner
+decision rather than widened on a drive-by.
+
+## 2.6.0 in-version fix — the merge claimed content it did not add (2026-07-29)
+
+*(Amended to fold in the two owner decisions, F5 and F6 — see below.)*
+
+Round-6 review of the co-owned `settings.json` merge found four defects, three
+of them the same shape as the four that preceded them: *the code that exists
+to stop the installer destroying operator content, destroying operator
+content.* All four were found by executing shapes, none by reading.
+
+The root cause of the first two is one sentence: **ownership was recorded as
+what the installer EMITS, not as what the run actually ADDED.** Anything the
+operator had written first and we happened to emit too was adopted, and then
+retired on their behalf.
+
+* **A deny rule we both carry was treated as ours.** `Read(.env*)` is a rule
+  a security-conscious operator writes themselves — and one `never_read_paths`
+  emits. Recording it as ours deleted it twice over: once at `--uninstall`,
+  and once on any re-apply that narrowed `never_read_paths`, at rc=0 beneath a
+  line reading "operator settings untouched". `_merge_settings` now reports
+  only rules *not already in their file*, and leaves their rules in their
+  original positions so the round trip returns the list unchanged. The same
+  defect applied to the keys we own outright: an operator's own `$schema`
+  (or `_generatedBy`, or `_note_mcp`) was overwritten at install and **deleted**
+  at uninstall. Their values are now recorded in the manifest as
+  `displaced_keys` and handed back. Where there is no record to carry — a
+  manifest lost with a fresh clone, or one written before this key existed —
+  the value is re-derived from a file that already holds ours, so a key equal
+  to our own emission is deliberately *not* claimed: taking it at face value
+  left `_generatedBy: bootstrap-installer` in the operator's file after an
+  uninstall that claimed to remove everything it created. The residual runs
+  the other way and is far smaller — an operator whose `$schema` is
+  byte-identical to ours loses that one key.
+
+* **Hook ownership was per COMMAND; it is now per SITE.** An operator may
+  deliberately widen one of our gates by registering our script at an event or
+  matcher we do not emit — `secrets-gate.sh` under `SessionStart`, or under
+  `PreToolUse`/`WebFetch`. Command-keyed ownership dropped every registration
+  of our scripts anywhere in the file and re-added them only where we emit, so
+  that widening vanished silently: rc=0, empty stderr, and `verify_wiring`
+  structurally could not see it (the command was still registered *somewhere*).
+  `owned_hooks` now records `[event, matcher, command]` triples. The old
+  bare-command shape is still read: such an entry is retired only when the
+  emission no longer carries that command at all, since its file is being
+  deleted and a surviving registration would dangle at rc=127.
+
+* **`verify_wiring` cried wolf on healthy installs.** A hook `command` is a
+  shell command line, not a path. `$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh
+  --fix` — an ordinary operator registration, script present and executable —
+  was resolved to the path `".claude/hooks/fmt.sh --fix"`, found absent, and
+  reported as a dangling reference. Every install on such a project exited 3
+  with "Do not treat it as installed", and `plugin/commands/bootstrap-apply.md`
+  acts on that exit code, so the operator was told a good install had failed.
+  The exit code this change added is only worth having if it is quiet when
+  nothing is wrong. Commands are now tokenised **the way the shell tokenises
+  them** and only the first token resolves; a genuinely missing script is
+  still reported, now named by path rather than by command line. `shlex.split`
+  alone was not enough — it does not terminate a word at `;`, `|`, `&&` or a
+  redirection, so `hook.sh; echo done` still resolved to a non-existent
+  `hook.sh;`, and turning on `punctuation_chars` to fix that moves the same
+  false alarm to `#`, which `shlex` reads as a comment and `sh` does not.
+  Both settings, verified token-for-token against `sh` across nine forms.
+
+* **Every refusal blamed `permissions`.** Three of the four unmergeable shapes
+  were misdiagnosed, two of them naming a key the operator's file did not
+  contain. `_settings_unmergeable_reason` now returns the actual cause and the
+  type it found. This matters more than a wording nit: the only remedy the
+  message offers is `--force`, which replaces the whole file.
+
+**What the tests could not see, and why.** Every operator fixture in
+`test_settings_merge.py` was chosen *disjoint* from what the installer emits —
+deny rules like `Bash(rm:*)` that we never produce, hook commands like `mine`
+that name no script of ours. The check literally named *"the operator's own
+deny rule is untouched"* passed because its rule was one we never emit. Three
+live defects lived in the overlap, invisible to a suite that never created
+one. There is now a section that only creates overlaps.
+
+**Blast radius.** `_merge_hooks`, `_merge_settings`, `_uninstall_settings_merge`,
+`verify_wiring` and the decline path; `build_plan` untouched, so a fresh
+install is still byte-identical to `f1ed58c` (verified by `diff -r` of both
+trees, not by trusting the golden suite). 20 suites, **1731 → 1756 checks**,
+0 failed; corpus HOLD 275 · LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3.
+
+### The two owner decisions, now made
+
+Round-6 left two findings open because they needed a decision rather than a
+patch. Both are decided and implemented here.
+
+**F5 — a symlinked `settings.json` is declined, not resolved.** It used to be
+replaced by a regular file, orphaning whatever it pointed at. Writing *through*
+the link was the obvious alternative and is worse: a `settings.json` shared
+between projects would gain `$CLAUDE_PROJECT_DIR/...` hook commands that
+resolve per-project, so every *other* project sharing that file would run
+scripts it does not have and get `rc=127` on every matching tool call. Neither
+outcome is the installer's to choose, so it declines, names the link target in
+the SKIP line, and exits 3. `--force` remains the way through and still writes
+a backup of the content.
+
+**F6 — `--adopt`, plus a diagnosis that does not overclaim.** The manifest is
+gitignored, so a clone carries every file this installer wrote and no record
+that it wrote them. Every one then reads as the operator's, and a config change
+made the skip permanent at rc=3 with `--force` — whose warning says it destroys
+what you put there — the only way out. Two changes:
+
+* `--adopt` records files at planned paths as installer-owned and **writes
+  nothing**. The operator uses it to say "these are an earlier install's
+  artifacts, not my work"; the next ordinary run sees a matching digest and
+  updates them normally. It is refused alongside `--force`, since they mean
+  opposite things and silently letting one win is how you end up with the
+  destructive one.
+* A skip on a tree with **no manifest at all** no longer claims the file is
+  "pre-existing and not installer-generated" — that is an authorship claim the
+  installer cannot support, and it is exactly wrong in the clone case. It now
+  says what is known. The old wording is still used where a manifest exists and
+  simply does not list the path, which is the one case that justifies it.
+
+Committing the manifest would fix the root cause and was rejected: it is in the
+plan, so it moves every golden digest and triggers the `GOLDEN_UPDATE=1`
+re-baseline plus a freeze exception, and it carries a timestamp, so it would
+churn on every install and conflict in teams.
+
+### Two ambiguities, resolved in opposite directions on purpose
+
+When a rule or a key is in the operator's file and we emit it too, there is no
+fact that says whose it is. The two cases are resolved the opposite way, and
+the reason is the harm, not the logic:
+
+* **A deny rule already in their file is THEIRS** — so uninstall leaves it.
+  Deleting an operator's `Read(.env*)` is the defect above; a deny rule left
+  behind is restrictive and safe. The cost is paid on manifest loss: with no
+  record, every rule reads as pre-existing, so `owned_deny` is empty and
+  `--uninstall` leaves all twelve of ours in place. Residue, in the safe
+  direction, and visible.
+* **An owned KEY holding exactly our value is OURS** — so uninstall removes
+  it. `_generatedBy: bootstrap-installer` left in an operator's settings.json
+  is unambiguous installer residue and makes `--uninstall` dishonest, which
+  outweighs the narrow case of an operator whose `$schema` is byte-identical
+  to ours.
+
+### Known, unfixed
+
+A merged `settings.json` is rewritten through `json.dumps(indent=2)`, so an
+operator's own indentation is normalised and non-ASCII values are re-escaped
+(`bär` → `bär`). The result is JSON-equivalent and no content is lost —
+the round trip is exact when parsed — but it is not byte-for-byte for a file
+whose formatting differed. At `f1ed58c` the file was skipped and never
+reformatted, so this is new; it is cosmetic, and left as an owner decision.
+
+## 2.6.0 in-version fix — `--force` is recoverable (2026-07-29)
+
+`--force` is the documented escape hatch and the emitted SKIP line points
+operators straight at it, so it gets used. It was also irrecoverable: review
+measured a forced re-apply deleting an operator's `permissions.allow`, their
+own `Bash(rm:*)` deny rule, `model`, `env` and `statusLine` with **no backup
+anywhere** — `find` for `*.bak`/`*~`/`*.orig`/`*backup*` returned nothing. The
+remedy for one kind of data loss was another kind.
+
+Before overwriting a file the installer did not author, `--force` now copies
+it to `.claude/.installer-backups/<run-timestamp>/<original path>` and names
+the location in its output.
+
+Three properties that matter more than the copy itself:
+
+* **It only fires when something is actually lost.** The predicate is the same
+  one the skip branch uses — untracked, digest-drifted, or stickily skipped —
+  now extracted as `_is_operator_content()` and shared by both, so the two can
+  no longer disagree about what "operator content" means. A `--force` that
+  merely rewrites our own untouched bytes writes no backup and prints nothing
+  about backups. A signal that fires every time is not a signal.
+* **`--dry-run` previews it and writes nothing.**
+* **`--uninstall` never touches the backups.** They are the operator's
+  recovery material, not an installer artifact, so they are deliberately not
+  manifest-tracked.
+
+### One decision left open
+
+`.claude/.installer-backups/` is **not** in the emitted `.claude/.gitignore`.
+Adding the line is correct and is one line — but `.claude/.gitignore` is in
+the plan, so it moves every golden digest in every fixture and triggers the
+`GOLDEN_UPDATE=1` re-baseline plus a freeze exception. That is a release
+ritual, not a drive-by, so it is left for whoever next re-baselines. Until
+then the directory name is deliberately conspicuous and every run that creates
+one prints its path.
+
+**Blast radius.** `apply_plan` only; no emission changed, goldens unmoved.
+20 suites, **1703 → 1724 checks**, 0 failed. Mutation-tested: disabling the
+backup fails 7 checks, backing up unconditionally fails 1, and writing the
+backup during `--dry-run` fails 1.
+
+## 2.6.0 in-version fix — settings.json is co-owned, not skipped (2026-07-29)
+
+The fix the previous entry's detector was built for. `.claude/settings.json`
+now gets the treatment the co-owned project-root `.gitignore` already had —
+merged by key instead of overwritten or skipped wholesale.
+
+**Ownership is per-ENTRY, not per-key.** Owning the `hooks` key outright was
+the obvious implementation and it is wrong: it silently deletes an operator's
+own hook registration, which is the same class of harm this change exists to
+remove, just relocated. So:
+
+| | owner | mechanism |
+|---|---|---|
+| `$schema`, `_generatedBy`, `_note_mcp` | installer | set or removed outright |
+| `hooks` | **shared** | our entries identified by `command`; theirs untouched, merged into the matching matcher group |
+| `permissions.deny` | **shared** | union; a deny rule is strictly restrictive, so contributing one can never fail open |
+| everything else | operator | preserved byte-for-byte |
+
+`owned_hooks` / `owned_deny` in the manifest record what each install
+contributed, so a later run can retire ours without touching theirs — that is
+what lets a shrinking `never_read_paths` actually shrink, and a hook dropped
+from the plan actually de-register.
+
+**`--uninstall` reverses it properly:** our registrations and deny rules are
+stripped and the operator's file is handed back; the file is removed only when
+nothing of theirs remains. Leaving our `hooks` key behind would have pointed
+Claude Code at scripts the same run had just deleted.
+
+### Two defects found while building this, both caught by tests before landing
+
+1. **Owning `hooks` wholesale destroyed an operator's own hook.** Found by
+   executing the case rather than reasoning about it; fixed by moving to
+   per-entry ownership.
+2. **The wholesale write path did not record `owned_hooks`.** So the FIRST
+   merge after one had no record of which registrations were ours, and a hook
+   dropped from the plan stayed registered forever while the same run deleted
+   the file it named — the exact `rc=127` dangling reference this was meant to
+   fix, reintroduced one layer down. Now recorded on every write path.
+
+### What this dissolves
+
+The dangling-registration defect is gone at the root: registration and removal
+now happen in the same pass, so they cannot disagree. `--force` remains the
+escape hatch for a file too broken to merge (unparseable JSON, a non-object
+`permissions` or `hooks`, an event whose value is not a list) — those are
+declined with a reason rather than guessed at, and the previous entry's
+`EXIT_UNENFORCED` still fires for them.
+
+**Blast radius.** A fresh install is byte-identical to before (the merge path
+is only reached when a file already exists), so the golden freeze surface does
+not move. 20 suites, **1652 → 1703 checks**, 0 failed; corpus unchanged at
+HOLD 275 · LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3; sweep 0 of 17,268.
+Mutation-tested: owning `hooks` wholesale, overwriting `deny` instead of
+unioning, dropping `owned_hooks` from the wholesale write, and disabling the
+uninstall strip each fail 1–5 checks.
+
+## 2.6.0 in-version fix — post-install enforcement verification (2026-07-29)
+
+**The installer could report a fully successful install that enforced
+nothing.** Round-5 review, executing rather than reading: installing into a
+project that already carried a `.claude/settings.json` wrote all 11 hook
+scripts, registered **none** of them, and exited 0 with an empty stderr and a
+single `SKIP` line on stdout line 29 of 60. `settings.json` is the only
+registration site for the shell substrate, so every gate went dead at once —
+while the hook bodies stayed on disk and still exited 2 when invoked by hand,
+so hand-verification passed and the operator had no signal at all. Measured
+base rate on the author's own machine: 4 of 14 project directories carry that
+file. `mode: retrofit` — the mode aimed at existing projects — behaved
+identically.
+
+The installer already had the fact it needed. `_hook_tier(action)` returns
+`security-critical` for exactly that action, and the manifest already recorded
+it:
+
+```json
+{"path": ".claude/settings.json", "state": "skipped-local-edit",
+ "tier": "security-critical"}
+```
+
+Nothing ever read it back.
+
+### What landed
+
+Two independent signals, both on **stderr**, both non-zero:
+
+| signal | catches |
+|---|---|
+| `summary["skipped_security"]` | any security-critical path this run DECLINED to write — including a pre-placed stub at a hook path, which the wiring check structurally cannot see because the hook is registered and present |
+| `verify_wiring(root, plan)` | emitted-but-unregistered (the dead-suite case) **and** registered-but-absent (a re-apply drops a hook from the plan and deletes it while a skipped `settings.json` keeps pointing at it — the harness then runs a missing script, `rc=127`, on every matching call, and 127 is neither allow nor block) |
+
+New exit code **`EXIT_UNENFORCED = 3`**: files were written, but this install
+does not enforce. Deliberately distinct from 2 (config refused, nothing
+written) because the operator's next move differs, and 0 is now reserved for an
+install whose enforcement was *verified*.
+
+`verify_wiring` is written as a **property**, not as a check for the two known
+causes: it holds whatever the reason a registration is missing, including
+reasons that do not exist yet. Given that six consecutive fix commits on this
+branch shipped a defect into the class they were fixing, a detector that
+generalises was worth more than two special cases.
+
+### What this deliberately does NOT do
+
+It does not change the skip semantics. `settings.json` is genuinely co-owned —
+the operator owns `permissions`/`model`/`env`/`statusLine`, the installer owns
+`hooks` — and the right fix is the managed-merge treatment `_apply_root_gitignore`
+already gives the co-owned root `.gitignore`. That is a behaviour change; this
+is its detector, and it lands first on purpose. Until it does, `--force`
+remains the only remedy and still replaces the whole file with no backup.
+
+### Blast radius
+
+`apply_plan`/`main` only — **no emission changed**, so the golden freeze
+surface (`build_plan` body digests) does not move. Verified: 19 suites,
+**1618 → 1652 checks**, 0 failed; regression corpus unchanged at HOLD 275 ·
+LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3. Both new signals were
+mutation-tested — neutering `verify_wiring` fails 14 checks, removing the tier
+recording fails 3 — so neither can green vacuously.
+
+`plugin/commands/bootstrap-apply.md` gained a step: check the exit code before
+reporting, because its step 5 previously told the agent to report the
+stdout counts, which look like success in exactly this case.
+
 ## 2.6.0 in-version fix — round-4 review remediation (2026-07-29)
 
 **Six consecutive fix commits had shipped a defect into the class they were
