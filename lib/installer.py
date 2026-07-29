@@ -1032,6 +1032,37 @@ def _split_owned_hooks(prev_owned: list) -> tuple[set, set]:
     return sites, legacy
 
 
+def _is_ours_here(event: str, matcher, entry, sites: set,
+                  legacy_cmds: set) -> bool:
+    """Is this registration entry one the installer placed?
+
+    Every argument but `event` comes from the operator's settings.json and may
+    be any JSON at all. A `matcher` that is a list or an object is
+    UNHASHABLE, and building `(event, matcher, command)` against a set raised
+    TypeError straight out of `apply_plan`: the install aborted after 22 of 58
+    files with every hook script on disk and none of them registered, and
+    `--uninstall` aborted outright so the tree could not be removed at all.
+    `_split_owned_hooks` already type-checks this same triple arriving from the
+    manifest - this is the other end of it, arriving from their file.
+
+    We only ever emit a string `command` under a string-or-absent `matcher`,
+    so a site we cannot key is by construction not ours: it is left alone,
+    which is what `_merge_hooks` already promises for anything it cannot
+    parse. The legacy command match is deliberately NOT gated on the matcher -
+    a pre-site manifest names a bare command and cannot say where we put it.
+    """
+    if not isinstance(entry, dict):
+        return False
+    cmd = entry.get("command")
+    if not isinstance(cmd, str):
+        return False
+    if cmd in legacy_cmds:
+        return True
+    if matcher is not None and not isinstance(matcher, str):
+        return False
+    return (event, matcher, cmd) in sites
+
+
 def _settings_contribution(ours: dict) -> tuple[list, list]:
     """What this emission contributes to a co-owned settings.json:
     (deny rules, hook registration sites).
@@ -1046,35 +1077,70 @@ def _settings_contribution(ours: dict) -> tuple[list, list]:
     return deny, _hook_sites(ours.get("hooks") or {})
 
 
+# Our own `_generatedBy` carries the protocol version, so it CHANGES between
+# releases. An equality test against this run's emission would read the
+# previous version's value as the operator's and hand it back at
+# `--uninstall`, which is installer residue. Match the generator name instead.
+_GENERATED_BY_MARKER = "bootstrap-installer"
+
+
+def _carried_displaced(known: dict | None) -> dict | None:
+    """A displaced-keys record from a previous run, or None when there is none
+    to carry.
+
+    Absence and `{}` are different answers and the difference is load-bearing:
+    `{}` is a decision some earlier run made ("they had none of these keys"),
+    absence means no run has decided yet and one must be DERIVED.
+    """
+    if known is not None and "displaced_keys" in known:
+        return dict(known["displaced_keys"] or {})
+    return None
+
+
+def _is_our_own_value(key: str, value, ours: dict) -> bool:
+    """Is this top-level value our own output rather than the operator's?"""
+    if value == ours.get(key):
+        return True
+    # `_generatedBy` is version-stamped, so an earlier install's value differs
+    # from this run's and would otherwise be claimed as the operator's.
+    return (key == "_generatedBy" and isinstance(value, str)
+            and value.startswith(_GENERATED_BY_MARKER))
+
+
 def _displaced_owned_keys(ours: dict, theirs: dict,
                           known: dict | None) -> dict:
     """The operator's values for the top-level keys we take over, recorded so
     `--uninstall` hands them back instead of deleting them.
 
-    Decided ONCE, on the first merge, and carried forward unchanged after
-    that: on every later run `theirs` already holds OUR value, so re-deriving
-    it unconditionally would record our own emission as the operator's. A file
-    that was ours wholesale (it carries a whole-file digest) displaced nothing.
+    Decided ONCE, on the first run that writes this path, and carried forward
+    unchanged after that: on every later run `theirs` already holds OUR value,
+    so re-deriving it unconditionally would record our own emission as the
+    operator's.
 
-    Where there is no record to carry - a manifest written before this key
-    existed, or one lost with a fresh clone - the value is derived, but only
-    for keys NOT already holding exactly what we emit. A key equal to our own
-    output is indistinguishable from our previous write, and claiming it would
-    leave `_generatedBy: bootstrap-installer` sitting in the operator's file
-    after `--uninstall`. The residual runs the other way and is far smaller:
-    an operator whose `$schema` is byte-identical to ours loses that one key.
+    Deriving is therefore only correct for a file this installer has NEVER
+    written, which is why every write path now records a value - see
+    `_tracked` and `_decline` in `_apply_settings_json`. The previous version
+    instead used "the manifest row carries a whole-file digest" as a proxy for
+    "we owned it wholesale, so nothing was displaced". That proxy was false in
+    precisely the cases it fired: this function is reached only from the MERGE
+    branch, and the merge branch is reached only when the file on disk is NOT
+    ours wholesale. A decline records the OPERATOR's digest under
+    `skipped-local-edit`, so a settings.json we had refused to touch read back
+    as one we owned outright - every top-level key in it was dropped from the
+    record and then DELETED by `--uninstall`, which is the round-6 F1 harm
+    coming back through the door round 6 opened.
 
-    Without any of this, an operator's own `$schema` - and `_generatedBy`, and
-    `_note_mcp` - was overwritten at install and DELETED at uninstall rather
-    than restored (round-6 F1, second manifestation).
+    What remains is the genuinely record-less case: a manifest lost with a
+    fresh clone, or one written before this key existed. There the value is
+    derived, excluding any key still holding our own output, which is
+    indistinguishable from our previous write. The residual runs toward
+    dropping one key of theirs, never toward leaving one of ours behind.
     """
-    if known is not None:
-        if "displaced_keys" in known:
-            return dict(known["displaced_keys"] or {})
-        if known.get("digest") is not None:
-            return {}
+    carried = _carried_displaced(known)
+    if carried is not None:
+        return carried
     return {k: theirs[k] for k in _SETTINGS_OWNED_KEYS
-            if k in theirs and theirs[k] != ours.get(k)}
+            if k in theirs and not _is_our_own_value(k, theirs[k], ours)}
 
 
 def _merge_hooks(ours: dict, theirs: dict,
@@ -1116,10 +1182,8 @@ def _merge_hooks(ours: dict, theirs: dict,
                 continue
             matcher = grp.get("matcher")
             kept = [e for e in grp["hooks"]
-                    if not (isinstance(e, dict)
-                            and ((event, matcher, e.get("command"))
-                                 in drop_sites
-                                 or e.get("command") in drop_cmds))]
+                    if not _is_ours_here(event, matcher, e,
+                                         drop_sites, drop_cmds)]
             if kept:
                 kept_groups.append(dict(grp, hooks=kept))
         if kept_groups:
@@ -1250,27 +1314,50 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         os.replace(tmp, target)
 
     _own_deny, _own_hooks = _settings_contribution(ours)
-    tracked = {
-        "path": action["path"],
-        "digest": _digest(body),
-        "mode": oct(action["mode"]),
-        "kind": action["kind"],
-        # Recorded even when we own the whole file, so the FIRST merge after
-        # a wholesale write knows which registrations were ours to retire.
-        "owned_deny": _own_deny,
-        "owned_hooks": _own_hooks,
-        "tier": TIER_SECURITY,
-    }
+    known = prev_files.get(action["path"])
+    carried = _carried_displaced(known)
+
+    def _tracked(displaced: dict) -> dict:
+        """The manifest row for a path we write WHOLESALE.
+
+        `displaced_keys` is recorded here too, not only on the merge: a row
+        carrying no record at all is exactly what tells a later run to DERIVE
+        one, and deriving is only correct on a file this installer has never
+        written. Without it, `--force` (or any wholesale write) over an
+        operator's file, followed by an operator edit, re-entered the merge
+        with nothing to carry and re-derived from a file that was by then
+        mostly ours - dropping their keys, which `--uninstall` then deleted.
+        """
+        return {
+            "path": action["path"],
+            "digest": _digest(body),
+            "mode": oct(action["mode"]),
+            "kind": action["kind"],
+            # Recorded even when we own the whole file, so the FIRST merge
+            # after a wholesale write knows which registrations were ours to
+            # retire.
+            "owned_deny": _own_deny,
+            "owned_hooks": _own_hooks,
+            "displaced_keys": displaced,
+            "tier": TIER_SECURITY,
+        }
 
     def _decline(why: str, digest: str) -> None:
         summary["skipped"] += 1
         print(f"  SKIP   {action['path']}  ({why}; use --force to overwrite)")
         summary["skipped_security"].append(
             {"path": action["path"], "reason": why})
-        manifest["files"].append(
-            {"path": action["path"], "digest": digest,
-             "state": "skipped-local-edit", "kind": action["kind"],
-             "tier": TIER_SECURITY})
+        row = {"path": action["path"], "digest": digest,
+               "state": "skipped-local-edit", "kind": action["kind"],
+               "tier": TIER_SECURITY}
+        # Carry a record forward, but never INVENT one. This run wrote
+        # nothing, so on a first-run decline nothing has been displaced yet
+        # and the next mergeable run must derive from a file that is still
+        # wholly theirs. Recording `{}` here instead claimed the opposite and
+        # cost the operator every top-level key they owned.
+        if carried is not None:
+            row["displaced_keys"] = carried
+        manifest["files"].append(row)
 
     # [round-6 F5] A symlinked settings.json has no good automatic answer, so
     # it gets neither guess. Replacing it (what this did) destroys the link
@@ -1296,17 +1383,20 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         print(f"  CREATE {action['path']}")
         if not dry:
             _write(body)
-        manifest["files"].append(tracked)
+        # There was no file, so this write displaced nothing - a decision, and
+        # the honest one, rather than an absent record a later run would read
+        # as licence to derive from our own emission.
+        manifest["files"].append(_tracked({}))
         return
 
     text = target.read_text()
     if text == body:
         summary["unchanged"] += 1
         print(f"    ok   {action['path']}")
-        manifest["files"].append(tracked)
+        manifest["files"].append(
+            _tracked(carried if carried is not None else {}))
         return
 
-    known = prev_files.get(action["path"])
     theirs_here = _is_operator_content(known, _digest(text))
     if not theirs_here or force:
         note = ""
@@ -1321,7 +1411,18 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         print(f"  UPDATE {action['path']}{note}")
         if not dry:
             _write(body)
-        manifest["files"].append(tracked)
+        # Read what this wholesale write is about to displace while the file
+        # is still on disk to read. An unparseable file yields {} - there are
+        # no top-level keys to hand back from JSON we cannot load.
+        displaced = carried
+        if displaced is None:
+            try:
+                prior = json.loads(text)
+            except ValueError:
+                prior = None
+            displaced = (_displaced_owned_keys(ours, prior, None)
+                         if isinstance(prior, dict) else {})
+        manifest["files"].append(_tracked(displaced))
         return
 
     try:
@@ -1410,10 +1511,8 @@ def _uninstall_settings_merge(root: Path, entry: dict) -> str:
                     continue
                 matcher = grp.get("matcher")
                 kept = [e for e in grp["hooks"]
-                        if not (isinstance(e, dict)
-                                and ((event, matcher, e.get("command"))
-                                     in owned_sites
-                                     or e.get("command") in legacy_cmds))]
+                        if not _is_ours_here(event, matcher, e,
+                                             owned_sites, legacy_cmds)]
                 if kept:
                     kept_groups.append(dict(grp, hooks=kept))
             if kept_groups:

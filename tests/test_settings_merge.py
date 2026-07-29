@@ -31,7 +31,7 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 from installer import (                          # noqa: E402
-    _SETTINGS_OWNED_KEYS, _SETTINGS_SHARED_KEYS, _merge_hooks,
+    _SETTINGS_OWNED_KEYS, _SETTINGS_SHARED_KEYS, _is_ours_here, _merge_hooks,
     _merge_settings, _settings_mergeable,
 )
 
@@ -729,6 +729,215 @@ for _shape, _want in (
         check(f"decline for {_want} still exits 3", _r.returncode == 3)
     finally:
         shutil.rmtree(_d, ignore_errors=True)
+
+
+# =========================================================================== #
+# A group we cannot KEY is not a group we may crash on
+# =========================================================================== #
+# Ownership is keyed on (event, matcher, command), and that tuple is hashed
+# against a set. Two of its three elements come out of the OPERATOR's file,
+# which may carry any JSON at all: a list or object `matcher` is unhashable
+# and raised TypeError straight out of apply_plan. The install aborted after
+# 22 of 58 files - every hook script on disk, none of them registered - and
+# `--uninstall` aborted outright, so the tree could not be removed at all.
+# `_split_owned_hooks` type-checks this same triple coming from the manifest;
+# nothing checked it coming from their file. Every fixture in this suite used
+# a string matcher, so nothing caught it.
+print("\n-- an unkeyable operator group is passed through, never crashed on --")
+
+for _label, _grp in (
+        ("list matcher",   {"matcher": ["Write", "Edit"],
+                            "hooks": [{"type": "command",
+                                       "command": "my-audit.sh"}]}),
+        ("object matcher", {"matcher": {"tool": "Write"},
+                            "hooks": [{"type": "command",
+                                       "command": "my-audit.sh"}]}),
+        ("list command",   {"matcher": "Write",
+                            "hooks": [{"type": "command",
+                                       "command": ["a", "b"]}]})):
+    _d = tempfile.mkdtemp()
+    try:
+        seed(_d, {"hooks": {"PreToolUse": [_grp]}})
+        _r = install(_d)
+        check(f"{_label}: install completes instead of aborting",
+              _r.returncode == 0, f"rc={_r.returncode} {_r.stderr[-300:]}")
+        if _r.returncode == 0:
+            _s = read(_d)
+            # Their ENTRY, not their whole group: a group whose matcher is one
+            # we also emit legitimately gains our hook alongside theirs.
+            check(f"{_label}: the operator's registration survives the merge",
+                  any(g.get("matcher") == _grp["matcher"]
+                      and _grp["hooks"][0] in g.get("hooks", [])
+                      for g in _s["hooks"]["PreToolUse"]),
+                  json.dumps(_s["hooks"]["PreToolUse"])[:300])
+            check(f"{_label}: our own wiring still lands",
+                  len([c for c in commands_in(_s)
+                       if isinstance(c, str)
+                       and c.startswith("$CLAUDE_PROJECT_DIR/")]) == 13)
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
+_d = tempfile.mkdtemp()
+try:
+    seed(_d, {"model": "opus"})
+    install(_d)
+    # The operator adds the unkeyable group AFTER a healthy install, which is
+    # what made this reachable without ever having seen a failed one.
+    _s = read(_d)
+    _s["hooks"]["PostToolUse"].append(
+        {"matcher": ["Write", "Edit"],
+         "hooks": [{"type": "command", "command": "my-audit.sh"}]})
+    seed(_d, _s)
+    _r = uninstall(_d)
+    check("uninstall completes with an unkeyable group in their file",
+          _r.returncode == 0, f"rc={_r.returncode} {_r.stderr[-300:]}")
+    _after = read(_d)
+    check("uninstall keeps the unkeyable group and their other settings",
+          _after.get("model") == "opus"
+          and _after["hooks"]["PostToolUse"][0]["matcher"] == ["Write", "Edit"],
+          json.dumps(_after))
+    check("uninstall still retires OUR registrations",
+          not [c for c in commands_in(_after)
+               if isinstance(c, str) and c.startswith("$CLAUDE_PROJECT_DIR/")])
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+print("\n-- _is_ours_here: keyable or not, the answer is a bool --")
+_site = ("PreToolUse", "Bash", "x.sh")
+check("a site we emit is ours",
+      _is_ours_here("PreToolUse", "Bash", {"command": "x.sh"}, {_site}, set()))
+check("the same command at another matcher is theirs",
+      not _is_ours_here("PreToolUse", "Read", {"command": "x.sh"},
+                        {_site}, set()))
+check("an unhashable matcher answers False rather than raising",
+      not _is_ours_here("PreToolUse", ["Bash"], {"command": "x.sh"},
+                        {_site}, set()))
+check("an unhashable command answers False rather than raising",
+      not _is_ours_here("PreToolUse", "Bash", {"command": ["x.sh"]},
+                        {_site}, set()))
+check("a legacy command matches at ANY matcher, including unkeyable ones",
+      _is_ours_here("PreToolUse", ["Bash"], {"command": "x.sh"},
+                    set(), {"x.sh"}))
+
+
+# =========================================================================== #
+# displaced_keys is recorded by every path that WRITES
+# =========================================================================== #
+# `_displaced_owned_keys` used to read "the manifest row carries a whole-file
+# digest" as "we owned this file wholesale, so it displaced nothing". That
+# proxy was false in exactly the cases it fired: the function is reached only
+# from the merge branch, and the merge branch is reached only when the file on
+# disk is NOT ours wholesale. A decline records the OPERATOR's digest under
+# `skipped-local-edit` - so a settings.json the installer had REFUSED to touch
+# read back as one it owned outright, every top-level key of theirs was
+# dropped from the record, and `--uninstall` then deleted them. Nothing in
+# this suite merged a tree whose previous run had declined.
+def settings_entry(root):
+    with open(os.path.join(root, ".claude",
+                           ".installer-manifest.json")) as fh:
+        return next(f for f in json.load(fh)["files"]
+                    if f["path"].endswith("settings.json"))
+
+
+THEIRS = {"$schema": "https://example.com/mine.json",
+          "_generatedBy": "our-internal-tooling", "model": "opus"}
+
+print("\n-- a run that wrote nothing decides nothing --")
+_d = tempfile.mkdtemp()
+try:
+    seed(_d, '{"$schema":')                       # invalid JSON -> decline
+    check("a first-run decline exits 3", install(_d).returncode == 3)
+    check("a first-run decline records NO displaced_keys (absence, not {})",
+          "displaced_keys" not in settings_entry(_d),
+          json.dumps(settings_entry(_d)))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+def seed_broken(root):
+    seed(root, '{"$schema":')                      # unparseable -> decline
+
+
+def seed_symlink(root):
+    shared = os.path.join(root, "shared.json")
+    with open(shared, "w") as fh:
+        fh.write(json.dumps(THEIRS) + "\n")
+    os.makedirs(os.path.join(root, ".claude"), exist_ok=True)
+    os.symlink("../shared.json",
+               os.path.join(root, ".claude", "settings.json"))
+
+
+print("\n-- their keys survive a decline, a symlink and a --force --")
+for _label, _setup, _argv in (
+        ("after an invalid-JSON decline", seed_broken, ()),
+        ("after a symlink decline", seed_symlink, ()),
+        ("after a --force wholesale write",
+         lambda d: seed(d, THEIRS), ("--force",))):
+    _d = tempfile.mkdtemp()
+    try:
+        _setup(_d)
+        install(_d, argv=_argv)                    # run 1: decline or force
+        if os.path.islink(os.path.join(_d, ".claude", "settings.json")):
+            os.unlink(os.path.join(_d, ".claude", "settings.json"))
+        if _argv:
+            _cur = read(_d)                        # they edit our forced copy
+            _cur["model"] = "opus"
+            seed(_d, _cur)
+        else:
+            seed(_d, THEIRS)                       # they fix the file
+        _r = install(_d)                           # run 2: merge
+        check(f"{_label}: merge succeeds", _r.returncode == 0,
+              _r.stderr[-200:])
+        check(f"{_label}: their keys are recorded as displaced",
+              settings_entry(_d).get("displaced_keys") ==
+              {"$schema": THEIRS["$schema"],
+               "_generatedBy": THEIRS["_generatedBy"]},
+              json.dumps(settings_entry(_d).get("displaced_keys")))
+        uninstall(_d)
+        _after = read(_d)
+        check(f"{_label}: uninstall HANDS BACK their keys",
+              _after.get("$schema") == THEIRS["$schema"]
+              and _after.get("_generatedBy") == THEIRS["_generatedBy"],
+              json.dumps(_after))
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
+print("\n-- and the other direction: we leave nothing of ours behind --")
+_d = tempfile.mkdtemp()
+try:
+    install(_d)                                    # we CREATE the file
+    check("a file we created displaced nothing",
+          settings_entry(_d).get("displaced_keys") == {},
+          json.dumps(settings_entry(_d).get("displaced_keys")))
+    _cur = read(_d)
+    _cur["model"] = "opus"
+    seed(_d, _cur)
+    install(_d)
+    uninstall(_d)
+    _after = read(_d)
+    check("uninstall leaves no installer key behind in a file we created",
+          not [k for k in _SETTINGS_OWNED_KEYS if k in _after],
+          json.dumps(_after))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = tempfile.mkdtemp()
+try:
+    install(_d)
+    os.unlink(os.path.join(_d, ".claude", ".installer-manifest.json"))
+    _cur = read(_d)                                # a fresh clone, older stamp
+    _cur["_generatedBy"] = "bootstrap-installer (protocol 2.5.0)"
+    _cur["model"] = "opus"
+    seed(_d, _cur)
+    install(_d)
+    check("an EARLIER install's version-stamped _generatedBy is not claimed "
+          "as theirs",
+          settings_entry(_d).get("displaced_keys") == {},
+          json.dumps(settings_entry(_d).get("displaced_keys")))
+    uninstall(_d)
+    check("so uninstall leaves no stale _generatedBy residue",
+          "_generatedBy" not in read(_d), json.dumps(read(_d)))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
 
 
 print(f"\n{passed} passed, {failed} failed")

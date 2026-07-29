@@ -1,5 +1,85 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — the ownership key crashed on the shapes it was built to tolerate (2026-07-29)
+
+Round-7 review of the previous entry found two defects. Both are the same
+shape as everything before them — *the code that exists to stop the installer
+destroying operator content, failing on operator content* — and both were
+found by executing shapes, not by reading. The suite was green at 1782 checks
+through both.
+
+* **A `matcher` the installer cannot key aborted the run.** Ownership is keyed
+  on `(event, matcher, command)`, and that tuple is hashed against a set. Two
+  of its three elements come out of the operator's file, which may carry any
+  JSON at all: a `matcher` that is a list or an object is **unhashable**, and
+  the lookup raised `TypeError` straight out of `apply_plan`. The install
+  aborted after 22 of 58 files — every hook script on disk, `settings.json`
+  untouched, so **not one gate registered** — with no manifest, so
+  `--uninstall` then reported "nothing removed" and left all 23 files. Worse,
+  the same lookup runs in `_uninstall_settings_merge`: an operator who added
+  such a group *after* a healthy install could not uninstall at all, at rc=1,
+  with no remedy but hand-editing the file. Both reproduce with
+  `{"matcher": ["Write", "Edit"], …}`; both worked at `844b8e0`, so this was a
+  regression introduced by the fix for round-6 F2.
+
+  `_split_owned_hooks` already type-checked this exact triple arriving from
+  the manifest — that check was added in the same commit, for the same reason.
+  Nothing checked it arriving from *their* file. The new `_is_ours_here`
+  applies one rule at both ends: we only ever emit a string `command` under a
+  string-or-absent `matcher`, so a site we cannot key is by construction not
+  ours and is left alone — which is what `_merge_hooks` already promised for
+  anything it could not parse. This also fixes an unhashable `command`, which
+  crashed identically and was pre-existing at `844b8e0`.
+
+* **`displaced_keys` was decided by a proxy that was false whenever it fired.**
+  `_displaced_owned_keys` treated "the manifest row carries a whole-file
+  digest" as "we owned this file wholesale, so it displaced nothing". But that
+  function is reached only from the MERGE branch, and the merge branch is
+  reached only when the file on disk is *not* ours wholesale — so the
+  condition was never true where it was tested. A decline records the
+  **operator's** digest under `skipped-local-edit`, so a `settings.json` the
+  installer had *refused to touch* read back as one it owned outright: every
+  top-level key of theirs was dropped from the record as `{}`, carried forward
+  as a decision on every subsequent run, and then **deleted** by
+  `--uninstall`. Every decline was a trigger, including the symlink decline
+  added in the entry below — declining is the correct action there, and it
+  still cost the operator their `$schema`. `--force` over their file, followed
+  by an operator edit, lost them the same way.
+
+  The proxy is gone. `displaced_keys` is now recorded by **every path that
+  writes** — `{}` on a create (there was no file, so nothing was displaced),
+  derived from the file on disk at the moment a wholesale write replaces it,
+  and carried forward through a decline rather than re-decided by one. A row
+  with no record at all now means only what it says: no run has decided yet,
+  so derive one — and deriving is now only ever reached for a file this
+  installer has never written. Absence and `{}` are different answers, and the
+  difference is load-bearing.
+
+  Deriving still happens on a genuinely record-less tree (a manifest lost with
+  a fresh clone). There it now also excludes a `_generatedBy` carrying our own
+  generator name at *any* protocol version: the value is version-stamped, so
+  an equality test against this run's emission read the previous release's
+  stamp as the operator's and handed it back at `--uninstall` — installer
+  residue, and a violation of "removes exactly what it created".
+
+Regression tests: 32 new checks in `tests/test_settings_merge.py`, the two
+sections this suite was missing. Every `matcher` fixture in it was a string,
+and nothing merged a tree whose previous run had declined — the two gaps the
+defects sat in. A fresh install remains byte-identical to `f1ed58c`; the merge
+is still a fixed point over three runs; the round trip on a messy operator
+file is still exact.
+
+### Not fixed — an inconsistency worth naming
+
+The symlink decline below applies only to `settings.json`. A symlink at any
+other planned path is skipped while it is untracked, but once tracked it is
+silently replaced by a regular file at rc=0, with no backup and no mention —
+`os.replace` swaps the link rather than writing through it, so the target's
+bytes survive but the link does not. The mechanism is pre-existing at
+`f1ed58c`; the inconsistency with `settings.json` is new, and the decline's
+own rationale ("neither orphan nor edit") applies verbatim. Left as an owner
+decision rather than widened on a drive-by.
+
 ## 2.6.0 in-version fix — the merge claimed content it did not add (2026-07-29)
 
 *(Amended to fold in the two owner decisions, F5 and F6 — see below.)*
