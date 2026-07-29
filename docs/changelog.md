@@ -1,5 +1,44 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — the SDK template warned on every fresh checkout (2026-07-29)
+
+CI had been red on every commit of this branch, on five assertions all reading
+*"… writes nothing to stderr"*. The cause was a real defect, and the reason it
+went unnoticed is worth recording.
+
+`lib/sdk_gates_template.py` carries the whole SDK gate module inside two
+**non-raw** `'''…'''` strings. A bare `\S` in the template body is therefore an
+invalid escape in the OUTER string as well as the inner one — eight of them,
+across five lines, including the very docstring that says *"the `r` prefix is
+load-bearing"*. Compiling the file emitted `SyntaxWarning` to stderr, so a
+clean install violated its own stated contract.
+
+Round-4 D10 fixed this one layer down: it hardened the **emitted** module and
+added two checks that compile the **rendered** source, one of them under
+`-W error::SyntaxWarning`. Nothing compiled the **template file itself**, so
+the identical defect survived in the file that generates the thing that was
+fixed — the same shape as the round-7 finding below, where a type check
+existed at one end of a value's journey and not the other.
+
+It stayed invisible locally because a working checkout has a warm
+`__pycache__`: the file is never recompiled, so the warning never fires. CI
+checks out fresh. Every local run showed 0 failed while CI showed 5.
+
+Fixed by doubling the eight escapes. In a non-raw string `\\S` and `\S` both
+render as `\S`, so **`_HEADER` and `_STATIC_BODY` hash byte-identical to before
+and no golden digest moves** — verified, along with a full emitted tree diffed
+file-by-file. One source line goes to 81 characters; it is a comment *inside*
+the template, so rewrapping it would change the emitted `gates.py`. The file
+already carries five longer lines.
+
+Two regression checks in `tests/test_sdk_gates.py`, both confirmed to fail with
+the defect restored: the template file py-compiles under
+`-W error::SyntaxWarning`, and importing it with a genuinely **cold** cache
+writes nothing to stderr. The second imports a COPY at a path Python has never
+cached — the first version of that check read the `__pycache__` the test file
+had populated at its own import and passed with the bug present, which is the
+warm-cache blindness that let this live in the first place.
+
 ## 2.6.0 in-version fix — the ownership key crashed on the shapes it was built to tolerate (2026-07-29)
 
 Round-7 review of the previous entry found two defects. Both are the same
