@@ -147,6 +147,62 @@ _DOTENV_TEMPLATES = frozenset({
     ".env.example", ".env.sample", ".env.template", ".env.dist",
     ".env.defaults", "env.example", "env.sample", "env.template",
 })
+# [round-2 review F-870] Shell parity: the gate's _sg_push carries the same
+# two sets. A shell invoker's argument is a COMMAND LINE, not prose, so its
+# quoted run is re-tokenized; every other command's quoted run stays one
+# opaque candidate. Deciding this on WHO THE COMMAND IS - rather than on
+# what the run looks like - is what lets `sh -c 'cat secrets/prod.yaml'`
+# block while `git commit -m "fix the .env loader"` stays allowed.
+_SHELL_INVOKERS = frozenset({
+    "sh", "bash", "zsh", "dash", "ksh", "ash", "busybox", "ssh", "eval",
+    "xargs",
+})
+# Transparent prefixes: they do not change WHICH program runs, so the next
+# token is still the command word. Mirrors CMD_PFX in the shell header.
+_CMD_PREFIXES = frozenset({
+    "env", "sudo", "nohup", "time", "watch", "command", "exec", "builtin",
+})
+
+
+def _shell_segments(cmd):
+    """Split on UNQUOTED operators and newlines -> the units at which a new
+    command can begin.
+
+    Quote-aware, so a `;` or a newline INSIDE a quoted argument does not
+    start a new command. Two things depend on that:
+
+      * command position, which the invoker rule keys on. shlex.split
+        discards newlines along with every other whitespace run, so an
+        `sh -c` on the second LINE of a command reached its token with the
+        tracker already past command position, the invoker rule never
+        fired, and the SDK would have allowed what the shell blocks - the
+        exact direction this module's binding rule forbids.
+      * not splitting quoted tokens on operators. The previous version ran
+        _SH_OPS.split over every shlex token, so `git commit -m "refactor
+        (parse .env) handling"` was torn into parts and denied while the
+        shell allowed it. Operators are handled HERE, before quotes are
+        removed, so a token that still contains one was quoted and is left
+        whole.
+
+    An unterminated quote takes the rest of the string as one segment,
+    which is what the shell gate does.
+    """
+    segs, cur, quote = [], [], None
+    for ch in cmd:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            cur.append(ch)
+        elif ch in ";&|()<>\\n":
+            segs.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    segs.append("".join(cur))
+    return [s for s in segs if s.strip()]
 
 
 def _bash_candidates(cmd):
@@ -158,6 +214,16 @@ def _bash_candidates(cmd):
     # POSIX mode is exactly that tokenizer, including backslash escapes and
     # multi-line input - the shell gate's hand-rolled equivalent exists only
     # because bash has no shlex.
+    out = []
+    for _seg in _shell_segments(cmd):
+        out.extend(_segment_candidates(_seg))
+    return out
+
+
+def _segment_candidates(cmd):
+    # One SEGMENT - operators and unquoted newlines already removed, so
+    # every token here belongs to the same command and the first one is at
+    # command position.
     try:
         toks = shlex.split(cmd, posix=True)
     except ValueError:
@@ -178,15 +244,33 @@ def _bash_candidates(cmd):
             stripped = raw.replace('"', "").replace("'", "")
             if stripped and stripped != raw:
                 toks.append(stripped)
+        # The fallback path did NOT go through _shell_segments' quote
+        # tracking, so its tokens can still carry operators; those are the
+        # only ones _SH_OPS is applied to now.
+        toks = [p for raw in toks for p in _SH_OPS.split(raw) if p]
     out = []
+    at_cmdpos = True
+    invoker = False
     for tok in toks:
-        for part in _SH_OPS.split(tok):
-            if not part:
-                continue
-            out.append(part)
-            m = _ASSIGN.match(part)
-            if m and m.group(1):
-                out.append(m.group(1))
+        out.append(tok)
+        m = _ASSIGN.match(tok)
+        if m and m.group(1):
+            out.append(m.group(1))
+        if at_cmdpos:
+            base = tok.rsplit("/", 1)[-1]
+            if base in _CMD_PREFIXES:
+                pass                    # next token is still the command
+            elif base in _SHELL_INVOKERS:
+                invoker, at_cmdpos = True, False
+            else:
+                invoker, at_cmdpos = False, False
+        # shlex splits on UNQUOTED whitespace, so a token that still
+        # contains whitespace came from a quoted run - which is exactly the
+        # set the invoker rule is about, with no extra bookkeeping. Additive:
+        # the run stays a candidate too, because deny-list bias is
+        # over-match. Shell parity: the gate's _sg_push, same condition.
+        if invoker and any(c.isspace() for c in tok):
+            out.extend(w for w in tok.split() if w)
     return out
 
 

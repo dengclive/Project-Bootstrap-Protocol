@@ -818,8 +818,10 @@ done
 # A quoted argument is then one candidate (its interior words are not paths),
 # while `cat ".env"` still yields `.env` - and, as a bonus, the intra-token
 # quoting of [lens A F8] reassembles: `cat .en''v` yields `.env`.
+_SG_CMDPOS=1
+_SG_INVOKER=0
 _sg_push(){{
-  local _lhs
+  local _lhs _b _w _arr2=()
   if [ -n "$_CUR" ]; then
     CMD_CANDIDATES+=("$_CUR")
     # A backslash escapes the next character, so `cat .en\\v` names `.env`.
@@ -839,37 +841,101 @@ _sg_push(){{
           *) CMD_CANDIDATES+=("${{_CUR#*=}}") ;;
         esac ;;
     esac
+    # --- COMMAND POSITION and the quoted-run rule [round-2 review] --------
+    # The first token of a command decides how the quoted runs that follow
+    # have to be read. `git commit -m "..."` takes PROSE; `sh -c "..."`
+    # takes SHELL CODE. v2.6.2 applied ONE rule to both and so had to be
+    # wrong for one of them: joining a run into a single candidate fixed
+    # the prose false positive (lens B finding 4) and in the same stroke
+    # made `sh -c 'cat secrets/prod.yaml'` invisible to every
+    # directory-anchored pattern [F-870]. The header comment above already
+    # says the two must be fixed together; what it got wrong is that the
+    # discriminator cannot be a property of the RUN. Deciding it
+    # STRUCTURALLY - on who the command is - is what lets both hold.
+    if [ "$_SG_CMDPOS" = "1" ]; then
+      _b="${{_CUR##*/}}"
+      case "$_b" in
+        # Transparent prefixes: they do not change WHICH program runs, so
+        # the next token is still the command word. Mirrors CMD_PFX in the
+        # shared header.
+        env|sudo|nohup|time|watch|command|exec|builtin) ;;
+        # Shell invokers: their argument IS a command line.
+        sh|bash|zsh|dash|ksh|ash|busybox|ssh|eval|xargs)
+          _SG_INVOKER=1; _SG_CMDPOS=0 ;;
+        *) _SG_INVOKER=0; _SG_CMDPOS=0 ;;
+      esac
+    fi
+    # Only a QUOTED run can carry whitespace - unquoted whitespace is
+    # precisely what splits tokens - so "contains whitespace" identifies
+    # exactly the runs this rule is about, with no extra bookkeeping. The
+    # run is re-tokenized ADDITIVELY and stays a candidate itself, because
+    # deny-list bias is over-match.
+    #
+    # KNOWN AND ACCEPTED: a nested quote inside an invoker's argument keeps
+    # its quote character on the word, so `ssh h "git commit -m '.env'"`
+    # over-matches. Over-match on a command that runs a shell remotely is
+    # the cheap direction; the prose case, which is ordinary and frequent,
+    # is the one that had to be protected (J-15).
+    if [ "$_SG_INVOKER" = "1" ]; then
+      case "$_CUR" in
+        *[[:space:]]*)
+          set -f
+          read -ra _arr2 <<< "$_CUR"
+          set +f
+          for _w in ${{_arr2[@]+"${{_arr2[@]}}"}}; do
+            CMD_CANDIDATES+=("$_w")
+          done ;;
+      esac
+    fi
   fi
   _CUR=""
   return 0
 }}
 _sg_raw(){{                     # an UNQUOTED run: split on whitespace
-  local _t="$1" _w _first=1 _trail=0 _arr=()
-  [ -z "$_t" ] && return 0
+  local _t="$1" _piece _w _first _trail _arr=() _pfirst=1
+  if [ -z "$_t" ]; then return 0; fi
   # Shell OPERATORS are not part of a word when unquoted, so they delimit
   # candidates. Without this the token carries the operator - `cd secrets;
   # cat prod.yaml` yields `secrets;`, and `cat .env; ls` yields `.env;`,
   # neither of which matches its pattern: a fail-open on the most ordinary
   # multi-command line there is. Applied to UNQUOTED runs only, so a `;`
   # inside a commit message still cannot split it (lens B finding 4).
-  _t="${{_t//;/ }}"; _t="${{_t//&/ }}"; _t="${{_t//|/ }}"
-  _t="${{_t//"("/ }}"; _t="${{_t//")"/ }}"
-  _t="${{_t//</ }}"; _t="${{_t//>/ }}"
-  case "$_t" in [[:space:]]*) _sg_push ;; esac
-  case "$_t" in *[[:space:]]) _trail=1 ;; esac
-  set -f
-  read -ra _arr <<< "$_t"
-  set +f
-  for _w in ${{_arr[@]+"${{_arr[@]}}"}}; do
-    if [ "$_first" = "1" ]; then _CUR="$_CUR$_w"; _first=0
-    else _sg_push; _CUR="$_w"; fi
-  done
-  [ "$_trail" = "1" ] && _sg_push
+  #
+  # [round-2 review] They translate to a NEWLINE rather than to a space,
+  # because an unquoted operator does not merely end a token - it starts a
+  # new COMMAND, and the invoker rule in _sg_push keys on command position.
+  # An unquoted newline already means exactly that, so the two collapse
+  # into one mechanism instead of two that can disagree. The consequence
+  # that matters: `sh -c 'x' && git commit -m "fix .env"` re-tokenizes the
+  # first quoted run and NOT the second.
+  _t="${{_t//;/$'\\n'}}"; _t="${{_t//&/$'\\n'}}"; _t="${{_t//|/$'\\n'}}"
+  _t="${{_t//"("/$'\\n'}}"; _t="${{_t//")"/$'\\n'}}"
+  _t="${{_t//</$'\\n'}}"; _t="${{_t//>/$'\\n'}}"
+  while IFS= read -r _piece || [ -n "$_piece" ]; do
+    if [ "$_pfirst" = "0" ]; then
+      _sg_push; _SG_CMDPOS=1; _SG_INVOKER=0
+    fi
+    _pfirst=0
+    if [ -n "$_piece" ]; then
+      case "$_piece" in [[:space:]]*) _sg_push ;; esac
+      _trail=0
+      case "$_piece" in *[[:space:]]) _trail=1 ;; esac
+      set -f
+      read -ra _arr <<< "$_piece"
+      set +f
+      _first=1
+      for _w in ${{_arr[@]+"${{_arr[@]}}"}}; do
+        if [ "$_first" = "1" ]; then _CUR="$_CUR$_w"; _first=0
+        else _sg_push; _CUR="$_w"; fi
+      done
+      if [ "$_trail" = "1" ]; then _sg_push; fi
+    fi
+  done <<< "$_t"
   return 0
 }}
-_sg_line(){{
+_sg_scan(){{
   local _l="$1" _pre _q _rest _run _pd _ps
-  _CUR=""
+  _CUR=""; _SG_CMDPOS=1; _SG_INVOKER=0
   while : ; do
     case "$_l" in *[\\"\\']*) ;; *) _sg_raw "$_l"; _sg_push; return 0 ;; esac
     _pd="${{_l%%\\"*}}"; _ps="${{_l%%\\'*}}"
@@ -887,10 +953,19 @@ _sg_line(){{
 }}
 _cmd="$(jget '.tool_input.command')"
 if [ -n "$_cmd" ]; then
-  _CUR=""
-  while IFS= read -r _line; do          # [F1] EVERY line, not just the first
-    _sg_line "$_line"
-  done <<< "$_cmd"
+  # [round-2 review F-891] ONE scan over the WHOLE command, not one per
+  # line. The per-line driver reset _CUR at every newline and treated an
+  # unterminated quote as ending at the line end, so a quoted argument
+  # SPANNING lines was re-parsed as unquoted and its prose became candidate
+  # paths. That is lens B finding 4's false positive restored for the
+  # standard subject+body commit message and for `gh pr create --body`, in
+  # the gate whose own comment calls it the one with no override path - and
+  # the corpus held only the single-line twin, so it stayed green.
+  #
+  # F1 (every line, not just the first) is preserved: one scan covers the
+  # whole string. Quote state now carries across newlines, which is what
+  # the shell itself does.
+  _sg_scan "$_cmd"
 fi
 if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
@@ -934,7 +1009,26 @@ else
   _LIST=(${{CMD_CANDIDATES[@]+"${{CMD_CANDIDATES[@]}}"}}); _dir_ok=0
 fi
 for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
-  base="$(basename -- "$TARGET" 2>/dev/null || printf '%s' "$TARGET")"
+  # [round-2 review F-937] `basename` here was a FORK PER CANDIDATE, and the
+  # F1 all-lines fix had just multiplied candidates by line count. An
+  # ordinary large Bash call - a heredoc writing a file, a generated script,
+  # pasted data - spent SECONDS in this loop (measured: 22.9 s at 2000
+  # lines, ~92% of it in these forks), and a ~150 KB one crossed the 60 s
+  # timeout this gate runs under. A PreToolUse timeout fails CLOSED, so the
+  # cost did not land as latency, it landed as a HARD BLOCK on benign input
+  # in the one gate with no override path - the "operator deletes the gate"
+  # pressure this file keeps citing, arriving through performance.
+  #
+  # Pure parameter expansion, no fork, same semantics: strip trailing
+  # slashes, then take the last path segment. `base` is used only for the
+  # basename-form matches below; `$TARGET` is matched separately, so the
+  # all-slashes edge case (basename '/' -> '/', here -> '') cannot open a
+  # path that the TARGET arm would have caught.
+  base="$TARGET"
+  while [ -n "${{base%/}}" ] && [ "$base" != "${{base%/}}" ]; do
+    base="${{base%/}}"
+  done
+  base="${{base##*/}}"
   # [lens B finding 4, THE ONE DELIBERATE RELAXATION IN THIS GATE] The
   # dotenv TEMPLATE names are conventionally secret-free and committed to
   # every repo that uses dotenv, so `.env*` blocking `cat .env.example`

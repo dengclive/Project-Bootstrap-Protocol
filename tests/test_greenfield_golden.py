@@ -584,8 +584,70 @@ EXPECTED_DIGESTS = {
     #      that runs on every Bash call, and its tokenizer is superlinear
     #      (0.29/1.38/6.01 s at 100/500/2000 lines). A PreToolUse timeout
     #      fails closed, so this bounds it in the safe direction.
+    # [freeze-exception no. 21 - round-2 review batch 2, the quoted-run rule,
+    # 2026-07-29] Source: the round-2 Fable 5 review of the no. 20 batch, 18
+    # findings, every one reproduced by executing both substrates. Exactly
+    # TWO emitted files move, identically on all three fixtures - action
+    # counts unchanged, zero added, zero removed, zero frozen twins moved
+    # (verified by a body diff of a parent-vs-head install at 0fba4d2, not
+    # asserted):
+    #   .claude/hooks/secrets-gate.sh  and  .claude/sdk_gates/gates.py
+    # No shared header, no other gate, no settings.json, no steering doc,
+    # skill, command or agent body. Narrower than no. 20 on purpose: the
+    # tokenizer work is separable from the ten independent fixes, which are
+    # deliberately NOT in this exception.
+    #
+    #   1. THE QUOTED-RUN RULE, resolved structurally [F-870 + F-891]. These
+    #      two are one decision, not two patches, and no. 20's own header
+    #      comment says so ("repairing either alone yields a tokenizer that
+    #      is confidently wrong in the other direction") - it was still
+    #      wrong, because it looked for the discriminator in the RUN. There
+    #      isn't one there: `sh -c 'cat secrets/prod.yaml'` and
+    #      `git commit -m "fix the .env loader"` are the same shape. The
+    #      discriminator is WHO THE COMMAND IS. A shell invoker's argument
+    #      is a command line and is re-tokenized; everyone else's quoted run
+    #      stays one opaque candidate. Both substrates carry the same two
+    #      sets (_SHELL_INVOKERS / _CMD_PREFIXES).
+    #      F-870 was the fail-open half: joining the run into one candidate
+    #      hid every directory-anchored pattern behind any wrapper, so
+    #      `bash -lc "grep -r . secrets/"` - the literal string
+    #      test_substrate_differential asserts as deny UNWRAPPED - passed on
+    #      BOTH substrates. F-891 was the false-positive half: quote state
+    #      reset at every newline, so a subject+body commit message and a
+    #      `gh pr create --body` were re-parsed as unquoted prose and denied
+    #      by the gate with no override path. One scan now carries quote
+    #      state across newlines, which is what the shell does.
+    #      Verified parent-vs-head: EXACTLY two verdicts move, both intended.
+    #   2. F-937, the prerequisite. `basename` was a fork PER CANDIDATE, and
+    #      no. 19's all-lines fix had just multiplied candidates by line
+    #      count. Measured on the emitted gate: 22.9 s for a benign 2000-line
+    #      command (~77 KB), crossing no. 20's own new 60 s bound at ~5000
+    #      lines - and a PreToolUse timeout fails CLOSED, so the cost landed
+    #      as a hard block on benign input, not as latency. Replaced with
+    #      pure parameter expansion: same input now 1.5 s, and 194 KB
+    #      completes in 3.8 s. This had to land BEFORE item 1, which raises
+    #      the candidate count.
+    #   3. SDK reconciliation, same commit, deliberately not deferred. The
+    #      shell fix alone made F-870 read shell=deny/sdk=allow - a NEW
+    #      divergence in the direction sdk_gates_template's binding rule
+    #      forbids, i.e. exactly the mistake the previous three batches made.
+    #      The ledger added in batch 1 caught it before it could ship. The
+    #      SDK now segments quote-aware BEFORE shlex, which also fixes a
+    #      divergence the review found separately: _SH_OPS.split was applied
+    #      to quoted tokens, so `git commit -m "refactor (parse .env)
+    #      handling"` was denied on the SDK and allowed by the shell.
+    #
+    # NO PROTOCOL_VERSION BUMP, same reasoning as no. 18 and no. 20: 2.6.0 is
+    # unreleased (v2.5.0 remains the only tag), so gate-behavior defects are
+    # fixed in place rather than bumped past. A bump is owed at 2.6.0's tag.
+    #
+    # ACCEPTED, recorded not buried: a nested quote inside an invoker's
+    # argument keeps its quote character on the word, so
+    # `ssh h "git commit -m '.env'"` over-matches. Over-match on a command
+    # that runs a shell remotely is the cheap direction; the prose case is
+    # the frequent one and is protected. docs/deferred-backlog.md J-15.
     "default":
-        "0ee3d342842823248c2f09e9f50e0a701289e5aed6b9d8a7aaf7b7c24bd10c25",
+        "03767cfd2ea09244c3de5ac317e819d395924b6834d57aa95b8d682be478399f",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -649,7 +711,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "afa51e7840cb87092eb93344ec698beb1bb08a145e3ac31ea5a12f295ac3ed7b",
+        "743a650577f3c8711302f69afaae64a197b3ec36faa5e4bfa66dda4d4d7cca1c",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -718,7 +780,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "1b189e2d9abbdd98c443587c0a7abd89f749a38b3f1073c1f1a9a6459437ba30",
+        "7807d807130a89fc524d3637303692799411b07d6b8e73b9e200dbc5f175dc0d",
 }
 
 EXPECTED_ACTION_COUNTS = {

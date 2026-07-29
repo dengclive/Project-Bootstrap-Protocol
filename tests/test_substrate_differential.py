@@ -213,7 +213,41 @@ for cmd, want in (
         # blocked ordinary prose.
         ("echo secrets", "allow"),
         ("grep secrets README.md", "allow"),
-        ("git commit -m secrets", "allow")):
+        ("git commit -m secrets", "allow"),
+        # [round-2 review F-870, FIXED] A shell invoker's quoted argument is
+        # a COMMAND LINE, so it is re-tokenized and the path inside it is a
+        # candidate again. Every one of these was `allow` on BOTH substrates
+        # at 0fba4d2 - row 3 is the literal string this file asserts as
+        # `deny` unwrapped, ~40 lines above, which is how close the corpus
+        # came to catching it.
+        ("sh -c 'cat secrets/prod.yaml'", "deny"),
+        ('bash -c "cat secrets/prod.yaml"', "deny"),
+        ('bash -lc "grep -r . secrets/"', "deny"),
+        ("sh -c 'cp secrets/prod.yaml /tmp/x'", "deny"),
+        ('ssh box "cat secrets/prod.yaml"', "deny"),
+        ("sh -c 'cat .env'", "deny"),
+        # ...and the other half of the same rule: an invoker's argument that
+        # names nothing sensitive is still allowed, so the fix cannot be
+        # satisfied by blocking `sh -c` wholesale.
+        ('sh -c "echo nothing to see here"', "allow"),
+        ('bash -c "ls -la"', "allow"),
+        # The rule is per COMMAND, not per command line: an operator ends
+        # the invoker's reach, so the `git` that follows takes prose again.
+        ('sh -c "x" && git commit -m "fix the .env loader"', "allow"),
+        # [round-2 review F-891, FIXED] Quote state carries across newlines,
+        # so a quoted argument SPANNING lines stays one opaque candidate.
+        # Subject+body is the normal commit shape and `--body` the normal PR
+        # shape; both were denied at 0fba4d2 by the gate with no override
+        # path, while the single-line twin (asserted `allow` above) was the
+        # only shape the corpus held.
+        ('git commit -m "fix loader\n\nthe .env parser was wrong"', "allow"),
+        ('git commit -m "refactor\n\nsee secrets/README for detail"',
+         "allow"),
+        ('gh pr create --body "Changes\n- move config.pem handling"',
+         "allow"),
+        # A multi-line UNQUOTED secret read must still block - the fix
+        # carries quote state, it does not stop scanning after line one.
+        ("cd /app\ncat secrets/prod.yaml", "deny")):
     differential("secrets-gate", bash(cmd), want, repr(cmd))
 
 print("\n== secrets-gate: file surfaces ==")
@@ -486,31 +520,12 @@ def ledger(gate, payload, now, should, owner, label):
           f"behaviour moved without the row being updated")
 
 
-# -- finding 870: joining a whole quoted run into ONE candidate hides every
-# -- directory-anchored pattern behind any shell-invoking wrapper. Both
-# -- substrates agree (the SDK's shlex tokenizer has the same hole), which is
-# -- precisely why a differential could not see it. Row 3 is the string this
-# -- file already asserts as `deny` unwrapped, ~160 lines above.
-for _c in ("sh -c 'cat secrets/prod.yaml'",
-           'bash -c "cat secrets/prod.yaml"',
-           'bash -lc "grep -r . secrets/"',
-           "sh -c 'cp secrets/prod.yaml /tmp/x'",
-           'ssh box "cat secrets/prod.yaml"'):
-    ledger("secrets-gate", bash(_c), ("allow", "allow"), ("deny", "deny"),
-           "F-870 sh -c bypass", repr(_c))
-
-# -- finding 891: the tokenizer resets quote state at every newline, so a
-# -- quoted argument spanning lines is re-parsed as unquoted. This is lens B
-# -- finding 4's false positive, restored for the standard subject+body
-# -- commit message, in the gate whose own comment says it has no override
-# -- path. The single-line twin is asserted `allow` in the corpus above -
-# -- that row is the only shape the suite had, which is why it stayed green.
-for _c in ('git commit -m "fix loader\n\nthe .env parser was wrong"',
-           'git commit -m "refactor\n\nsee secrets/README for detail"',
-           'gh pr create --body "Changes\n- move config.pem handling"'):
-    ledger("secrets-gate", bash(_c), ("deny", "allow"), ("allow", "allow"),
-           "F-891 newline resets quote state", repr(_c))
-
+# -- F-870 and F-891 were here. Both are FIXED (the quoted-run rule is now
+# -- structural: a shell invoker's argument is re-tokenized, everyone else's
+# -- quoted run stays opaque, and quote state carries across newlines).
+# -- Their shapes moved UP into the live corpus as positive assertions
+# -- rather than being deleted, so the fix stays pinned in both directions.
+#
 # -- finding 788: `pattern` is a search REGEX, not a path, but it sits in the
 # -- phase where a bare directory stem counts as naming the directory. Both
 # -- substrates agree, so only a ledger row can hold it.
@@ -586,8 +601,8 @@ ledger("tdd-gate",
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row
 # itself first ("delete this row"), then this. Both steps are deliberate.
-check(f"known-defect ledger holds exactly 25 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 25,
+check(f"known-defect ledger holds exactly 17 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 17,
       "a row was added or removed without updating this count")
 
 # --------------------------------------------------------------------------- #
