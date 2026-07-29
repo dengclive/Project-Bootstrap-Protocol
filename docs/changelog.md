@@ -1,5 +1,99 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — round-3 review, and its remediation (2026-07-29)
+
+**Five consecutive fix commits have now introduced a defect into the class
+they were fixing.** The round-2 remediation (`fac2897`, `9952741`, `edac7c7`,
+`ff435f5`) fixed eighteen findings and shipped at least four new defects of
+its own, on a green suite of 1494 checks. Three independent adversarial
+lenses — run blind of each other, ~22,000 verdict evaluations between them —
+returned 25 findings against it.
+
+**This entry exists because the previous four commits had none.** Lens C
+looked for the changelog record of that batch and found nineteen added lines,
+all backlog rows and one correction bullet: every new denial it shipped was
+undocumented. Freeze-exceptions 21 and 22 existed only as comments inside a
+test file while the changelog's numbered series stopped at 20.
+
+### What the previous batch got wrong, in its own terms
+
+- **A fail-open, from a justification that was false.** Retiring backlog J-7
+  made a quoted separator non-splitting, reasoning that *"hiding an install
+  inside quotes does not run it."* True for `git commit -m "fix; npm install
+  evil"`. False for `sh -c 'true; pip install evil'`, which runs — confirmed
+  by execution with a fake `pip` on PATH. The invoker rule had been added to
+  `secrets-gate` in the same batch and not to `cmd_segments`, so the two
+  segmenters disagreed in the dangerous direction.
+- **A second fail-open at the intersection of its own two headline fixes.**
+  The invoker re-tokenization used `read -ra`, which is line-oriented, so a
+  multi-line invoker argument was truncated at the first newline. The corpus
+  had no row combining an invoker with a newline.
+- **F-435 was not actually closed.** `cmd_segments` walked quoted runs and
+  then split on every newline — including ones inside quoted runs, because
+  the segment break was itself spelled with a newline. So the `;` half was
+  fixed and the `\n` half left open, while `secrets-gate`'s twin fix
+  deliberately carried quote state across newlines: two parsers, opposite
+  answers about one character, in the batch that claimed to have consolidated
+  them.
+- **An unsatisfiable gate.** `tdd-gate` required a test *newer* than the
+  target, and `-newer` needs the target to exist — so creating any new source
+  file was refused after the operator had already written the test. Its only
+  escape was `touch` through Bash: the gate's sole recourse was routing
+  around the gate. This had been latent forever and became live when the
+  absolute-path fix made the gate actually run.
+- **Every CI push blocked.** `eval-gate`'s `*.md` predicate treated every
+  markdown file as a prompt file. Harmless on a two-commit diff, fatal once
+  the root-commit branch fed it the whole tree: a shallow clone (the
+  `actions/checkout` default) has no `HEAD~1`, took that branch, matched
+  `README.md`, and refused the push.
+- **A block that caught the honest spelling and missed the hostile one.** The
+  index-flag deny list matched `--index-url URL` and missed `--index-url=URL`
+  and `-f URL`. Enumerating flag *names* is what left the hole.
+- **A refusal the operator could not act on.** "A bare version needs a dot"
+  refused `pip install --timeout 60 requests` with *"not in deps.md approved
+  list: 60"* — instructing the operator to add the integer 60 to their
+  dependency policy. That is the same unactionable-advice failure the
+  previous batch had just fixed elsewhere.
+- **A quality mechanism that could not fail.** The known-defect ledger was
+  shipped with every row fixed, so `ledger()` had zero call sites,
+  `LEDGER_OPEN` was structurally 0, and its count-pin compared 0 to 0.
+  Deleting the whole mechanism left the suite green. A device whose premise
+  is *"a test that cannot fail is worthless"* shipped in exactly that state,
+  described in its commit message as a standing guard.
+
+### Fixed
+
+All of the above. The segmenter now uses a non-newline segment break and a
+non-space sentinel for whitespace inside quoted runs, so a quoted value stays
+one token and quotes no longer hide a tool name; an invoker's quoted argument
+is re-segmented on both substrates; index overrides are decided on the VALUE
+carrying a scheme rather than on a list of flag names; a bare integer is read
+as a flag value after an unambiguous long flag and as a package name after a
+one-letter flag; `tdd-gate` requires a matching test to EXIST, found anywhere
+in the tree; `eval-gate` fires on paths that name a prompt; wrapper binaries
+that carry their own operand (`timeout 5 sh -c`, `flock f sh -c`) no longer
+hide the invoker behind them. The ledger is armed again with a defect round 3
+found and this batch did not fix.
+
+### Recorded and NOT fixed
+
+`docs/deferred-backlog.md` — J-15, J-16, and the pre-existing items round 3
+surfaced: a `never_read_paths` entry can terminate the emitted heredoc and
+inject shell into the hook (present at every commit in this chain, unrecorded
+until now); `eval-gate`'s two substrates diff different ranges (`HEAD~1` vs
+`@{u}..HEAD`); the empty-payload refusal exits 2 from hooks that declare
+themselves advisory, because the check sits above `FAIL_CLOSED=0` in the
+shared header.
+
+### The standing gap
+
+No test compares `cmd_segments` / `_sg_scan` against real `bash`
+word-splitting. Every one of the five rounds has shipped a tokenizer defect,
+and each round's clean result came from a hand-built corpus written by the
+person who wrote the code. A generative differential against a real shell is
+the only mechanism any of the three lenses could name that would catch the
+class.
+
 ## 2.6.0 in-version fix — round-2 review of the fix batch (2026-07-29)
 
 **Three consecutive fix commits have now introduced a defect into the class

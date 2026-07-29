@@ -432,23 +432,63 @@ norm_cmd(){
 # one segment. Hiding an install inside quotes does not run it. J-7's
 # over-match is therefore retired rather than traded away.
 _CS_BT='`'
+_CS_SEP=$'\\001'                 # segment break (never a byte a command uses)
+_CS_WS=$'\\002'                  # whitespace INSIDE a quoted run
 _CS_BUF=""
+_CS_EXTRA=""
+_CS_INVOKERS='sh|bash|zsh|dash|ksh|ash|busybox|ssh|eval|xargs'
 _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   local _t="$1"
-  _t="${_t//;/$'\\n'}"; _t="${_t//&/$'\\n'}"; _t="${_t//|/$'\\n'}"
-  _t="${_t//"("/$'\\n'}"; _t="${_t//")"/$'\\n'}"
+  _t="${_t//;/$_CS_SEP}"; _t="${_t//&/$_CS_SEP}"; _t="${_t//|/$_CS_SEP}"
+  _t="${_t//"("/$_CS_SEP}"; _t="${_t//")"/$_CS_SEP}"
   # A backtick substitution runs its contents, so it opens a command
-  # position. Without this `echo `pip install leftpad`` was allowed while
-  # the identical `echo $(pip install leftpad)` was blocked - the `()` half
-  # had been closed and the backtick half had not.
-  _t="${_t//$_CS_BT/$'\\n'}"
+  # position, exactly as `$( )` does.
+  _t="${_t//$_CS_BT/$_CS_SEP}"
+  # [round-3 lens A, A5] An UNQUOTED newline is a command separator; a
+  # newline INSIDE a quoted run is not, and the segment break is no longer
+  # spelled with a newline so the two can finally be told apart. The old
+  # code translated operators to `\\n` and then split the buffer on every
+  # `\\n`, so a newline inside a quoted `git -c` value tore the segment in
+  # half and `git -c a.b="p<newline>q" commit` escaped the anchor on
+  # test-gate, eval-gate, ci-mirror and dependency-gate. F-435 fixed the
+  # `;` half of that property and left the `\\n` half open, while
+  # secrets-gate's twin fix carried quote state across newlines - two
+  # parsers giving opposite answers about one character.
+  _t="${_t//$'\\n'/$_CS_SEP}"
   _CS_BUF="$_CS_BUF$_t"
   return 0
+}
+# Is the segment currently being built headed by a shell INVOKER? Its
+# quoted argument is then a command line, not data, and has to be
+# segmented as one [round-3 lens A, A1]. Mirrors _sg_push's rule in
+# secrets-gate; that rule was added there in the same batch and NOT here,
+# which is what reopened `sh -c 'true; pip install evil'`.
+_cs_isinv(){
+  local _tail="${_CS_BUF##*$_CS_SEP}" _w
+  while : ; do
+    _tail="${_tail#"${_tail%%[![:space:]]*}"}"
+    _w="${_tail%%[[:space:]]*}"
+    [ -z "$_w" ] && return 1
+    case "${_w##*/}" in
+      env|sudo|nohup|time|timeout|watch|command|exec|builtin|stdbuf|setsid\\
+      |nice|ionice|flock|chroot|doas|script|unbuffer|proxychains)
+        _tail="${_tail#"$_w"}" ;;
+      [A-Za-z_]*=*) _tail="${_tail#"$_w"}" ;;
+      *)
+        case "${_w##*/}" in
+          sh|bash|zsh|dash|ksh|ash|busybox|ssh|eval|xargs|su) return 0 ;;
+        esac
+        return 1 ;;
+    esac
+  done
 }
 cmd_segments(){
   local _s _seg _pre _q _rest _run _pd _ps
   _s="$(norm_cmd "${1:-}")"
-  _CS_BUF=""
+  # The two sentinels are ours; a command containing them would otherwise
+  # be able to forge a segment break or glue two tokens together.
+  _s="${_s//$_CS_SEP/ }"; _s="${_s//$_CS_WS/ }"
+  _CS_BUF=""; _CS_EXTRA=""
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
   # operators in the UNQUOTED stretches only. Run-at-a-time, not
   # character-at-a-time: a per-character loop is O(n^2) under bash's
@@ -464,13 +504,24 @@ cmd_segments(){
       *"$_q"*) _run="${_rest%%"$_q"*}"; _s="${_rest#*"$_q"}" ;;
       *)       _run="$_rest"; _s="" ;;   # unterminated quote: take the rest
     esac
-    # The quote characters are kept, so a consumer's option-run regex still
-    # sees a single token where the shell saw one.
-    _CS_BUF="$_CS_BUF$_q$_run$_q"
+    # An invoker's argument is a command line: segment it too. Additive, so
+    # the run also stays part of its own segment.
+    if _cs_isinv; then _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_run"; fi
+    # Whitespace inside the run becomes a NON-space sentinel so the run
+    # stays ONE token: every consumer's option-run and assignment patterns
+    # are built from `[^ ]+`, and a quoted value containing a space
+    # otherwise ends the run early. The quote characters themselves are
+    # dropped, which additionally makes `"pip" install evil` and
+    # `p''ip install evil` reach the tool matcher [round-3 lens A, A5].
+    _run="${_run//$'\\n'/$_CS_WS}"; _run="${_run// /$_CS_WS}"
+    _run="${_run//$'\\t'/$_CS_WS}"
+    _CS_BUF="$_CS_BUF$_run"
     if [ -z "$_s" ]; then break; fi
   done
-  while IFS= read -r _seg; do
+  if [ -n "$_CS_EXTRA" ]; then _cs_ops "$_CS_EXTRA"; fi
+  while IFS= read -r -d "$_CS_SEP" _seg || [ -n "$_seg" ]; do
     _seg="${_seg%% \\#*}"
+    _seg="${_seg//$'\\n'/ }"
     _seg="${_seg# }"; _seg="${_seg% }"
     [ -z "$_seg" ] && continue
     printf ' %s \\n' "$_seg"
@@ -478,21 +529,16 @@ cmd_segments(){
   return 0
 }
 
-# Command-position prefixes that do not change WHICH program runs: `env` and
-# `sudo` with their own flags, and one or more VAR=value assignment runs. The
-# v2.6.0 anchor admitted only a literal `env `, so `env GIT_AUTHOR=x git
-# commit` and `sudo git commit` fell outside it.
+# Command-position prefixes that do not change WHICH program runs.
 #
-# [round-2 review F-401] Widened again. Every one of these was a one-token
-# evasion of the command-position anchor, confirmed against dependency-gate
-# with an unapproved package: `>/dev/null pip install evil`,
-# `2>/dev/null pip install evil`, `time pip install evil`,
-# `nohup pip install evil`, `{ pip install evil; }` and
-# `if true; then pip install evil; fi` all exited 0 while a bare
-# `pip install evil` exited 2. A redirection, a brace group and a shell
-# keyword do not change WHICH program runs, so they belong here with `env`
-# and `sudo` rather than being new segment types.
-CMD_PFX='((env|sudo)( +-[^ ]+)* +|(nohup|time|watch|command|exec|builtin|then|else|do|elif) +|[{] +|[0-9]*[<>]+ *[^ ]+ +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
+# [round-2 review F-401] Redirections, brace groups and shell keywords each
+# evaded the anchor with ONE token while a bare `pip install evil` was
+# denied.
+# [round-3 lens A, A7] Widened again with the wrapper binaries the invoker
+# audit found: `timeout 5 sh -c '...'` was allowed while `nohup sh -c '...'`
+# denied, an asymmetry with no defensible reason. Kept in sync with
+# _cs_isinv above and with _CMD_PREFIXES on the SDK side.
+CMD_PFX='((env|sudo|doas|su)( +-[^ ]+)* +|(nohup|time|timeout|watch|command|exec|builtin|stdbuf|setsid|nice|ionice|flock|chroot|script|unbuffer|proxychains|then|else|do|elif) +|[{] +|[0-9]*[<>]+ *[^ ]+ +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
 
 # cmd_has_verb "<normalized cmd>" "<tool regex>" "<subcommand regex>"
 # True if the command invokes `<tool> <subcommand>` at a command position.
@@ -907,6 +953,8 @@ _v="$(jget '.tool_input.pattern')"
 # quoting of [lens A F8] reassembles: `cat .en''v` yields `.env`.
 _SG_CMDPOS=1
 _SG_INVOKER=0
+_SG_PFXSEEN=0
+_SG_SKIPPED=0
 _sg_push(){{
   local _lhs _b _w _arr2=()
   if [ -n "$_CUR" ]; then
@@ -945,11 +993,27 @@ _sg_push(){{
         # Transparent prefixes: they do not change WHICH program runs, so
         # the next token is still the command word. Mirrors CMD_PFX in the
         # shared header.
-        env|sudo|nohup|time|watch|command|exec|builtin) ;;
+        # [round-3 lens A, A7] Widened: `timeout 5 sh -c '...'` was allowed
+        # while `nohup sh -c '...'` denied - semantically identical wrappers,
+        # and the gap was a single common binary. Kept in sync with
+        # _cs_isinv and CMD_PFX in the shared header.
+        env|sudo|nohup|time|timeout|watch|command|exec|builtin|stdbuf\\
+        |setsid|nice|ionice|flock|chroot|doas|script|unbuffer|proxychains)
+          _SG_PFXSEEN=1 ;;
         # Shell invokers: their argument IS a command line.
-        sh|bash|zsh|dash|ksh|ash|busybox|ssh|eval|xargs)
+        sh|bash|zsh|dash|ksh|ash|busybox|ssh|eval|xargs|su)
           _SG_INVOKER=1; _SG_CMDPOS=0 ;;
-        *) _SG_INVOKER=0; _SG_CMDPOS=0 ;;
+        *)
+          # [round-3 lens A, A7] A wrapper carries its OWN operand -
+          # `timeout 5 sh -c`, `flock /tmp/l sh -c`, `nice -n 5 sh -c` - so
+          # stopping at the first non-prefix token lost the invoker behind
+          # it, while `nohup sh -c` (no operand) denied correctly. Bounded,
+          # so an ordinary command cannot drift into command position.
+          if [ "$_SG_PFXSEEN" = "1" ] && [ "$_SG_SKIPPED" -lt 3 ]; then
+            _SG_SKIPPED=$((_SG_SKIPPED + 1))
+          else
+            _SG_INVOKER=0; _SG_CMDPOS=0
+          fi ;;
       esac
     fi
     # Only a QUOTED run can carry whitespace - unquoted whitespace is
@@ -967,7 +1031,18 @@ _sg_push(){{
       case "$_CUR" in
         *[[:space:]]*)
           set -f
-          read -ra _arr2 <<< "$_CUR"
+          # [round-3 lens A, A2] `read -ra` is LINE-oriented, so on a
+          # multi-line invoker argument it took the first line and silently
+          # dropped the rest: `sh -c 'echo a<newline>cat secrets/prod.yaml'`
+          # re-tokenized to [echo] [a] and the path was never a candidate -
+          # a fail-open at the exact intersection of this batch's two
+          # headline features (the quoted-run rule and quote state carried
+          # across newlines), and the differential had zero rows combining
+          # an invoker with a newline. Newlines are ordinary whitespace
+          # inside a quoted run, so flatten before splitting. The SDK twin
+          # was already correct: Python's str.split() splits on all
+          # whitespace, which is why this showed as shell=allow/sdk=deny.
+          read -ra _arr2 <<< "${{_CUR//$'\\n'/ }}"
           set +f
           for _w in ${{_arr2[@]+"${{_arr2[@]}}"}}; do
             CMD_CANDIDATES+=("$_w")
@@ -1001,6 +1076,7 @@ _sg_raw(){{                     # an UNQUOTED run: split on whitespace
   while IFS= read -r _piece || [ -n "$_piece" ]; do
     if [ "$_pfirst" = "0" ]; then
       _sg_push; _SG_CMDPOS=1; _SG_INVOKER=0
+      _SG_PFXSEEN=0; _SG_SKIPPED=0
     fi
     _pfirst=0
     if [ -n "$_piece" ]; then
@@ -1022,7 +1098,7 @@ _sg_raw(){{                     # an UNQUOTED run: split on whitespace
 }}
 _sg_scan(){{
   local _l="$1" _pre _q _rest _run _pd _ps
-  _CUR=""; _SG_CMDPOS=1; _SG_INVOKER=0
+  _CUR=""; _SG_CMDPOS=1; _SG_INVOKER=0; _SG_PFXSEEN=0; _SG_SKIPPED=0
   while : ; do
     case "$_l" in *[\\"\\']*) ;; *) _sg_raw "$_l"; _sg_push; return 0 ;; esac
     _pd="${{_l%%\\"*}}"; _ps="${{_l%%\\'*}}"
@@ -1532,8 +1608,24 @@ is_flag_value(){{
     # from a numeric package name; the cost is that a dotless flag value
     # (`--python-version 3`) is now read as a package and named in the
     # refusal, which is the over-match direction a deny-list wants.
+    # [round-3 lenses A/C] The DOT requirement was right about `npm i -w 2`
+    # and wrong about `pip install --timeout 60`, which it refused with
+    # "not in deps.md approved list: 60" - telling the operator to add the
+    # integer 60 to their dependency policy. That is the same unactionable
+    # advice F-1357 was just fixed for.
+    #
+    # The discriminator is the FLAG, not the value. A long flag names one
+    # thing (`--timeout`, `--retries`, `--python-version` all take a bare
+    # integer), so a bare number after one is its value. A one-letter flag
+    # means different things per ecosystem - `-f` is pip's --find-links and
+    # npm's --force - so after one of those a bare number is assumed to be
+    # a package name, which is what `0`, `1` and `2` actually are on npm.
     *.*) return 0 ;;                # digits AND a dot: a version
-    *) return 1 ;;                  # bare `0`, `1`, `2`: a package name
+    *)
+      case "${{2:-}}" in
+        --?*) return 0 ;;           # unambiguous long flag: it is the value
+        *) return 1 ;;              # short/unknown flag: assume a package
+      esac ;;
   esac
 }}
 while IFS= read -r nseg; do
@@ -1556,11 +1648,29 @@ while IFS= read -r nseg; do
   read -ra TOKS <<< "$rest"
   set +f
   skip_next=0
+  last_flag=""
   for tok in ${{TOKS[@]+"${{TOKS[@]}}"}}; do
     if [ "$skip_next" = "1" ]; then
       skip_next=0
-      if is_flag_value "$tok"; then continue; fi
+      # [round-3 lenses A/C] A flag VALUE that carries a scheme is a remote
+      # source, whatever the flag is called. Enumerating flag NAMES is what
+      # left `-f <url>` open: `-f` is pip's --find-links and npm's --force,
+      # it was excluded from the name list to avoid blaming the wrong one,
+      # and that one character bypassed the whole list - fetching an
+      # APPROVED package name from an attacker's server, verbatim the
+      # capability the list exists to refuse. Deciding on the VALUE needs no
+      # list and cannot be bypassed by a flag nobody thought of.
+      case "$tok" in
+        *://*)
+          echo "Dependency gate: a remote source override is not verifiable." >&2
+          echo "'$last_flag $tok' redirects even an APPROVED package to another" >&2
+          echo "server. Remove it, or set the source in the project's own" >&2
+          echo "package-manager config (pip.conf, .npmrc, .cargo/config.toml)." >&2
+          exit 2 ;;
+      esac
+      if is_flag_value "$tok" "$last_flag"; then continue; fi
     fi
+    last_flag="$tok"
     case "$tok" in
       # A requirements/constraints FILE lists packages this gate cannot see.
       # Allowing it would defeat the gate entirely, so it blocks with its own
@@ -1584,7 +1694,8 @@ while IFS= read -r nseg; do
       # but npm's --force, and blaming the wrong one gives worse advice
       # than treating it as an ordinary value flag.
       -i|--index-url|--extra-index-url|--find-links|--registry|--index\\
-      |--git|--repo)
+      |--git|--repo|--default-index|--index-strategy\\
+      |*=*://*|-i?*|-f?*)
         echo "Dependency gate: a package-index override is not verifiable." >&2
         echo "It redirects even an APPROVED package to another server. Remove it," >&2
         echo "or set the index in the project's own package-manager config." >&2
@@ -1642,9 +1753,31 @@ esac
 TARGET="${TARGET#./}"
 case "$TARGET" in
   src/*|lib/*)
-    base="$(basename "$TARGET")"; stem="${base%.*}"
-    if ! find tests -name "*${stem}*" -newer "$TARGET" 2>/dev/null \
-         | grep -q .; then
+    base="${TARGET##*/}"; stem="${base%.*}"
+    # [round-3 lens C] This was `find tests -name "*$stem*" -newer "$TARGET"`
+    # and it was UNSATISFIABLE in two ways at once, both invisible until
+    # F-1393 made the gate actually run:
+    #   * `-newer "$TARGET"` requires the target to EXIST. A file being
+    #     created never does, so `find` errored, `2>/dev/null` swallowed it,
+    #     and creating any new source file was refused - after the operator
+    #     had already written the test. The only way through was to `touch`
+    #     the file via Bash first, i.e. the gate's sole escape was teaching
+    #     the agent to route around it through the shell.
+    #   * `find tests` is relative and hard-coded, so Maven/Gradle
+    #     (`src/test/java`), Go (`_test.go` beside the source), Elixir and
+    #     any per-package monorepo layout could never satisfy it.
+    # The rule is now the one the message already states: a matching test
+    # must EXIST. The `-newer` half was a test-first *ordering* signal that
+    # `touch` forged anyway, and it is what made the gate unsatisfiable.
+    _tdd_found=0
+    while IFS= read -r _tf; do
+      case "$_tf" in "./$TARGET"|"$TARGET") continue ;; esac
+      _tdd_found=1; break
+    done < <(find . -name .git -prune -o -type f \
+                  \\( -name "*test*${stem}*" -o -name "*${stem}*test*" \
+                     -o -name "*${stem}*spec*" -o -name "*spec*${stem}*" \\) \
+                  -print 2>/dev/null)
+    if [ "$_tdd_found" = "0" ]; then
       echo "TDD gate: write a failing test for $stem before $TARGET." >&2
       exit 2
     fi ;;
@@ -1706,8 +1839,16 @@ $_diff_rc); refusing to guess." >&2
     fi
     _prompt_touched=0
     while IFS= read -r _f; do
+      # [round-3 lenses A/B/C] The predicate was `*prompt*|*.md`. Blanket
+      # `*.md` made every documentation file a prompt file, which was
+      # survivable while the input was a two-commit diff and catastrophic
+      # once the root-commit branch fed it the WHOLE TREE: a shallow clone
+      # (`actions/checkout` defaults to depth 1) has no HEAD~1, took that
+      # branch, matched README.md, and refused every CI push. An eval gate
+      # for prompt changes should fire on prompt files; README.md is not
+      # one. Narrowed to paths that actually name a prompt.
       case "$_f" in
-        *prompt*|*.md) _prompt_touched=1; break ;;
+        *[Pp]rompt*|prompts/*|*/prompts/*) _prompt_touched=1; break ;;
       esac
     done <<< "$_CHANGED"
     if [ "$_prompt_touched" = "1" ]; then

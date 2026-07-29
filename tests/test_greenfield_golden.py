@@ -764,9 +764,71 @@ EXPECTED_DIGESTS = {
     # read. Items 2, 7 and 8 also newly deny. The only NEWLY ALLOWED
     # behaviour in this batch is item 4 (`Grep pattern="<dirname>"`).
     #
+    # [freeze-exception no. 24 - ROUND-3 review remediation, 2026-07-29]
+    # Source: three independent adversarial lenses run against `ff435f5`,
+    # ~22,000 verdict evaluations between them, 25 findings. THIRTEEN
+    # emitted files move (all twelve hooks plus sdk_gates/gates.py) because
+    # most of this is in the shared header. Verified parent-vs-head against
+    # ff435f5: no settings.json, no steering doc, skill, command or agent
+    # body, no CLAUDE.md, no frozen twin.
+    #
+    # This exception exists because the PREVIOUS batch shipped defects into
+    # the classes it was fixing, and said so nowhere. Stated plainly:
+    #
+    #   1. FAIL-OPEN I INTRODUCED [A1/B-F1]. Retiring backlog J-7 made
+    #      quoted separators non-splitting on the reasoning that "hiding an
+    #      install inside quotes does not run it". True for prose, FALSE for
+    #      a shell invoker: `sh -c 'true; pip install evil'` runs, and was
+    #      allowed from edac7c7 onward. The invoker rule had been added to
+    #      secrets-gate in the same batch and not to cmd_segments, so the
+    #      two segmenters disagreed in the dangerous direction. cmd_segments
+    #      now re-segments an invoker's quoted argument (_cs_isinv).
+    #   2. FAIL-OPEN I INTRODUCED [A2]. The invoker re-tokenization used
+    #      `read -ra`, which is LINE-oriented, so a multi-line invoker
+    #      argument was truncated at the first newline. The intersection of
+    #      the two features that batch shipped together, and the corpus had
+    #      no row combining them.
+    #   3. F-435 WAS NOT ACTUALLY CLOSED [A5]. cmd_segments walked quoted
+    #      runs but then split the buffer on every newline - including ones
+    #      inside quoted runs, because the segment break was itself spelled
+    #      with a newline. The break is now \001 and whitespace inside a
+    #      quoted run is \002, so a run stays one token; quotes are dropped,
+    #      which also lets `"pip" install evil` reach the matcher.
+    #   4. UNSATISFIABLE GATE [C1/C2]. tdd-gate required a test NEWER than
+    #      the target, and `-newer` needs the target to exist - so creating
+    #      any new source file was refused after the operator had already
+    #      written the test, and the only escape was `touch` via Bash, i.e.
+    #      routing around the gate. It also searched a hard-coded `tests/`.
+    #      The rule is now the one the message states: a matching test must
+    #      EXIST, found anywhere in the tree.
+    #   5. CI BLOCKED [A6/B-F3/C6]. eval-gate's `*.md` predicate made every
+    #      markdown file a prompt file. Survivable on a two-commit diff,
+    #      catastrophic once the root-commit branch fed it the whole tree: a
+    #      shallow clone (actions/checkout defaults to depth 1) has no
+    #      HEAD~1, took that branch, matched README.md, and refused every CI
+    #      push. Narrowed to paths that actually name a prompt.
+    #   6. BLOCK THAT MISSED THE HOSTILE SPELLING [A3/C3/C4]. The index-flag
+    #      deny list matched `--index-url URL` and missed `--index-url=URL`
+    #      and `-f URL` - the spellings an attacker uses, and every one of
+    #      pip/npm/yarn/cargo accepts them. Enumerating flag NAMES is what
+    #      left the hole; the rule is now the VALUE carrying a scheme.
+    #   7. UNACTIONABLE REFUSAL [A4/C10]. "a bare version needs a dot"
+    #      refused `pip install --timeout 60 requests` with "not in deps.md
+    #      approved list: 60". The discriminator is the FLAG: a long flag
+    #      names one thing, a one-letter flag differs by ecosystem.
+    #   8. WRAPPER GAPS [A7/C9]. `timeout 5 sh -c` allowed while
+    #      `nohup sh -c` denied. Wrappers that carry their own operand are
+    #      now scanned past, bounded.
+    #
+    # NEWLY ALLOWED, derived from an executed parent-vs-head sweep and not
+    # from intent: `pip install --timeout 60 requests` and its dotless-value
+    # siblings; creating a new source file when its test exists (tdd-gate);
+    # `git push` when the only markdown changed is not a prompt file.
+    # NEWLY BLOCKED: everything in items 1, 2, 3, 6, 8.
+    #
     # NO PROTOCOL_VERSION BUMP - 2.6.0 is still unreleased.
     "default":
-        "583e5e2eb9a60be8618182306cce811d4bfcb5c869dc9391f32608ed7d27482a",
+        "1e1b97de2ec1c18f2c5132720453f3653eefba7f3b000cccdd98e98a5f4fd6e4",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -830,7 +892,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "434a3d4041c6202c247ab0cc79434fc36312d84bc4778c88ff034c31f6e822f6",
+        "a344fed04dcd1eed7f14d808b853979fe5ae3ee5fbd70b3f31bc40b4934f9b76",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -899,7 +961,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "bbfa5f7f291b1a79187f1b0e0b0c95fc5e871b93335605fe272f4773b2ef3d9d",
+        "735b6edc7ddff37c7c9ba03aff2ea78b301537f46db2f7815942cf14f50f6df2",
 }
 
 EXPECTED_ACTION_COUNTS = {

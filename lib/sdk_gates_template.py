@@ -155,12 +155,17 @@ _DOTENV_TEMPLATES = frozenset({
 # block while `git commit -m "fix the .env loader"` stays allowed.
 _SHELL_INVOKERS = frozenset({
     "sh", "bash", "zsh", "dash", "ksh", "ash", "busybox", "ssh", "eval",
-    "xargs",
+    "xargs", "su",
 })
 # Transparent prefixes: they do not change WHICH program runs, so the next
 # token is still the command word. Mirrors CMD_PFX in the shell header.
+# [round-3 lens A, A7] Widened: `timeout 5 sh -c '...'` was allowed while
+# `nohup sh -c '...'` denied - identical wrappers, and the gap was one
+# common binary. Kept in sync with CMD_PFX / _cs_isinv on the shell side.
 _CMD_PREFIXES = frozenset({
-    "env", "sudo", "nohup", "time", "watch", "command", "exec", "builtin",
+    "env", "sudo", "nohup", "time", "timeout", "watch", "command", "exec",
+    "builtin", "stdbuf", "setsid", "nice", "ionice", "flock", "chroot",
+    "doas", "script", "unbuffer", "proxychains",
 })
 
 
@@ -172,11 +177,84 @@ _CMD_PREFIXES = frozenset({
 #     they are skipped by _CMD_PFX_RE at command position instead, so
 #     `>/dev/null pip install evil` keeps `pip install` at the head of its
 #     segment. A backtick IS a separator - it runs its contents.
+_CS_WS = "\\002"
 _SECRETS_OPS = ";&|()<>\\n"
 _CMD_OPS = ";&|()`\\n"
 
 
-def _shell_segments(cmd, ops=_SECRETS_OPS):
+def _quoted_runs(cmd):
+    """Every quoted run in `cmd`, contents only. No regex, so there is no
+    escaping question about what the pattern means."""
+    runs, cur, quote = [], [], None
+    for ch in cmd:
+        if quote:
+            if ch == quote:
+                runs.append("".join(cur))
+                cur = []
+                quote = None
+            else:
+                cur.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+    if cur:
+        runs.append("".join(cur))
+    return runs
+
+
+def _flatten_seg(seg):
+    """Drop quote characters and turn whitespace inside a quoted run into a
+    non-space sentinel, so the run stays one token for the `\\S+` patterns.
+    Applied AFTER invoker expansion, which needs the quotes to find the
+    argument. Shell parity (cmd_segments' _CS_WS handling)."""
+    out = _shell_segments(seg, "", flatten=True)
+    return out[0] if out else ""
+
+
+def _expand_invoker_args(segs):
+    """A shell invoker's quoted argument is a COMMAND LINE, so segment it
+    too. Shell parity (_cs_isinv / _CS_EXTRA in the shared header).
+
+    [round-3 lens A, A1] Without this, `sh -c 'true; pip install evil'`
+    reached dependency-gate as ONE segment headed by `sh`, no install verb
+    was ever at command position, and the install ran. Both substrates
+    agreed on allow, so the differential could not see it. The J-7
+    retirement that made quoted separators non-splitting is correct for
+    prose and false for an invoker: `sh -c` really does run its argument.
+    Additive - the original segment is kept as well.
+    """
+    out = []
+    for seg in segs:
+        out.append(seg)
+        toks = seg.split()
+        i = 0
+        # [round-3 lens A, A7] A wrapper prefix can carry its own operand
+        # (`timeout 5 sh -c`, `flock /tmp/l sh -c`, `nice -n 5 sh -c`), so
+        # stopping at the first non-prefix token missed the invoker behind
+        # it. Once a wrapper is seen, scan the head for one.
+        saw_prefix = False
+        while i < len(toks):
+            base = toks[i].rsplit("/", 1)[-1]
+            if base in _SHELL_INVOKERS:
+                break
+            if base in _CMD_PREFIXES or _ASSIGN.match(toks[i]):
+                saw_prefix = True
+                i += 1
+                continue
+            if saw_prefix and i < 4:
+                i += 1
+                continue
+            break
+        if i >= len(toks):
+            continue
+        if toks[i].rsplit("/", 1)[-1] not in _SHELL_INVOKERS:
+            continue
+        for inner in _quoted_runs(seg):
+            if inner.strip():
+                out.extend(_shell_segments(inner, _CMD_OPS))
+    return out
+
+
+def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
     """Split on UNQUOTED operators and newlines -> the units at which a new
     command can begin.
 
@@ -199,15 +277,28 @@ def _shell_segments(cmd, ops=_SECRETS_OPS):
     An unterminated quote takes the rest of the string as one segment,
     which is what the shell gate does.
     """
+    # [round-3 lens A, A5] `flatten` mirrors the shell's cmd_segments: the
+    # whitespace INSIDE a quoted run becomes a non-space sentinel so the run
+    # stays ONE token (every option-run and assignment pattern is built from
+    # `\\S+`, and a quoted value containing a space otherwise ends the run
+    # early), and the quote characters are dropped so `"pip" install evil`
+    # reaches the tool matcher. Off for the secrets tokenizer, which hands
+    # its output to shlex and needs the quotes intact.
     segs, cur, quote = [], [], None
     for ch in cmd:
         if quote:
-            cur.append(ch)
             if ch == quote:
                 quote = None
+                if not flatten:
+                    cur.append(ch)
+            elif flatten and ch.isspace():
+                cur.append(_CS_WS)
+            else:
+                cur.append(ch)
         elif ch in ("'", '"'):
             quote = ch
-            cur.append(ch)
+            if not flatten:
+                cur.append(ch)
         elif ch in ops:
             segs.append("".join(cur))
             cur = []
@@ -263,6 +354,8 @@ def _segment_candidates(cmd):
     out = []
     at_cmdpos = True
     invoker = False
+    saw_prefix = False
+    skipped = 0
     for tok in toks:
         out.append(tok)
         m = _ASSIGN.match(tok)
@@ -271,9 +364,17 @@ def _segment_candidates(cmd):
         if at_cmdpos:
             base = tok.rsplit("/", 1)[-1]
             if base in _CMD_PREFIXES:
-                pass                    # next token is still the command
+                saw_prefix = True       # next token is still the command
             elif base in _SHELL_INVOKERS:
                 invoker, at_cmdpos = True, False
+            elif saw_prefix and skipped < 3:
+                # [round-3 lens A, A7] A wrapper carries its own operand -
+                # `timeout 5 sh -c`, `flock /tmp/l sh -c`, `nice -n 5 sh -c`
+                # - so stopping at the first non-prefix token lost the
+                # invoker behind it, while `nohup sh -c` (no operand)
+                # denied. Bounded so an ordinary command cannot drift into
+                # command position.
+                skipped += 1
             else:
                 invoker, at_cmdpos = False, False
         # shlex splits on UNQUOTED whitespace, so a token that still
@@ -526,8 +627,17 @@ _GIT_VERB_TMPL = (r"(?:^|[;&|()`\\n])\\s*" + _CMD_PFX_RE + r"(?:\\S*/)?git"
 
 
 def _git_verb(cmd, verb):
-    """True if `cmd` invokes `git <verb>` at a command position."""
-    return re.search(_GIT_VERB_TMPL % verb, cmd) is not None
+    """True if `cmd` invokes `git <verb>` at a command position.
+
+    [round-3 lens A, A5] Runs over quote-aware SEGMENTS rather than the raw
+    string. Searching the raw string treated a newline as a separator even
+    inside a quoted value, so `git -c a.b="p<newline>q" commit` put the verb
+    off command position and every command gate allowed it. Shell parity
+    (cmd_has_verb over cmd_segments).
+    """
+    pat = _GIT_VERB_TMPL % verb
+    return any(re.search(pat, " " + _flatten_seg(seg) + " ")
+               for seg in _shell_segments(cmd, _CMD_OPS))
 
 
 _TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
@@ -610,6 +720,12 @@ _VALUE_FLAGS = frozenset({
 # `-f` is deliberately absent: it is pip's --find-links but npm's --force,
 # and blaming the wrong one gives worse advice than an ordinary value flag.
 # Shell parity.
+_SRC_OVERRIDE_REASON = (
+    "Dependency gate: a remote source override is not verifiable.\\n"
+    "'%s %s' redirects even an APPROVED package to another server. "
+    "Remove it,\\nor set the source in the project's own package-manager "
+    "config (pip.conf, .npmrc, .cargo/config.toml)."
+)
 _INDEX_FLAGS = frozenset({
     "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
     "--index", "--git", "--repo",
@@ -632,10 +748,11 @@ _VERSION_SPEC = re.compile(r"==|>=|<=|~=|!=|<|>")
 # Cost: a dotless flag value (`--python-version 3`) is now read as a package
 # name and named in the refusal, which is the over-match direction a
 # deny-list wants. Shell parity (is_flag_value).
+_BARE_INT = re.compile(r"^[0-9]+$")
 _BARE_VERSION = re.compile(r"^[0-9]+(?:\\.[0-9]+)+$")
 
 
-def _is_flag_value(tok):
+def _is_flag_value(tok, flag=""):
     """True if `tok` could NOT be a package name and is therefore the
     preceding flag's value. Shell parity (is_flag_value)."""
     if _FLAG_VALUE_SHAPE.search(tok):
@@ -644,7 +761,14 @@ def _is_flag_value(tok):
         return False
     if "=" in tok:
         return True
-    return bool(_BARE_VERSION.match(tok))
+    if _BARE_VERSION.match(tok):
+        return True
+    # [round-3 lenses A/C] A bare INTEGER after an unambiguous long flag is
+    # that flag's value (`--timeout 60`, `--retries 5`); after a one-letter
+    # flag whose meaning differs by ecosystem (`-f` is pip's --find-links
+    # and npm's --force) it is assumed to be a package name, which is what
+    # `0`, `1` and `2` actually are on npm. Shell parity (is_flag_value).
+    return bool(_BARE_INT.match(tok)) and flag.startswith("--")
 
 
 def _pkg_name(tok):
@@ -723,7 +847,8 @@ def _scan_install_line(line, approved):
     # it, because that install does not run - and it did not treat a
     # backtick substitution as a command position, so `` echo `pip install
     # leftpad` `` was allowed while `echo $(pip install leftpad)` was denied.
-    for seg in _shell_segments(norm, _CMD_OPS):
+    for seg in _expand_invoker_args(_shell_segments(norm, _CMD_OPS)):
+        seg = _flatten_seg(seg)
         seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
         m = _INSTALL_HEAD.match(seg)
         if not m:
@@ -740,10 +865,19 @@ def _scan_install_line(line, approved):
         if not rest.strip():
             continue
         skip_next = False
+        last_flag = ""
         for tok in rest.split():
             if skip_next:
                 skip_next = False
-                if _is_flag_value(tok):
+                # [round-3 lenses A/C] A flag VALUE carrying a scheme is a
+                # remote source, whatever the flag is called. Enumerating
+                # flag NAMES is what left `-f <url>` open - `-f` is pip's
+                # --find-links and npm's --force, excluded from the name
+                # list to avoid blaming the wrong one, and that one
+                # character bypassed the entire list. Shell parity.
+                if "://" in tok:
+                    return (_SRC_OVERRIDE_REASON % (last_flag, tok), "")
+                if _is_flag_value(tok, last_flag):
                     continue
             if tok in ("-r", "--requirement", "-c", "--constraint"):
                 # Packages listed in a FILE are invisible to the gate;
@@ -751,6 +885,11 @@ def _scan_install_line(line, approved):
                 return ("Dependency gate: cannot verify packages listed in "
                         "a file.\\nInstall them explicitly, or approve in "
                         ".claude/steering/deps.md.", "")
+            last_flag = tok
+            # The `--flag=value` spelling never reaches the value branch.
+            if "=" in tok and "://" in tok.split("=", 1)[1]:
+                return (_SRC_OVERRIDE_REASON
+                        % (tok.split("=", 1)[0], tok.split("=", 1)[1]), "")
             if tok in _INDEX_FLAGS:
                 return ("Dependency gate: a package-index override is not "
                         "verifiable.\\nIt redirects even an APPROVED package "
@@ -843,10 +982,17 @@ def _eval_gate(config):
 
 def _tdd_gate(config):
     async def tdd_gate(input_data, tool_use_id, context):
-        # Block a Write to source unless a matching test was edited more
-        # recently than the target. A nonexistent target denies (parity
-        # with the shell `find -newer` failing on a missing reference):
-        # the gate's contract is test-first even for new source files.
+        # Block a Write to source unless a matching test EXISTS.
+        #
+        # [round-3 lens C] This used to require a test newer than the
+        # target, and to deny when the target did not exist - which made
+        # creating any new source file impossible even with the test
+        # already written, since a file being created never exists. The
+        # only escape was to `touch` it through Bash first, i.e. the gate's
+        # sole recourse was routing around the gate. The `-newer` ordering
+        # signal was forgeable by `touch` anyway. It also searched only a
+        # hard-coded `tests/`, which Maven/Gradle, Go, Elixir and per-package
+        # monorepos can never satisfy. Shell parity (the find sweep).
         raw = _tool_input(input_data).get("file_path") or ""
         if not raw:
             return {}
@@ -872,15 +1018,16 @@ def _tdd_gate(config):
         stem = os.path.basename(rel)
         stem = stem.rsplit(".", 1)[0] if "." in stem else stem
         tpath = proj / rel
-        newer = False
-        if tpath.is_file():
-            t_mtime = tpath.stat().st_mtime
-            tests_dir = proj / "tests"
-            if tests_dir.is_dir():
-                newer = any(
-                    p.is_file() and p.stat().st_mtime > t_mtime
-                    for p in tests_dir.rglob(f"*{stem}*"))
-        if not newer:
+        found = False
+        low = stem.lower()
+        for cand in proj.rglob("*"):
+            if ".git" in cand.parts or not cand.is_file() or cand == tpath:
+                continue
+            nm = cand.name.lower()
+            if low in nm and ("test" in nm or "spec" in nm):
+                found = True
+                break
+        if not found:
             return _deny(f"TDD gate: write a failing test for {stem} "
                          f"before {rel}.")
         return {}
