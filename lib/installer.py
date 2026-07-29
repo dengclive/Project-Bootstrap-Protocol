@@ -1342,6 +1342,13 @@ def main(argv: list[str]) -> int:
             print(f"  - {e}", file=sys.stderr)
         return 2
 
+    # [round-4 D18] Spellings that were normalized rather than refused. These
+    # are NOT errors - the install proceeds - but they must be visible: the
+    # previous behavior was to emit a secrets-gate that guarded nothing, with
+    # rc=0 and no output, which is the worst of the available options.
+    for note in cfg.get("_config_notices", ()):
+        print(f"note: {note}", file=sys.stderr)
+
     # The IC gate runs BEFORE --print-config returns too: interview.py
     # documents `--print-config` as the authoritative validation call and
     # the seam §8.2 job uses it, so its verdict must match the install's

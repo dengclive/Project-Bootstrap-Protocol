@@ -279,8 +279,19 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
-# S-5: malicious config values must not corrupt hook syntax
-d = _install("""project:
+# S-5: malicious config values must not corrupt hook syntax.
+#
+# [round-4 D12] STRENGTHENED, and the change of verdict is the point. S-5
+# asserted only that a hostile value could not break bash SYNTAX - true,
+# because the heredoc is quoted - and that is why this test stayed green for
+# five rounds while `PAT_EOF` as a pattern terminated the heredoc, executed
+# everything after it on every hook invocation, and silently truncated the
+# guarded pattern list. "The hooks still parse" was never the property worth
+# having. These values are now REFUSED at resolve_config, so the assertion is
+# that the install fails and says which field.
+_s5 = subprocess.run(
+    [sys.executable, BIN, "-C", tempfile.mkdtemp(), "-c", "/dev/stdin"],
+    input="""project:
   name: r
   archetype: cli
 deps:
@@ -289,12 +300,31 @@ secrets:
   never_read_paths: [".env*", "weird) ; echo PWNED"]
 commands:
   test: "pytest && echo X"
+""", capture_output=True, text=True)
+check("S-5: a config carrying shell metacharacters is now REFUSED",
+      _s5.returncode != 0)
+check("S-5: the refusal names both offending fields",
+      "deps.approved" in _s5.stderr
+      and "secrets.never_read_paths" in _s5.stderr)
+
+# The original property S-5 existed for - a legal but awkward value cannot
+# corrupt hook syntax - still holds, now over values the validator admits.
+d = _install("""project:
+  name: r
+  archetype: cli
+deps:
+  approved: ["good", "@scope/pkg", "a.b_c", "pip[extra]"]
+secrets:
+  never_read_paths: [".env*", "cfg[0-9].key", "**/*.jks"]
+commands:
+  test: "pytest -k 'not slow' && echo X"
 """)
 try:
     hd = os.path.join(d, ".claude", "hooks")
     bad = [f for f in os.listdir(hd) if f.endswith(".sh") and
            subprocess.run(["bash", "-n", os.path.join(hd, f)]).returncode]
-    check("S-5: injection config -> all hooks still valid bash", bad == [])
+    check("S-5: awkward-but-legal config -> all hooks still valid bash",
+          bad == [])
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -1593,6 +1623,161 @@ check("RR-F1: audio config carries the honest-scope header",
 check("RR-F1: drift-detector body admits tier-1-only scope",
       "TIER-1 TOOL-CALL COUNTER ONLY" in
       _body_of(_rr_plan, ".claude/hooks/drift-detector.sh"))
+
+# ---------------------------------------------------------------------------
+# [round-4 D12] CONFIG INJECTION IS A CLASS, not one field.
+#
+# Four fields reach executable shell and none was validated. Established by
+# execution: a marker planted in every string field, the emitted plan searched
+# for it. Each case below is the reproduction, and each control is a value an
+# ordinary project really uses - the point of the control set is that closing
+# the class must not cost anyone a legitimate config.
+# ---------------------------------------------------------------------------
+_D12_BASE = {"project": {"name": "d12", "archetype": "ai-agent"}}
+
+
+def _d12(overlay):
+    raw = {"project": dict(_D12_BASE["project"])}
+    for k, v in overlay.items():
+        raw.setdefault(k, {}).update(v) if isinstance(v, dict) else None
+        if not isinstance(v, dict):
+            raw[k] = v
+    _c, _e = resolve_config(raw)
+    return _c, _e
+
+
+# sink 1: secrets.never_read_paths -> mapfile -t PATS <<'PAT_EOF'
+_c, _e = _d12({"secrets": {"never_read_paths":
+                           [".env*", "PAT_EOF", "$(id -un > /tmp/PWNED)",
+                            "secrets/**", "*.pem", "*.key"]}})
+check("D12-1: never_read_paths carrying the heredoc sentinel is refused",
+      any("PAT_EOF" in e for e in _e))
+_c, _e = _d12({"secrets": {"never_read_paths": [".env*", "`id`"]}})
+check("D12-1: never_read_paths carrying a backtick is refused", bool(_e))
+_c, _e = _d12({"secrets": {"never_read_paths": [".env*", "a\nb"]}})
+check("D12-1: never_read_paths carrying a newline is refused", bool(_e))
+
+# sink 2: deps.approved -> mapfile -t APPROVED <<'APPROVED_EOF'. Worse than
+# sink 1: the mapfile sits ABOVE every early exit, so a poisoned entry bricks
+# dependency-gate to rc=2 on EVERY PreToolUse call, not just on installs.
+_c, _e = _d12({"deps": {"approved": ["requests", "APPROVED_EOF", "$(id)"]}})
+check("D12-2: deps.approved carrying the heredoc sentinel is refused",
+      any("APPROVED_EOF" in e for e in _e))
+_c, _e = _d12({"deps": {"approved": ["requests; rm -rf /"]}})
+check("D12-2: deps.approved carrying a shell separator is refused", bool(_e))
+# minyaml has no nested flow mappings, so `deps: {approved: [...]}` parses to
+# the STRING '["..."]' and "\n".join() then emitted one CHARACTER per line.
+# Unlisted in the brief; found while reproducing D12 and caught by the type
+# check rather than by a rule written for it.
+_c, _e = _d12({"deps": {"approved": '["requests"]'}})
+check("D12-2: deps.approved as a string (flow-style YAML) is refused",
+      bool(_e))
+
+# sink 3: hooks.drift_* -> [ "$n" -ge <raw, unquoted> ], on every PostToolUse.
+# The P0-1 arithmetic-injection RCE re-entering through config.
+_c, _e = _d12({"hooks": {"drift_tool_call_threshold": "$(touch /tmp/PWNED)"}})
+check("D12-3: a non-numeric drift threshold is refused", bool(_e))
+_c, _e = _d12({"hooks": {"drift_tool_call_threshold": True}})
+check("D12-3: a bool drift threshold is refused (int subclass in Python)",
+      bool(_e))
+_c, _e = _d12({"hooks": {"drift_session_duration_minutes": "5; id"}})
+check("D12-3: every drift threshold is checked, not just the tool-call one",
+      bool(_e))
+
+# sink 4: commands.* are MEANT to be shell. The defect is that an unbalanced
+# quote emits a hook bash cannot parse, so every commit is refused with a
+# syntax error and no diagnosis.
+_c, _e = _d12({"commands": {"test": "echo 'oops"}})
+check("D12-4: commands.test with an unbalanced quote is refused", bool(_e))
+_c, _e = _d12({"commands": {"lint": 'ruff check "'}})
+check("D12-4: commands.lint with an unbalanced quote is refused", bool(_e))
+_c, _e = _d12({"commands": {"ci_local": "make ci \\"}})
+check("D12-4: commands.ci_local with a trailing backslash is refused",
+      bool(_e))
+_c, _e = _d12({"commands": {"test": "echo a\necho b"}})
+check("D12-4: commands.test with a newline is refused", bool(_e))
+
+# Controls: closing the class must cost nothing real.
+for _lbl, _ov in (
+        ("default config", {}),
+        ("scoped + dotted + dashed package names",
+         {"deps": {"approved": ["@scope/pkg", "req-uests", "a.b_c",
+                                "github.com/x/y", "pip[extra]"]}}),
+        ("glob patterns incl. a character class",
+         {"secrets": {"never_read_paths": [".env*", "secrets/**", "*.pem",
+                                           "cfg[0-9].key", "**/*.jks"]}}),
+        ("quoted and nested-quoted test commands",
+         {"commands": {"test": "pytest -k 'not slow'",
+                       "lint": 'ruff check . && echo "ok"',
+                       "ci_local": "make ci"}}),
+        ("legitimate thresholds", {"hooks": {"drift_tool_call_threshold": 200,
+                                             "drift_file_read_threshold": 1}}),
+):
+    _c, _e = _d12(_ov)
+    check(f"D12 control: {_lbl} still validates", not _e)
+
+# The emitted hooks must PARSE for every value the validator lets through.
+# The pre-existing `bash -n` check runs on the default config only, which is
+# exactly why sink 4 survived: the hostile value never reached an emitted
+# hook in any test.
+_c, _e = _d12({"commands": {"test": "pytest -k 'not slow'",
+                            "lint": 'ruff check . && echo "ok"',
+                            "ci_local": "make ci"},
+               "deps": {"approved": ["@scope/pkg", "a.b_c"]},
+               "secrets": {"never_read_paths": [".env*", "cfg[0-9].key"]},
+               "principles": {"tdd_policy": "required"}})
+assert not _e, _e
+_d12_tmp = tempfile.mkdtemp()
+try:
+    _bad = []
+    for _a in build_plan(_c):
+        _p = _a["path"] if isinstance(_a, dict) else _a.path
+        _b = _a["body"] if isinstance(_a, dict) else _a.body
+        if not _p.endswith(".sh") or not isinstance(_b, str):
+            continue
+        _f = os.path.join(_d12_tmp, os.path.basename(_p))
+        with open(_f, "w") as _fh:
+            _fh.write(_b)
+        if subprocess.run(["bash", "-n", _f],
+                          capture_output=True).returncode != 0:
+            _bad.append(_p)
+    check("D12: every emitted hook parses (bash -n) on a quote-heavy config",
+          _bad == [], )
+finally:
+    shutil.rmtree(_d12_tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# [round-4 D18] CONFIG-SHAPED VACUITY. Ordinary never_read_paths spellings
+# turned secrets-gate OFF, installing rc=0 with no warning. No technique the
+# round-4 brief endorses can see this: both substrates agree, it reproduces at
+# every commit, and a composition sweep varies COMMAND shape while this varies
+# CONFIG shape. Normalized rather than rejected - `**/secrets/**` is not a
+# wrong thing to write.
+# ---------------------------------------------------------------------------
+for _lbl, _given, _want in (
+        ("**/ prefix also guards the root", ["**/secrets/**", "**/.env*"],
+         ["secrets/**", ".env*"]),
+        ("./ prefix is stripped", ["./secrets/**", "./.env*"],
+         ["secrets/**", ".env*"]),
+        ("a trailing slash names the subtree", ["secrets/"], ["secrets/**"]),
+        ("a bare directory name names the subtree", ["secrets"],
+         ["secrets/**"]),
+):
+    _c, _e = _d12({"secrets": {"never_read_paths": list(_given)}})
+    _got = _c["secrets"]["never_read_paths"]
+    check(f"D18: {_lbl}",
+          not _e and all(w in _got for w in _want)
+          and all(g in _got for g in _given))
+    check(f"D18: {_lbl} is reported, not silent",
+          any("never_read_paths" in n for n in _c.get("_config_notices", [])))
+
+# The DEFAULT list must pass through byte-identical, or every golden digest
+# and every prior invariant moves for a defect none of them has.
+_c, _e = _d12({})
+check("D18: the default never_read_paths list is unchanged",
+      _c["secrets"]["never_read_paths"]
+      == [".env*", "secrets/**", "*.pem", "*.key"]
+      and _c.get("_config_notices") == [])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

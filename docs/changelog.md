@@ -1,5 +1,264 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — round-4 review remediation (2026-07-29)
+
+**Six consecutive fix commits had shipped a defect into the class they were
+fixing, every one on a fully green suite.** This is the seventh attempt, and
+the first thing it did was stop trusting the suite: a 282-row regression
+corpus, run before a line was changed, showed **77 live defects at `b1782ec`
+while 1516 checks passed**. A green suite has never once carried information
+in this repository.
+
+**SCOPE: greenfield.** `mode: retrofit` was explicitly out of scope (owner
+decision, 2026-07-29). D14 — the retrofit legacy allowlist being inert on the
+absolute paths the harness actually sends — is **not fixed**; it is recorded
+as backlog **K-1** with the structural reason it has now recurred across three
+rounds: `mode: retrofit` has no golden fixture and zero rows in the substrate
+differential, so it is untested by construction. `tests/test_retrofit.py`
+(263 checks) was treated as a tripwire and stayed green.
+
+### The design problem underneath most of it
+
+There were **six hand-rolled encodings of "where does a command begin, and
+what is its command word", and five distinct prefix-membership sets** — four
+of them claiming in comments to be "kept in sync" with the others.
+
+| implementation | file | consumed by |
+|---|---|---|
+| `_cs_isinv` | `lib/templates.py` (shared header) | dependency-gate, test-gate, spec-gate-commit, ci-mirror, eval-gate |
+| `CMD_PFX` | `lib/templates.py` (anchor regex) | the same five |
+| `_sg_push` | `lib/templates.py` (secrets-gate body) | secrets-gate |
+| `_CS_INVOKERS` | `lib/templates.py` | **nothing — dead code, already drifted** |
+| `_segment_candidates` / `_expand_invoker_args` | `lib/sdk_gates_template.py` | all SDK gates |
+| `_CMD_PREFIXES` / `_CMD_PFX_RE` | `lib/sdk_gates_template.py` | all SDK gates |
+
+`_CMD_PFX_RE` sat byte-identical to the previous commit while its shell twin
+grew, under a comment reading *"Shell parity: this is CMD_PFX from the shell
+header, same alternation in the same order."* Twelve spellings diverged.
+
+All of it now derives from **`lib/cmdpos.py`**, one definition per set, and
+`tests/test_composition.py` asserts that each set literal appears exactly once
+outside comments — because "the number of implementations went down" is
+gameable, and merging two walkers while leaving both anchor regexes untouched
+would have left D3 and D9 exactly where they were.
+
+**The two kinds of consumer needed OPPOSITE treatments**, and getting this
+backwards was the single most expensive mistake available. A reviewer applied
+exact flag arity to the walkers and measured **16 of 27 real wrapper-flag
+spellings regressing from deny to allow** — mostly LONG forms (`sudo
+--chroot /`, `nice --adjustment 5`, `flock --timeout 10`) of flags whose short
+form was in the table — with every suite green.
+
+- **Walkers** lost their bound entirely. It was `< 3` in one and `< 4` in
+  another, and `timeout -k 1 -s KILL 5 sh -c` needs five. Once a wrapper word
+  is seen, skip to the end of the segment; the gate on *having seen a wrapper*
+  is the safety argument, so `grep -r sh file` never starts the skip.
+- **Anchor regexes** gained positionals. They UNDER-consumed, which is the
+  fail-open direction: `sudo -u root pip install evilpkg` was rc=0 on **both
+  substrates at all three commits**, invisible to a differential (they agreed)
+  and to a parent-vs-head sweep (it never changed). Unbounded consumption
+  cannot fail open in a regex, because matching asks whether a parse EXISTS —
+  `sudo -i pip install evil` backtracks and matches, while `echo -n pip
+  install evil` does not, since `echo` is not a wrapper.
+
+### Fixed
+
+- **Wrapper operands hid the invoker behind them** (D1/D2/D7). `timeout 5 sh
+  -c 'true; pip install evilpkg'` and eleven sibling wrappers were `shell=allow
+  / sdk=deny` — the direction `sdk_gates_template`'s own binding rule forbids.
+  Fixed by bringing the SHELL up, never by bringing the SDK down.
+- **The SDK's verb gates never expanded an invoker at all** (D1, SDK half).
+  `_git_verb` did not call `_expand_invoker_args`; only `_scan_install_line`
+  did. So `sh -c 'git commit -m x'`, `bash -c`, `zsh -c`, `eval`, `busybox sh
+  -c` and `ssh box` were allowed on **test-gate, spec-gate-commit and
+  eval-gate simultaneously**. Repairing only what D1's shell cause named would
+  have left every one of them open.
+- **`sudo -u root pip install evilpkg`** and twelve more wrapper-with-operand
+  shapes (D9), on both substrates.
+- **Neither substrate's quote scanner handled backslash escapes** (D5). This
+  is D5's real root cause; an earlier diagnosis blamed recursion depth, a
+  reviewer implemented depth-3 recursion over mis-parsed input, and two of
+  D5's three reproductions still allowed. `bash -c "sh -c \"pip install
+  evil\""` desynced the scanner; `sh -c pip\ install\ evil` had no quoted run
+  to recurse into at all. Both now deny, on both substrates, and both EXECUTE
+  without the fix.
+- **Nested quotes inside an invoker argument were a FAIL-OPEN** (D8), in the
+  gate this codebase repeatedly calls the one with no override path:
+
+  ```
+  bash -c "cat secrets/prod.yaml"      rc=2
+  bash -c "cat 'secrets/prod.yaml'"    rc=0   <- read the file
+  sh   -c "cat '.env'"                 rc=0
+  eval    "cat '.env'"                 rc=0
+  ```
+
+  One extra pair of quotes. The re-tokenization was a whitespace split, not a
+  parse. The SDK had **two** independent expansion mechanisms and the obvious
+  fix touches only the one dependency-gate uses; both now share one head scan.
+  Backlog **J-15 recorded this inverted**, as an over-match "in the cheap
+  direction" — its own example allowed.
+- **The SDK split lines before tracking quotes** (D6), so an unbalanced quote
+  earlier in a command hid everything after it.
+- **eval-gate diverged in BOTH directions** (D4). Each substrate had a range
+  the other lacked: the shell had the root-commit `ls-tree` branch and no
+  `@{u}..HEAD`; the SDK had `@{u}..HEAD` and no root-commit branch, so on a
+  shallow clone (`actions/checkout` defaults to `--depth 1`) it saw an empty
+  diff and ALLOWED. Both carry all three ranges now, and the SDK's
+  `prompt|\.md$` predicate is narrowed to the shell's. Backlog J-18 closed.
+- **The emitted `gates.py` no longer compiled clean** (D10). A bare `\S` in a
+  docstring: under `-W error::SyntaxWarning` the import raises and **every SDK
+  gate is disabled at once**. Nothing compiled the emitted artifact, so the
+  golden digest simply re-baselined over it. Now asserted twice — in-process
+  and via a real `py_compile -W error` on the file as it lands on disk.
+- **CONFIG INJECTION IS A CLASS, not one field** (D12). Four sinks reach
+  executable shell, established by planting a marker in every string field and
+  searching the emitted plan: `secrets.never_read_paths` and `deps.approved`
+  reach quoted heredocs whose sentinel they can forge (terminating it makes
+  every later entry top-level shell **executed on every hook invocation**, and
+  silently TRUNCATES the guarded list); `hooks.drift_*` is interpolated
+  unquoted into `[ "$n" -ge <value> ]` on every PostToolUse event — the P0-1
+  arithmetic-injection RCE re-entering through config; `commands.*` with an
+  unbalanced quote emits a hook bash cannot parse, so every commit is refused
+  with a syntax error and no diagnosis. All validate at `resolve_config`.
+  Backlog J-17's "privilege-equivalent rather than escalation" framing is what
+  made `open` look defensible for three rounds.
+- **CONFIG-SHAPED VACUITY** (D18) — the largest untouched surface, and no
+  technique the round-4 brief endorses can see it, because both substrates
+  agree, it reproduces at every commit, and a composition sweep varies COMMAND
+  shape while this varies CONFIG shape. Each of these installed rc=0, silent,
+  and produced a secrets-gate that guarded **nothing**:
+
+  ```
+  never_read_paths: ["**/secrets/**", "**/.env*"]   root-level .env ALLOW
+  never_read_paths: ["./secrets/**", "./.env*"]     fully vacuous
+  never_read_paths: ["secrets/"]                    fully vacuous
+  never_read_paths: ["secrets"]                     fully vacuous  (not in
+                                                    the brief; the most
+                                                    natural spelling of all)
+  ```
+
+  Normalized rather than rejected — `**/secrets/**` is not a wrong thing to
+  write, and a gate an operator is fighting is a gate an operator deletes. The
+  DEFAULT list passes through byte-identical, so no fixture moves.
+- **Six advisory hooks exited 2 on an empty payload** (D17), not four as
+  backlog J-19 recorded: `spec-gate-entry` is a **UserPromptSubmit** hook,
+  where `exit 2` blocks the user's own prompt. The posture is now baked into
+  the shared header at emission time, DERIVED from the body's own
+  `FAIL_CLOSED=0`, so there is no second list to drift.
+- **`tdd-gate` was near-vacuous** (D11). Case-sensitive `find` globs, so
+  `PaymentTest.java` / `OrderSpec.scala` / `Foo.test.ts` — the default
+  conventions in the exact ecosystems the round-3 fix cited — did not match
+  while the SDK lowercased and did. It pruned only `.git`, so
+  `node_modules/p/dist/test_zzz.js` satisfied `src/zzz.py`, and on a pristine
+  install `.claude/commands/spec-new.md` satisfied `src/new.py`. **The SDK's
+  prune test used the ABSOLUTE path**, so any project living under a directory
+  named `.git` had this gate disabled entirely — found by running the fix.
+- **`Grep{glob}` was inspected by NEITHER substrate** (D19), and that call
+  returns matching file CONTENTS. Lens A's F6 finding re-entering through a
+  sibling parameter of two that had already been fixed. Every parameter of
+  every gated tool is now enumerated and decided explicitly, including the
+  ones deliberately NOT matched (`content`, `old_string`, `new_string`) and
+  the one escalated instead (`WebFetch{url}`, backlog K-5).
+- **The arrival-channel patterns were a hand-written subset** of sets that
+  already existed (D16/D20). `curl url | /bin/sh`, `| tee /tmp/x | sh`,
+  `| sudo -u root sh`, `| env sh`, `| timeout 5 sh`, `| nohup sh`, plus
+  `aria2c`/`http`/`fetch` as downloaders — all allowed. Now built from
+  `cmdpos`. Added `yarn create`, `npm init <pkg>`, `pnpm create`, `bun create`,
+  `bun x`, `pipx run`, `uv tool run`; `deno run <url>` and `uv run --with
+  <pkg>` are matched by their DISTINGUISHING token so `deno run main.ts` and
+  `uv run python` stay allowed. **Download-then-run** (`curl url > /tmp/a.sh
+  && sh /tmp/a.sh`) now denies via a two-half structural rule — backlog J-10
+  declined this on the premise that it needed a generic `bash <path>` block,
+  which is not what closing it takes.
+- **`secrets-gate` cost** (D15): per-pattern derivation was being recomputed
+  inside the (candidate x pattern) loop. Hoisted, plus candidate
+  de-duplication: 15.15 -> 5.43 ms/line with a 202-pattern config, moving the
+  60 s fail-CLOSED `PreToolUse` crossover from ~4,000 to ~11,000 lines on this
+  machine. The quote-heavy single-huge-command shape the gate's own comment
+  warns about was measured for the first time and is ~3x CHEAPER per unit. The
+  gate is still LINEAR — recorded as backlog **K-3**, bounded rather than
+  closed. `_GATE_TIMEOUTS` now declares the same 60 s bound the shell emits.
+- **`deps.md` told operators something false** (D13): *"The dependency gate
+  stops blocking once the package appears above."* Untrue for an index
+  override, a requirements file, a remote script or a run-without-installing
+  channel. The emitted doc now lists what the approved list does not cover.
+
+### Newly ALLOWED — enumerated before the work started
+
+`docs/round-4-intended-relaxations.md` was written **before any parser was
+touched**, because the definition of done as originally worded blocked its own
+sequencing: fixing D4 necessarily newly-allows a docs-only push, and fixing
+D11 necessarily newly-allows source writes.
+
+| | |
+|---|---|
+| R-1 | eval-gate: a documentation-only `git push` (SDK: deny -> allow) |
+| R-2 | tdd-gate: a source file whose test exists under a conventional name (shell: deny -> allow) |
+| R-3 | `script pip install evil`, `su pip install evil` — **neither runs its positional operand** (shell: deny -> allow) |
+| R-4 | the six advisory hooks stop blocking on an empty payload |
+| R-4b | `ssh h "git commit -m '.env'"` now DENIES — D8's price, and exactly the over-match J-15 originally recorded as accepted |
+
+Anything newly allowed that is not on that list is a regression, and the list
+was closed before measurement.
+
+### The technique, committed
+
+`tests/composition_sweep.py` — `wrapper x wrapper-FLAG x operand x invoker x
+quoting x separator x verb`, **at gate level, on both substrates**. Payload-
+content fuzzing returned nothing across three rounds; composition found
+fifteen divergences in one pass. Backlog **J-20** proposed a differential
+against `bash` word-splitting instead; that would NOT have caught D1 or D2,
+because both tokenizers agree with bash about word-splitting and disagree
+about command POSITION, which is downstream of it.
+
+Two axes are new and each is load-bearing: a **wrapper-FLAG axis in short AND
+long spellings** (without it the sweep cannot see the arity class at all), and
+a **backslash-escape axis** (`sh -c pip\ install\ evil` has no quoted run, so
+every quoting axis built from `'` and `"` is blind to it).
+
+Results, re-runnable:
+
+```
+tests/composition_sweep.py                          17,268 x 2 substrates
+                                                    0 not denied
+tests/composition_sweep.py --rev 0fba4d2 --rev b1782ec
+                                                    0 newly allowed outside
+                                                    R-1..R-4
+regression-invariant-corpus.py    LIVE 77 -> 2,  REGRESSION 0
+suite                             1516 -> 1617 checks, 0 failed
+tests/test_retrofit.py            263, unchanged (tripwire)
+```
+
+`tests/test_composition.py` runs a bounded, evenly-spaced sample every commit
+— evenly spaced and never "the first N", because the first N cases are all one
+wrapper, which is how a sampled sweep misses this class.
+
+### Corrections to the record
+
+Five consecutive newly-allowed inventories in `test_greenfield_golden.py` were
+written from intent and all five were wrong. **Freeze-exception 24** claimed
+its inventory came "from an executed parent-vs-head sweep and not from intent";
+a 22,392-invocation sweep found **1,740 shapes that `0fba4d2` blocks and
+`b1782ec` allows**, none of them among its three listed items — and **1,164 of
+those came from the round-2 series `fac2897..ff435f5`**, appearing in no
+freeze-exception, changelog entry or backlog row, including exception 23, which
+makes the identical claim. Both are corrected in place.
+
+**Exceptions 22, 23 and 24 all claim "thirteen emitted files / all twelve
+hooks".** No fixture emits twelve hooks. Measured: `default` 11,
+`design_steering` 11, `full_autonomous` 15.
+
+Backlog rows rewritten from executed evidence rather than edited: **J-15**
+(inverted), **J-1** (describes neither substrate — SURFACED for an owner call,
+not retired), **I-11** (stale in the safe direction), **J-17** (framing),
+**J-19** (undercount), **J-10** (premise), **J-18**, **J-20** (superseded).
+New section **K** records what this round did not close: K-1 retrofit/D14,
+K-2 `ci-mirror` has no SDK twin so every "substrate parity" claim is scoped to
+7 of 11 gates, K-3 the secrets-gate bound, K-4 the now-empty defect ledger,
+K-5 `WebFetch{url}`.
+
+**NO PROTOCOL_VERSION BUMP** — 2.6.0 is still unreleased.
+
 ## 2.6.0 in-version fix — round-3 review, and its remediation (2026-07-29)
 
 **Five consecutive fix commits have now introduced a defect into the class

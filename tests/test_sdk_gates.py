@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import types
+import warnings
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
@@ -96,6 +97,26 @@ except SyntaxError as e:
     print("cannot continue against unparseable emission")
     sys.exit(1)
 
+# ---- [round-4 D10] emitted source compiles CLEAN, not merely parses ------ #
+# `ast.parse` accepts a module that emits SyntaxWarning, so a bare `\S` in a
+# non-raw docstring parsed here for a whole round while the emitted artifact
+# warned on every import. Under `-W error::SyntaxWarning` - or a future
+# Python where invalid escape sequences harden into SyntaxError, which the
+# warning text explicitly promises - that import RAISES, and since
+# build_hooks() is the single entry point, EVERY SDK gate is disabled at
+# once. Nothing here compiled the artifact, so the golden digest simply
+# re-baselined over the regression.
+#
+# Assert on the whole module rather than on the one known site: the failure
+# mode is prose, and prose is edited constantly.
+with warnings.catch_warnings(record=True) as _w:
+    warnings.simplefilter("always")
+    compile(body, "gates.py", "exec")
+_syn = [x for x in _w if issubclass(x.category, SyntaxWarning)]
+check("D10: emitted gates.py compiles with no SyntaxWarning",
+      not _syn,
+      "; ".join(f"line {x.lineno}: {x.message}" for x in _syn))
+
 # ---- AC-7-4: import under an import-side-effect probe -------------------- #
 # Any file/subprocess/socket I/O at import time must trip the probe. The
 # import machinery itself uses io.open_code, which the probe leaves alone.
@@ -103,6 +124,20 @@ workdir = tempfile.mkdtemp()
 mod_path = os.path.join(workdir, "gates.py")
 with open(mod_path, "w") as fh:
     fh.write(body)
+
+# [round-4 D10] The in-process compile above is the fast, total check; this
+# one is the PRODUCTION mechanism - a real interpreter, real flags, the file
+# as it lands on disk. Kept alongside rather than instead of, because the two
+# fail for different reasons (a rendering bug that only shows on disk, vs. a
+# warning category the harness filters).
+_pyc = subprocess.run(
+    [sys.executable, "-W", "error::SyntaxWarning", "-c",
+     "import py_compile,sys;py_compile.compile(sys.argv[1],"
+     "cfile=sys.argv[2],doraise=True)",
+     mod_path, os.path.join(workdir, "gates.pyc")],
+    capture_output=True, text=True)
+check("D10: emitted gates.py py_compiles under -W error::SyntaxWarning",
+      _pyc.returncode == 0, _pyc.stderr.strip()[-300:])
 
 _probe_hits = []
 import builtins  # noqa: E402
@@ -505,21 +540,47 @@ shutil.rmtree(proj, ignore_errors=True)
 shutil.rmtree(workdir, ignore_errors=True)
 
 # ---- fix: bool/None config values render VALID Python (no NameError) ----- #
+#
+# [round-4 D12] The VERDICT on the config changed and the RENDER invariant did
+# not, so the two are now asserted separately.
+#
+# This case used to assert that `commands: {test: true}` and
+# `never_read_paths: [true, ".env"]` resolve with no errors. They should not:
+# a bool test command means the gate runs the literal string "True", and a
+# bool never-read pattern guards a file named "True". Rendering nonsense
+# faithfully was never the goal - it was a proxy for the real property, which
+# is that the emitter uses repr/json.dumps rather than pasting YAML text.
 _, cfg_bool_e = resolve_config(load_yaml(
     "project:\n  name: b\n  archetype: service\n"
     "commands:\n  test: true\n  lint: false\n"
     "secrets:\n  never_read_paths: [true, \".env\"]\n"))
-assert not cfg_bool_e, cfg_bool_e
+check("D12: bool commands.test / never_read_paths entry is refused",
+      any("commands.test" in e for e in cfg_bool_e)
+      and any("never_read_paths" in e for e in cfg_bool_e))
+
+# The render invariant itself, asserted where it actually lives: hand a
+# non-string straight to the emitter, bypassing validation. If the template
+# ever went back to pasting YAML scalars, `true`/`null` would reach the
+# emitted module as bare names and every SDK gate would die on NameError at
+# import - the same total-outage shape as D10.
 cfg_bool, _ = resolve_config(load_yaml(
     "project:\n  name: b\n  archetype: service\n"
-    "commands:\n  test: true\n  lint: false\n"
-    "secrets:\n  never_read_paths: [true, \".env\"]\n"))
+    "commands:\n  test: \"true\"\n  lint: \"true\"\n"))
+cfg_bool["commands"]["test"] = True
+cfg_bool["commands"]["lint"] = False
+cfg_bool["commands"]["format"] = None
+cfg_bool["secrets"]["never_read_paths"] = [True, ".env"]
 body_bool = templates.TEMPLATES["sdk_gates"](cfg_bool)
 try:
     g2 = {}
     exec(compile(body_bool, "g2", "exec"), g2)   # NameError if true/null leak
+    # sdk_gates_module str()-coerces every leaf for exactly this reason, so
+    # the bool arrives as "True" and the None as "" - both valid Python names
+    # nobody has to define.
     check("fix: bool/None config renders valid Python (no true/null leak)",
-          g2["RESOLVED_CONFIG"]["commands"]["test"] == "True")
+          g2["RESOLVED_CONFIG"]["commands"]["test"] == "True"
+          and g2["RESOLVED_CONFIG"]["commands"]["format"] == ""
+          and "True" in g2["RESOLVED_CONFIG"]["secrets"]["never_read_paths"])
 except NameError as e:
     check("fix: bool/None config renders valid Python", False, str(e))
 

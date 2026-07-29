@@ -359,8 +359,38 @@ for name, payload in (("empty", ""), ("not json", "not json at all"),
                       ("wrong types", '{"tool_input":{"file_path":123}}')):
     for hook in ("secrets-gate", "dependency-gate", "drift-detector"):
         rc, _, _ = run(hook, payload)
-        check(f"{hook} survives a {name} payload (rc in 0/2)", rc in (0, 2),
-              f"rc={rc}")
+        check(f"{hook} survives a {name} payload (no crash)",
+              rc in (0, 1, 2), f"rc={rc}")
+
+# [round-4 D17] POSTURE, not merely "does not crash". The check above accepted
+# `rc in (0, 2)` and so certified as healthy the exact defect: SIX advisory
+# hooks exited 2 on an empty payload, because `hook_fail` lives in the shared
+# header ABOVE the line where each body sets FAIL_CLOSED=0. On a `Stop` event
+# `exit 2` means "do not stop"; on spec-gate-entry, a UserPromptSubmit hook,
+# it blocks the USER'S OWN PROMPT. Backlog J-19 recorded four of the six.
+#
+# The property is directional and is asserted as such: a BLOCKING gate must
+# fail closed on an unusable payload, an ADVISORY hook must never block.
+_ADVISORY = ("format-lint-gate", "spec-gate-entry", "cost-log",
+             "drift-detector", "task-done-alarm", "decision-required-alarm")
+_BLOCKING = ("secrets-gate", "dependency-gate", "test-gate", "tdd-gate",
+             "spec-gate-commit", "eval-gate", "ci-mirror")
+def _emitted(hook):
+    return os.path.isfile(os.path.join(HOOKS, f"{hook}.sh"))
+
+
+for hook in _ADVISORY:
+    if not _emitted(hook):
+        continue                # this fixture's config does not enable it
+    rc, _, _ = run(hook, "")
+    check(f"D17: advisory {hook} does not BLOCK on an empty payload",
+          rc != 2, f"rc={rc}")
+for hook in _BLOCKING:
+    if not _emitted(hook):
+        continue
+    rc, _, _ = run(hook, "")
+    check(f"D17: blocking {hook} still fails CLOSED on an empty payload",
+          rc == 2, f"rc={rc}")
 
 print("\n== P1-4: command matching is anchored to command position ==")
 

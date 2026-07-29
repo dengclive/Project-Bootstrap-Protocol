@@ -650,6 +650,11 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 22 - round-2 review batch 2b, the shared
     # segmenter, 2026-07-29] Source: the same round-2 review. THIRTEEN
     # emitted files move - all twelve hooks plus sdk_gates/gates.py - because
+    # [COUNT CORRECTED round-4, 2026-07-29: no fixture emits twelve hooks.
+    #  The `default` and `design_steering` fixtures emit 11,
+    #  `full_autonomous` 15, so a shared-header change moves 13 and 17 files
+    #  respectively (hooks + sdk_gates/gates.py). Measured, not counted from
+    #  memory.]
     # the change is in the shared _HOOK_HEADER. Verified by parent-vs-head
     # install against 9952741, not asserted: NO settings.json, no steering
     # doc, no skill, command or agent body, no CLAUDE.md, no frozen twin,
@@ -699,6 +704,11 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 23 - round-2 review batch 3, the independent
     # fixes, 2026-07-29] Source: the same round-2 review. THIRTEEN emitted
     # files move again (all twelve hooks plus sdk_gates/gates.py) because
+    # [COUNT CORRECTED round-4, 2026-07-29: no fixture emits twelve hooks.
+    #  The `default` and `design_steering` fixtures emit 11,
+    #  `full_autonomous` 15, so a shared-header change moves 13 and 17 files
+    #  respectively (hooks + sdk_gates/gates.py). Measured, not counted from
+    #  memory.]
     # item 1 is in the shared _HOOK_HEADER. Verified parent-vs-head against
     # edac7c7: no settings.json, no steering doc, skill, command or agent
     # body, no CLAUDE.md, no frozen twin; action counts unchanged.
@@ -768,6 +778,11 @@ EXPECTED_DIGESTS = {
     # Source: three independent adversarial lenses run against `ff435f5`,
     # ~22,000 verdict evaluations between them, 25 findings. THIRTEEN
     # emitted files move (all twelve hooks plus sdk_gates/gates.py) because
+    # [COUNT CORRECTED round-4, 2026-07-29: no fixture emits twelve hooks.
+    #  The `default` and `design_steering` fixtures emit 11,
+    #  `full_autonomous` 15, so a shared-header change moves 13 and 17 files
+    #  respectively (hooks + sdk_gates/gates.py). Measured, not counted from
+    #  memory.]
     # most of this is in the shared header. Verified parent-vs-head against
     # ff435f5: no settings.json, no steering doc, skill, command or agent
     # body, no CLAUDE.md, no frozen twin.
@@ -826,9 +841,127 @@ EXPECTED_DIGESTS = {
     # `git push` when the only markdown changed is not a prompt file.
     # NEWLY BLOCKED: everything in items 1, 2, 3, 6, 8.
     #
+    # ---- CORRECTION, 2026-07-29 (round-4). THE PARAGRAPH ABOVE IS FALSE. --
+    #
+    # It says its newly-allowed inventory was "derived from an executed
+    # parent-vs-head sweep and not from intent". It was not. A round-4 sweep
+    # of 7464 compositions x 3 installs (22,392 hook invocations) over
+    # 0fba4d2, ff435f5 and b1782ec found **1,740 shapes that 0fba4d2 blocks
+    # and b1782ec allows**. Only 576 of those were introduced by b1782ec (384
+    # dependency-gate + 192 test-gate). NONE of them appears in the three
+    # items listed above.
+    #
+    # The other **1,164 came from the round-2 series fac2897..ff435f5** (768
+    # dependency-gate + 384 test-gate + 12 secrets-gate) and appear in NO
+    # freeze-exception, changelog entry or backlog row - including
+    # exception 23 below, which makes the same "from an executed parent-vs-head
+    # comparison" claim. Hand-verified sample: `sudo -u root sh -c 'echo hi;
+    # pip install evilpkg'` is rc=2 at 0fba4d2, rc=0 at ff435f5, rc=0 at
+    # b1782ec.
+    #
+    # FIVE consecutive newly-allowed inventories in this file were written
+    # from intent and all five were wrong. The round-4 exception (no. 25)
+    # states its inventory from a committed, re-runnable sweep -
+    # `tests/composition_sweep.py` - and the sweep is now in the suite.
+    #
+    # The file-count claim below ("THIRTEEN emitted files ... all twelve
+    # hooks") is also wrong and is corrected in exception 25: NO fixture
+    # emits twelve hooks. Measured 2026-07-29: `default` 11, `design_steering`
+    # 11, `full_autonomous` 15.
+    #
+    # ======================================================================
+    # [freeze-exception no. 25 - ROUND-4 remediation, 2026-07-29]
+    # ======================================================================
+    # Source: the round-4 fix brief, itself written by the implementer of
+    # b1782ec and then adversarially reviewed by three independent lenses.
+    # SCOPE: greenfield only (owner decision, 2026-07-29). `mode: retrofit`
+    # is tracked, not fixed; D14 stays open as backlog K-1, and
+    # tests/test_retrofit.py (263 checks) was a TRIPWIRE this round, not a
+    # target. It stayed green.
+    #
+    # FILES THAT MOVE - measured by a HEAD-vs-worktree plan diff, per fixture,
+    # not counted from memory:
+    #     default           13 of 57   (11 hooks + sdk_gates/gates.py
+    #                                   + steering/deps.md)
+    #     design_steering   13 of 59   (same named set)
+    #     full_autonomous   17 of 69   (15 hooks + the same two)
+    # ZERO files added, ZERO removed, so all three action counts are
+    # unchanged (57/69/59). NO settings.json, no CLAUDE.md, no skill, command
+    # or agent body, no frozen twin. `steering/deps.md` moves for D13 and is
+    # the only non-hook, non-gates.py body in the set.
+    #
+    # WHY (each item is a defect this batch's predecessors shipped):
+    #
+    #   1. SIX COMMAND-POSITION ENCODINGS, FIVE PREFIX SETS [D1/D2/D3/D7/D9].
+    #      `_cs_isinv`, `CMD_PFX`, `_sg_push` and the dead `_CS_INVOKERS` on
+    #      the shell; `_segment_candidates`, `_expand_invoker_args`,
+    #      `_CMD_PREFIXES` and `_CMD_PFX_RE` on the SDK. They disagreed about
+    #      which words are transparent, whether a prefix may consume an
+    #      operand, and whether VAR=value runs are skipped. All six now derive
+    #      from lib/cmdpos.py. The walkers lost their bound (`< 3` in one,
+    #      `< 4` in another; `timeout -k 1 -s KILL 5 sh -c` needs five); the
+    #      anchors gained positionals, which is what D9 needed -
+    #      `sudo -u root pip install evilpkg` was rc=0 on BOTH substrates at
+    #      ALL THREE commits, so neither a differential nor a parent sweep
+    #      could see it.
+    #   2. THE SDK'S VERB GATES NEVER EXPANDED AN INVOKER [D1, SDK half].
+    #      `_git_verb` did not call `_expand_invoker_args` - only
+    #      `_scan_install_line` did - so `sh -c 'git commit -m x'` was
+    #      shell=deny / SDK=allow across test-gate, spec-gate-commit AND
+    #      eval-gate simultaneously.
+    #   3. NEITHER QUOTE SCANNER HANDLED BACKSLASHES [D5]. This is D5's actual
+    #      root cause; an earlier diagnosis blamed recursion depth and a
+    #      reviewer built depth-3 recursion over mis-parsed input. Two of
+    #      D5's three reproductions still allowed, and it EXECUTES.
+    #   4. NESTED QUOTES INSIDE AN INVOKER ARGUMENT WERE A FAIL-OPEN [D8].
+    #      `bash -c "cat 'secrets/prod.yaml'"` READ THE FILE while
+    #      `bash -c "cat secrets/prod.yaml"` denied. The re-tokenization was
+    #      a whitespace split, not a parse. Backlog J-15 recorded this
+    #      INVERTED, as an over-match "in the cheap direction".
+    #   5. THE EMITTED gates.py NO LONGER COMPILED CLEAN [D10]. A bare `\\S`
+    #      in a docstring. Under `-W error::SyntaxWarning` the import fails
+    #      and EVERY SDK gate is disabled at once. Nothing compiled the
+    #      emitted artifact, so the golden digest re-baselined over it.
+    #   6. CONFIG INJECTION, FOUR SINKS [D12]. `never_read_paths` and
+    #      `deps.approved` reach quoted heredocs whose sentinel they can
+    #      forge; `hooks.drift_*` is interpolated UNQUOTED into a shell test
+    #      that runs on every tool call; `commands.*` can emit a hook bash
+    #      cannot parse. All validate at `resolve_config` now.
+    #   7. CONFIG-SHAPED VACUITY [D18]. `["**/secrets/**"]`, `["./secrets/**"]`,
+    #      `["secrets/"]` and `["secrets"]` each produced a secrets-gate that
+    #      guarded NOTHING, rc=0 and silent. Normalized, not rejected.
+    #   8. ADVISORY HOOKS BLOCKED [D17]. Six, not four: the empty-payload
+    #      `hook_fail` sits above each body's `FAIL_CLOSED=0`.
+    #   9. tdd-gate WAS NEAR-VACUOUS [D11]: case-sensitive `find`, and it
+    #      pruned only `.git`, so `.claude/commands/spec-new.md` satisfied
+    #      `src/new.py` on a pristine install.
+    #  10. THE ARRIVAL-CHANNEL PATTERNS WERE A HAND-WRITTEN SUBSET [D16/D20]
+    #      of sets that already existed, plus D19: `Grep{glob}` returned
+    #      matching file CONTENTS and was inspected by neither substrate.
+    #
+    # NEWLY ALLOWED - enumerated BEFORE the parsers were touched, in
+    # docs/round-4-intended-relaxations.md, and verified by the committed
+    # sweep rather than asserted:
+    #     R-1  eval-gate: a docs-only `git push`            (SDK: deny->allow)
+    #     R-2  tdd-gate: a source file whose test exists under a conventional
+    #          name (`PaymentTest.java`, `OrderSpec.scala`, `foo.test.ts`)
+    #                                                     (shell: deny->allow)
+    #     R-3  `script pip install evil` / `su pip install evil` - NEITHER
+    #          runs its positional operand              (shell: deny->allow)
+    #     R-4  the six advisory hooks stop exiting 2 on an empty payload
+    # Everything else moves in the DENY direction.
+    #
+    # EVIDENCE, re-runnable, not asserted:
+    #   tests/composition_sweep.py            17,268 compositions x both
+    #                                         substrates: 0 not denied
+    #   tests/composition_sweep.py --rev 0fba4d2 --rev b1782ec
+    #                                         0 newly allowed outside R-1..R-4
+    #   .claude/checkpoints/regression-invariant-corpus.py
+    #                                         LIVE 77 -> 2, REGRESSION 0
+    #
     # NO PROTOCOL_VERSION BUMP - 2.6.0 is still unreleased.
     "default":
-        "1e1b97de2ec1c18f2c5132720453f3653eefba7f3b000cccdd98e98a5f4fd6e4",
+        "b85670d3a1dc8afa04e386df482be3bf6555228aeb041e06af04ed52f6f47bce",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -892,7 +1025,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "a344fed04dcd1eed7f14d808b853979fe5ae3ee5fbd70b3f31bc40b4934f9b76",
+        "d747f12a953e785282517ecdb69b982516c5df234f2d9987985ab3f4d4b1a534",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -961,7 +1094,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "735b6edc7ddff37c7c9ba03aff2ea78b301537f46db2f7815942cf14f50f6df2",
+        "466b7a7393566559dfc77ff0485cf2a2f294c3dbd25adc4bf4d82e4f23f308c1",
 }
 
 EXPECTED_ACTION_COUNTS = {

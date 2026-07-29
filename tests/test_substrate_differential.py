@@ -675,19 +675,28 @@ for _c, _want in (('echo "git commit"', "allow"),
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row
 # itself first ("delete this row"), then this. Both steps are deliberate.
-# -- round-3 lens A, A10: an unbalanced quote in front of a deliberately
-# -- EXEMPTED dotenv template. The shell allows (its scanner takes the rest
-# -- of the line as the run and the basename exemption applies); the SDK's
-# -- shlex fallback emits a quote-stripped variant that misses the exact
-# -- basename test and denies. Pre-existing at every commit in this chain,
-# -- in the false-positive direction, and the round-2 unbalanced-quote rows
-# -- covered only shapes that SHOULD deny.
-ledger("secrets-gate", bash("cat '.env.example"), ("allow", "deny"),
-       ("allow", "allow"), "A10 unbalanced quote vs dotenv exemption",
-       "cat '.env.example")
+# -- RETIRED [round-4]: A10, an unbalanced quote in front of a deliberately
+# -- EXEMPTED dotenv template (`cat '.env.example`). The shell allowed; the
+# -- SDK's shlex fallback emitted a quote-stripped variant that missed the
+# -- exact-basename test and denied - a false positive on a file whose whole
+# -- purpose is to be read, in the gate with no override path. Fixed by
+# -- stripping quote characters from the basename before the dotenv-template
+# -- test, which is what the shell's tokenizer already did. The row fired
+# -- "delete this row" on the fix, exactly as designed.
+#
+# The ledger is now EMPTY, and that is the state its own comment warns about:
+# round 3 shipped it inert, with every row fixed, `ledger()` at zero call
+# sites and this count pinned at 0, described in the commit message as a
+# standing guard. The count below is pinned at 0 DELIBERATELY and with that
+# history stated, not by omission.
+#
+# KNOWN WEAKNESS, recorded rather than left implicit [round-4 D17]: deleting a
+# row AND its count pin together is silent - the mutation tests cover a row
+# changing or a count changing, not both at once. The pin is a tripwire
+# against accident, not against intent.
 
-check(f"known-defect ledger holds exactly 1 open row (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 1,
+check(f"known-defect ledger holds exactly 0 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 0,
       "a row was added or removed without updating this count")
 
 # --------------------------------------------------------------------------- #
