@@ -164,7 +164,19 @@ _CMD_PREFIXES = frozenset({
 })
 
 
-def _shell_segments(cmd):
+# Two operator sets, mirroring the two the shell carries, because the two
+# consumers need different things and the shell is the contract:
+#   _SECRETS_OPS = the gate's _sg_raw. `<` and `>` delimit a WORD there, so
+#     `base64 <.env` yields `.env`.
+#   _CMD_OPS = the header's _cs_ops. Redirections are NOT separators there;
+#     they are skipped by _CMD_PFX_RE at command position instead, so
+#     `>/dev/null pip install evil` keeps `pip install` at the head of its
+#     segment. A backtick IS a separator - it runs its contents.
+_SECRETS_OPS = ";&|()<>\\n"
+_CMD_OPS = ";&|()`\\n"
+
+
+def _shell_segments(cmd, ops=_SECRETS_OPS):
     """Split on UNQUOTED operators and newlines -> the units at which a new
     command can begin.
 
@@ -196,7 +208,7 @@ def _shell_segments(cmd):
         elif ch in ("'", '"'):
             quote = ch
             cur.append(ch)
-        elif ch in ";&|()<>\\n":
+        elif ch in ops:
             segs.append("".join(cur))
             cur = []
         else:
@@ -462,7 +474,33 @@ def _spec_gate_commit(config):
 # shell's `case *"git commit"*`: it missed `git  commit`, a tab,
 # `git --no-pager commit` and `git -C /repo commit`, and it fired on the
 # string appearing in a comment, a quoted argument or a grep pattern.
-_GIT_VERB_TMPL = (r"(?:^|[;&|(])\\s*(?:env\\s+)?git"
+# Command-position prefixes that do not change WHICH program runs. Shell
+# parity: this is CMD_PFX from the shell header, same alternation in the
+# same order - `env`/`sudo` with their own flags, the transparent commands
+# and keywords, a brace group, a redirection, and VAR=value runs.
+#
+# [round-2 review F-401] The redirection / brace / keyword arms are new on
+# BOTH substrates: `>/dev/null pip install evil`, `time pip install evil`,
+# `{ pip install evil; }` and `if true; then pip install evil; fi` all
+# evaded the anchor with one token.
+_CMD_PFX_RE = (r"(?:(?:env|sudo)(?:\\s+-\\S+)*\\s+"
+               r"|(?:nohup|time|watch|command|exec|builtin|then|else|do"
+               r"|elif)\\s+"
+               r"|[{]\\s+"
+               r"|[0-9]*[<>]+\\s*\\S+\\s+"
+               r"|[A-Za-z_]\\w*=\\S*\\s+)*")
+# [round-2 review F-381] RE-SYNCED to the shell's cmd_has_verb. The shell
+# was rewritten at v2.6.2 - newline as a command separator, sudo/VAR=/path
+# prefixes - and this template was left at the v2.6.0 form, so the SDK
+# ALLOWED what the shell blocked across test-gate, spec-gate-commit and
+# eval-gate: `git add -A` + newline + `git commit`, `sudo git commit`,
+# `FOO=1 git commit`, `/usr/bin/git commit`, `env GIT_AUTHOR=x git commit`.
+# That is the direction this module's binding rule forbids, and `git show
+# 4cc9742` proves the two anchors AGREED at the parent - the divergence was
+# created by the batch that rewrote one side. The differential's verb corpus
+# was entirely single-line and unprefixed, which is why 107/107 held over
+# it; batch 1 added those shapes before this fix landed.
+_GIT_VERB_TMPL = (r"(?:^|[;&|()`\\n])\\s*" + _CMD_PFX_RE + r"(?:\\S*/)?git"
                   r"(?:\\s+-[Cc]\\s+\\S+|\\s+-\\S+)*\\s+%s(?:\\s|$)")
 
 
@@ -475,9 +513,10 @@ _TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
           r"|composer|mix|rebar3|gleam|go|deno")
 _VERBS = r"install|i|add|get|require|get-deps|deps\\.get"
 # Command-position prefixes that do not change WHICH program runs, so the
-# install verb is still the verb: `env`/`sudo` with their own flags, and one
-# or more VAR=value assignment runs. Shell parity (the shell gate's PFX).
-_PREFIX = r"(?:(?:env|sudo)(?:\\s+-\\S+)*\\s+|[A-Za-z_]\\w*=\\S*\\s+)*"
+# install verb is still the verb. Shell parity (the shell gate's PFX) - the
+# same _CMD_PFX_RE the git-verb anchor uses, so the two anchors cannot drift
+# apart again the way F-381 let them.
+_PREFIX = _CMD_PFX_RE
 # An install invocation at the START of a segment - not merely present
 # somewhere in it. The tool may carry a path (`/usr/bin/pip install`);
 # `python -m pip install` and `uv pip install` are spelled out because the
@@ -632,7 +671,14 @@ def _scan_install_line(line, approved):
     # the verdict the OR over segments fixes both and is what a deny-list
     # wants. Shell parity.
     blocked = ""
-    for seg in _SEGMENT.split(norm):
+    # [round-2 review F-435 / F-401] Quote-aware, and a backtick separates.
+    # The old `_SEGMENT.split` was a bare regex over the raw string, so it
+    # broke a quoted argument into segments - `git commit -m "fix; npm
+    # install evil"` denied on this substrate while the shell (now) allows
+    # it, because that install does not run - and it did not treat a
+    # backtick substitution as a command position, so `` echo `pip install
+    # leftpad` `` was allowed while `echo $(pip install leftpad)` was denied.
+    for seg in _shell_segments(norm, _CMD_OPS):
         seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
         m = _INSTALL_HEAD.match(seg)
         if not m:

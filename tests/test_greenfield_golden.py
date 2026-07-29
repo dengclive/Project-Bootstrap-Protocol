@@ -646,8 +646,57 @@ EXPECTED_DIGESTS = {
     # `ssh h "git commit -m '.env'"` over-matches. Over-match on a command
     # that runs a shell remotely is the cheap direction; the prose case is
     # the frequent one and is protected. docs/deferred-backlog.md J-15.
+    #
+    # [freeze-exception no. 22 - round-2 review batch 2b, the shared
+    # segmenter, 2026-07-29] Source: the same round-2 review. THIRTEEN
+    # emitted files move - all twelve hooks plus sdk_gates/gates.py - because
+    # the change is in the shared _HOOK_HEADER. Verified by parent-vs-head
+    # install against 9952741, not asserted: NO settings.json, no steering
+    # doc, no skill, command or agent body, no CLAUDE.md, no frozen twin,
+    # action counts unchanged at 57/69/59. This is the wide-blast-radius
+    # kind of exception, taken deliberately in ONE batch for the same reason
+    # no. 19 was: F-401 and F-435 both live in the header, so splitting them
+    # would burn two exceptions over the same bytes.
+    #
+    #   1. cmd_segments is QUOTE-AWARE [F-435]. It was not, and the same
+    #      property was fail-CLOSED for dependency-gate (backlog J-7,
+    #      accepted and written down) and fail-OPEN for cmd_has_verb (never
+    #      written down): a separator inside a quoted `git -c` option value
+    #      tore the option run in half, so `git -c user.email="$(id -un)@h.com"
+    #      commit` left the verb off command position and test-gate,
+    #      spec-gate-commit and ci-mirror all exited 0. Only one half of one
+    #      property had been recorded.
+    #      This RETIRES J-7 rather than trading it: a `;` inside a quoted
+    #      argument is not a separator to the shell either, so
+    #      `git commit -m "fix; npm install evil"` correctly reaches
+    #      dependency-gate as one segment. Hiding an install inside quotes
+    #      does not run it; the unquoted spelling still blocks. Walked
+    #      run-at-a-time, not character-at-a-time - a per-character bash loop
+    #      is O(n^2) under substring expansion, and F-937 is what that costs.
+    #   2. CMD_PFX widened [F-401]. `>/dev/null pip install evil`,
+    #      `2>/dev/null …`, `time …`, `nohup …`, `{ pip install evil; }` and
+    #      `if true; then pip install evil; fi` each evaded the anchor with
+    #      ONE token while a bare `pip install evil` was denied. A
+    #      redirection, a brace group and a shell keyword do not change WHICH
+    #      program runs, so they join env/sudo as prefixes rather than
+    #      becoming new segment types. A backtick DOES run its contents and
+    #      is now a separator, closing the asymmetry where
+    #      `echo $(pip install leftpad)` blocked and the backtick spelling
+    #      did not.
+    #   3. sdk_gates/gates.py re-synced [F-381]. The shell's cmd_has_verb was
+    #      rewritten at v2.6.2 and _GIT_VERB_TMPL was left at the v2.6.0
+    #      form, so the SDK allowed what the shell blocked on five command
+    #      shapes across three gates. `git show 4cc9742` proves the anchors
+    #      AGREED at the parent - the divergence was created by the batch
+    #      that rewrote one side. The verb anchor and the install anchor now
+    #      share one _CMD_PFX_RE so they cannot drift apart that way again,
+    #      and dependency-gate's segmentation moved off a bare regex onto the
+    #      same quote-aware walk.
+    #
+    # NO PROTOCOL_VERSION BUMP - same reasoning as no. 18/20/21: 2.6.0 is
+    # unreleased, v2.5.0 remains the only tag.
     "default":
-        "03767cfd2ea09244c3de5ac317e819d395924b6834d57aa95b8d682be478399f",
+        "b403ff6cd89e70f9535ec96ffd5bcb2294b9dd4e01f1b2dadf064c0c2a215f9a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -711,7 +760,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "743a650577f3c8711302f69afaae64a197b3ec36faa5e4bfa66dda4d4d7cca1c",
+        "9bb30ff4164249c9026efc65f54efed326d161420db41113ab390830b5e6c44e",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -780,7 +829,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "7807d807130a89fc524d3637303692799411b07d6b8e73b9e200dbc5f175dc0d",
+        "9c8c5c3c3010b0e35d7702cf8e0c6d9dfd6c6b52b46db081b833bbe06c5528ec",
 }
 
 EXPECTED_ACTION_COUNTS = {

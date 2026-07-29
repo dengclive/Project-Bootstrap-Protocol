@@ -398,20 +398,63 @@ norm_cmd(){
 # command can begin (newline, ; & | and parens), whitespace-normalized,
 # padded, with any trailing `#` comment removed. This is the single
 # segmentation mechanism in the suite - dependency-gate consumes it too.
+#
+# [round-2 review F-435] It is QUOTE-AWARE. It was not, and the same
+# property was fail-CLOSED for dependency-gate (backlog J-7, accepted) and
+# fail-OPEN here: a separator inside a quoted `git -c` option value tore the
+# option run in half, so `git -c user.email="$(id -un)@h.com" commit` left
+# the verb off command position and test-gate, spec-gate-commit and
+# ci-mirror all exited 0. Only the fail-closed half was ever written down.
+#
+# Quote-awareness is the correct model, not a relaxation: a `;` inside a
+# quoted argument is not a command separator to the shell either, so
+# `git commit -m "fix; npm install evil"` SHOULD reach dependency-gate as
+# one segment. Hiding an install inside quotes does not run it. J-7's
+# over-match is therefore retired rather than traded away.
+_CS_BT='`'
+_CS_BUF=""
+_cs_ops(){                      # operator -> segment break, UNQUOTED text only
+  local _t="$1"
+  _t="${_t//;/$'\\n'}"; _t="${_t//&/$'\\n'}"; _t="${_t//|/$'\\n'}"
+  _t="${_t//"("/$'\\n'}"; _t="${_t//")"/$'\\n'}"
+  # A backtick substitution runs its contents, so it opens a command
+  # position. Without this `echo `pip install leftpad`` was allowed while
+  # the identical `echo $(pip install leftpad)` was blocked - the `()` half
+  # had been closed and the backtick half had not.
+  _t="${_t//$_CS_BT/$'\\n'}"
+  _CS_BUF="$_CS_BUF$_t"
+  return 0
+}
 cmd_segments(){
-  local _s _seg
+  local _s _seg _pre _q _rest _run _pd _ps
   _s="$(norm_cmd "${1:-}")"
-  _s="${_s//;/$'\\n'}"
-  _s="${_s//&/$'\\n'}"
-  _s="${_s//|/$'\\n'}"
-  _s="${_s//"("/$'\\n'}"
-  _s="${_s//")"/$'\\n'}"
+  _CS_BUF=""
+  # Walk quoted runs the way secrets-gate's _sg_scan does, translating
+  # operators in the UNQUOTED stretches only. Run-at-a-time, not
+  # character-at-a-time: a per-character loop is O(n^2) under bash's
+  # substring expansion, and F-937 is what that costs on a large command.
+  while : ; do
+    case "$_s" in *[\\"\\']*) ;; *) _cs_ops "$_s"; break ;; esac
+    _pd="${_s%%\\"*}"; _ps="${_s%%\\'*}"
+    if [ "${#_pd}" -le "${#_ps}" ]; then _q='"'; _pre="$_pd"
+    else _q="'"; _pre="$_ps"; fi
+    _cs_ops "$_pre"
+    _rest="${_s#*"$_q"}"
+    case "$_rest" in
+      *"$_q"*) _run="${_rest%%"$_q"*}"; _s="${_rest#*"$_q"}" ;;
+      *)       _run="$_rest"; _s="" ;;   # unterminated quote: take the rest
+    esac
+    # The quote characters are kept, so a consumer's option-run regex still
+    # sees a single token where the shell saw one.
+    _CS_BUF="$_CS_BUF$_q$_run$_q"
+    if [ -z "$_s" ]; then break; fi
+  done
   while IFS= read -r _seg; do
     _seg="${_seg%% \\#*}"
     _seg="${_seg# }"; _seg="${_seg% }"
     [ -z "$_seg" ] && continue
     printf ' %s \\n' "$_seg"
-  done <<< "$_s"
+  done <<< "$_CS_BUF"
   return 0
 }
 
@@ -419,7 +462,17 @@ cmd_segments(){
 # `sudo` with their own flags, and one or more VAR=value assignment runs. The
 # v2.6.0 anchor admitted only a literal `env `, so `env GIT_AUTHOR=x git
 # commit` and `sudo git commit` fell outside it.
-CMD_PFX='((env|sudo)( +-[^ ]+)* +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
+#
+# [round-2 review F-401] Widened again. Every one of these was a one-token
+# evasion of the command-position anchor, confirmed against dependency-gate
+# with an unapproved package: `>/dev/null pip install evil`,
+# `2>/dev/null pip install evil`, `time pip install evil`,
+# `nohup pip install evil`, `{ pip install evil; }` and
+# `if true; then pip install evil; fi` all exited 0 while a bare
+# `pip install evil` exited 2. A redirection, a brace group and a shell
+# keyword do not change WHICH program runs, so they belong here with `env`
+# and `sudo` rather than being new segment types.
+CMD_PFX='((env|sudo)( +-[^ ]+)* +|(nohup|time|watch|command|exec|builtin|then|else|do|elif) +|[{] +|[0-9]*[<>]+ *[^ ]+ +|[A-Za-z_][A-Za-z0-9_]*=[^ ]* +)*'
 
 # cmd_has_verb "<normalized cmd>" "<tool regex>" "<subcommand regex>"
 # True if the command invokes `<tool> <subcommand>` at a command position.
