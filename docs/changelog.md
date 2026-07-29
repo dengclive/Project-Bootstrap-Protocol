@@ -1,10 +1,57 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — five checks asserted a property of the developer's machine (2026-07-29)
+
+The second of the two causes behind the red CI below, and the one that kept it
+red after the first was fixed.
+
+`_runtime_floor_check` (AC-9-4) writes to stderr when the Claude Code CLI is
+absent from PATH or below `RUNTIME_FLOOR`. That is deliberate, and its
+docstring says so: *"Never fatal … but never silent either."* It is a property
+of the **machine**, not of the install.
+
+Five assertions spelled the enforcement contract as `stderr == ""`. On a
+developer box with the CLI on PATH that holds. On a CI runner, which has no
+Claude Code CLI, the installer correctly emits its advisory and all five fail.
+The suite was asserting "this machine has the CLI installed" without meaning
+to.
+
+Fixed in the tests, not the installer: silencing a deliberate safety advisory
+to make a test pass would be the wrong direction, and adding an opt-out
+env var would put a switch on exactly the warning that is documented never to
+be silent. A `stderr_sans_floor()` helper drops lines beginning
+`WARNING: Claude Code ` and asserts on the remainder — which is what these
+checks always meant: *the installer reported nothing of its own.*
+
+The helper is deliberately narrow, and that is verified rather than asserted:
+with the escape defect below restored, these five checks still **fail**, so
+the filter cannot mask the class of bug it sits next to.
+
+### Why this took two rounds to see
+
+The two causes were invisible in different ways, and both hid behind the same
+green local run:
+
+* `bin/run-tests` sets `PYTHONDONTWRITEBYTECODE=1` so suites cannot litter the
+  tree. That stops a `.pyc` being *written*, but an existing one is still
+  *read* — so a working checkout, which has `lib/__pycache__` from any earlier
+  direct `python3` run, never recompiles the template and never sees its
+  warning. A fresh CI checkout has no cache and, with writes disabled, never
+  gains one, so **every** subprocess compiles and warns.
+* The floor advisory needs the Claude Code CLI *absent*, which never happens on
+  the machine the tests were written on.
+
+Reproducing CI locally therefore needs both: `__pycache__` removed **and**
+`claude` off PATH. Under those two conditions the suite now reports 20 suites,
+1816 checks, 0 failed; reverting either fix alone puts it back to 7 and 5
+failures respectively.
+
 ## 2.6.0 in-version fix — the SDK template warned on every fresh checkout (2026-07-29)
 
 CI had been red on every commit of this branch, on five assertions all reading
-*"… writes nothing to stderr"*. The cause was a real defect, and the reason it
-went unnoticed is worth recording.
+*"… writes nothing to stderr"*. This was **one of two independent causes** —
+the second is the entry above, and fixing this one alone left CI red. Both were
+real, and the reason this one went unnoticed is worth recording.
 
 `lib/sdk_gates_template.py` carries the whole SDK gate module inside two
 **non-raw** `'''…'''` strings. A bare `\S` in the template body is therefore an

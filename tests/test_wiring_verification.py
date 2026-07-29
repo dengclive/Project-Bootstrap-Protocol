@@ -84,6 +84,25 @@ def install(root, cfg_text=SERVICE, argv=()):
                           capture_output=True, text=True)
 
 
+def stderr_sans_floor(text):
+    """stderr with the AC-9-4 runtime-floor advisory removed.
+
+    `_runtime_floor_check` writes to stderr when the Claude Code CLI is absent
+    from PATH or below RUNTIME_FLOOR. That is deliberate and documented as
+    "never silent" - it is a property of the MACHINE, not of the install, and
+    it fires on any box without the CLI.
+
+    The assertions below were written on a developer machine that has the CLI,
+    so `stderr == ""` held there and failed on every CI run, which has no CLI.
+    Five commits shipped with a red suite because the failure looked
+    environmental and the message named a real advisory. Strip the advisory
+    and assert on the remainder, which is what these checks always meant: the
+    INSTALLER reported nothing of its own.
+    """
+    return "\n".join(ln for ln in text.splitlines()
+                     if not ln.startswith("WARNING: Claude Code ")).strip()
+
+
 def plan_for(cfg_text=SERVICE):
     from defaults import resolve_config
     from installer import build_plan
@@ -104,7 +123,7 @@ try:
     check("clean greenfield install still exits 0", r.returncode == 0,
           f"rc={r.returncode} stderr={r.stderr[-300:]}")
     check("clean greenfield install writes nothing to stderr",
-          r.stderr == "", repr(r.stderr[-300:]))
+          stderr_sans_floor(r.stderr) == "", repr(r.stderr[-300:]))
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 
@@ -120,7 +139,7 @@ try:
     check("a mergeable pre-existing settings.json exits 0",
           r.returncode == 0, f"rc={r.returncode} stderr={r.stderr[-300:]}")
     check("a mergeable pre-existing settings.json writes nothing to stderr",
-          r.stderr == "", repr(r.stderr[-300:]))
+          stderr_sans_floor(r.stderr) == "", repr(r.stderr[-300:]))
     check("enforcement is verifiably present after the merge",
           verify_wiring(Path(_d), plan_for()) == [],
           str(verify_wiring(Path(_d), plan_for())))
@@ -150,7 +169,8 @@ try:
     r2 = install(_d, argv=("--force",))
     check("--force restores enforcement and exits 0", r2.returncode == 0,
           f"rc={r2.returncode} stderr={r2.stderr[-300:]}")
-    check("--force run writes nothing to stderr", r2.stderr == "")
+    check("--force run writes nothing to stderr",
+          stderr_sans_floor(r2.stderr) == "", repr(r2.stderr[-300:]))
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 
@@ -163,7 +183,8 @@ try:
     r = install(_d, argv=("--dry-run",))
     check("--dry-run over an unenforced tree still exits 0",
           r.returncode == 0, f"rc={r.returncode}")
-    check("--dry-run writes nothing to stderr", r.stderr == "")
+    check("--dry-run writes nothing to stderr",
+          stderr_sans_floor(r.stderr) == "", repr(r.stderr[-300:]))
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 

@@ -85,6 +85,20 @@ def seed(root, settings):
                  else json.dumps(settings, indent=2) + "\n")
 
 
+def stderr_sans_floor(text):
+    """stderr with the AC-9-4 runtime-floor advisory removed.
+
+    `_runtime_floor_check` writes to stderr when the Claude Code CLI is absent
+    from PATH or below RUNTIME_FLOOR - deliberately, and documented as "never
+    silent". It is a property of the MACHINE, not of the install, so a bare
+    `stderr == ""` holds on a developer box with the CLI and fails on CI,
+    which has none. Assert on what is left, which is what this check always
+    meant: the INSTALLER reported nothing of its own.
+    """
+    return "\n".join(ln for ln in text.splitlines()
+                     if not ln.startswith("WARNING: Claude Code ")).strip()
+
+
 def read(root):
     with open(os.path.join(root, ".claude", "settings.json")) as fh:
         return json.load(fh)
@@ -374,7 +388,8 @@ try:
     check("the run says where the backup is",
           BACKUP_DIR in r.stdout and "displaced" in r.stdout,
           r.stdout[-400:])
-    check("--force still writes nothing to stderr", r.stderr == "")
+    check("--force still writes nothing to stderr",
+          stderr_sans_floor(r.stderr) == "", repr(r.stderr[-300:]))
     check("the forced write actually took effect",
           "hooks" in read(_d))
 finally:
