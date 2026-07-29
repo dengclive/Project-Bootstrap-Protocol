@@ -1,5 +1,152 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — the merge claimed content it did not add (2026-07-29)
+
+*(Amended to fold in the two owner decisions, F5 and F6 — see below.)*
+
+Round-6 review of the co-owned `settings.json` merge found four defects, three
+of them the same shape as the four that preceded them: *the code that exists
+to stop the installer destroying operator content, destroying operator
+content.* All four were found by executing shapes, none by reading.
+
+The root cause of the first two is one sentence: **ownership was recorded as
+what the installer EMITS, not as what the run actually ADDED.** Anything the
+operator had written first and we happened to emit too was adopted, and then
+retired on their behalf.
+
+* **A deny rule we both carry was treated as ours.** `Read(.env*)` is a rule
+  a security-conscious operator writes themselves — and one `never_read_paths`
+  emits. Recording it as ours deleted it twice over: once at `--uninstall`,
+  and once on any re-apply that narrowed `never_read_paths`, at rc=0 beneath a
+  line reading "operator settings untouched". `_merge_settings` now reports
+  only rules *not already in their file*, and leaves their rules in their
+  original positions so the round trip returns the list unchanged. The same
+  defect applied to the keys we own outright: an operator's own `$schema`
+  (or `_generatedBy`, or `_note_mcp`) was overwritten at install and **deleted**
+  at uninstall. Their values are now recorded in the manifest as
+  `displaced_keys` and handed back. Where there is no record to carry — a
+  manifest lost with a fresh clone, or one written before this key existed —
+  the value is re-derived from a file that already holds ours, so a key equal
+  to our own emission is deliberately *not* claimed: taking it at face value
+  left `_generatedBy: bootstrap-installer` in the operator's file after an
+  uninstall that claimed to remove everything it created. The residual runs
+  the other way and is far smaller — an operator whose `$schema` is
+  byte-identical to ours loses that one key.
+
+* **Hook ownership was per COMMAND; it is now per SITE.** An operator may
+  deliberately widen one of our gates by registering our script at an event or
+  matcher we do not emit — `secrets-gate.sh` under `SessionStart`, or under
+  `PreToolUse`/`WebFetch`. Command-keyed ownership dropped every registration
+  of our scripts anywhere in the file and re-added them only where we emit, so
+  that widening vanished silently: rc=0, empty stderr, and `verify_wiring`
+  structurally could not see it (the command was still registered *somewhere*).
+  `owned_hooks` now records `[event, matcher, command]` triples. The old
+  bare-command shape is still read: such an entry is retired only when the
+  emission no longer carries that command at all, since its file is being
+  deleted and a surviving registration would dangle at rc=127.
+
+* **`verify_wiring` cried wolf on healthy installs.** A hook `command` is a
+  shell command line, not a path. `$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh
+  --fix` — an ordinary operator registration, script present and executable —
+  was resolved to the path `".claude/hooks/fmt.sh --fix"`, found absent, and
+  reported as a dangling reference. Every install on such a project exited 3
+  with "Do not treat it as installed", and `plugin/commands/bootstrap-apply.md`
+  acts on that exit code, so the operator was told a good install had failed.
+  The exit code this change added is only worth having if it is quiet when
+  nothing is wrong. Commands are now tokenised **the way the shell tokenises
+  them** and only the first token resolves; a genuinely missing script is
+  still reported, now named by path rather than by command line. `shlex.split`
+  alone was not enough — it does not terminate a word at `;`, `|`, `&&` or a
+  redirection, so `hook.sh; echo done` still resolved to a non-existent
+  `hook.sh;`, and turning on `punctuation_chars` to fix that moves the same
+  false alarm to `#`, which `shlex` reads as a comment and `sh` does not.
+  Both settings, verified token-for-token against `sh` across nine forms.
+
+* **Every refusal blamed `permissions`.** Three of the four unmergeable shapes
+  were misdiagnosed, two of them naming a key the operator's file did not
+  contain. `_settings_unmergeable_reason` now returns the actual cause and the
+  type it found. This matters more than a wording nit: the only remedy the
+  message offers is `--force`, which replaces the whole file.
+
+**What the tests could not see, and why.** Every operator fixture in
+`test_settings_merge.py` was chosen *disjoint* from what the installer emits —
+deny rules like `Bash(rm:*)` that we never produce, hook commands like `mine`
+that name no script of ours. The check literally named *"the operator's own
+deny rule is untouched"* passed because its rule was one we never emit. Three
+live defects lived in the overlap, invisible to a suite that never created
+one. There is now a section that only creates overlaps.
+
+**Blast radius.** `_merge_hooks`, `_merge_settings`, `_uninstall_settings_merge`,
+`verify_wiring` and the decline path; `build_plan` untouched, so a fresh
+install is still byte-identical to `f1ed58c` (verified by `diff -r` of both
+trees, not by trusting the golden suite). 20 suites, **1731 → 1756 checks**,
+0 failed; corpus HOLD 275 · LIVE 0 · OPEN 4 · REGRESSION 0 · SKIP 3.
+
+### The two owner decisions, now made
+
+Round-6 left two findings open because they needed a decision rather than a
+patch. Both are decided and implemented here.
+
+**F5 — a symlinked `settings.json` is declined, not resolved.** It used to be
+replaced by a regular file, orphaning whatever it pointed at. Writing *through*
+the link was the obvious alternative and is worse: a `settings.json` shared
+between projects would gain `$CLAUDE_PROJECT_DIR/...` hook commands that
+resolve per-project, so every *other* project sharing that file would run
+scripts it does not have and get `rc=127` on every matching tool call. Neither
+outcome is the installer's to choose, so it declines, names the link target in
+the SKIP line, and exits 3. `--force` remains the way through and still writes
+a backup of the content.
+
+**F6 — `--adopt`, plus a diagnosis that does not overclaim.** The manifest is
+gitignored, so a clone carries every file this installer wrote and no record
+that it wrote them. Every one then reads as the operator's, and a config change
+made the skip permanent at rc=3 with `--force` — whose warning says it destroys
+what you put there — the only way out. Two changes:
+
+* `--adopt` records files at planned paths as installer-owned and **writes
+  nothing**. The operator uses it to say "these are an earlier install's
+  artifacts, not my work"; the next ordinary run sees a matching digest and
+  updates them normally. It is refused alongside `--force`, since they mean
+  opposite things and silently letting one win is how you end up with the
+  destructive one.
+* A skip on a tree with **no manifest at all** no longer claims the file is
+  "pre-existing and not installer-generated" — that is an authorship claim the
+  installer cannot support, and it is exactly wrong in the clone case. It now
+  says what is known. The old wording is still used where a manifest exists and
+  simply does not list the path, which is the one case that justifies it.
+
+Committing the manifest would fix the root cause and was rejected: it is in the
+plan, so it moves every golden digest and triggers the `GOLDEN_UPDATE=1`
+re-baseline plus a freeze exception, and it carries a timestamp, so it would
+churn on every install and conflict in teams.
+
+### Two ambiguities, resolved in opposite directions on purpose
+
+When a rule or a key is in the operator's file and we emit it too, there is no
+fact that says whose it is. The two cases are resolved the opposite way, and
+the reason is the harm, not the logic:
+
+* **A deny rule already in their file is THEIRS** — so uninstall leaves it.
+  Deleting an operator's `Read(.env*)` is the defect above; a deny rule left
+  behind is restrictive and safe. The cost is paid on manifest loss: with no
+  record, every rule reads as pre-existing, so `owned_deny` is empty and
+  `--uninstall` leaves all twelve of ours in place. Residue, in the safe
+  direction, and visible.
+* **An owned KEY holding exactly our value is OURS** — so uninstall removes
+  it. `_generatedBy: bootstrap-installer` left in an operator's settings.json
+  is unambiguous installer residue and makes `--uninstall` dishonest, which
+  outweighs the narrow case of an operator whose `$schema` is byte-identical
+  to ours.
+
+### Known, unfixed
+
+A merged `settings.json` is rewritten through `json.dumps(indent=2)`, so an
+operator's own indentation is normalised and non-ASCII values are re-escaped
+(`bär` → `bär`). The result is JSON-equivalent and no content is lost —
+the round trip is exact when parsed — but it is not byte-for-byte for a file
+whose formatting differed. At `f1ed58c` the file was skipped and never
+reformatted, so this is new; it is cosmetic, and left as an owner decision.
+
 ## 2.6.0 in-version fix — `--force` is recoverable (2026-07-29)
 
 `--force` is the documented escape hatch and the emitted SKIP line points

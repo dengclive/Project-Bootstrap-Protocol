@@ -306,6 +306,61 @@ _own = {"hooks": {"PreToolUse": [{"hooks": [
 check("commands outside $CLAUDE_PROJECT_DIR are not flagged as missing",
       wiring(_own) == [], str(wiring(_own)))
 
+# Round-6 F3. A hook `command` is a SHELL COMMAND LINE, not a path. Taking the
+# whole string as one reported a healthy install as unenforced and exited 3 -
+# and plugin/commands/bootstrap-apply.md acts on that exit code, so operators
+# were told a good install had failed. The detector is only worth having if it
+# is quiet when nothing is wrong.
+def _beside_ours(command):
+    """Our own registration, plus one of the operator's alongside it - the
+    shape a real merged settings.json has."""
+    merged = json.loads(json.dumps(GOOD))
+    merged["hooks"]["PostToolUse"] = [{"matcher": "Write", "hooks": [
+        {"type": "command", "command": command}]}]
+    return merged
+
+
+_BOTH = (HOOK, ".claude/hooks/fmt.sh")
+_argv = _beside_ours("$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh --fix")
+check("an operator hook that takes ARGUMENTS is not a false alarm",
+      wiring(_argv, hooks=_BOTH) == [], str(wiring(_argv, hooks=_BOTH)))
+
+_quoted = _beside_ours("$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh 'a b.txt'")
+check("quoted arguments resolve to the same path",
+      wiring(_quoted, hooks=_BOTH) == [], str(wiring(_quoted, hooks=_BOTH)))
+
+# ...and the detector must still fire when the script really is missing.
+_gone = _beside_ours("$CLAUDE_PROJECT_DIR/.claude/hooks/gone.sh --fix")
+_p = wiring(_gone)
+check("a missing script is still reported when the command has arguments",
+      any("not on disk" in p for p in _p), str(_p))
+check("and it is named by PATH, without the arguments",
+      any(".claude/hooks/gone.sh," in p for p in _p), str(_p))
+
+# The resolver must tokenise the way the SHELL does, not the way shlex.split
+# does. Each of these runs a script that exists; resolving the whole word (or
+# stopping at the wrong character) reports a healthy tree as broken.
+for _label, _suffix in (
+        ("semicolon", "; echo done"),
+        ("and-list", " && echo done"),
+        ("pipeline", " | tee log"),
+        ("redirect", " 2>/dev/null"),
+        ("hash in the filename", "#x"),
+        ("plain argument", " --fix"),
+        ("quoted argument", " 'a b.txt'")):
+    _name = ".claude/hooks/fmt.sh" + ("#x" if "hash" in _label else "")
+    _cmd = "$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh" + _suffix
+    _s = _beside_ours(_cmd)
+    check(f"resolver follows the shell: {_label}",
+          wiring(_s, hooks=(HOOK, _name)) == [],
+          str(wiring(_s, hooks=(HOOK, _name))))
+
+check("an unparseable command line is left alone, not reported",
+      wiring({"hooks": {"Stop": [{"hooks": [
+          {"type": "command",
+           "command": '$CLAUDE_PROJECT_DIR/x.sh "unbalanced'}]}]}},
+             plan=[]) == [])
+
 # Malformed nesting must degrade to "nothing registered", never raise.
 for label, shape in (
         ("hooks is a list", {"hooks": []}),

@@ -265,8 +265,11 @@ try:
     # Without it the first merge afterwards has no record of which
     # registrations were ours, so a hook dropped from the plan stays
     # registered forever while the same run deletes the file it names.
+    # owned_hooks entries are SITES - [event, matcher, command] - not bare
+    # commands; see _hook_sites (round-6 F2).
     check("a wholesale write still records owned_hooks / owned_deny",
-          any("secrets-gate.sh" in c for c in _entry.get("owned_hooks", []))
+          any("secrets-gate.sh" in site[2]
+              for site in _entry.get("owned_hooks", []))
           and any(r.startswith("Read(") for r in _entry.get("owned_deny", [])),
           json.dumps({k: _entry.get(k)
                       for k in ("owned_hooks", "owned_deny")})[:300])
@@ -294,7 +297,7 @@ OURS_H = {"PreToolUse": [{"matcher": "Bash", "hooks": [
 
 _m, _own = _merge_hooks(OURS_H, {}, [])
 check("_merge_hooks on an empty operator map yields ours",
-      _m == OURS_H and _own == ["ours-a"])
+      _m == OURS_H and _own == [["PreToolUse", "Bash", "ours-a"]], str(_own))
 
 _theirs = {"PreToolUse": [{"matcher": "Bash", "hooks": [
     {"type": "command", "command": "theirs"}]}]}
@@ -330,7 +333,8 @@ check("_merge_settings keeps operator keys and unions deny",
       and _merged["permissions"]["deny"] == ["Bash(rm:*)", "Read(.env*)"],
       json.dumps(_merged))
 check("_merge_settings reports what it contributed",
-      _d1 == ["Read(.env*)"] and _h1 == ["ours-a"])
+      _d1 == ["Read(.env*)"]
+      and _h1 == [["PreToolUse", "Bash", "ours-a"]], f"{_d1} {_h1}")
 
 _gone, _, _ = _merge_settings(
     {}, {"permissions": {"deny": ["Read(*.pem)"]}}, ["Read(*.pem)"], [])
@@ -485,6 +489,247 @@ check("_is_operator_content: our own untouched file is NOT theirs",
 check("_is_operator_content: a co-owned entry (no whole-file digest) is theirs",
       _is_operator_content({"state": "settings-merged",
                             "block_digest": "b"}, "d"))
+
+# =========================================================================== #
+# Round-6 regressions: operator content that OVERLAPS ours
+# =========================================================================== #
+# Every fixture above this point picks operator content DISJOINT from what the
+# installer emits - deny rules like `Bash(rm:*)` that we never produce, hook
+# commands like `mine` that name no script of ours. Three live defects lived
+# in the overlap, invisible to a suite that never creates one. These tests
+# exist to keep that overlap covered.
+print("\n-- operator content that collides with ours is still THEIRS --")
+
+# F1. A rule we emit is one a security-conscious operator writes themselves.
+# Recording it as ours meant deleting it on their behalf: once at --uninstall,
+# and once on any re-apply that narrowed never_read_paths - rc=0, under a line
+# reading "operator settings untouched".
+NARROW = SERVICE.replace('[".env*", "secrets/**", "*.pem"]', '["secrets/**"]')
+_d = tempfile.mkdtemp()
+try:
+    theirs = {"permissions": {"deny": ["Read(.env*)", "Read(vault/**)"]}}
+    seed(_d, theirs)
+    install(_d)
+    deny = read(_d)["permissions"]["deny"]
+    check("their rule that we also emit survives the merge",
+          "Read(.env*)" in deny, str(deny))
+    check("and keeps its position, ahead of everything we added",
+          deny[:2] == ["Read(.env*)", "Read(vault/**)"], str(deny))
+
+    install(_d, cfg_text=NARROW)          # .env* no longer configured
+    deny = read(_d)["permissions"]["deny"]
+    check("re-applying a narrowed config does not delete their rule",
+          "Read(.env*)" in deny, str(deny))
+    check("but does retire the ones we really did contribute",
+          "Edit(.env*)" not in deny and "Write(.env*)" not in deny, str(deny))
+
+    uninstall(_d)
+    check("uninstall hands back a colliding deny rule, not a subset of it",
+          read(_d) == theirs, json.dumps(read(_d)))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# F1, second key. The keys we own OUTRIGHT are ones an operator may already
+# have set - `$schema` most of all. Overwriting is fine; deleting on the way
+# out is not.
+_d = tempfile.mkdtemp()
+try:
+    theirs = {"$schema": "https://example.com/team.schema.json",
+              "model": "opus"}
+    seed(_d, theirs)
+    install(_d)
+    check("we take over $schema while installed",
+          read(_d)["$schema"].startswith("https://json.schemastore.org/"))
+    uninstall(_d)
+    check("uninstall RESTORES their $schema rather than deleting it",
+          read(_d) == theirs, json.dumps(read(_d)))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# ...and the mirror of it. When there is no record to carry - a manifest lost
+# with a fresh clone, or one written before displaced_keys existed - the
+# operator's values are re-derived from a file that ALREADY HOLDS OURS. Taking
+# that at face value leaves `_generatedBy: bootstrap-installer` sitting in
+# their settings.json after an uninstall that claimed to remove everything it
+# created.
+_d = tempfile.mkdtemp()
+try:
+    seed(_d, {"model": "opus"})
+    install(_d)
+    os.remove(os.path.join(_d, ".claude", ".installer-manifest.json"))
+    install(_d)                       # re-derives with no record to carry
+    uninstall(_d)
+    left = read(_d)
+    check("uninstall leaves none of OUR owned keys behind",
+          not any(k in left for k in _SETTINGS_OWNED_KEYS), json.dumps(left))
+    check("and still keeps the operator's own keys",
+          left.get("model") == "opus", json.dumps(left))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# F2. Ownership of a hook is per SITE, not per command. An operator may
+# deliberately widen one of our gates by registering our script at an event or
+# matcher we do not emit; command-keyed ownership deleted that silently.
+_d = tempfile.mkdtemp()
+try:
+    ours_cmd = "$CLAUDE_PROJECT_DIR/.claude/hooks/secrets-gate.sh"
+    theirs = {"hooks": {
+        "PreToolUse": [{"matcher": "WebFetch", "hooks": [
+            {"type": "command", "command": ours_cmd}]}],
+        "SessionStart": [{"hooks": [
+            {"type": "command", "command": ours_cmd}]}]}}
+    seed(_d, theirs)
+    r = install(_d)
+    got = read(_d)
+    matchers = [g.get("matcher") for g in got["hooks"]["PreToolUse"]]
+    check("their registration of OUR script at their own event survives",
+          got["hooks"].get("SessionStart") == theirs["hooks"]["SessionStart"],
+          json.dumps(got["hooks"].get("SessionStart")))
+    check("and at their own matcher under an event we do emit",
+          "WebFetch" in matchers, str(matchers))
+    check("while ours is still registered where we put it",
+          "Bash" in matchers and ours_cmd in commands_in(got), str(matchers))
+    check("a merge that preserves their sites still exits 0",
+          r.returncode == 0, r.stderr[-300:])
+
+    uninstall(_d)
+    check("uninstall retires only our site and hands their file back",
+          read(_d) == theirs, json.dumps(read(_d)))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# F4. Every refusal used to be reported as a `permissions` problem, including
+# for files carrying no `permissions` key at all. The only remedy the message
+# offers is --force, which replaces the whole file, so a misdirected diagnosis
+# costs the operator real content.
+# The manifest is a file on the operator's disk. A record that does not
+# describe a site we recognise must degrade to "we own nothing there", never
+# abort the install: an unhashable matcher raised TypeError out of apply_plan
+# and left the tree half-written.
+_d = tempfile.mkdtemp()
+try:
+    seed(_d, {"model": "opus"})
+    install(_d)
+    _mf = os.path.join(_d, ".claude", ".installer-manifest.json")
+    with open(_mf) as fh:
+        _m = json.load(fh)
+    for _f in _m["files"]:
+        if _f["path"].endswith("settings.json"):
+            _f["owned_hooks"] = [["PreToolUse", [], "x"], 7, ["a", "b"],
+                                 ["PreToolUse", None, "keep-me"]]
+    with open(_mf, "w") as fh:
+        json.dump(_m, fh)
+    _r = install(_d)
+    check("a hand-edited owned_hooks record does not abort the install",
+          _r.returncode == 0, _r.stderr[-300:])
+    check("and the tree still enforces afterwards",
+          "ERROR" not in _r.stderr, _r.stderr[-200:])
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# [round-6 F5] A symlinked settings.json gets neither guess. Replacing it
+# orphans its target; writing THROUGH it would put `$CLAUDE_PROJECT_DIR/...`
+# hook commands into a file other projects share, where they resolve
+# per-project and exit 127 on every matching call.
+print("\n-- a symlinked settings.json is declined, not resolved --")
+_d = tempfile.mkdtemp()
+_ext = tempfile.mkdtemp()
+try:
+    _shared = os.path.join(_ext, "team.json")
+    with open(_shared, "w") as fh:
+        fh.write('{"model":"opus","permissions":{"deny":["Read(x/**)"]}}\n')
+    _before = open(_shared).read()
+    os.makedirs(os.path.join(_d, ".claude"), exist_ok=True)
+    os.symlink(_shared, os.path.join(_d, ".claude", "settings.json"))
+    _r = install(_d)
+    _link = os.path.join(_d, ".claude", "settings.json")
+    check("a symlinked settings.json is declined, not written",
+          os.path.islink(_link), _r.stdout[-300:])
+    check("the SKIP names the link target",
+          _shared in _r.stdout, _r.stdout[-300:])
+    check("the file behind the link is untouched",
+          open(_shared).read() == _before)
+    check("and the run reports itself unenforced", _r.returncode == 3,
+          f"rc={_r.returncode}")
+    _rf = install(_d, argv=("--force",))
+    check("--force is still the documented way through",
+          not os.path.islink(_link) and _rf.returncode == 0,
+          _rf.stdout[-200:])
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+    shutil.rmtree(_ext, ignore_errors=True)
+
+
+# [round-6 F6] The manifest is gitignored, so a clone carries the whole tree
+# and none of its provenance. Every file this installer wrote then reads as
+# the operator's, and a config change makes the skip permanent at rc=3 with
+# --force -- whose warning says it destroys what you put there -- the only way
+# out. --adopt is the non-destructive one.
+print("\n-- --adopt breaks a manifest-less tree out of a permanent rc=3 --")
+# The transition has to actually CHANGE a security-critical file, or there is
+# nothing for the manifest's absence to misjudge. eval_gate moves gates.py.
+_HOOKS_ON = SERVICE + "hooks: {cost_log: true, eval_gate: true}\n"
+_HOOKS_OFF = SERVICE + "hooks: {cost_log: false, eval_gate: false}\n"
+_d = tempfile.mkdtemp()
+try:
+    install(_d, cfg_text=_HOOKS_ON)
+    _gates = os.path.join(_d, ".claude", "sdk_gates", "gates.py")
+    _stale = open(_gates).read()
+    os.remove(os.path.join(_d, ".claude", ".installer-manifest.json"))
+
+    _r = install(_d, cfg_text=_HOOKS_OFF)
+    check("with no manifest, a security-critical file is skipped at rc=3",
+          _r.returncode == 3, f"rc={_r.returncode}")
+    check("the reason does not claim the file is the operator's work",
+          "no installer manifest" in _r.stdout, _r.stdout[-400:])
+    check("and stderr offers --adopt, not only --force",
+          "--adopt" in _r.stderr, _r.stderr[-300:])
+
+    _a = install(_d, cfg_text=_HOOKS_OFF, argv=("--adopt",))
+    check("--adopt exits 0", _a.returncode == 0, _a.stderr[-300:])
+    check("--adopt writes NOTHING at the adopted path",
+          open(_gates).read() == _stale)
+    check("--adopt says what it did", "ADOPT" in _a.stdout, _a.stdout[-300:])
+
+    _b = install(_d, cfg_text=_HOOKS_OFF)
+    check("the ordinary re-run afterwards exits 0", _b.returncode == 0,
+          _b.stderr[-300:])
+    check("and brings the adopted file up to date",
+          open(_gates).read() != _stale)
+    check("the tree is no longer stuck",
+          install(_d, cfg_text=_HOOKS_OFF).returncode == 0)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = tempfile.mkdtemp()
+try:
+    seed(_d, {"model": "opus"})
+    _x = install(_d, argv=("--force", "--adopt"))
+    check("--force and --adopt together is refused, not silently ordered",
+          _x.returncode == 2 and "mutually exclusive" in _x.stderr,
+          f"rc={_x.returncode} {_x.stderr[-200:]}")
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+
+print("\n-- a refusal names the key that actually caused it --")
+for _shape, _want in (
+        ({"permissions": "bad"}, "`permissions` key"),
+        ({"permissions": {"deny": "Read(x)"}}, "`permissions.deny`"),
+        ({"hooks": "nope"}, "`hooks` key"),
+        ({"hooks": {"PreToolUse": {"a": 1}}}, "`hooks.PreToolUse`")):
+    _d = tempfile.mkdtemp()
+    try:
+        seed(_d, _shape)
+        _r = install(_d)
+        _line = next((ln for ln in _r.stdout.splitlines()
+                      if "SKIP" in ln and "settings.json" in ln), "")
+        check(f"decline names {_want}", _want in _line,
+              _line or _r.stdout[-200:])
+        check(f"decline for {_want} still exits 3", _r.returncode == 3)
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

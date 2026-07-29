@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import os
+import shlex
 import stat
 import sys
 from datetime import datetime, timezone
@@ -681,6 +682,25 @@ def _save_forced_copy(bak_root: Path, root: Path, rel: str, text: str,
     return str(dest.relative_to(root))
 
 
+def _skip_reason(untracked: bool, no_manifest: bool) -> str:
+    """Why a planned path was left alone — said accurately.
+
+    [round-6 F6] "pre-existing and not installer-generated" is a claim about
+    provenance, and on a tree with NO manifest at all the installer has no
+    basis for it: the manifest is gitignored, so a fresh clone carries every
+    file this installer wrote and no record that it wrote them. Telling the
+    operator their stale artifact is content they authored is what made
+    `--force` — whose warning says it destroys what you put there — read as
+    the wrong move when it was the only one on offer.
+    """
+    if not untracked:
+        return "locally modified"
+    if no_manifest:
+        return ("this tree has no installer manifest, so this run cannot "
+                "tell your work from an earlier install's")
+    return "pre-existing and not installer-generated"
+
+
 def _classify(root: Path, action: dict) -> str:
     target = root / action["path"]
     if not target.exists():
@@ -691,7 +711,7 @@ def _classify(root: Path, action: dict) -> str:
 
 
 def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
-               dry: bool, force: bool) -> dict:
+               dry: bool, force: bool, adopt: bool = False) -> dict:
     manifest = {
         "installer_version": INSTALLER_VERSION,
         "protocol_version": PROTOCOL_VERSION,
@@ -700,6 +720,12 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     }
     summary = {"create": 0, "update": 0, "unchanged": 0, "skipped": 0,
                "removed": 0,
+               # [round-6 F6] Files --adopt claimed without writing.
+               "adopted": 0,
+               # Whether this tree had NO manifest at all, which changes what
+               # a skip is allowed to claim about provenance (_skip_reason)
+               # and which remedy the run should point at.
+               "no_manifest": False,
                # Paths whose tier is security-critical and which this run
                # DECLINED to write. `_hook_tier` already computes that tier
                # and the manifest already records it; before this key existed
@@ -710,6 +736,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                "backups": []}
 
     prev = _load_manifest(root)
+    summary["no_manifest"] = prev is None
     prev_files = {f["path"]: f for f in prev.get("files", [])} if prev else {}
     planned_paths = {a["path"] for a in plan}
     bak_root = _backup_root(root, manifest)
@@ -728,6 +755,8 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         if action["kind"] == "settings":
             _apply_settings_json(root, action, manifest, summary, prev_files,
                                  bak_root, dry=dry, force=force)
+            # settings.json is co-owned, so it MERGES rather than skipping and
+            # never reaches the state --adopt exists to break out of.
             continue
 
         verdict = _classify(root, action)
@@ -768,10 +797,28 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                                               disk_text, dry=dry)
                     summary["backups"].append(saved)
                     note = f"  (forced; previous version saved to {saved})"
+                elif adopt:
+                    # [round-6 F6] The non-destructive escape. The manifest is
+                    # gitignored, so a clone carries the whole tree and none
+                    # of its provenance; every file this installer wrote then
+                    # reads as the operator's, and a config change makes the
+                    # skip permanent at rc=3 with --force the only way out -
+                    # while --force's own warning tells them they are
+                    # destroying work that, here, is a stale artifact of an
+                    # earlier install. --adopt lets them say so. It records
+                    # the file as ours and WRITES NOTHING; the next ordinary
+                    # run sees a matching digest and updates it normally.
+                    summary["adopted"] += 1
+                    print(f"  ADOPT  {action['path']}  (recorded as "
+                          f"installer-owned; nothing written)")
+                    manifest["files"].append(
+                        {"path": action["path"], "digest": on_disk,
+                         "mode": oct(action["mode"]), "kind": action["kind"],
+                         "tier": _hook_tier(action)})
+                    continue
                 else:
                     summary["skipped"] += 1
-                    reason = ("pre-existing and not installer-generated"
-                              if untracked else "locally modified")
+                    reason = _skip_reason(untracked, prev is None)
                     print(f"  SKIP   {action['path']}  ({reason}; "
                           f"use --force to overwrite)")
                     tier = _hook_tier(action)
@@ -871,11 +918,17 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
 #
 # `hooks` and `permissions.deny` are deliberately NOT here. Both are shared:
 # an operator may register hooks of their own and write deny rules of their
-# own, so we contribute ENTRIES to each and own only the entries we
-# contributed - tracked per-install in the manifest (`owned_hooks`,
-# `owned_deny`) so a later run can retire ours without touching theirs.
+# own, so we contribute ENTRIES to each and own only what we actually ADDED -
+# tracked per-install in the manifest (`owned_hooks`, `owned_deny`,
+# `displaced_keys`) so a later run can retire ours without touching theirs.
 # Owning `hooks` wholesale would silently delete an operator's own hook, which
 # is the same class of harm this whole change exists to remove.
+#
+# Two corrections from round 6, both of that same class: ownership of a hook
+# is per SITE (event, matcher, command), because the operator may register one
+# of our scripts somewhere we do not; and a deny rule or owned key the
+# operator wrote FIRST is never claimed, because claiming it meant deleting it
+# later on their behalf.
 #
 # tests/test_wiring_verification.py asserts that every top-level key our own
 # emission produces is claimed here or is one of the two shared keys, so a key
@@ -885,48 +938,103 @@ _SETTINGS_OWNED_KEYS = ("$schema", "_generatedBy", "_note_mcp")
 _SETTINGS_SHARED_KEYS = ("hooks", "permissions")
 
 
-def _settings_mergeable(theirs: dict) -> bool:
-    """Can the operator's settings.json accept our entries without guessing?
+def _settings_unmergeable_reason(theirs: dict) -> str | None:
+    """Why the operator's settings.json cannot accept our entries, or None if
+    it can.
 
     We refuse exactly the shapes where merging would mean destroying or
     inventing meaning for operator content: a `permissions` that is not an
-    object, a `hooks` that is not an object, or an event whose value is not a
-    list of groups. Declining and saying so beats either alternative.
+    object, a `permissions.deny` that is not a list, a `hooks` that is not an
+    object, or an event whose value is not a list of groups. Declining and
+    saying so beats either alternative.
+
+    The REASON is returned rather than a bool because every refusal used to be
+    reported as a `permissions` problem - including files carrying no
+    `permissions` key at all (round-6 F4). A misdirected diagnosis costs real
+    work here: the only remedy the message offers is --force, which replaces
+    the whole file.
     """
     perms = theirs.get("permissions")
-    if perms is not None:
-        if not isinstance(perms, dict):
-            return False
+    if perms is not None and not isinstance(perms, dict):
+        return (f"existing settings.json has a `permissions` key that is a "
+                f"{type(perms).__name__}, not an object")
+    if isinstance(perms, dict):
         # `deny` is the one key we WRITE INTO. A non-list there cannot be
         # unioned, and coercing it to [] would silently delete an operator's
         # rule - the exact failure this whole change exists to remove, so it
         # is a refusal, not a coercion.
         deny = perms.get("deny")
         if deny is not None and not isinstance(deny, list):
-            return False
+            return (f"existing settings.json has a `permissions.deny` that is "
+                    f"a {type(deny).__name__}, not a list")
     hooks = theirs.get("hooks")
     if hooks is None:
-        return True
+        return None
     if not isinstance(hooks, dict):
-        return False
-    return all(isinstance(groups, list) for groups in hooks.values())
+        return (f"existing settings.json has a `hooks` key that is a "
+                f"{type(hooks).__name__}, not an object")
+    for event, groups in hooks.items():
+        if not isinstance(groups, list):
+            return (f"existing settings.json has `hooks.{event}` as a "
+                    f"{type(groups).__name__}, not a list of hook groups")
+    return None
 
 
-def _hook_commands(hooks: dict) -> list[str]:
-    """Every `command` string in a well-formed `hooks` mapping (ours)."""
-    out: list[str] = []
-    for groups in hooks.values():
+def _settings_mergeable(theirs: dict) -> bool:
+    """Can the operator's settings.json accept our entries without guessing?"""
+    return _settings_unmergeable_reason(theirs) is None
+
+
+def _hook_sites(hooks: dict) -> list[list]:
+    """Every registration SITE in a well-formed `hooks` mapping (ours), as
+    `[event, matcher, command]`. A missing `matcher` key reads as None, which
+    is how our own no-matcher groups are emitted.
+
+    Ownership is per SITE, not per command. The same script may legitimately
+    be registered by US under the matcher we emit AND by the OPERATOR under
+    one we do not - keying on the command alone deleted the operator's
+    registration of our own `secrets-gate.sh` under `SessionStart` and under
+    `PreToolUse`/`WebFetch`, at rc=0, beneath a line reading "operator
+    settings untouched" (round-6 F2). Lists rather than tuples because this
+    round-trips through the manifest as JSON.
+    """
+    out: list[list] = []
+    for event, groups in hooks.items():
         for grp in groups:
+            matcher = grp.get("matcher")
             for entry in grp.get("hooks", []):
                 cmd = entry.get("command")
                 if isinstance(cmd, str):
-                    out.append(cmd)
+                    out.append([event, matcher, cmd])
     return out
+
+
+def _split_owned_hooks(prev_owned: list) -> tuple[set, set]:
+    """Read a manifest `owned_hooks` in either shape: the site triples this
+    version records, or the bare command strings written before ownership
+    became site-keyed. Returns (sites, legacy commands).
+
+    The manifest is a file on the operator's disk and may have been
+    hand-edited, so every element is type-checked before it reaches a set: a
+    record carrying an unhashable matcher used to raise TypeError out of
+    `apply_plan` and abort the install mid-tree. A record that does not
+    describe a site we could recognise is ignored, which degrades to "we own
+    nothing there" - the same conservative direction as a missing manifest.
+    """
+    sites, legacy = set(), set()
+    for item in prev_owned or []:
+        if isinstance(item, str):
+            legacy.add(item)
+        elif (isinstance(item, (list, tuple)) and len(item) == 3
+                and isinstance(item[0], str) and isinstance(item[2], str)
+                and (item[1] is None or isinstance(item[1], str))):
+            sites.add(tuple(item))
+    return sites, legacy
 
 
 def _settings_contribution(ours: dict) -> tuple[list, list]:
     """What this emission contributes to a co-owned settings.json:
-    (deny rules, hook commands).
+    (deny rules, hook registration sites).
 
     Recorded in the manifest on EVERY write path, including the wholesale
     one. Without it, the first merge after a wholesale write has no record of
@@ -935,20 +1043,68 @@ def _settings_contribution(ours: dict) -> tuple[list, list]:
     file the same run deletes.
     """
     deny = list((ours.get("permissions") or {}).get("deny") or [])
-    return deny, _hook_commands(ours.get("hooks") or {})
+    return deny, _hook_sites(ours.get("hooks") or {})
+
+
+def _displaced_owned_keys(ours: dict, theirs: dict,
+                          known: dict | None) -> dict:
+    """The operator's values for the top-level keys we take over, recorded so
+    `--uninstall` hands them back instead of deleting them.
+
+    Decided ONCE, on the first merge, and carried forward unchanged after
+    that: on every later run `theirs` already holds OUR value, so re-deriving
+    it unconditionally would record our own emission as the operator's. A file
+    that was ours wholesale (it carries a whole-file digest) displaced nothing.
+
+    Where there is no record to carry - a manifest written before this key
+    existed, or one lost with a fresh clone - the value is derived, but only
+    for keys NOT already holding exactly what we emit. A key equal to our own
+    output is indistinguishable from our previous write, and claiming it would
+    leave `_generatedBy: bootstrap-installer` sitting in the operator's file
+    after `--uninstall`. The residual runs the other way and is far smaller:
+    an operator whose `$schema` is byte-identical to ours loses that one key.
+
+    Without any of this, an operator's own `$schema` - and `_generatedBy`, and
+    `_note_mcp` - was overwritten at install and DELETED at uninstall rather
+    than restored (round-6 F1, second manifestation).
+    """
+    if known is not None:
+        if "displaced_keys" in known:
+            return dict(known["displaced_keys"] or {})
+        if known.get("digest") is not None:
+            return {}
+    return {k: theirs[k] for k in _SETTINGS_OWNED_KEYS
+            if k in theirs and theirs[k] != ours.get(k)}
 
 
 def _merge_hooks(ours: dict, theirs: dict,
                  prev_owned: list) -> tuple[dict, list]:
-    """Merge hook registrations by COMMAND identity rather than by replacing
-    the `hooks` key. Returns (merged, the commands this run contributed).
+    """Merge hook registrations by SITE identity - (event, matcher, command) -
+    rather than by replacing the `hooks` key. Returns (merged, the sites this
+    run contributed).
 
     Groups and entries we cannot parse are passed through untouched: an
     operator's malformed-to-us registration is still theirs, and dropping it
     would be the data loss this function exists to avoid.
+
+    Keying on the COMMAND alone was round-6 F2: it dropped every registration
+    of our scripts anywhere in the file and re-added them only at the sites we
+    emit, so an operator who had deliberately widened one of our gates lost
+    that widening silently. Residual, and narrow: a registration the operator
+    wrote at exactly the site we emit is indistinguishable from ours and is
+    still treated as ours.
     """
-    ours_cmds = _hook_commands(ours)
-    drop = set(prev_owned) | set(ours_cmds)
+    ours_sites = _hook_sites(ours)
+    prev_sites, legacy_cmds = _split_owned_hooks(prev_owned)
+    ours_cmds = {c for _, _, c in ours_sites}
+    drop_sites = prev_sites | {tuple(s) for s in ours_sites}
+    # A manifest written before ownership became site-keyed names a bare
+    # command and cannot say where we put it. Retire one only when our
+    # emission no longer carries it at all - its file is deleted this run, so
+    # a surviving registration would dangle at rc=127. While we still emit it,
+    # site matching covers our own copy and a registration anywhere else is
+    # the operator's.
+    drop_cmds = {c for c in legacy_cmds if c not in ours_cmds}
 
     merged: dict = {}
     for event, groups in theirs.items():
@@ -958,8 +1114,12 @@ def _merge_hooks(ours: dict, theirs: dict,
                     or not isinstance(grp.get("hooks"), list):
                 kept_groups.append(grp)            # opaque; leave it alone
                 continue
+            matcher = grp.get("matcher")
             kept = [e for e in grp["hooks"]
-                    if not (isinstance(e, dict) and e.get("command") in drop)]
+                    if not (isinstance(e, dict)
+                            and ((event, matcher, e.get("command"))
+                                 in drop_sites
+                                 or e.get("command") in drop_cmds))]
             if kept:
                 kept_groups.append(dict(grp, hooks=kept))
         if kept_groups:
@@ -976,13 +1136,13 @@ def _merge_hooks(ours: dict, theirs: dict,
                 bucket.append(dict(grp, hooks=list(grp["hooks"])))
             else:
                 match["hooks"].extend(grp["hooks"])
-    return merged, ours_cmds
+    return merged, ours_sites
 
 
 def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
                     prev_owned_hooks: list) -> tuple[dict, list, list]:
     """Overlay the installer's contribution onto the operator's `theirs`.
-    Returns (merged, deny rules contributed, hook commands contributed).
+    Returns (merged, deny rules ADDED by this run, hook sites contributed).
 
     Ordering is chosen for IDEMPOTENCE: keys already present keep their
     position (dict assignment does not move them) and ours append only when
@@ -996,6 +1156,10 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
     absent (a fresh clone) `prev_owned_deny` is empty and the union simply
     keeps everything - the degradation is a stale, visible deny rule, never a
     missing one.
+
+    What is reported as CONTRIBUTED excludes anything already in their file:
+    ownership is what this run ADDED, not what it emitted, so a rule or a
+    registration the operator wrote first is never retired on our behalf.
     """
     merged = dict(theirs)
     for key in _SETTINGS_OWNED_KEYS:
@@ -1021,10 +1185,21 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
     new_perms = dict(their_perms) if isinstance(their_perms, dict) else {}
     their_deny = new_perms.get("deny")
     their_deny = their_deny if isinstance(their_deny, list) else []
-    kept = [r for r in their_deny
-            if r not in prev_owned_deny and r not in ours_deny]
 
-    deny = kept + ours_deny
+    # Rules we contributed on a PREVIOUS run are ours to retire. Everything
+    # else already in their list is THEIRS - including rules this emission
+    # happens to produce as well. Claiming those was round-6 F1: an operator's
+    # own `Read(.env*)` was recorded as ours and then deleted, both by
+    # --uninstall and by the next run that narrowed never_read_paths, at rc=0
+    # beneath "operator settings untouched".
+    theirs_own = [r for r in their_deny if r not in prev_owned_deny]
+    owned_deny = [r for r in ours_deny if r not in theirs_own]
+
+    # Their rules keep their positions and ours append after: a rule we both
+    # carry stays where THEY put it, so an install followed by an uninstall
+    # returns the file byte-for-byte rather than merely set-equal. In the
+    # no-collision case this is the same list the union always produced.
+    deny = theirs_own + owned_deny
     if deny:
         new_perms["deny"] = deny
     else:
@@ -1033,7 +1208,7 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
         merged["permissions"] = new_perms
     else:
         merged.pop("permissions", None)
-    return merged, ours_deny, owned_hooks
+    return merged, owned_deny, owned_hooks
 
 
 def _apply_settings_json(root: Path, action: dict, manifest: dict,
@@ -1087,6 +1262,35 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         "tier": TIER_SECURITY,
     }
 
+    def _decline(why: str, digest: str) -> None:
+        summary["skipped"] += 1
+        print(f"  SKIP   {action['path']}  ({why}; use --force to overwrite)")
+        summary["skipped_security"].append(
+            {"path": action["path"], "reason": why})
+        manifest["files"].append(
+            {"path": action["path"], "digest": digest,
+             "state": "skipped-local-edit", "kind": action["kind"],
+             "tier": TIER_SECURITY})
+
+    # [round-6 F5] A symlinked settings.json has no good automatic answer, so
+    # it gets neither guess. Replacing it (what this did) destroys the link
+    # and orphans its target. Writing THROUGH it is worse: a settings.json
+    # shared between projects would gain `$CLAUDE_PROJECT_DIR/...` hook
+    # commands that resolve per-project, so every OTHER project sharing that
+    # file runs scripts it does not have and gets rc=127 on every matching
+    # tool call. Decline, name the target, and let the operator choose.
+    # Checked before `exists()`, which follows the link.
+    if target.is_symlink() and not force:
+        try:
+            here = _digest(target.read_text())
+        except OSError:                      # dangling link; nothing to hash
+            here = ""
+        _decline(f"existing settings.json is a symlink to "
+                 f"{os.readlink(target)}, which this installer will neither "
+                 f"orphan nor edit on behalf of every project sharing it",
+                 here)
+        return
+
     if not target.exists():
         summary["create"] += 1
         print(f"  CREATE {action['path']}")
@@ -1120,28 +1324,19 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         manifest["files"].append(tracked)
         return
 
-    def _decline(why: str) -> None:
-        summary["skipped"] += 1
-        print(f"  SKIP   {action['path']}  ({why}; use --force to overwrite)")
-        summary["skipped_security"].append(
-            {"path": action["path"], "reason": why})
-        manifest["files"].append(
-            {"path": action["path"], "digest": _digest(text),
-             "state": "skipped-local-edit", "kind": action["kind"],
-             "tier": TIER_SECURITY})
-
     try:
         theirs = json.loads(text)
     except ValueError as exc:
-        _decline(f"existing settings.json is not valid JSON ({exc})")
+        _decline(f"existing settings.json is not valid JSON ({exc})",
+                 _digest(text))
         return
     if not isinstance(theirs, dict):
         _decline(f"existing settings.json is a {type(theirs).__name__}, "
-                 f"not an object")
+                 f"not an object", _digest(text))
         return
-    if not _settings_mergeable(theirs):
-        _decline("existing settings.json has a `permissions` key that is "
-                 "not an object")
+    why = _settings_unmergeable_reason(theirs)
+    if why is not None:
+        _decline(why, _digest(text))
         return
 
     merged, owned_deny, owned_hooks = _merge_settings(
@@ -1157,6 +1352,9 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         "block_digest": _digest(body),
         "owned_deny": owned_deny,
         "owned_hooks": owned_hooks,
+        # Their values for the keys we take over outright, so uninstall can
+        # give them back rather than delete them.
+        "displaced_keys": _displaced_owned_keys(ours, theirs, known),
         "tier": TIER_SECURITY,
     }
     if new_text == text:
@@ -1173,7 +1371,7 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
 
 
 def _uninstall_settings_merge(root: Path, entry: dict) -> str:
-    """Reverse a merged settings.json: drop our keys and our deny rules,
+    """Reverse a merged settings.json: retire what this installer ADDED and
     keep everything the operator put there. -> "removed" | "stripped" |
     "kept". Removing the file only when nothing of theirs is left is what
     keeps `--uninstall` honest for a co-owned file; leaving our `hooks` key
@@ -1186,12 +1384,19 @@ def _uninstall_settings_merge(root: Path, entry: dict) -> str:
     if not isinstance(cur, dict):
         return "kept"
 
+    # Keys we took over go BACK to the operator's value where they had one,
+    # and are removed only where they did not. Assigning an existing key does
+    # not move it, so their file keeps its ordering.
+    displaced = entry.get("displaced_keys") or {}
     for key in _SETTINGS_OWNED_KEYS:
-        cur.pop(key, None)
+        if key in displaced:
+            cur[key] = displaced[key]
+        else:
+            cur.pop(key, None)
 
-    owned_cmds = set(entry.get("owned_hooks") or [])
+    owned_sites, legacy_cmds = _split_owned_hooks(entry.get("owned_hooks"))
     hooks = cur.get("hooks")
-    if owned_cmds and isinstance(hooks, dict):
+    if (owned_sites or legacy_cmds) and isinstance(hooks, dict):
         stripped: dict = {}
         for event, groups in hooks.items():
             if not isinstance(groups, list):
@@ -1203,9 +1408,12 @@ def _uninstall_settings_merge(root: Path, entry: dict) -> str:
                         or not isinstance(grp.get("hooks"), list):
                     kept_groups.append(grp)
                     continue
+                matcher = grp.get("matcher")
                 kept = [e for e in grp["hooks"]
                         if not (isinstance(e, dict)
-                                and e.get("command") in owned_cmds)]
+                                and ((event, matcher, e.get("command"))
+                                     in owned_sites
+                                     or e.get("command") in legacy_cmds))]
                 if kept:
                     kept_groups.append(dict(grp, hooks=kept))
             if kept_groups:
@@ -1237,6 +1445,39 @@ def _uninstall_settings_merge(root: Path, entry: dict) -> str:
 # Post-install wiring verification
 # --------------------------------------------------------------------------- #
 _CPD_PREFIX = "$CLAUDE_PROJECT_DIR/"
+
+
+def _resolved_hook_path(command: str) -> str | None:
+    """The project-relative path a hook command RUNS, or None when it does not
+    name one we can resolve.
+
+    A hook `command` is a SHELL COMMAND LINE, not a path: an operator's
+    `$CLAUDE_PROJECT_DIR/.claude/hooks/fmt.sh --fix` runs a script that is
+    right there on disk. Treating the whole string as a path reported a
+    perfectly healthy install as unenforced and exited 3 (round-6 F3) - the
+    cry-wolf failure, and `plugin/commands/bootstrap-apply.md` acts on that
+    exit code, so the operator was told an install had failed when it had
+    not. Only `$CLAUDE_PROJECT_DIR/…` resolves; anything else is the
+    operator's business and is left alone rather than guessed at.
+
+    Tokenised the way the shell would, which `shlex.split` alone does NOT do:
+    `punctuation_chars` makes `;`, `|`, `&&` and redirections terminate a
+    word, so `hook.sh; echo done` resolves to `hook.sh` rather than to a
+    non-existent `hook.sh;`. `commenters` is cleared because `shlex` treats
+    `#` as starting a comment while `sh` treats it as an ordinary character
+    mid-word - enabling `punctuation_chars` without it merely moves the false
+    alarm from `;` to `#`. Both verified token-for-token against `sh`.
+    """
+    lex = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    try:
+        argv = list(lex)
+    except ValueError:              # unbalanced quoting; theirs, and opaque
+        return None
+    if not argv or not argv[0].startswith(_CPD_PREFIX):
+        return None
+    return argv[0][len(_CPD_PREFIX):]
 
 
 def _registered_commands(settings: dict) -> list[str]:
@@ -1317,8 +1558,9 @@ def verify_wiring(root: Path, plan: list[dict]) -> list[str]:
             f"object; no hook can be registered in it.")
         return problems
 
-    registered = {c[len(_CPD_PREFIX):] for c in _registered_commands(settings)
-                  if c.startswith(_CPD_PREFIX)}
+    registered = {p for p in map(_resolved_hook_path,
+                                 _registered_commands(settings))
+                  if p is not None}
 
     for hook_path in planned_hooks:
         if hook_path not in registered:
@@ -1894,6 +2136,13 @@ def main(argv: list[str]) -> int:
                     help="Show the plan; write nothing.")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite files even if locally modified.")
+    ap.add_argument("--adopt", action="store_true",
+                    help="Record files at planned paths as installer-owned "
+                         "WITHOUT writing them. For a tree whose manifest "
+                         "is gone (it is gitignored, so a fresh clone has "
+                         "none) and whose files are an earlier install's "
+                         "artifacts rather than your work. Nothing is "
+                         "overwritten; re-run normally afterwards.")
     ap.add_argument("--uninstall", action="store_true",
                     help="Remove everything the installer created.")
     ap.add_argument("--print-config", action="store_true",
@@ -1906,6 +2155,16 @@ def main(argv: list[str]) -> int:
     args = ap.parse_args(argv)
 
     root = Path(args.dir).resolve()
+
+    # They mean opposite things - "overwrite what is there" versus "keep what
+    # is there and claim it" - so a run asking for both is a mistake, and
+    # silently letting one win is how an operator ends up with the
+    # destructive one.
+    if args.force and args.adopt:
+        print("--force and --adopt are mutually exclusive: --force "
+              "overwrites what is on disk, --adopt keeps it and records it "
+              "as ours.", file=sys.stderr)
+        return 2
 
     if args.ic_checks:
         import ic_checks
@@ -1974,10 +2233,15 @@ def main(argv: list[str]) -> int:
     print(f"{'DRY RUN - ' if args.dry_run else ''}{len(plan)} files planned\n")
 
     summary = apply_plan(root, plan, cfg, dry=args.dry_run,
-                          force=args.force)
+                          force=args.force, adopt=args.adopt)
     print(f"\nDone. create={summary['create']} update={summary['update']} "
           f"unchanged={summary['unchanged']} skipped={summary['skipped']} "
-          f"removed={summary['removed']}")
+          f"removed={summary['removed']}"
+          + (f" adopted={summary['adopted']}" if summary["adopted"] else ""))
+    if summary["adopted"]:
+        print(f"\n--adopt recorded {summary['adopted']} file(s) as "
+              f"installer-owned and wrote none of them. Re-run without "
+              f"--adopt to bring them up to date.")
     if summary["backups"]:
         print(f"\n--force displaced {len(summary['backups'])} file(s) the "
               f"installer did not author. Previous versions:")
@@ -2007,6 +2271,16 @@ def main(argv: list[str]) -> int:
               "Reconcile them and re-run, or pass --force to overwrite "
               "(--force replaces the whole file, including anything you "
               "put there).", file=sys.stderr)
+        # [round-6 F6] Without this, --force is the only remedy on offer, and
+        # its warning describes destroying the operator's work - which on a
+        # manifest-less tree is very often not what those files are.
+        if summary["no_manifest"]:
+            print("This tree has NO installer manifest. It is gitignored, so "
+                  "a fresh clone carries every file this installer wrote and "
+                  "no record that it wrote them, which is why they read as "
+                  "yours. If they are an earlier install's artifacts rather "
+                  "than your work, `--adopt` records them as ours and writes "
+                  "nothing; re-run normally afterwards.", file=sys.stderr)
 
     problems = verify_wiring(root, plan)
     if problems:

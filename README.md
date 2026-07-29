@@ -149,14 +149,21 @@ bootstrap-installer/
   digests) and skipped, not clobbered. `--force` overrides, and copies
   anything it displaces to `.claude/.installer-backups/<run>/` first, naming
   the location in its output. A `--force` that destroys nothing writes no
-  backup and says nothing.
+  backup and says nothing. `--adopt` is the non-destructive counterpart: it
+  records files at planned paths as installer-owned and writes none of them,
+  for a tree whose manifest is gone (it is gitignored, so a fresh clone has
+  none) and whose files are an earlier install's artifacts rather than your
+  work. Re-run normally afterwards.
 - **Co-owned where it has to be** — the project-root `.gitignore` and
   `.claude/settings.json` are shared with you, so they are merged rather than
   skipped: the installer owns its managed block / its hook registrations and
   its `never_read_paths` deny rules, and leaves your `permissions.allow`,
   `model`, `env` and any hooks of your own untouched. Skipping `settings.json`
   wholesale would be silently catastrophic — it is the only registration site
-  for the shell gates, so a skip disabled all of them at once.
+  for the shell gates, so a skip disabled all of them at once. A *symlinked*
+  `settings.json` is declined rather than merged: replacing it would orphan
+  its target, and writing through it would push project-specific hook paths
+  into a file your other projects share.
 - **Reversible** — `--uninstall` removes exactly what it created, including
   un-registering its hooks from a co-owned `settings.json` while leaving the
   rest of that file alone.
