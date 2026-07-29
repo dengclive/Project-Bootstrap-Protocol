@@ -733,6 +733,12 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                # printed one SKIP line among ~60 on stdout and exited 0.
                "skipped_security": [],
                # Project-relative paths of operator content --force displaced.
+               # [round-7] Planned paths that were a SYMLINK and are now a
+               # regular file. A mid-transcript line is not a signal - a skip
+               # buried on stdout line 29 of 60 is exactly how the original
+               # unenforced-tree defect went unnoticed - so these are also
+               # summarised at the end of the run.
+               "symlinks_replaced": [],
                "backups": []}
 
     prev = _load_manifest(root)
@@ -834,6 +840,31 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         summary[verdict] += 1
         tag = {"create": "CREATE", "update": "UPDATE",
                "unchanged": "  ok  "}[verdict]
+
+        # [round-7] A planned path may be a SYMLINK the operator put there -
+        # steering docs or hooks kept in a shared dotfiles repo, say. The write
+        # below is `os.replace`, so it swaps the LINK for a regular file rather
+        # than writing through it: the link target keeps its bytes but silently
+        # stops being used, at rc=0, with no backup and no mention. Not writing
+        # through is the right half (it is what `settings.json` declines in
+        # order to avoid, one project's `$CLAUDE_PROJECT_DIR/...` reaching every
+        # project that shares the file). Saying nothing is the wrong half.
+        #
+        # Reported rather than declined: whether a symlink at a planned path
+        # should BLOCK the install is a per-kind judgement the owner has taken
+        # for `settings.json` only, and inventing it here for every path would
+        # decide it by drive-by. Announce it, record it, let them choose.
+        link_to = None
+        if verdict != "unchanged" and target.is_symlink():
+            link_to = os.readlink(target)
+            summary["symlinks_replaced"].append(
+                {"path": action["path"], "target": link_to})
+            note += (f"  ({'is' if dry else 'was'} a symlink to {link_to}; "
+                     f"{'would be' if dry else 'has been'} replaced by a "
+                     f"regular file, so that path "
+                     f"{'would no longer be' if dry else 'is no longer'} "
+                     f"used)")
+
         print(f"  {tag} {action['path']}{note}")
 
         if not dry and verdict != "unchanged":
@@ -847,13 +878,20 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             if stat.S_IMODE(target.stat().st_mode) != action["mode"]:
                 target.chmod(action["mode"])
 
-        manifest["files"].append({
+        row = {
             "path": action["path"],
             "digest": _digest(action["body"]),
             "mode": oct(action["mode"]),
             "kind": action["kind"],
             "tier": _hook_tier(action),
-        })
+        }
+        if link_to is not None:
+            # Recorded so the operator can find what the run displaced after
+            # the transcript is gone. `--uninstall` deletes the regular file we
+            # wrote and does NOT restore the link: re-linking is theirs to do,
+            # and this is the only place that still names the old target.
+            row["replaced_symlink"] = link_to
+        manifest["files"].append(row)
 
     # Stale-file cleanup: a re-apply whose plan no longer includes a path
     # this installer previously created removes it from disk (the retrofit
@@ -2348,6 +2386,22 @@ def main(argv: list[str]) -> int:
             print(f"  {saved}")
         print("Nothing else reads that directory; delete it when you are "
               "satisfied, or copy content back out of it.")
+    if summary["symlinks_replaced"]:
+        n = len(summary["symlinks_replaced"])
+        if args.dry_run:
+            print(f"\n{n} planned path(s) ARE SYMLINKS and would be replaced "
+                  f"by regular files. The link target would keep its own "
+                  f"content, but nothing would point at it any more:")
+        else:
+            print(f"\n{n} planned path(s) were SYMLINKS and are now regular "
+                  f"files. The link target still holds its own content, but "
+                  f"nothing points at it any more:")
+        for s in summary["symlinks_replaced"]:
+            print(f"  {s['path']}  ->  linked to {s['target']}")
+        print("If that link is deliberate - a shared dotfiles repo, say - "
+              "re-create it afterwards, or keep the file here and drop the "
+              "link. `--uninstall` removes what was written and does not "
+              "restore the link.")
 
     if args.dry_run:
         print("(dry run - no files written)")

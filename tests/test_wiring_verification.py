@@ -408,5 +408,97 @@ check("_registered_commands returns [] for a shapeless mapping",
 check("a plan carrying no hooks reports nothing",
       verify_wiring(Path(tempfile.gettempdir()), []) == [])
 
+# =========================================================================== #
+# A symlink at a planned path is destroyed LOUDLY, not silently
+# =========================================================================== #
+# The generic write path is `os.replace`, so it swaps the LINK for a regular
+# file rather than writing through it. Not writing through is the right half -
+# it is exactly what the settings.json decline exists to prevent. Doing it at
+# rc=0 with no backup and no mention was the wrong half: the operator's link
+# target keeps its bytes and silently stops being used.
+#
+# Reported, deliberately not declined: whether a symlink should BLOCK the
+# install is a per-kind owner judgement, taken so far for settings.json only.
+print("\n-- a replaced symlink is announced, recorded, and dry-run visible --")
+
+
+def _linked_tree(link_name="../../shared-product.md"):
+    """An installed tree whose product.md has been moved aside and symlinked
+    back - the shape an operator creates with a shared dotfiles repo."""
+    d = tempfile.mkdtemp()
+    install(d)
+    inner = os.path.join(d, ".claude", "steering", "product.md")
+    shared = os.path.join(d, "shared-product.md")
+    os.rename(inner, shared)
+    os.symlink(link_name, inner)
+    return d, inner, shared
+
+
+# The plan must actually CHANGE that file, or the run is `unchanged` and the
+# link is never touched - which is also the correct behaviour, pinned below.
+RENAMED = SERVICE.replace("name: demo", "name: renamed")
+
+_d, _inner, _shared = _linked_tree()
+try:
+    _before = open(_shared).read()
+    r = install(_d, cfg_text=RENAMED, argv=("--dry-run",))
+    check("--dry-run NAMES the symlink before anything is written",
+          "shared-product.md" in r.stdout and "SYMLINK" in r.stdout,
+          r.stdout[-400:])
+    check("--dry-run says WOULD be replaced, not was",
+          "would be replaced" in r.stdout and "are now regular" not in r.stdout,
+          r.stdout[-400:])
+    check("--dry-run leaves the link alone", os.path.islink(_inner))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d, _inner, _shared = _linked_tree()
+try:
+    _before = open(_shared).read()
+    r = install(_d, cfg_text=RENAMED)
+    check("a real run still exits 0", r.returncode == 0, r.stderr[-200:])
+    check("the replaced symlink is named on the per-file line",
+          "was a symlink to ../../shared-product.md" in r.stdout,
+          r.stdout[-400:])
+    check("and again in the end-of-run summary, not only mid-transcript",
+          "were SYMLINKS and are now regular files" in r.stdout,
+          r.stdout[-400:])
+    check("the link really is gone (behaviour unchanged, only the reporting)",
+          not os.path.islink(_inner) and os.path.isfile(_inner))
+    check("the link TARGET keeps its bytes - we never wrote through it",
+          open(_shared).read() == _before)
+    with open(os.path.join(_d, ".claude",
+                           ".installer-manifest.json")) as fh:
+        _rows = [f for f in json.load(fh)["files"]
+                 if f.get("replaced_symlink")]
+    check("the manifest records what was displaced, after the transcript "
+          "is gone",
+          len(_rows) == 1
+          and _rows[0]["path"] == ".claude/steering/product.md"
+          and _rows[0]["replaced_symlink"] == "../../shared-product.md",
+          str(_rows))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# An install that does not rewrite the file must not touch the link, and must
+# not cry wolf about one.
+_d, _inner, _shared = _linked_tree()
+try:
+    r = install(_d)                       # same config -> `ok`, no rewrite
+    check("an unchanged path leaves the symlink intact",
+          os.path.islink(_inner), r.stdout[-300:])
+    check("and says nothing about symlinks", "SYMLINK" not in r.stdout)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = tempfile.mkdtemp()
+try:
+    r = install(_d)
+    check("a tree with no symlinks gains no symlink noise at all",
+          "symlink" not in r.stdout.lower(), r.stdout[-200:])
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

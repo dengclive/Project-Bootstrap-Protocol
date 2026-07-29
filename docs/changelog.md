@@ -1,5 +1,51 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — a replaced symlink is now announced, not swallowed (2026-07-29)
+
+The inconsistency named as "not fixed" two entries below, closed on the half
+that was actually wrong.
+
+A planned path may be a symlink the operator put there — steering docs or hooks
+kept in a shared dotfiles repo. `settings.json` declines that at rc=3; every
+other planned path replaced it at rc=0 with no backup and no mention.
+
+**What the fix is not.** It does not extend the decline. Re-checking the
+round-6 F5 rationale against an execution shows its load-bearing half does not
+transfer: the decline exists because *writing through* a shared file would give
+every other project `$CLAUDE_PROJECT_DIR/...` commands it cannot run — and the
+generic path is `os.replace`, which swaps the **link** for a regular file and
+never writes through it. The link target keeps its bytes. So the shared-file
+harm is structurally absent there, and the only real defect was **silence**:
+the operator's target quietly stopped being used and nothing said so.
+
+**What changed** — reporting only, behaviour identical:
+
+* the per-file line names the link and its target;
+* an end-of-run block repeats it, because a line buried mid-transcript is not
+  a signal — a SKIP on stdout line 29 of 60 is precisely how the original
+  unenforced-tree defect went unnoticed;
+* `--dry-run` reports it in the **future** tense, before anything is written,
+  so the warning arrives while it is still actionable;
+* the manifest records `replaced_symlink`, so the displaced target is still
+  findable once the transcript is gone. `--uninstall` removes what was written
+  and does **not** re-create the link; that is stated in the message.
+
+A path the run does not rewrite is left alone and says nothing, and a tree with
+no symlinks gains no new output at all — both pinned, so this cannot become
+noise on ordinary installs.
+
+Whether a symlink should *block* an install is left open as
+`docs/deferred-backlog.md` **L-1**, deliberately: it is a per-kind judgement.
+A symlinked hook script has a real argument for declining; a symlinked steering
+doc mostly just blocks installs. Deciding it uniformly here would settle an
+owner question by drive-by — the specific criticism an earlier round already
+earned. **L-2** records the other honest gap: the legacy-manifest migration
+path was reasoned through and never executed.
+
+12 checks in `tests/test_wiring_verification.py`. No emitted body moves and no
+golden digest shifts — the change is confined to the transcript and the
+manifest.
+
 ## 2.6.0 in-version fix — five checks asserted a property of the developer's machine (2026-07-29)
 
 The second of the two causes behind the red CI below, and the one that kept it
