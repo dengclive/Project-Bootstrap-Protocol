@@ -59,7 +59,19 @@ _CTRL = frozenset(chr(c) for c in list(range(0, 32)) + [127])
 # the documented spellings - and so are the ordinary name characters
 # (. - _ / @ + = ~ : ^ ,). This is a deny list of the characters that change
 # what a shell DOES, kept narrow enough that no legitimate value trips it.
-_SHELL_META = frozenset("`$;&|<>()\"'\\!*?")  # noqa: P103 - see below
+#
+# `!` IS NOT HERE, and its absence is deliberate. The first cut of this list
+# included it and rejected two legitimate values:
+#   [!.]env      the POSIX/fnmatch negated class - and `_norm_pat` on the SDK
+#                side converts `[^` INTO `[!` precisely because fnmatch reads
+#                `[^` as a positive class containing `^`. So the fnmatch-native
+#                spelling of a pattern this suite already supports was refused.
+#   client!.key  `!` is a legal filename character.
+# It is also harmless: history expansion does not run in a non-interactive
+# shell, and nothing expands inside a QUOTED heredoc. Rejecting it bought
+# nothing and cost two real configs - the false-positive direction this
+# codebase keeps paying for.
+_SHELL_META = frozenset("`$;&|<>()\"'\\*?")
 
 # `*` and `?` ARE legal in a never-read glob, so the glob fields subtract
 # them back out. Package names never need them.
@@ -225,8 +237,10 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
             if bad:
                 errors.append(
                     f"{where} contains characters that are not valid here: "
-                    f"{bad} (in {v!r}). This value is written verbatim into "
-                    f"an emitted shell hook.")
+                    f"{bad} (in {v!r}). This value is written VERBATIM into an "
+                    f"emitted shell hook and is never expanded, so `$HOME` and "
+                    f"`$(...)` cannot mean what they look like - write the "
+                    f"literal path, or a glob.")
 
     # ---- the numeric drift thresholds ------------------------------------
     # Interpolated raw and UNQUOTED into `[ "$n" -ge <value> ]`, which runs on

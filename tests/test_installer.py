@@ -1706,6 +1706,14 @@ for _lbl, _ov in (
         ("glob patterns incl. a character class",
          {"secrets": {"never_read_paths": [".env*", "secrets/**", "*.pem",
                                            "cfg[0-9].key", "**/*.jks"]}}),
+        # Both NEGATED-class spellings. `_norm_pat` on the SDK side converts
+        # `[^` INTO `[!` because fnmatch reads `[^` as a POSITIVE class
+        # containing `^` - so the fnmatch-native form is a pattern this suite
+        # already supports, and the first cut of the D12 validator rejected
+        # it. `!` is also a legal filename character.
+        ("negated classes and a bang in a filename",
+         {"secrets": {"never_read_paths": ["[^.]env", "[!.]env",
+                                           "client!.key"]}}),
         ("quoted and nested-quoted test commands",
          {"commands": {"test": "pytest -k 'not slow'",
                        "lint": 'ruff check . && echo "ok"',
