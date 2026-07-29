@@ -695,8 +695,78 @@ EXPECTED_DIGESTS = {
     #
     # NO PROTOCOL_VERSION BUMP - same reasoning as no. 18/20/21: 2.6.0 is
     # unreleased, v2.5.0 remains the only tag.
+    #
+    # [freeze-exception no. 23 - round-2 review batch 3, the independent
+    # fixes, 2026-07-29] Source: the same round-2 review. THIRTEEN emitted
+    # files move again (all twelve hooks plus sdk_gates/gates.py) because
+    # item 1 is in the shared _HOOK_HEADER. Verified parent-vs-head against
+    # edac7c7: no settings.json, no steering doc, skill, command or agent
+    # body, no CLAUDE.md, no frozen twin; action counts unchanged.
+    #
+    #   1. F-301, the shared-header payload read. `INPUT="$(cat || true)"`
+    #      forked `cat` in the ONE place every hook runs, so a single
+    #      missing binary disabled all eleven at once IN THE DIRECTION THAT
+    #      ALLOWS. Confirmed: with a PATH holding jq/python3/grep/sed/tr/git
+    #      but not `cat`, secrets-gate on `cat .env` and dependency-gate on
+    #      `npm install evil` both returned rc=0 - empty INPUT, jq succeeds
+    #      on empty input so hook_fail never fires, every jget empty, every
+    #      gate falls through, no error, no log line. Strictly a better
+    #      lever than the `tr`/`grep` the previous batch removed. Now a
+    #      builtin `read -r -d ''`, plus an explicit empty-payload refusal.
+    #   2. F-947, dotenv exemption scope. It `continue`d the TARGET loop,
+    #      skipping EVERY pattern rather than the dotfile family it is
+    #      scoped to, so `secrets/.env.example` was unguarded - and
+    #      `secrets/**` is exactly the pattern it must not override. The
+    #      comment's "exact basenames only" was true of the basename test
+    #      and silent about the control-flow scope, which was the bug.
+    #   3. F-1420, eval-gate, TWO fail-opens in one `if` condition (exempt
+    #      from set -e and the ERR trap): `grep` off PATH -> 127 -> "no
+    #      prompt files changed" -> push allowed; and `grep -q` SIGPIPEing
+    #      git under pipefail -> 141 -> same, for any diff over the ~64 KiB
+    #      pipe buffer. Pure bash now, and a git failure is a refusal. Also
+    #      fixed in passing: a ROOT commit has no HEAD~1, so the very first
+    #      push of a repo - the one introducing every prompt file it has -
+    #      was the one push this gate never inspected.
+    #   4. F-788, `Grep{pattern:...}` is a search REGEX and sat in the phase
+    #      where a bare directory name counts as a path, so
+    #      `Grep pattern="secrets"` was hard-blocked: searching your own
+    #      codebase for the word was impossible, in the gate with no
+    #      override path. Own phase, dir_ok=0 - still matched, since
+    #      `pattern:"*.pem"` returns matching file contents.
+    #   5. F-1357, index overrides. The CLI spelling was SKIPPED as an
+    #      ordinary flag value while the environment-variable spelling of
+    #      the identical attack was denied from the same reason string in
+    #      the same file. NEWLY BLOCKED on both substrates:
+    #      --index-url/-i/--extra-index-url/--find-links/--registry/--index/
+    #      --git/--repo. `-f` is deliberately excluded (pip's --find-links
+    #      but npm's --force). A legitimate internal index belongs in the
+    #      project's package-manager config, which is what the refusal says.
+    #   6. F-1313, `^[0-9.]+$` still swallowed single-character numeric
+    #      package names; `0`, `1` and `2` are all real npm packages. A bare
+    #      version needs a DOT now. Third consecutive round for this
+    #      predicate.
+    #   7. F-1393, the shell tdd-gate was anchored on `src/`/`lib/` while
+    #      Claude Code passes ABSOLUTE paths, so it matched nothing and
+    #      silently allowed every write - while the SDK twin normalized and
+    #      denied, its comment naming the bug verbatim and fixing only its
+    #      own side. Both now strip the project root and a leading `./`.
+    #   8. F-2923, the retrofit warn-only preamble matched a raw SUBSTRING
+    #      while the body it wraps is anchored, so the two disagreed in both
+    #      directions during the weeks the schedule promises are warn-only:
+    #      `git  commit` (two spaces) and `git -C . commit` skipped the
+    #      exemption and hit the ENFORCING body, and `echo "git commit"`
+    #      fired the warn-only message on a command the body ignores. Uses
+    #      the same anchor as the body now.
+    #
+    # NEWLY BLOCKED, stated plainly because this is the class the changelog
+    # got wrong three rounds running: items 5 and 6 deny commands that were
+    # allowed at edac7c7, and item 3 denies a push whose diff cannot be
+    # read. Items 2, 7 and 8 also newly deny. The only NEWLY ALLOWED
+    # behaviour in this batch is item 4 (`Grep pattern="<dirname>"`).
+    #
+    # NO PROTOCOL_VERSION BUMP - 2.6.0 is still unreleased.
     "default":
-        "b403ff6cd89e70f9535ec96ffd5bcb2294b9dd4e01f1b2dadf064c0c2a215f9a",
+        "583e5e2eb9a60be8618182306cce811d4bfcb5c869dc9391f32608ed7d27482a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -760,7 +830,7 @@ EXPECTED_DIGESTS = {
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
     "full_autonomous":
-        "9bb30ff4164249c9026efc65f54efed326d161420db41113ab390830b5e6c44e",
+        "434a3d4041c6202c247ab0cc79434fc36312d84bc4778c88ff034c31f6e822f6",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -829,7 +899,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     "design_steering":
-        "9c8c5c3c3010b0e35d7702cf8e0c6d9dfd6c6b52b46db081b833bbe06c5528ec",
+        "bbfa5f7f291b1a79187f1b0e0b0c95fc5e871b93335605fe272f4773b2ef3d9d",
 }
 
 EXPECTED_ACTION_COUNTS = {

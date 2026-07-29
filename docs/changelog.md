@@ -184,7 +184,25 @@ rounds' regressions got past review.
   prefix of an install. These redirect even an **approved** package to
   another server, which no package-name check can see. Tested against the
   matched command head only, so prose naming the variable does not block.
-- **NEWLY ALLOWED (the batch's only relaxations, both in `secrets-gate`).**
+- **CORRECTION (2026-07-29, round-2 review).** The heading below said "the
+  batch's only relaxations, both in `secrets-gate`". **That was false, and it
+  was the third consecutive round the same claim was false.** A parent-vs-head
+  differential found at least four behaviours the parent blocked and that
+  release allowed, three of them outside `secrets-gate`: the CLI spelling of
+  a package-index override (`--index-url`/`-i`/`--registry`/`--find-links`/
+  `--git`, while the environment-variable spelling in the bullet above was
+  blocked from the same reason string); the dotenv-template exemption
+  escaping *every* never-read pattern rather than the dotfile family, so
+  `secrets/.env.example` was unguarded; a separator inside a quoted `git -c`
+  option value defeating the command-position anchor; and any command wrapped
+  in `sh -c '…'` becoming invisible to every directory-anchored pattern. All
+  four are fixed. The lesson recorded, since the mechanism repeated: this
+  inventory was written from *intent* — the relaxations the authors meant to
+  make — and never from a diff, so a relaxation that arrived as a side effect
+  could not appear in it. Freeze-exception no. 23 states its newly-blocked
+  and newly-allowed sets from an executed parent-vs-head comparison instead.
+- **NEWLY ALLOWED (as INTENDED at the time; see the correction above for what
+  else slipped through).**
   (a) A quoted argument is one token, so `git commit -m "fix the .env
   loader"` and `git commit -m "docs: describe secrets/README"` no longer
   block — `RETROFIT.md:1134` scopes the mid-plan exception to *secrets*, not

