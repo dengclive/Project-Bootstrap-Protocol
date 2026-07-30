@@ -3,6 +3,12 @@
 **Built from the v2.5.0 → v2.6.0 delta of the Bootstrap Protocol.**
 Compiled 2026-07-30, against tags `v2.5.0` (`fc04c10`) and `v2.6.0` (`f6bded0`).
 
+**Amended 2026-07-31** against `main` `3355e9c` (in-version fixes, PRs #22 and
+#23). That round found a **fourth** variant of P0-3 — one that v2.6.0 shipped and
+that the test suite written to close P0-3b could not see — and it yields a sixth
+cross-cutting pattern. Post-tag material is marked **`[+2026-07-31]`** so the
+v2.5.0 → v2.6.0 delta this was compiled from stays legible as a delta.
+
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
 v2.5.0 → v2.6.0 delta closed thirteen defects, four of them fail-open security
@@ -50,7 +56,7 @@ printf '{"tool_name":"Bash","tool_input":{"command":"cat .env"}}' \
   | CLAUDE_PROJECT_DIR=$PWD/v25 bash v25/.claude/hooks/secrets-gate.sh; echo "rc=$?"
 ```
 
-Three harness notes that cost real time here, recorded so they cost you none:
+Four harness notes that cost real time here, recorded so they cost you none:
 
 1. **Capture `$?` immediately.** `printf '%s rc=%s' "$(some_cmd)" "$?"` reads the
    exit code of the *command substitution*, not of the thing you ran. This
@@ -62,6 +68,25 @@ Three harness notes that cost real time here, recorded so they cost you none:
 3. **To execute `sdk_gates/gates.py` without the SDK installed,** stub it on
    `PYTHONPATH`: a `HookMatcher` class plus a module-level `__getattr__`
    returning throwaway types is enough to reach the matching internals.
+4. **Build substrates where a dependency is PRESENT AND BROKEN, not merely
+   absent.** `[+2026-07-31]` Removing `jq` from a symlink farm tests one
+   thing; a `jq` that exists, is executable, and exits 127 tests a different
+   one, and the second is the case that shipped (P0-3d below). Three shapes,
+   all real, all satisfying `command -v`:
+
+   ```bash
+   # (i) version-manager shim for an uninstalled runtime — pyenv/asdf/mise
+   printf '#!/bin/sh\necho "pyenv: jq: command not found" >&2\nexit 127\n' > farm/jq
+   # (ii) broken dynamic link — the Alpine/slim-image shape
+   printf '#!/bin/sh\necho "jq: error while loading shared libraries: libonig.so.5" >&2\nexit 127\n' > farm/jq
+   # (iii) right name, not executable
+   : > farm/jq && chmod 644 farm/jq        # `command -v` still says yes
+   ```
+
+   Build the farm with symlinks, then **`rm` the link before writing the
+   stub** — `cat > farm/jq` follows the symlink and writes through to the real
+   `/usr/bin/jq`. (It failed with `Permission denied` here, which is the only
+   reason it was caught.)
 
 ---
 
@@ -109,6 +134,7 @@ not documentation hygiene** — a theme this document returns to repeatedly.
 | P0-3a | jq-less payload >128 KiB fails `exec` | fail-open | allows | fixed |
 | P0-3b | Neither `jq` nor `python3` → `case` falls through | fail-open | allows | fixed |
 | P0-3c | `set -e` death → exit 1 = "tool proceeds" | fail-open | allows | fixed |
+| P0-3d | Parser **present but broken** → selector never falls back | fail-open | allows | **allows** — fixed post-tag `[+2026-07-31]` |
 | P1-1 | `async: true` makes `exit 2` a no-op | dead control | 3 gates inert | fixed |
 | P1-2 | `spec-gate-commit` blocks every first commit | availability | blocks all 60 files | partly fixed |
 | P1-3 | `dependency-gate` fail-open + fires on prose | control bypass | 11 bypasses | mostly fixed |
@@ -235,13 +261,14 @@ nothing.** v2.6.0 blocks it (`rc=2`).
 
 ---
 
-### P0-3 — Three ways a parsing gate silently allowed
+### P0-3 — Four ways a parsing gate silently allowed
 
 **Class:** unenumerated degraded paths in a security control. All **EXECUTED**.
 
-Every gate parses its JSON payload through a shared `jget` helper. Three separate
+Every gate parses its JSON payload through a shared `jget` helper. Four separate
 conditions made that helper return empty, and an empty parse fell through the
-gate's `case` statement to allow.
+gate's `case` statement to allow. **(a)–(c) were closed by v2.6.0; (d) was found
+a day after the tag, and v2.6.0 ships it.**
 
 **(a) Payload larger than 128 KiB, with `jq` absent.** The fallback passed the
 entire payload to Python *in an environment variable*. Linux caps a single
@@ -302,6 +329,62 @@ CLAUDE_PROJECT_DIR unwritable, Read of .env:
                  ^ exit 1 = "hook error, tool proceeds" — the read went through
   v2.6.0  rc=2   BLOCKED: .env matches never-read pattern .env*
 ```
+
+**(d) A parser that is present and does not work.** `[+2026-07-31]` **v2.6.0
+ships this one.** (a)–(c) are about the parse; (d) is about the **selector**.
+
+```bash
+have_jq(){ command -v jq >/dev/null 2>&1; }      # a PRESENCE test
+jget(){
+  if have_jq;   then ... jq      ... 2>/dev/null || true
+  elif have_py; then ... python3 ... 2>/dev/null || true
+  else hook_fail "no JSON parser available"; fi
+}
+```
+
+`command -v jq` answers *"is there a file named jq on PATH"*, which is not the
+question any caller has. It reports success for all three shapes in note 4 above.
+jq then ran, failed, `|| true` erased the failure, `jget` returned empty, and the
+`case` fell through to allow. The `elif` is the second half of the defect: the
+fallback is bound to jq's **absence**, never to its **failure**, so a healthy
+`python3` on the same PATH was structurally unreachable.
+
+```
+jq PRESENT but exiting 127 (broken libonig / pyenv shim), python3 healthy:
+                                     v2.6.0 (f6bded0)      main (3355e9c)
+  secrets-gate     cat .env            rc=0  ALLOWED         rc=2 BLOCKED
+  dependency-gate  npm install evil    rc=0  ALLOWED         rc=2 BLOCKED
+
+control — same substrate, jq ABSENT rather than broken:
+  secrets-gate     cat .env            rc=2                  rc=2
+```
+
+The control line is the point: **P0-3b's fix works perfectly.** The fallback is
+correct; it was simply never reached. A defect can sit entirely in the predicate
+that chooses between two correct implementations.
+
+Both fail-opens were silent — no stderr, and `hooks.log` recorded only a
+misleading `secrets-gate: no path`. The fix tries each parser in turn and accepts
+its output only if it **exited clean** (`set -o pipefail` makes the pipeline's
+status the parser's, not `printf`'s); both unusable is now the same condition as
+neither installed.
+
+**Why the suite could not see it, which is the part to keep.**
+`tests/test_hook_behavior.py` was written specifically to close P0-3b. It builds
+symlink farms for *jq absent* and for *no parser*, under this comment:
+
+> *"A symlink farm is the only honest way — `command -v jq` cannot be fooled by
+> shadowing."*
+
+That sentence is **true, and it is the wrong invariant.** Nothing was shadowing
+jq. It was broken, and a presence test reports broken as success. The suite built
+to prove the degradation path encoded the author's model of *how* the dependency
+could be missing, and that model had one entry. **A test suite inherits the
+imagination of the fix it was written for** — which is the §5 lesson about tests
+written from the implementation, one level up: not "written from the code" but
+"written from the *theory of failure*."
+
+> **Generalizes to:** see §4.6. A capability check must exercise the capability.
 
 > **Generalizes to:** **enumerate every path by which your control can fail to
 > reach a decision, and make each one deny.** Missing dependency, oversized input,
@@ -671,8 +754,8 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Thirteen defects, five recurring shapes. If this document is read for one section,
-this is it.
+Thirteen defects, six recurring shapes — five from the v2.5.0 → v2.6.0 delta and
+one added post-tag. If this document is read for one section, this is it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
 
@@ -733,6 +816,38 @@ diverge, **both are defects**. This is why the v2.6.0 release review treated a s
 sentence in a checklist as a shipping blocker: §6.D is normative, so an AI author
 conforming to a wrong item writes a wrong gate — and it looks like conformance.
 
+### 4.6 A dependency check must test the dependency, not its name `[+2026-07-31]`
+
+P0-3d. `command -v jq` was used to decide whether JSON could be parsed. It cannot
+answer that. It answers *"is there a file of that name on PATH"*, and the two
+questions diverge for every shape that actually occurs in the field: a
+version-manager shim for an uninstalled runtime, a broken dynamic link, a
+non-executable file, a different tool with the same name.
+
+The shape is general, and it is attractive because the cheap check is *almost*
+the right one:
+
+| the cheap check | what it actually asserts | what the caller needed |
+|---|---|---|
+| `command -v X` / `which X` | a name resolves | X runs and does its job |
+| `[ -x path ]` | a bit is set | exec succeeds |
+| `importlib.util.find_spec` | a module is importable-by-name | import has no side-effect failure |
+| `docker --version` | a client exists | a daemon is reachable |
+| config key is present | the key exists | the value resolves to something usable |
+
+**Rule:** probe the capability, not the name — for a parser, parse a known
+literal and compare. Where a probe is genuinely too expensive, then at minimum
+make the *use* fall back on **failure**, not only on absence, and never let
+`|| true` erase the difference between "returned nothing" and "could not run."
+Those two must not be the same value, because one is an answer and the other is
+the absence of one.
+
+**Corollary for tests, which is where this hid.** A substrate built by *removing*
+a dependency tests absence only. Present-and-broken is a different substrate and
+needs its own — see the recipes in §0 note 4. Whenever a control has a
+degradation path, ask what the *set* of ways to degrade is, and be suspicious of
+any answer with one element.
+
 ---
 
 ## 5. Why detection failed, and what actually worked
@@ -770,14 +885,74 @@ substrates and fails on divergence. Suite went 1016 → 1828 checks.
 > artifact. And **a regression test for a security fix must be demonstrated to fail
 > before the fix** — otherwise you have tested that your test passes.
 
+**What that account left out, now closed. `[+2026-07-31]`** As first written, this
+section named `tests/test_hook_behavior.py` as the answer to "why detection
+failed" — payloads into the emitted **hooks**, asserting exit codes. True, and it
+read broader than it was. The emitted **wrappers** (`auto.sh`, `loop.sh`,
+`goal-loop.sh`) are controls too — halt sentinels, eligibility refusal, a claim
+protocol — and *nothing had ever executed one*. Three review rounds covered them
+by byte assertion. The first round to run them found four defects, including all
+three wrappers exiting **0** with a terminal-*success* reason for a run that
+dispatched nothing, which under `nohup` or cron is indistinguishable from a clean
+overnight run. `tests/test_wrapper_behavior.py` (65 checks, demonstrated to fail
+against the pre-fix templates) closes it. Self-reported as backlog O-6, now
+`done`.
+
+**And an instrument can quietly stop existing. `[+2026-07-31]`** That new suite
+printed `0 passed, 0 failed` and exited **0** on any host without `flock` (stock
+macOS ships none), and the runner parsed that into `(0, 0)`, saw exit 0, and
+rendered **`ok`**. The 65-check instrument added *because* "a green suite sat on
+top of all four defects" could contribute zero while the run still ended with
+`ALL SUITES PASSED`. It now emits a `SUITE SKIPPED:` marker carried onto the
+table, the totals line, and the closing banner.
+
+> **Rule:** a suite that *declines to run* must be reported distinctly from a
+> suite that *ran and passed*. `0 passed, 0 failed` is not a pass, and neither is
+> a green banner over a host that could not execute the thing under test.
+> Coverage that varies by machine is coverage you do not have — say so on the
+> line a human reads, because that is the line that gets quoted into a commit
+> message.
+
 ### 5.1 The recurrence pattern
 
-Worth recording plainly: **seven consecutive fix batches in this repository each
-shipped a defect into the class they were fixing**, and none was caught by the green
+Worth recording plainly: **eight consecutive fix batches in this repository each
+produced a defect in the class they were fixing**, and none was caught by the green
 suite — every one was caught by an independent adversarial round. Round 7 alone
 found an unhashable `matcher` that aborted install at 22 of 58 files with no gates
 registered, and a proxy that deleted the operator's `settings.json` keys on any
 declined write.
+
+**The eighth batch did it three times, and each catch needed a different
+instrument. `[+2026-07-31]`** The batch fixed an *unbounded-block* class — a
+control whose bound was inoperative and silent about it.
+
+1. **First cut:** the new `stop_hook_active` bound read
+   `[ "$(jget '.stop_hook_active')" = "true" ]`. `jget` routes a missing parser
+   through `hook_fail`, whose `exit 2` dies with the **command substitution**, not
+   the script — so the guard read empty, the bound could never fire, and the hook
+   blocked every `Stop` forever. *Caught by execution, after commit.*
+2. **Second cut:** replaced with `if have_jq || have_py`, degrading to allow.
+   Still a **presence** test (P0-3d): with a broken-but-present jq the guard took
+   the true branch, the bound read empty, and the hook blocked every `Stop` —
+   `rc=1` before the batch, `rc=2` after, with the degrade message never printed.
+   *Caught by the independent adversarial round.*
+3. **The repair of its test:** a check asserting the bound exists compared
+   `str.find()` results with no lower guard, so `-1 < 28191` passed with the bound
+   deleted outright. The first repair anchored on the bare token
+   `stop_hook_active` — which also appears in the **comment block explaining the
+   bound** — so it still passed with the guard removed. *Caught by mutation
+   testing.*
+
+Three instances, one batch, three different detection instruments, and **none of
+them was the test suite**, which was green throughout at 1895 checks.
+
+> **Two rules from the third one, because it is the least obvious.** A *repair*
+> can be unsound in the same class as the thing it repairs — re-run the mutation
+> against the fixed check, not just against the fixed code. And **a string
+> assertion on emitted code can be satisfied by the prose describing that code**:
+> anchor on the executable form (`if parser_ok; then`), never on a token that a
+> nearby comment also contains. The better the comment, the more likely it
+> defeats the check.
 
 The v2.6.0 *documentation* release continued the pattern: its brand-new §6.D
 checklist item recorded `sh -c "git commit"` as unmatched — a limitation the
@@ -846,6 +1021,43 @@ Only the tier-1 counter is implemented; tier-2/tier-3 escalation, the
 hard block, and audio dispatch are not.              (backlog I-1)
 ```
 
+**Post-tag additions `[+2026-07-31]`** — found by the round that first executed
+the emitted **wrappers**, and by the adversarial pass on its fix batch. Filed as
+`docs/deferred-backlog.md` clusters **O** and **P**; the highest-signal ones:
+
+```
+-- a safety fix does not reach the installs that need it --
+Upgrade over an install whose wrappers the operator has begun completing:
+  UPDATE  .claude/hooks/…            <- both HOOK fixes land
+  SKIP    .claude/loop.sh  (locally modified; use --force to overwrite)
+  SKIP    .claude/goal-loop.sh
+  SKIP    .claude/auto.sh            <- all three WRAPPER fixes withheld
+  Done. … skipped=3      rc=0, no warning that a fix was withheld
+Population affected is exactly the one running loops.            (P-1)
+
+-- a control that blocks but does not enforce --
+The iteration-summary Stop gate now exits 2, but its bound sits ABOVE the
+demand, so turn 2 is allowed whether or not the agent complied:
+  Stop #1 rc=2   Stop #2 (stop_hook_active) rc=0   Stop #3 rc=2
+One extra turn per iteration; no enforcement across turns.        (P-2)
+
+-- the durable record is inverted --
+Across those three stops hooks.log holds exactly ONE line, and it is the
+one saying the gate declined to act. Every allow path logs; the exit-2
+enforcement branch is the only silent outcome in the hook.        (P-3)
+
+-- the control demands a file nothing teaches --
+`.iteration-summary-*` appears only in the hook, .claude/.gitignore and
+settings.json — not in any doc, skill, command or wrapper the agent
+reads. Stated once, in the stderr of the block.                   (P-4)
+
+-- parity suites are structurally blind to a missing twin --
+Every substrate-differential assertion iterates SDK_GATES, the smaller
+side, so a shell control with no SDK counterpart is invisible. Executed:
+adding an always-deny shell hook with no twin left both parity suites
+green at 176/0 and 96/0.                                          (P-17)
+```
+
 ---
 
 ## 7. Reusable controls checklist
@@ -857,10 +1069,16 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Every security regression test is demonstrated to **fail before** its fix.
 - [ ] The runtime's control semantics (which exit codes block, what makes a control advisory) are written down and asserted, not assumed.
 - [ ] No control is marked async/background/non-blocking unless it is purely informational.
+- [ ] Controls that are *scripts the operator runs* (wrappers, runners, CLIs) are executed too, not only the ones the runtime invokes. `[+2026-07-31]`
+- [ ] A suite that cannot run on this host reports **SKIPPED**, distinctly from one that ran and passed — `0 passed, 0 failed` + exit 0 must never render as `ok`. `[+2026-07-31]`
+- [ ] String assertions on emitted code anchor on the **executable** form, not a token a neighbouring comment also contains. `[+2026-07-31]`
+- [ ] Mutation is re-run against a **repaired check**, not only against repaired code — a fix to a test can reproduce the defect it was fixing. `[+2026-07-31]`
 
 **Fail-closed**
 - [ ] Every dispatch has an explicit deny arm; no `case` falls through to allow.
 - [ ] Missing parser, oversized payload, unwritable filesystem, timeout, and malformed input each **deny**, each with a distinct reason.
+- [ ] Every dependency is probed for **function**, not presence: a shim, a broken dynamic link, a non-executable file of the right name, and a same-named different tool all route to the same deny as an absent one. `[+2026-07-31]`
+- [ ] Fallback between redundant implementations triggers on **failure**, not only on absence — and "returned nothing" is never the same value as "could not run". `[+2026-07-31]`
 - [ ] Incidental work (logging, temp files, `mkdir`) cannot kill the process before the decision.
 - [ ] An `ERR` trap routes *unanticipated* failures to deny.
 - [ ] Advisory controls declare their posture explicitly and degrade to a logged no-op — and the posture is set where it cannot be shadowed by an earlier exit.
@@ -897,5 +1115,14 @@ Derived from the above; ordered by how much each would have caught here.
 - `Bootstrap-Protocol-v2-6-0.md` §6.D — the normative hook checklist these lessons are encoded into.
 - `tests/test_hook_behavior.py`, `tests/test_substrate_differential.py` — the executing suites.
 
-All exit codes in this document were reproduced on 2026-07-30 against tags
-`v2.5.0` (`fc04c10`) and `v2.6.0` (`f6bded0`).
+Post-tag sources `[+2026-07-31]`:
+
+- `docs/changelog.md`, the two 2026-07-31 in-version entries — the P0-3d fix (PR #22) and the autonomous-mode exit contract (PR #23).
+- `docs/deferred-backlog.md` clusters **O** and **P** — the wrapper round's residue, and the adversarial pass on its fix batch (45 claims raised, 23 refuted).
+- `tests/test_wrapper_behavior.py` — the suite that first executed an emitted wrapper; `P0-3b(ii)` in `tests/test_hook_behavior.py` — the broken-parser substrates.
+
+All exit codes in §§1–5 were reproduced on 2026-07-30 against tags `v2.5.0`
+(`fc04c10`) and `v2.6.0` (`f6bded0`). Everything marked **`[+2026-07-31]`** was
+reproduced that day against `v2.6.0` (`f6bded0`) as the *before* and `main`
+(`3355e9c`) as the *after* — so the v2.6.0 column of the P0-3d table is the
+tagged release's real behaviour, not a reconstruction.
