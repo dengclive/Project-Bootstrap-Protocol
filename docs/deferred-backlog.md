@@ -219,6 +219,23 @@ documentation release should not carry an emission change.
 | M-2 | **Emitted `drift-detector.sh` and `audio-alerts.config` cite `Bootstrap-Protocol-v2-5-0.md` §6.E.** Added by the v2.5.0 release review's honest-scope pass and not re-pointed at 2.6.0, so an operator reading their own emitted config is sent to the superseded document — and specifically to the one file whose bytes differ from its own tag. Cosmetic but self-defeating for a release that re-pointed every other self-reference. Part of the doc-reference-normalization pass the v2.4.0 history section already owes | `open` |
 | M-3 | **The invoker-rule residue from J-1's decision.** The shared hook header still reads "KNOWN AND ACCEPTED LIMITATION … `sh -c "git commit"` … no longer matches", and the differential corpus pins the invoker rows `OPEN` rather than `want=deny`. Both now contradict the decided model and the shipped behavior. Neither is operator-facing, which is why this is a residue row and not a defect | `open` |
 
+## N. Coverage gaps surviving the 2.6.0 batch (2026-07-30)
+
+Found while compiling `docs/agentic-harness-security-kb.md` by executing the
+v2.5.0 and v2.6.0 emissions side by side. **None is a regression** — every row is
+a scope limit the upstream batch did not reach, or a gap the batch created no
+worse. They are filed because they were recorded nowhere: not in the upstream
+report, not in clusters A–M, and until now only in the KB's prose. Every rc below
+was executed on the v2.6.0 emission at tag `v2.6.0` (`f6bded0`).
+
+| ID | Item | Notes |
+|---|---|---|
+| N-1 | **The `dependency-gate` refusal names a remediation that does nothing.** It prints "Approve in-session and update `.claude/steering/deps.md`", but the approved list is baked into the hook at emission time from `deps.approved` (`mapfile -t APPROVED <<'APPROVED_EOF'`). Editing `deps.md` changes no behaviour until the installer is re-run. **Compounding:** the installer `SKIP`s a locally-modified `deps.md`, so the operator who follows the instruction also stops receiving the new refusal-class documentation. This is the KB §4.5 class — an advertised remediation path that is inert — and is the most operator-hostile survivor of the batch: the operator does the thing they were told, observes no change, and concludes the gate is broken. Fix is a choice: read `deps.md` at runtime, or change the message to name `bootstrap.config.yaml` + re-install | `open` |
+| N-2 | **`dependency-gate` still does not match five ecosystems.** Executed on v2.6.0: `mix deps.get` rc=0, `rebar3 get-deps` rc=0, `opam install x` rc=0, `nimble install x` rc=0, `apt-get install x` rc=0. (`gem install x` rc=2 — Ruby *is* covered.) The upstream report named `mix` and `rebar3` explicitly under P1-3 and the fix batch closed the others around them. Elixir/Erlang are the notable miss given the report came from a BEAM-adjacent project | `open` |
+| N-3 | **`secrets-gate` never inspects file *content*.** Executed: a `Write` to `notes.md` whose body is `-----BEGIN RSA PRIVATE KEY-----…` returns rc=0. The gate is a path-policy engine only. Recorded by the upstream report under P2-4 and not addressed. Whether content scanning belongs in a `PreToolUse` hook at all is a design question — the honest interim move may be to say so in `secrets.md`, which currently implies broader protection than the path list gives | `decision` — owner |
+| N-4 | **No project-boundary or traversal check.** Executed: `Read ../../etc/passwd` rc=0, `Read /etc/shadow` rc=0. Paths outside the project are evaluated against the configured patterns and nothing else. Named in the upstream report under P2-4, unaddressed | `open` |
+| N-5 | **`WebFetch` is on no matcher.** The emitted matcher set is `Bash`, `Read\|Write\|Edit\|NotebookEdit\|Grep\|Glob`, `Write`, `Write\|Edit`. The upstream report named `WebFetch(file://)` as an unguarded read route under P0-2; the fix added `Bash` and the file tools and left `WebFetch`. Overlaps open decision **K-5** (is `WebFetch{url}` a gated exfil surface?) — K-5 asks the policy question, N-5 records that the read-side route is also currently open | `open` — pairs with K-5 |
+
 ## Priority reading
 
 Highest-signal actionable clusters: **B** (seam follow-ups) and **E** (smoke /
