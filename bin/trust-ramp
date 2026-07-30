@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+"""trust-ramp - graded autonomy ledger for work on THIS repository.
+
+NOT protocol surface. This is repo-local governance: it configures nothing,
+emits nothing into a target project, and is not reachable from lib/. It exists
+because Bootstrap-Protocol-v2-5-0.md ships the trust-ramp *posture* as prose
+(5-10 tasks -> loop, 10-20 -> goal, ~4 weeks -> queue, PRD 9.5/9.6/9.7) and
+ships no mechanism that records where an operator actually is, refuses an
+unearned promotion, or covers the supervised rung at the bottom. Deliberately
+self-contained so nobody mistakes it for a shipped artifact; deliberately
+un-imported by lib/ so it can never drift into the golden surface.
+
+The rungs bind to Claude Code's own autonomy surface, not to the protocol's
+.claude/loop.sh wrappers - this repo has no install of its own. The thresholds
+are still the protocol's; only the thing being unlocked differs.
+
+Usage:
+  trust-ramp status
+  trust-ramp log --task <id> --outcome <clean|corrected|harmful> [--notes S]
+                 [--date YYYY-MM-DD]
+  trust-ramp promote [--date YYYY-MM-DD]
+  trust-ramp attest <name> [--date YYYY-MM-DD]
+  trust-ramp check [--rung R2]
+
+  --file PATH   operate on a ledger other than .claude/trust-ramp.md
+
+`check` re-derives the declared rung from the ledger rather than trusting the
+state block, so promoting by hand-editing the file fails loudly.
+"""
+import argparse
+import datetime
+import os
+import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_LEDGER = os.path.join(HERE, "..", ".claude", "trust-ramp.md")
+
+OUTCOMES = ("clean", "corrected", "harmful")
+
+# Rung order is the ramp. Each entry is the gate that must be met AT the rung
+# named by `from_rung` in order to enter this one.
+#
+# min_entries / consec_clean / harmful_window come from the protocol's own
+# ranges, taking the top of each stated band (PRD 9.5 "5-10", 9.6 "10-20") so
+# the gate is the conservative reading. min_days comes from 9.7's "~4 weeks".
+RUNGS = ("R0", "R1", "R2", "R3")
+
+RUNG_TITLE = {
+    "R0": "Supervised per-task",
+    "R1": "Loop (fixed prompt, unattended iteration)",
+    "R2": "Loop + goal condition",
+    "R3": "Scheduled / queue-shaped runs",
+}
+
+GATES = {
+    "R1": {
+        "from_rung": "R0",
+        "min_entries": 10,
+        "consec_clean": 8,
+        "harmful_window": 10,
+        "min_days": 0,
+        "attestations": (),
+    },
+    "R2": {
+        "from_rung": "R1",
+        "min_entries": 20,
+        "consec_clean": 15,
+        "harmful_window": 20,
+        "min_days": 0,
+        "attestations": ("goal-condition-review",),
+    },
+    "R3": {
+        "from_rung": "R2",
+        "min_entries": 20,
+        "consec_clean": 15,
+        "harmful_window": 20,
+        "min_days": 28,
+        "attestations": ("subramp-9-7",),
+    },
+}
+
+STATE_RE = re.compile(
+    r"<!-- STATE -->\n(.*?)\n<!-- /STATE -->", re.S)
+ENTRY_RE = re.compile(
+    r"^## (?P<task>.+?) — (?P<rung>R[0-3]) — (?P<date>\d{4}-\d{2}-\d{2})\s*$")
+# The trailing colon is optional because the protocol's own mode-selection.md
+# block is not internally consistent about it: `**Recommendation:**` carries
+# one, `**Felt right?**` does not. Both must parse for the merge claim to hold.
+FIELD_RE = re.compile(r"^\*\*(?P<key>[^*]+?):?\*\*\s*(?P<val>.*?)\s*$")
+
+
+class LedgerError(Exception):
+    """Malformed ledger. Always fatal - never repaired silently."""
+
+
+# --------------------------------------------------------------------------- #
+# Parsing
+# --------------------------------------------------------------------------- #
+def parse(text):
+    """-> (state dict, [entry dict]). Raises LedgerError on anything unclear.
+
+    Unknown `**Field:**` lines are preserved into the entry dict rather than
+    rejected, so a ledger that later absorbs the protocol's own
+    learnings/mode-selection.md block (Recommendation / Chosen / Felt right?)
+    parses without a format change.
+    """
+    m = STATE_RE.search(text)
+    if not m:
+        raise LedgerError("no <!-- STATE --> block found")
+    state = {"attestations": []}
+    for line in m.group(1).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            raise LedgerError(f"malformed state line: {line!r}")
+        key, val = line.split(":", 1)
+        key, val = key.strip(), val.strip()
+        if key == "attestations":
+            state["attestations"] = [a.strip() for a in val.split(",")
+                                     if a.strip()]
+        else:
+            state[key] = val
+
+    for required in ("current_rung", "rung_entered"):
+        if required not in state:
+            raise LedgerError(f"state block is missing {required}")
+    if state["current_rung"] not in RUNGS:
+        raise LedgerError(f"unknown current_rung {state['current_rung']!r}")
+    _date(state["rung_entered"], "rung_entered")
+
+    entries = []
+    cur = None
+    for raw in text.splitlines():
+        m = ENTRY_RE.match(raw)
+        if m:
+            cur = {"task": m.group("task").strip(),
+                   "rung": m.group("rung"),
+                   "date": m.group("date"),
+                   "fields": {}}
+            _date(cur["date"], f"entry {cur['task']}")
+            entries.append(cur)
+            continue
+        if cur is None:
+            continue
+        f = FIELD_RE.match(raw)
+        if f:
+            cur["fields"][f.group("key").strip().lower()] = f.group("val")
+
+    for e in entries:
+        outcome = e["fields"].get("outcome", "")
+        if not outcome:
+            # A blank outcome is the failure this tool exists to catch: it
+            # would otherwise inflate the count while carrying no evidence.
+            raise LedgerError(
+                f"entry {e['task']!r} ({e['date']}) has no **Outcome:** - "
+                f"an entry without a recorded outcome does not count toward "
+                f"any gate. Record one of: {', '.join(OUTCOMES)}.")
+        if outcome not in OUTCOMES:
+            raise LedgerError(
+                f"entry {e['task']!r} has outcome {outcome!r}; "
+                f"expected one of {', '.join(OUTCOMES)}")
+        e["outcome"] = outcome
+    return state, entries
+
+
+def _date(s, what):
+    try:
+        return datetime.date.fromisoformat(s)
+    except ValueError:
+        raise LedgerError(f"{what}: {s!r} is not an ISO date (YYYY-MM-DD)")
+
+
+# --------------------------------------------------------------------------- #
+# Gate evaluation
+# --------------------------------------------------------------------------- #
+def next_rung(rung):
+    i = RUNGS.index(rung)
+    return RUNGS[i + 1] if i + 1 < len(RUNGS) else None
+
+
+def prev_rung(rung):
+    i = RUNGS.index(rung)
+    return RUNGS[i - 1] if i else None
+
+
+def evaluate(target, state, entries, today):
+    """Evaluate the gate for entering `target`. -> [(ok, label, detail)].
+
+    Only entries logged AT the rung below `target` count. Work done at a
+    higher rung cannot retroactively earn a lower promotion, and work at a
+    lower rung after a demotion is what re-earns it.
+    """
+    gate = GATES[target]
+    at = [e for e in entries if e["rung"] == gate["from_rung"]]
+    results = []
+
+    n = len(at)
+    results.append((n >= gate["min_entries"],
+                    f"{gate['min_entries']} tasks logged at {gate['from_rung']}",
+                    f"{n}/{gate['min_entries']}"))
+
+    streak = 0
+    for e in reversed(at):
+        if e["outcome"] == "clean":
+            streak += 1
+        else:
+            break
+    results.append((streak >= gate["consec_clean"],
+                    f"{gate['consec_clean']} consecutive clean outcomes",
+                    f"{streak}/{gate['consec_clean']}"))
+
+    window = at[-gate["harmful_window"]:]
+    harmful = [e for e in window if e["outcome"] == "harmful"]
+    results.append((not harmful,
+                    f"no harmful outcome in the trailing "
+                    f"{gate['harmful_window']}",
+                    "none" if not harmful
+                    else ", ".join(e["task"] for e in harmful)))
+
+    if gate["min_days"]:
+        entered = _date(state["rung_entered"], "rung_entered")
+        days = (today - entered).days
+        results.append((days >= gate["min_days"],
+                        f"{gate['min_days']} days at {gate['from_rung']}",
+                        f"{days}/{gate['min_days']} days"))
+
+    for att in gate["attestations"]:
+        have = att in state["attestations"]
+        results.append((have, f"attestation: {att}",
+                        "recorded" if have else
+                        f"missing - run: trust-ramp attest {att}"))
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Rendering / writing
+# --------------------------------------------------------------------------- #
+def render_state(state):
+    lines = [f"current_rung: {state['current_rung']}",
+             f"rung_entered: {state['rung_entered']}",
+             f"attestations: {', '.join(state['attestations'])}"]
+    return "<!-- STATE -->\n" + "\n".join(lines) + "\n<!-- /STATE -->"
+
+
+def write_state(text, state):
+    return STATE_RE.sub(lambda _: render_state(state), text, count=1)
+
+
+def read(path):
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def save(path, text):
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+# --------------------------------------------------------------------------- #
+# Commands
+# --------------------------------------------------------------------------- #
+def cmd_status(args, today):
+    text = read(args.file)
+    state, entries = parse(text)
+    rung = state["current_rung"]
+    entered = _date(state["rung_entered"], "rung_entered")
+    at = [e for e in entries if e["rung"] == rung]
+
+    print(f"Rung {rung} — {RUNG_TITLE[rung]}")
+    print(f"  entered {state['rung_entered']} "
+          f"({(today - entered).days} days ago)")
+    print(f"  {len(at)} task(s) logged at this rung; "
+          f"{len(entries)} total")
+    if state["attestations"]:
+        print(f"  attestations: {', '.join(state['attestations'])}")
+
+    nxt = next_rung(rung)
+    if nxt is None:
+        print("\nTop rung. Nothing further to earn.")
+        return 0
+    print(f"\nTo enter {nxt} — {RUNG_TITLE[nxt]}:")
+    results = evaluate(nxt, state, entries, today)
+    for ok, label, detail in results:
+        print(f"  [{'x' if ok else ' '}] {label}: {detail}")
+    print("\n" + ("GATE MET — run: trust-ramp promote"
+                  if all(r[0] for r in results) else "gate not met"))
+    return 0
+
+
+def cmd_log(args, today):
+    text = read(args.file)
+    state, entries = parse(text)
+    rung = state["current_rung"]
+    date = args.date or today.isoformat()
+    _date(date, "--date")
+
+    if any(e["task"] == args.task and e["rung"] == rung for e in entries):
+        print(f"error: {args.task!r} is already logged at {rung}. "
+              f"Entries are append-only; use a distinct task id.",
+              file=sys.stderr)
+        return 2
+
+    block = [f"## {args.task} — {rung} — {date}",
+             f"**Outcome:** {args.outcome}"]
+    if args.notes:
+        block.append(f"**Notes:** {args.notes}")
+    text = text.rstrip("\n") + "\n\n" + "\n".join(block) + "\n"
+
+    demoted = None
+    if args.outcome == "harmful":
+        # Demotion is the reverse gear the protocol's prose ramps lack. One
+        # harmful outcome drops a rung and resets the clock, so the trailing
+        # windows above must be re-earned rather than aged out.
+        demoted = prev_rung(rung)
+        if demoted is not None:
+            state["current_rung"] = demoted
+            state["rung_entered"] = date
+            text = write_state(text, state)
+
+    save(args.file, text)
+    print(f"logged {args.task} at {rung}: {args.outcome}")
+    if demoted:
+        print(f"DEMOTED {rung} -> {demoted}: a harmful outcome resets the "
+              f"rung and its trailing window (rung_entered = {date}).")
+    elif args.outcome == "harmful":
+        print("harmful outcome at R0 — already at the bottom rung; "
+              "no demotion available.")
+    return 0
+
+
+def cmd_promote(args, today):
+    text = read(args.file)
+    state, entries = parse(text)
+    rung = state["current_rung"]
+    nxt = next_rung(rung)
+    if nxt is None:
+        print(f"already at {rung}, the top rung", file=sys.stderr)
+        return 2
+    results = evaluate(nxt, state, entries, today)
+    unmet = [r for r in results if not r[0]]
+    if unmet:
+        print(f"refusing to promote {rung} -> {nxt}; unmet:", file=sys.stderr)
+        for _, label, detail in unmet:
+            print(f"  - {label}: {detail}", file=sys.stderr)
+        return 2
+    date = args.date or today.isoformat()
+    _date(date, "--date")
+    state["current_rung"] = nxt
+    state["rung_entered"] = date
+    save(args.file, write_state(text, state))
+    print(f"promoted {rung} -> {nxt} ({RUNG_TITLE[nxt]}) on {date}")
+    return 0
+
+
+def cmd_attest(args, today):
+    text = read(args.file)
+    state, entries = parse(text)
+    known = {a for g in GATES.values() for a in g["attestations"]}
+    if args.name not in known:
+        print(f"error: unknown attestation {args.name!r}; "
+              f"known: {', '.join(sorted(known))}", file=sys.stderr)
+        return 2
+    if args.name in state["attestations"]:
+        print(f"{args.name} already recorded")
+        return 0
+    state["attestations"].append(args.name)
+    save(args.file, write_state(text, state))
+    print(f"recorded attestation: {args.name}")
+    return 0
+
+
+def cmd_check(args, today):
+    text = read(args.file)
+    state, entries = parse(text)
+    rung = state["current_rung"]
+
+    # Re-derive: the declared rung must have been EARNED by the entries at
+    # the rung below it. This is what makes hand-editing the state block a
+    # loud failure rather than a free promotion.
+    if rung != "R0":
+        results = evaluate(rung, state, entries, today)
+        unmet = [r for r in results if not r[0]]
+        if unmet:
+            print(f"UNEARNED: the ledger declares {rung} but its gate is "
+                  f"not satisfied by the logged entries:", file=sys.stderr)
+            for _, label, detail in unmet:
+                print(f"  - {label}: {detail}", file=sys.stderr)
+            return 1
+
+    if args.rung:
+        if args.rung not in RUNGS:
+            print(f"error: unknown rung {args.rung!r}", file=sys.stderr)
+            return 2
+        if RUNGS.index(rung) < RUNGS.index(args.rung):
+            print(f"DENIED: {args.rung} ({RUNG_TITLE[args.rung]}) requested; "
+                  f"earned rung is {rung}.", file=sys.stderr)
+            return 1
+        print(f"ok: {args.rung} is within the earned rung {rung}")
+        return 0
+    print(f"ok: {rung} is earned")
+    return 0
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog="trust-ramp",
+                                description=__doc__.split("\n")[0])
+    p.add_argument("--file", default=DEFAULT_LEDGER)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("status")
+
+    lg = sub.add_parser("log")
+    lg.add_argument("--task", required=True)
+    lg.add_argument("--outcome", required=True, choices=OUTCOMES)
+    lg.add_argument("--notes", default="")
+    lg.add_argument("--date")
+
+    pr = sub.add_parser("promote")
+    pr.add_argument("--date")
+
+    at = sub.add_parser("attest")
+    at.add_argument("name")
+    at.add_argument("--date")
+
+    ck = sub.add_parser("check")
+    ck.add_argument("--rung")
+
+    args = p.parse_args(argv)
+    for a in ("date", "rung", "notes"):
+        if not hasattr(args, a):
+            setattr(args, a, None)
+
+    today = datetime.date.today()
+    fn = {"status": cmd_status, "log": cmd_log, "promote": cmd_promote,
+          "attest": cmd_attest, "check": cmd_check}[args.cmd]
+    try:
+        return fn(args, today)
+    except LedgerError as e:
+        print(f"ledger error: {e}", file=sys.stderr)
+        return 3
+    except FileNotFoundError:
+        print(f"no ledger at {args.file}", file=sys.stderr)
+        return 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

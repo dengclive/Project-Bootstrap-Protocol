@@ -32,7 +32,15 @@ config.
    python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install
    ```
 
-5. Report the create/update/unchanged/skipped counts. Remind the operator
+5. **Check the exit code before reporting anything.** Exit 3 means files were
+   written but the install does NOT enforce — a security-critical file was
+   skipped, or a hook is emitted-but-unregistered / registered-but-absent.
+   The stdout counts look like a success in that case, so read stderr and
+   surface it verbatim; do not tell the operator the install succeeded.
+   (Exit 2 is a config refusal — nothing was written. Exit 0 is the only
+   outcome whose enforcement was verified.)
+
+6. Report the create/update/unchanged/skipped counts. Remind the operator
    that local edits to generated files are preserved unless `--force` is
    passed, and that `--uninstall` cleanly reverses the install.
 

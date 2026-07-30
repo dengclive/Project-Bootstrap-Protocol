@@ -871,10 +871,24 @@ try:
           "retrofit_active exemption NOT silently granted (a parser outage "
           "cannot fabricate the .claude/-only exemption)",
           "retrofit_active exempt" not in _log_new)
-    check("T2.FS7b': no parser -> hook is an inert pass-through, not a "
-          "spurious block (exit 0 and greenfield 'ok' fall-through reached, "
-          "proving the hook ran rather than producing an empty log)",
-          _r7b.returncode == 0 and "spec-gate-commit ok" in _log_new)
+    # POSTURE CHANGED 2026-07-28 (upstream P0-3b; backlog A-1 decided).
+    # This previously asserted an inert pass-through: exit 0 plus the
+    # greenfield "ok" fall-through. The comment above flagged that fail-open
+    # as pre-existing and "a separate design decision" — A-1 in
+    # docs/deferred-backlog.md. The upstream review decided it: with no
+    # parser the gate could not see the command at all, so every parsing gate
+    # fell through its `case` and ALLOWED, silently and with no message. A
+    # security substrate must never degrade to allow. Blocking gates now exit
+    # 2 with a reason; advisory hooks still degrade to a logged no-op.
+    #
+    # The guarantee this case exists for is UNCHANGED and now stronger: a
+    # parser outage still cannot fabricate the .claude/-only exemption
+    # (asserted above), and it can no longer wave the commit through either.
+    check("T2.FS7b': no parser -> blocking gate FAILS CLOSED with a reason "
+          "(exit 2, not the former silent exit-0 pass-through)",
+          _r7b.returncode == 2
+          and "fail-closed" in (_r7b.stderr or "").lower(),
+          f"rc={_r7b.returncode} stderr={(_r7b.stderr or '')[:200]}")
     shutil.rmtree(_no_py_path, ignore_errors=True)
 finally:
     shutil.rmtree(d, ignore_errors=True)
@@ -895,10 +909,10 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.5.0' literally "
-          "(DS-01 v2.5.0 release-identity bump; retrofit state also "
+    check("8.3: bootstrap_protocol_version matches '2.6.0' literally "
+          "(upstream-fix v2.6.0 release-identity bump; retrofit state also "
           "stamps the greenfield PROTOCOL_VERSION per the shared writer)",
-          state["bootstrap_protocol_version"] == "2.5.0")
+          state["bootstrap_protocol_version"] == "2.6.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "

@@ -12,6 +12,293 @@ from __future__ import annotations
 
 import copy
 
+# ---- [round-4 D12/D18] CONFIG IS AN ATTACK SURFACE -------------------------
+#
+# Four fields reach EXECUTABLE shell in an emitted hook, and none of them was
+# validated anywhere. Established by execution, not by reading: a marker was
+# planted in every string field of a resolved config and the emitted plan was
+# searched for it. The markdown-only fields (project.name, project.prd_path,
+# project.shell, principles.ranked, principles.tiebreakers,
+# secrets.rotation_policy) came back clean; these did not.
+#
+#   secrets.never_read_paths  -> mapfile -t PATS <<'PAT_EOF'      (templates
+#   deps.approved             -> mapfile -t APPROVED <<'APPROVED_EOF'   .py)
+#   hooks.drift_*             -> [ "$n" -ge <value> ]         (drift-detector)
+#   commands.test/lint/ci_local -> ( <value> )      (test-gate, format-lint-
+#                                                    gate, ci-mirror)
+#
+# The heredocs are QUOTED, so a pattern is normally inert. What is not inert
+# is a pattern that IS the sentinel: it terminates the heredoc early, so
+# (a) every later pattern becomes top-level shell in the hook - executed on
+# EVERY invocation, a persistent primitive, not a one-shot - and (b) the
+# array is silently TRUNCATED, so the patterns that were supposed to be
+# guarded stop being guarded with no warning and rc=0 from the installer.
+# deps.approved is worse: its mapfile sits above every early exit, so a
+# poisoned entry bricks dependency-gate to rc=2 on EVERY PreToolUse call.
+#
+# The drift thresholds are the original P0-1 arithmetic-injection RCE
+# re-entering through config: numeric fields with no type check, interpolated
+# raw and unquoted. The file's own comment twelve lines above the sink claims
+# that class was closed - for the STATE FILE, which was the only input anyone
+# thought was untrusted.
+#
+# Two properties make this the cheapest fix available: it is one choke point
+# (everything flows through resolve_config), and these fields have no
+# validation today, so ADDING some cannot weaken a behavior that exists.
+#
+# The SDK substrate is immune - it embeds config through json.dumps, so every
+# pattern survives intact - which is the proof that rejecting here costs
+# nothing real: the SDK already shows what these configs are supposed to mean.
+
+# C0 controls and DEL. A newline forges heredoc lines; the rest have no
+# business in a glob, a package name or a threshold.
+_CTRL = frozenset(chr(c) for c in list(range(0, 32)) + [127])
+
+# Shell metacharacters that no path glob and no package name needs. Glob
+# syntax (* ? [ ] { }) is deliberately ABSENT - `.env*` and `secrets/**` are
+# the documented spellings - and so are the ordinary name characters
+# (. - _ / @ + = ~ : ^ ,). This is a deny list of the characters that change
+# what a shell DOES, kept narrow enough that no legitimate value trips it.
+#
+# `!` IS NOT HERE, and its absence is deliberate. The first cut of this list
+# included it and rejected two legitimate values:
+#   [!.]env      the POSIX/fnmatch negated class - and `_norm_pat` on the SDK
+#                side converts `[^` INTO `[!` precisely because fnmatch reads
+#                `[^` as a positive class containing `^`. So the fnmatch-native
+#                spelling of a pattern this suite already supports was refused.
+#   client!.key  `!` is a legal filename character.
+# It is also harmless: history expansion does not run in a non-interactive
+# shell, and nothing expands inside a QUOTED heredoc. Rejecting it bought
+# nothing and cost two real configs - the false-positive direction this
+# codebase keeps paying for.
+_SHELL_META = frozenset("`$;&|<>()\"'\\*?")
+
+# `*` and `?` ARE legal in a never-read glob, so the glob fields subtract
+# them back out. Package names never need them.
+_GLOB_OK = frozenset("*?[]")
+
+# The heredoc sentinels the emitted hooks use. A value equal to one of these
+# terminates its heredoc; a value merely CONTAINING one is rejected too,
+# because the emitted body may gain a differently-indented heredoc later and
+# a near-miss here is not worth the argument.
+_HEREDOC_SENTINELS = ("PAT_EOF", "APPROVED_EOF")
+
+
+def _bad_chars(value: str, allowed: frozenset) -> str:
+    """The offending characters in `value`, in first-seen order, as a
+    printable string. Empty when the value is clean."""
+    seen, out = set(), []
+    for ch in value:
+        if ch in seen:
+            continue
+        if ch in _CTRL or (ch in _SHELL_META and ch not in allowed):
+            seen.add(ch)
+            out.append(repr(ch))
+    return ", ".join(out)
+
+
+def _quotes_balanced(cmd: str) -> bool:
+    """Does `cmd` end outside every quote, with no dangling escape?
+
+    Bash's own rule, which is the one that matters: inside `'...'` nothing
+    escapes; inside `"..."` a backslash escapes; outside, a backslash escapes.
+    An unbalanced quote here emits a hook bash cannot PARSE, so every commit
+    is refused with a syntax error and no diagnosis - the operator sees a
+    broken gate, not a broken config value.
+    """
+    state, esc = None, False
+    for ch in cmd:
+        if esc:
+            esc = False
+            continue
+        if state == "'":
+            if ch == "'":
+                state = None
+        elif state == '"':
+            if ch == "\\":
+                esc = True
+            elif ch == '"':
+                state = None
+        elif ch == "\\":
+            esc = True
+        elif ch in ("'", '"'):
+            state = ch
+    return state is None and not esc
+
+
+def _normalize_never_read(patterns: list) -> tuple[list, list]:
+    """[round-4 D18] Make the ordinary spellings mean what they obviously
+    mean, and say so. Returns (expanded_patterns, notices).
+
+    This is not a parsing bug and no technique the round-4 brief endorses can
+    see it: both substrates agree, it reproduces at every commit, and a
+    composition sweep varies COMMAND shape while this varies CONFIG shape.
+    Measured at b1782ec, all installing rc=0 with no warning:
+
+        ["**/secrets/**", "**/.env*"]  -> root-level `.env` and
+                                          `secrets/prod.yaml` ALLOW
+        ["./secrets/**", "./.env*"]    -> fully vacuous
+        ["secrets/"]                   -> fully vacuous
+        ["secrets"]                    -> fully vacuous
+
+    The last is not in the brief and is the most natural spelling of all.
+    A leading `**/` is how everyone writes "anywhere", and it is exactly what
+    disables root-level protection, because `**` collapses to `*` for `case`
+    and `*/secrets/*` cannot match a path with nothing before `secrets`.
+
+    NORMALIZE rather than reject. Rejecting `**/secrets/**` makes the
+    operator fight the tool over a spelling that is not wrong, and a gate an
+    operator is fighting is a gate an operator deletes - the pressure this
+    codebase keeps citing. Every rule below only ADDS patterns, never removes
+    or rewrites one, so the block set can only widen: the same deny-list-bias
+    argument the implicit leading `*` already rests on.
+
+    The DEFAULT list is byte-identical through this function - `.env*`,
+    `secrets/**`, `*.pem`, `*.key` all carry a glob and none carries a `./`,
+    a `**/` or a trailing `/` - so no existing install, fixture or golden
+    digest moves. Only configs that are silently vacuous today change.
+    """
+    out, notices, seen = [], [], set()
+
+    def add(p):
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+
+    for pat in patterns:
+        if not isinstance(pat, str) or not pat:
+            add(pat)
+            continue
+        add(pat)                       # what the operator wrote always stays
+        root = pat
+        while root.startswith("./"):
+            root = root[2:]
+        while root.startswith("**/"):
+            root = root[3:]
+        if root != pat and root:
+            add(root)
+            notices.append(
+                f"secrets.never_read_paths: {pat!r} does not match a "
+                f"root-level path ('**' collapses to '*' and '*/…' needs a "
+                f"leading directory). Also guarding {root!r}.")
+        for cand in (pat, root):
+            if not cand:
+                continue
+            if cand.endswith("/"):
+                sub = cand + "**"
+            elif not (set(cand) & _GLOB_OK):
+                sub = cand.rstrip("/") + "/**"
+            else:
+                continue
+            if sub not in seen:
+                add(sub)
+                notices.append(
+                    f"secrets.never_read_paths: {cand!r} names a directory "
+                    f"but matches no path under it. Also guarding {sub!r}.")
+    return out, notices
+
+
+def _validate_shell_reaching(cfg: dict, errors: list) -> list:
+    """Validate every config field that reaches executable shell. Returns the
+    list of operator notices (non-fatal); appends to `errors` for the fatal
+    ones. Runs for BOTH modes: the retrofit hook bodies wrap the greenfield
+    ones, so every sink below is reachable from either."""
+    notices: list[str] = []
+
+    # ---- the two quoted-heredoc list fields ------------------------------
+    for field, values, allowed in (
+            ("secrets.never_read_paths",
+             cfg.get("secrets", {}).get("never_read_paths"), _GLOB_OK),
+            ("deps.approved",
+             cfg.get("deps", {}).get("approved"), frozenset())):
+        if values is None:
+            continue
+        if not isinstance(values, list):
+            errors.append(f"{field} must be a list of strings; got "
+                          f"{type(values).__name__}")
+            continue
+        for i, v in enumerate(values):
+            where = f"{field}[{i}]"
+            if not isinstance(v, str):
+                errors.append(f"{where} must be a string; got "
+                              f"{type(v).__name__} ({v!r})")
+                continue
+            for sentinel in _HEREDOC_SENTINELS:
+                if sentinel in v:
+                    errors.append(
+                        f"{where} contains the heredoc sentinel {sentinel!r} "
+                        f"({v!r}). That value terminates the emitted "
+                        f"heredoc: every entry after it becomes shell code "
+                        f"the hook EXECUTES, and the list itself is silently "
+                        f"truncated so the remaining entries stop guarding "
+                        f"anything.")
+                    break
+            bad = _bad_chars(v, allowed)
+            if bad:
+                errors.append(
+                    f"{where} contains characters that are not valid here: "
+                    f"{bad} (in {v!r}). This value is written VERBATIM into an "
+                    f"emitted shell hook and is never expanded, so `$HOME` and "
+                    f"`$(...)` cannot mean what they look like - write the "
+                    f"literal path, or a glob.")
+
+    # ---- the numeric drift thresholds ------------------------------------
+    # Interpolated raw and UNQUOTED into `[ "$n" -ge <value> ]`, which runs on
+    # every PostToolUse event, so a value of `$(...)` is command execution -
+    # the P0-1 arithmetic-injection class arriving through config instead of
+    # through the state file. bool is excluded explicitly: it is an int
+    # subclass in Python and `True` would render as `True`, not as a number.
+    h = cfg.get("hooks", {})
+    for key, lo in (("drift_tool_call_threshold", 1),
+                    ("drift_session_duration_minutes", 1),
+                    ("drift_file_read_threshold", 1)):
+        if key not in h:
+            continue
+        v = h[key]
+        if isinstance(v, bool) or not isinstance(v, int):
+            errors.append(
+                f"hooks.{key} must be an integer; got "
+                f"{type(v).__name__} ({v!r}). It is interpolated unquoted "
+                f"into a shell test that runs on every tool call.")
+        elif v < lo:
+            errors.append(f"hooks.{key} must be >= {lo}; got {v!r}")
+
+    # ---- the command fields ----------------------------------------------
+    # These are MEANT to be shell, so execution is by design and there is
+    # nothing to reject on that count. The defect is narrower: an unbalanced
+    # quote emits a hook bash cannot parse, so every commit is refused with a
+    # syntax error and no diagnosis. A newline breaks the single-line
+    # `echo "Running test gate: <cmd>"` the same way.
+    for key in ("test", "lint", "format", "typecheck", "ci_local"):
+        v = cfg.get("commands", {}).get(key)
+        if v in (None, ""):
+            continue
+        if not isinstance(v, str):
+            errors.append(f"commands.{key} must be a string; got "
+                          f"{type(v).__name__} ({v!r})")
+            continue
+        ctrl = sorted({repr(ch) for ch in v if ch in _CTRL and ch != "\t"})
+        if ctrl:
+            errors.append(
+                f"commands.{key} contains {', '.join(ctrl)}; it is emitted "
+                f"on one line of a shell hook. Put a multi-line command in a "
+                f"script and call the script.")
+        elif not _quotes_balanced(v):
+            errors.append(
+                f"commands.{key} has an unbalanced quote or a trailing "
+                f"backslash ({v!r}). The emitted hook would not PARSE, so "
+                f"every gated action is refused with a bash syntax error and "
+                f"no explanation of why.")
+
+    # ---- [D18] never_read_paths spellings that guard nothing -------------
+    sec = cfg.get("secrets", {})
+    if isinstance(sec.get("never_read_paths"), list):
+        expanded, d18_notices = _normalize_never_read(sec["never_read_paths"])
+        sec["never_read_paths"] = expanded
+        notices.extend(d18_notices)
+    return notices
+
+
 ARCHETYPES = {
     "cli", "library", "service", "fullstack", "mobile",
     "data-ml", "ai-agent", "platform", "other",
@@ -328,6 +615,13 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     cfg["_command_warnings"] = [
         name for name in ("test", "lint", "format")
         if not cmds.get(name)]
+
+    # ---- [round-4 D12/D18] the shell-reaching fields --------------------- #
+    # Placed here, ahead of the retrofit branch, so it covers BOTH modes: the
+    # retrofit hook bodies prefix a preamble onto the greenfield bodies, so
+    # every sink is reachable from either. Fatal problems go to `errors` (the
+    # installer refuses); spelling problems normalize and report.
+    cfg["_config_notices"] = _validate_shell_reaching(cfg, errors)
 
     # ---- Retrofit-mode: fill defaults + validate retrofit invariants ----- #
     # Runs only when mode == "retrofit". Greenfield path is byte-identical

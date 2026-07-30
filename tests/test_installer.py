@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 from defaults import resolve_config            # noqa: E402
 from installer import build_plan               # noqa: E402
 from minyaml import load_yaml                   # noqa: E402
+import templates as _tmpl                       # noqa: E402
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
 passed = failed = 0
@@ -262,9 +263,13 @@ try:
     check("S-2: --upgrade flag not treated as package",
           _run_hook(dg, {"tool_input":
                          {"command": "pip install --upgrade flask"}}) == 0)
-    check("S-2: -r requirements.txt not treated as package",
+    # [upstream P1-3] POSTURE REVERSED. Consuming the filename and allowing
+    # meant every package inside reqs.txt was installed unchecked - the gate
+    # was strictly decorative for the most common Python install form. A file
+    # the gate cannot read is not grounds to allow.
+    check("S-2: -r requirements.txt is unverifiable -> blocked (P1-3)",
           _run_hook(dg, {"tool_input":
-                         {"command": "pip install -r reqs.txt"}}) == 0)
+                         {"command": "pip install -r reqs.txt"}}) == 2)
     check("S-2: unapproved second package is caught",
           _run_hook(dg, {"tool_input":
                          {"command": "pip install requests evil"}}) == 2)
@@ -274,8 +279,19 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
-# S-5: malicious config values must not corrupt hook syntax
-d = _install("""project:
+# S-5: malicious config values must not corrupt hook syntax.
+#
+# [round-4 D12] STRENGTHENED, and the change of verdict is the point. S-5
+# asserted only that a hostile value could not break bash SYNTAX - true,
+# because the heredoc is quoted - and that is why this test stayed green for
+# five rounds while `PAT_EOF` as a pattern terminated the heredoc, executed
+# everything after it on every hook invocation, and silently truncated the
+# guarded pattern list. "The hooks still parse" was never the property worth
+# having. These values are now REFUSED at resolve_config, so the assertion is
+# that the install fails and says which field.
+_s5 = subprocess.run(
+    [sys.executable, BIN, "-C", tempfile.mkdtemp(), "-c", "/dev/stdin"],
+    input="""project:
   name: r
   archetype: cli
 deps:
@@ -284,12 +300,31 @@ secrets:
   never_read_paths: [".env*", "weird) ; echo PWNED"]
 commands:
   test: "pytest && echo X"
+""", capture_output=True, text=True)
+check("S-5: a config carrying shell metacharacters is now REFUSED",
+      _s5.returncode != 0)
+check("S-5: the refusal names both offending fields",
+      "deps.approved" in _s5.stderr
+      and "secrets.never_read_paths" in _s5.stderr)
+
+# The original property S-5 existed for - a legal but awkward value cannot
+# corrupt hook syntax - still holds, now over values the validator admits.
+d = _install("""project:
+  name: r
+  archetype: cli
+deps:
+  approved: ["good", "@scope/pkg", "a.b_c", "pip[extra]"]
+secrets:
+  never_read_paths: [".env*", "cfg[0-9].key", "**/*.jks"]
+commands:
+  test: "pytest -k 'not slow' && echo X"
 """)
 try:
     hd = os.path.join(d, ".claude", "hooks")
     bad = [f for f in os.listdir(hd) if f.endswith(".sh") and
            subprocess.run(["bash", "-n", os.path.join(hd, f)]).returncode]
-    check("S-5: injection config -> all hooks still valid bash", bad == [])
+    check("S-5: awkward-but-legal config -> all hooks still valid bash",
+          bad == [])
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -943,8 +978,14 @@ try:
           _after == _SENTINEL)
     check("upgrade: the skip is reported, not silent",
           "SKIP" in _r_up.stdout and "assumption-ledger.md" in _r_up.stdout)
-    check("upgrade: skip reason names it as not installer-generated",
-          "pre-existing and not installer-generated" in _r_up.stdout)
+    # [round-6 F6] This tree has no manifest, so "pre-existing and not
+    # installer-generated" — which this used to print — is a claim about
+    # authorship the installer cannot support: the manifest is gitignored, so
+    # a clone of an INSTALLED tree looks identical to this one. The reason now
+    # says what is actually known. "pre-existing and not installer-generated"
+    # is still used where a manifest exists and simply does not list the path.
+    check("upgrade: skip reason says what is actually known",
+          "no installer manifest" in _r_up.stdout)
     # Sticky across runs: a skip records the OPERATOR's digest, which must not
     # read as "we wrote that" on the next run and fall through to overwrite.
     subprocess.run([sys.executable, BIN, "-C", _d_up],
@@ -1043,7 +1084,9 @@ import json as _j4
 _EXPECT = {
     "spec-gate-entry": ("UserPromptSubmit", None),
     "spec-gate-commit": ("PreToolUse", "Bash"),
-    "secrets-gate": ("PreToolUse", "Read|Write|Edit"),
+    # [upstream P0-2/P2-4] Widened primary matcher; the Bash registration is
+    # separate and asserted below against templates.HOOK_EXTRA_EVENTS.
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
     "test-gate": ("PreToolUse", "Bash"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
     "ci-mirror": ("PreToolUse", "Bash"),
@@ -1073,16 +1116,49 @@ for arch in ("cli", "library", "service", "fullstack", "mobile",
             check(f"matrix[{arch}]: steering/{cond} present",
                   os.path.exists(os.path.join(cl, "steering", cond)))
         st = _j4.load(open(os.path.join(cl, "settings.json")))
+        # [upstream P0-2] A hook may now hold MORE than one registration:
+        # secrets-gate guards Read|Write|Edit|NotebookEdit|Grep|Glob AND
+        # Bash, because every never-read path was otherwise reachable through
+        # a shell command. Collect a SET of registrations per hook and assert
+        # the primary one is among them, rather than assuming exactly one.
         wired = {}
         for ev, groups in st["hooks"].items():
             for g in groups:
                 for hk in g["hooks"]:
                     nm = hk["command"].split("/")[-1].replace(".sh", "")
-                    wired[nm] = (ev, g.get("matcher"))
+                    wired.setdefault(nm, set()).add((ev, g.get("matcher")))
         hooks = [f[:-3] for f in os.listdir(os.path.join(cl, "hooks"))
                  if f.endswith(".sh")]
         bad = [h for h in hooks
-               if h in _EXPECT and wired.get(h) != _EXPECT[h]]
+               if h in _EXPECT and _EXPECT[h] not in wired.get(h, set())]
+        # [round-2 review] This check was VACUOUS, and it guarded the P0-2
+        # fix's actual production wiring. `extra` was built with a filter
+        # that admitted a hook only when it ALREADY carried a registration
+        # beyond the primary one, so a DROPPED extra removed the key
+        # entirely and `all()` ran over `{}`. Confirmed by mutation:
+        # changing templates.py's `registrations = [HOOK_EVENT_MAP[hk]] +
+        # HOOK_EXTRA_EVENTS.get(hk, [])` to drop the second term deletes
+        # secrets-gate's PreToolUse(Bash) entry from every emitted
+        # settings.json - the shell gate is then never invoked on shell
+        # commands at all, i.e. upstream P0-2 (`cat .env` unguarded)
+        # restored at the harness layer - and the entire suite stayed green
+        # except the three golden byte-digests.
+        #
+        # Assert the EXACT registration set for every hook instead, so
+        # presence and absence both fail. Every other guard in the repo
+        # (test_sdk_gates equality, the differential) compares table to
+        # table or drives hook scripts directly, bypassing this wiring
+        # layer, so this is the only place a dropped registration can be
+        # caught.
+        want_reg = {h: {_EXPECT[h]}
+                    | {tuple(e) for e in _tmpl.HOOK_EXTRA_EVENTS.get(h, [])}
+                    for h in hooks if h in _EXPECT}
+        wrong = {h: {"emitted": sorted(wired.get(h, set())),
+                     "declared": sorted(w)}
+                 for h, w in want_reg.items() if wired.get(h, set()) != w}
+        check(f"matrix[{arch}]: every hook's registration set is exactly "
+              f"its primary matcher plus its declared HOOK_EXTRA_EVENTS "
+              f"{wrong if wrong else ''}", wrong == {})
         missing = [h for h in hooks if h not in wired]
         orphan = [k for k in wired if k not in hooks]
         check(f"matrix[{arch}]: every hook wired correctly in settings",
@@ -1129,6 +1205,13 @@ finally:
 # usage-limit bump; [v2.4.0 code fold, GR2-EX/TEL-EX step 0] re-pinned
 # 2.2.0 -> 2.4.0 (single fold, no intermediate 2.3.0 code release; the
 # 2.3.0 GR2 doc fold and 2.4.0 TEL-01 doc fold land together in code);
+# [upstream fixes, 2.6.0] re-pinned 2.5.0 -> 2.6.0. Classified MINOR, not
+# PATCH: the emitted gates change BEHAVIOR, not just bytes - test-gate and
+# ci-mirror were async and therefore could not block at all, and now do; a
+# parser outage now fails closed where it used to allow. Not a seam event by
+# SEAM-CONTRACT §8.4 ("changes that touch only gate internals or dispatch
+# policy do not bump seam_version"): no §7.2 tier membership, §7.4 sentinel,
+# CLI flag, result/stream table, or `binds` entry moved.
 # [DS-01, 2.5.0] re-pinned 2.4.0 -> 2.5.0 at the design-steering fold (Step 7
 # version bump; PROTOCOL_VERSION is stamped into settings.json _generatedBy,
 # state, and the manifest — see the golden re-baseline for the emitted-byte
@@ -1137,10 +1220,10 @@ finally:
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.5.0",
-      _installer_mod.PROTOCOL_VERSION == "2.5.0")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.5.0",
-      _templates_mod.PROTOCOL_VERSION == "2.5.0")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.6.0",
+      _installer_mod.PROTOCOL_VERSION == "2.6.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.6.0",
+      _templates_mod.PROTOCOL_VERSION == "2.6.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 # The two constants are declared independently in installer.py and
@@ -1171,16 +1254,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.5.0",
-          state.get("bootstrap_protocol_version") == "2.5.0")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.6.0",
+          state.get("bootstrap_protocol_version") == "2.6.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.5.0",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.6.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.5.0)")
+          == "bootstrap-installer (protocol 2.6.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.5.0",
-          manifest.get("protocol_version") == "2.5.0")
+    check("AC-A0-3: manifest records protocol_version 2.6.0",
+          manifest.get("protocol_version") == "2.6.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -1517,8 +1600,12 @@ _rr_cost = _body_of(_rr_plan, ".claude/hooks/cost-log.sh")
 # F3: the jq-less Python fallback must render booleans like `jq -r` —
 # lowercase — or every [ "$(jget ...)" = "true" ] guard (notably the 6.D
 # stop_hook_active loop guard) fails open on installs without jq.
-check("RR-F3: jget fallback renders booleans lowercase (jq -r parity)",
-      'sys.stdout.write("true" if cur else "false")' in _rr_cost)
+# [upstream P3] Refined: `true` still renders lowercase (F3's point), but
+# FALSE now renders EMPTY, because jq's `.x // empty` treats false as absent.
+# The two parsers must be the same function or the next boolean guard added
+# diverges by substrate.
+check("RR-F3: jget fallback renders true lowercase, false empty (jq parity)",
+      'sys.stdout.write("true" if cur else "")' in _rr_cost)
 check("RR-F3: jget fallback special-cases bool before str()",
       "isinstance(cur, bool)" in _rr_cost)
 # F2/A-5: iteration-summary-enforcement is wired as an unconditional Stop
@@ -1542,6 +1629,169 @@ check("RR-F1: audio config carries the honest-scope header",
 check("RR-F1: drift-detector body admits tier-1-only scope",
       "TIER-1 TOOL-CALL COUNTER ONLY" in
       _body_of(_rr_plan, ".claude/hooks/drift-detector.sh"))
+
+# ---------------------------------------------------------------------------
+# [round-4 D12] CONFIG INJECTION IS A CLASS, not one field.
+#
+# Four fields reach executable shell and none was validated. Established by
+# execution: a marker planted in every string field, the emitted plan searched
+# for it. Each case below is the reproduction, and each control is a value an
+# ordinary project really uses - the point of the control set is that closing
+# the class must not cost anyone a legitimate config.
+# ---------------------------------------------------------------------------
+_D12_BASE = {"project": {"name": "d12", "archetype": "ai-agent"}}
+
+
+def _d12(overlay):
+    raw = {"project": dict(_D12_BASE["project"])}
+    for k, v in overlay.items():
+        raw.setdefault(k, {}).update(v) if isinstance(v, dict) else None
+        if not isinstance(v, dict):
+            raw[k] = v
+    _c, _e = resolve_config(raw)
+    return _c, _e
+
+
+# sink 1: secrets.never_read_paths -> mapfile -t PATS <<'PAT_EOF'
+_c, _e = _d12({"secrets": {"never_read_paths":
+                           [".env*", "PAT_EOF", "$(id -un > /tmp/PWNED)",
+                            "secrets/**", "*.pem", "*.key"]}})
+check("D12-1: never_read_paths carrying the heredoc sentinel is refused",
+      any("PAT_EOF" in e for e in _e))
+_c, _e = _d12({"secrets": {"never_read_paths": [".env*", "`id`"]}})
+check("D12-1: never_read_paths carrying a backtick is refused", bool(_e))
+_c, _e = _d12({"secrets": {"never_read_paths": [".env*", "a\nb"]}})
+check("D12-1: never_read_paths carrying a newline is refused", bool(_e))
+
+# sink 2: deps.approved -> mapfile -t APPROVED <<'APPROVED_EOF'. Worse than
+# sink 1: the mapfile sits ABOVE every early exit, so a poisoned entry bricks
+# dependency-gate to rc=2 on EVERY PreToolUse call, not just on installs.
+_c, _e = _d12({"deps": {"approved": ["requests", "APPROVED_EOF", "$(id)"]}})
+check("D12-2: deps.approved carrying the heredoc sentinel is refused",
+      any("APPROVED_EOF" in e for e in _e))
+_c, _e = _d12({"deps": {"approved": ["requests; rm -rf /"]}})
+check("D12-2: deps.approved carrying a shell separator is refused", bool(_e))
+# minyaml has no nested flow mappings, so `deps: {approved: [...]}` parses to
+# the STRING '["..."]' and "\n".join() then emitted one CHARACTER per line.
+# Unlisted in the brief; found while reproducing D12 and caught by the type
+# check rather than by a rule written for it.
+_c, _e = _d12({"deps": {"approved": '["requests"]'}})
+check("D12-2: deps.approved as a string (flow-style YAML) is refused",
+      bool(_e))
+
+# sink 3: hooks.drift_* -> [ "$n" -ge <raw, unquoted> ], on every PostToolUse.
+# The P0-1 arithmetic-injection RCE re-entering through config.
+_c, _e = _d12({"hooks": {"drift_tool_call_threshold": "$(touch /tmp/PWNED)"}})
+check("D12-3: a non-numeric drift threshold is refused", bool(_e))
+_c, _e = _d12({"hooks": {"drift_tool_call_threshold": True}})
+check("D12-3: a bool drift threshold is refused (int subclass in Python)",
+      bool(_e))
+_c, _e = _d12({"hooks": {"drift_session_duration_minutes": "5; id"}})
+check("D12-3: every drift threshold is checked, not just the tool-call one",
+      bool(_e))
+
+# sink 4: commands.* are MEANT to be shell. The defect is that an unbalanced
+# quote emits a hook bash cannot parse, so every commit is refused with a
+# syntax error and no diagnosis.
+_c, _e = _d12({"commands": {"test": "echo 'oops"}})
+check("D12-4: commands.test with an unbalanced quote is refused", bool(_e))
+_c, _e = _d12({"commands": {"lint": 'ruff check "'}})
+check("D12-4: commands.lint with an unbalanced quote is refused", bool(_e))
+_c, _e = _d12({"commands": {"ci_local": "make ci \\"}})
+check("D12-4: commands.ci_local with a trailing backslash is refused",
+      bool(_e))
+_c, _e = _d12({"commands": {"test": "echo a\necho b"}})
+check("D12-4: commands.test with a newline is refused", bool(_e))
+
+# Controls: closing the class must cost nothing real.
+for _lbl, _ov in (
+        ("default config", {}),
+        ("scoped + dotted + dashed package names",
+         {"deps": {"approved": ["@scope/pkg", "req-uests", "a.b_c",
+                                "github.com/x/y", "pip[extra]"]}}),
+        ("glob patterns incl. a character class",
+         {"secrets": {"never_read_paths": [".env*", "secrets/**", "*.pem",
+                                           "cfg[0-9].key", "**/*.jks"]}}),
+        # Both NEGATED-class spellings. `_norm_pat` on the SDK side converts
+        # `[^` INTO `[!` because fnmatch reads `[^` as a POSITIVE class
+        # containing `^` - so the fnmatch-native form is a pattern this suite
+        # already supports, and the first cut of the D12 validator rejected
+        # it. `!` is also a legal filename character.
+        ("negated classes and a bang in a filename",
+         {"secrets": {"never_read_paths": ["[^.]env", "[!.]env",
+                                           "client!.key"]}}),
+        ("quoted and nested-quoted test commands",
+         {"commands": {"test": "pytest -k 'not slow'",
+                       "lint": 'ruff check . && echo "ok"',
+                       "ci_local": "make ci"}}),
+        ("legitimate thresholds", {"hooks": {"drift_tool_call_threshold": 200,
+                                             "drift_file_read_threshold": 1}}),
+):
+    _c, _e = _d12(_ov)
+    check(f"D12 control: {_lbl} still validates", not _e)
+
+# The emitted hooks must PARSE for every value the validator lets through.
+# The pre-existing `bash -n` check runs on the default config only, which is
+# exactly why sink 4 survived: the hostile value never reached an emitted
+# hook in any test.
+_c, _e = _d12({"commands": {"test": "pytest -k 'not slow'",
+                            "lint": 'ruff check . && echo "ok"',
+                            "ci_local": "make ci"},
+               "deps": {"approved": ["@scope/pkg", "a.b_c"]},
+               "secrets": {"never_read_paths": [".env*", "cfg[0-9].key"]},
+               "principles": {"tdd_policy": "required"}})
+assert not _e, _e
+_d12_tmp = tempfile.mkdtemp()
+try:
+    _bad = []
+    for _a in build_plan(_c):
+        _p = _a["path"] if isinstance(_a, dict) else _a.path
+        _b = _a["body"] if isinstance(_a, dict) else _a.body
+        if not _p.endswith(".sh") or not isinstance(_b, str):
+            continue
+        _f = os.path.join(_d12_tmp, os.path.basename(_p))
+        with open(_f, "w") as _fh:
+            _fh.write(_b)
+        if subprocess.run(["bash", "-n", _f],
+                          capture_output=True).returncode != 0:
+            _bad.append(_p)
+    check("D12: every emitted hook parses (bash -n) on a quote-heavy config",
+          _bad == [], )
+finally:
+    shutil.rmtree(_d12_tmp, ignore_errors=True)
+
+# ---------------------------------------------------------------------------
+# [round-4 D18] CONFIG-SHAPED VACUITY. Ordinary never_read_paths spellings
+# turned secrets-gate OFF, installing rc=0 with no warning. No technique the
+# round-4 brief endorses can see this: both substrates agree, it reproduces at
+# every commit, and a composition sweep varies COMMAND shape while this varies
+# CONFIG shape. Normalized rather than rejected - `**/secrets/**` is not a
+# wrong thing to write.
+# ---------------------------------------------------------------------------
+for _lbl, _given, _want in (
+        ("**/ prefix also guards the root", ["**/secrets/**", "**/.env*"],
+         ["secrets/**", ".env*"]),
+        ("./ prefix is stripped", ["./secrets/**", "./.env*"],
+         ["secrets/**", ".env*"]),
+        ("a trailing slash names the subtree", ["secrets/"], ["secrets/**"]),
+        ("a bare directory name names the subtree", ["secrets"],
+         ["secrets/**"]),
+):
+    _c, _e = _d12({"secrets": {"never_read_paths": list(_given)}})
+    _got = _c["secrets"]["never_read_paths"]
+    check(f"D18: {_lbl}",
+          not _e and all(w in _got for w in _want)
+          and all(g in _got for g in _given))
+    check(f"D18: {_lbl} is reported, not silent",
+          any("never_read_paths" in n for n in _c.get("_config_notices", [])))
+
+# The DEFAULT list must pass through byte-identical, or every golden digest
+# and every prior invariant moves for a defect none of them has.
+_c, _e = _d12({})
+check("D18: the default never_read_paths list is unchanged",
+      _c["secrets"]["never_read_paths"]
+      == [".env*", "secrets/**", "*.pem", "*.key"]
+      and _c.get("_config_notices") == [])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
