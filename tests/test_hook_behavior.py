@@ -102,6 +102,13 @@ HOOKS = os.path.join(PROJ, ".claude", "hooks")
 # Sandbox PATHs: exercising the jq-less and no-parser branches means running a
 # hook with a PATH that genuinely lacks those binaries. A symlink farm is the
 # only honest way -- `command -v jq` cannot be fooled by shadowing.
+#
+# [2026-07-31] That last sentence was true and it was the wrong question, and
+# believing it is why a fail-open lived in the shared header from the start.
+# Nothing was ever shadowing jq. The uncovered case is a jq that is PRESENT
+# and does not WORK -- `command -v` reports it happily, and jget bound its
+# choice of parser to exactly that report. Every farm below tests ABSENCE;
+# `_broken_farm` tests brokenness, which is the case that shipped.
 # --------------------------------------------------------------------------- #
 BASE_BINS = ("bash", "cat", "date", "mkdir", "dirname", "basename", "mktemp",
              "grep", "rm", "sed", "tr", "find", "git", "sort", "head", "tail",
@@ -122,6 +129,37 @@ def _farm(name, extra=()):
 
 PATH_NOJQ = _farm("nojq", ("python3",))     # python3 present, jq absent
 PATH_NOPARSER = _farm("noparser")           # neither jq nor python3
+
+
+def _broken_farm(name, stub, extra=()):
+    """A farm where `stub` EXISTS and is executable but always fails.
+
+    Reproduces the three shapes that actually occur in the field: a
+    version-manager shim (pyenv/asdf/mise print a "command not found" line
+    and exit 127 for a runtime the user has not installed), a binary whose
+    dynamic link is broken (`libonig.so.5` is jq's, and the usual
+    Alpine/slim-image failure), and a wrapper script that errors. All three
+    satisfy `command -v` and none of them parses JSON.
+    """
+    d = _farm(name, extra)
+    p = os.path.join(d, stub)
+    if os.path.islink(p) or os.path.exists(p):
+        os.remove(p)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\n"
+                 f"echo '{stub}: error while loading shared libraries: "
+                 "libonig.so.5' >&2\n"
+                 "exit 127\n")
+    os.chmod(p, 0o755)
+    return d
+
+
+# jq broken, python3 fine: the fallback MUST reach python3.
+PATH_BROKENJQ = _broken_farm("brokenjq", "jq", ("python3",))
+# jq broken, python3 absent: no working parser at all -> fail closed.
+PATH_BROKENBOTH = _broken_farm("brokenboth", "jq")
+# python3 broken, jq absent: the mirror image, so the fix is not jq-specific.
+PATH_BROKENPY = _broken_farm("brokenpy", "python3")
 
 
 def run(hook, payload, env=None, project=None, path=None):
@@ -248,6 +286,58 @@ rc, _, _ = run("format-lint-gate", pre("Write", file_path="src/x.rs"),
                path=PATH_NOPARSER)
 check("format-lint-gate (advisory) does not block with no parser", rc != 2,
       f"rc={rc}")
+
+
+print("\n== P0-3b(ii): a parser that is PRESENT but BROKEN ==")
+
+# [2026-07-31] P0-3b closed "no parser at all". It did not close "a parser
+# that does not work", because `have_jq`/`have_py` are `command -v` presence
+# tests and jget bound its choice to them with `if have_jq ... elif have_py`,
+# then swallowed the failure with `|| true`. So a jq exiting 127 made jget
+# return EMPTY, every gate's `case` fell through to ALLOW, and the `elif`
+# guaranteed the working python3 on the same PATH was never tried.
+#
+# Executed against the emitted artifact BEFORE the fix, jq exiting 127 with
+# python3 present: secrets-gate on `cat .env` -> rc=0, dependency-gate on
+# `npm install evil` -> rc=0. Both silent; hooks.log recorded only the
+# misleading "secrets-gate: no path". These four checks fail on that build.
+rc, _, err = run("secrets-gate", pre("Bash", command="cat .env"),
+                 path=PATH_BROKENJQ)
+check("secrets-gate BLOCKS when jq is present but broken", rc == 2,
+      f"rc={rc} err={err[:200]} (0 = fail-open through the selector)")
+
+rc, _, _ = run("dependency-gate", pre("Bash", command="npm install evil"),
+               path=PATH_BROKENJQ)
+check("dependency-gate BLOCKS when jq is present but broken", rc == 2,
+      f"rc={rc} (0 = fail-open through the selector)")
+
+# The benign direction proves the fallback genuinely PARSED, rather than the
+# gate having become a block-everything. Without this, a jget that always
+# failed closed would pass the two checks above.
+rc, _, _ = run("secrets-gate", pre("Bash", command="echo hi"),
+               path=PATH_BROKENJQ)
+check("secrets-gate ALLOWS a benign command with jq broken", rc == 0,
+      f"rc={rc} (2 = the fallback did not parse, it just blocked)")
+
+rc, _, _ = run("secrets-gate", pre("Read", file_path="/h/.env"),
+               path=PATH_BROKENPY)
+check("secrets-gate BLOCKS when python3 is broken and jq absent", rc == 2,
+      f"rc={rc} (the mirror case: the fix must not be jq-specific)")
+
+# Both parsers unusable is the same condition as neither installed.
+rc, _, err = run("secrets-gate", pre("Read", file_path="/h/.env"),
+                 path=PATH_BROKENBOTH)
+check("secrets-gate fails CLOSED when the only parser present is broken",
+      rc == 2, f"rc={rc} err={err[:200]}")
+check("...and says a working parser is what it lacked",
+      "parser" in err.lower(), err[:200])
+
+# Advisory hooks must still not block -- a broken parser is not a reason to
+# take the session down, and hook_fail's FAIL_CLOSED=0 branch is what makes
+# that distinction. Same reasoning as the no-parser advisory checks above.
+rc, _, _ = run("drift-detector", pre("Read"), path=PATH_BROKENBOTH)
+check("drift-detector (advisory) does not block with a broken parser",
+      rc != 2, f"rc={rc}")
 
 
 print("\n== F5: a missing grep/tr must not turn a gate into a no-op ==")

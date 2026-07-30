@@ -960,8 +960,43 @@ EXPECTED_DIGESTS = {
     #                                         LIVE 77 -> 2, REGRESSION 0
     #
     # NO PROTOCOL_VERSION BUMP - 2.6.0 is still unreleased.
+    #
+    # [freeze-exception no. 26 - jget parser-usability fail-open, 2026-07-31]
+    # ALL THREE fixtures move together, because the change is one function in
+    # the shared `_HOOK_HEADER`: every emitted hook body carries it. Verified
+    # per-file against `main` by body digest before re-baselining:
+    #   default          11 bodies move, 57 actions (stable), 0 added/removed
+    #   full_autonomous  15 bodies move, 69 actions (stable), 0 added/removed
+    #   design_steering  11 bodies move, 59 actions (stable), 0 added/removed
+    # EVERY moved body is under .claude/hooks/. Nothing outside the hook set
+    # moved - checked explicitly, because "the shared header changed" is
+    # exactly the shape that hides an unrelated edit. `sdk_gates/gates.py`
+    # deliberately did NOT move: the SDK substrate parses JSON in-process and
+    # has no external-parser selector, so it never had this defect.
+    #
+    # THE DEFECT. `jget` chose its parser with `if have_jq ... elif have_py`,
+    # binding the choice to `command -v` PRESENCE, then swallowed the parser's
+    # failure with `|| true`. A jq that exists but does not run - a pyenv/asdf
+    # /mise shim, a broken `libonig.so.5` link, a non-executable file of the
+    # right name - therefore made jget return EMPTY, every parsing gate fall
+    # through its `case` to ALLOW, and the `elif` guaranteed the working
+    # python3 on the same PATH was never tried. Executed on the emitted
+    # artifact at `main`, jq exiting 127 with python3 present:
+    #   secrets-gate    `cat .env`           rc=0   (must be 2)
+    #   dependency-gate `npm install evil`   rc=0   (must be 2)
+    # Both silent; hooks.log recorded only the misleading "no path". This is
+    # upstream P0-3b's fail-open reopened through the SELECTOR rather than
+    # through absence - P0-3b closed "no parser at all" and this is "a parser
+    # that does not work", which a presence test reports as success.
+    #
+    # THE FIX. Try each parser in turn; accept its output only if it exited
+    # clean (`set -o pipefail` makes the pipeline's status the parser's).
+    # Both unusable is now the same condition as neither installed: hook_fail,
+    # fail-closed for a blocking gate and a logged degrade for an advisory
+    # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
+    # fail (5 checks) against the pre-fix header.
     "default":
-        "b85670d3a1dc8afa04e386df482be3bf6555228aeb041e06af04ed52f6f47bce",
+        "0e098fdf9838eaa48f431ea1e12e9790e9d3c1f7dc5b5f39e099fa1dd73666ec",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1024,8 +1059,10 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
+    # [freeze-exception no. 26] see the note on `default` above; this fixture
+    # moves 15 hook bodies for the same one-function shared-header change.
     "full_autonomous":
-        "d747f12a953e785282517ecdb69b982516c5df234f2d9987985ab3f4d4b1a534",
+        "af9ec1e7400faafd46fb9fd297658db7c919751893ec9782031f32d5ea514a39",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1093,8 +1130,10 @@ EXPECTED_DIGESTS = {
     # artifacts themselves are UNCHANGED (frozen twins intact).
     # [freeze-exception no. 18] same two files as `default` above; the three
     # design artifacts themselves are UNCHANGED (frozen twins intact).
+    # [freeze-exception no. 26] see the note on `default` above; this fixture
+    # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "466b7a7393566559dfc77ff0485cf2a2f294c3dbd25adc4bf4d82e4f23f308c1",
+        "ce8e2ffae8af5a32ab3a9dd15f9decbd582d24191352a085e80dcc46ecfc7c76",
 }
 
 EXPECTED_ACTION_COUNTS = {
