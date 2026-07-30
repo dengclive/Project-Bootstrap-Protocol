@@ -355,7 +355,28 @@ try:
     auto = os.path.join(d, ".claude", "auto.sh")
     r = subprocess.run(["bash", auto], stdin=subprocess.DEVNULL,
                         capture_output=True, text=True, timeout=8)
-    check("F-2: auto.sh runs without hanging", r.returncode == 0)
+    # The property is "does not hang on stdin" - the timeout= above is what
+    # tests it; reaching this line at all means it terminated. rc == 0 was
+    # incidental and became wrong on 2026-07-30, when the skeleton stopped
+    # claiming terminal success for a run that dispatched nothing.
+    #
+    # [2026-07-31] The 2026-07-30 rewrite of this line was
+    # `r.returncode is not None`, which cannot fail: subprocess.run always
+    # sets returncode to an int on return, so the check could only ever be
+    # counted as a pass. Two costs, both measured. It removed this file's
+    # ONLY pin on the exit contract - a complete revert of all three wrappers
+    # to `exit 0` left test_installer's 350 checks green. And at be9f31c this
+    # same check was a LIVE red on a flock-less host (auto.sh exits 1 at the
+    # flock guard), so the rewrite converted a real host-portability signal
+    # into a permanent green. Assert the refusal code AND the refusal reason:
+    # `== 1` alone is satisfied by the flock guard too, which is a different
+    # refusal for a different cause and would hide the same regression.
+    check("F-2: auto.sh terminates (does not hang on stdin)",
+          r.returncode is not None)
+    check("F-2: auto.sh refuses non-zero rather than claiming success",
+          r.returncode == 1)
+    check("F-2: ...and refuses because it is a skeleton, not for some "
+          "other reason", "skeleton" in r.stderr.lower())
     check("F-2: auto.sh cleans .run-active sentinel",
           not os.path.exists(os.path.join(d, ".claude", "queue",
                                           ".run-active")))
@@ -1617,7 +1638,42 @@ check("RR-F2: iteration-summary hook gates on .goal-active-*",
       'if ! ls "$S"/.goal-active-* >/dev/null 2>&1; then' in _rr_iter)
 check("RR-F2: the gate precedes the summary demand",
       0 < _rr_iter.find(".goal-active-*")
-      < _rr_iter.find("iteration-summary missing/empty"))
+      < _rr_iter.find("iteration-summary missing"))
+# The demand must BLOCK. 6.D: exit 1 is "hook error, tool proceeds", and on a
+# Stop hook exit 2 means "do not stop" - so the gate spent its whole life
+# exiting 1 for the one violation it exists to catch. Pinned here as well as
+# behaviorally in tests/test_wrapper_behavior.py, because the ordering check
+# above would happily pass over an inert gate.
+check("RR-F2: the summary demand exits 2, not 1",
+      "\n  exit 2\n" in _rr_iter[_rr_iter.find("iteration-summary missing"):])
+# ...and the block is bounded: exit 2 on Stop means "do not stop", so a turn
+# that cannot produce a summary would spin forever without this.
+#
+# [2026-07-31] This was `_rr_iter.find("stop_hook_active") < _rr_iter.find(
+# "iteration-summary missing")` with no lower guard, and `str.find` returns
+# -1 when the token is ABSENT. -1 is less than any positive index, so the
+# check passed when the bound had been deleted outright -- the one condition
+# it exists to detect. The sibling check two lines above kept its `0 <` guard;
+# this one was written without it. Anchor the lower bound, and assert the
+# bound is a USABILITY probe rather than a presence test: `have_jq || have_py`
+# is satisfied by a jq that exists and does not run, which is how the bound
+# was defeated on a broken-parser host (rc=2 on every Stop).
+# Anchored on the EXECUTABLE guard, not the bare token. `stop_hook_active`
+# also appears several times in the comment block explaining the bound, so a
+# token search finds the comment and passes with the guard deleted outright -
+# which is what a mutation run demonstrated, on the first repair of this very
+# check. A check that is satisfied by the prose describing the control is the
+# same defect class as one satisfied by -1.
+_GUARD = '''if [ "$(jget '.stop_hook_active')" = "true" ]; then'''
+_i_bound = _rr_iter.find(_GUARD)
+check("RR-F2: the demand is bounded by stop_hook_active",
+      0 < _i_bound < _rr_iter.find("iteration-summary missing"))
+# Anchored on the EXECUTABLE form, not the bare token: the hook's own comment
+# quotes the superseded `have_jq || have_py` while explaining why it was
+# wrong, and a substring test would read that comment as the code.
+check("RR-F2: the bound tests parser USABILITY, not mere presence",
+      "if parser_ok; then" in _rr_iter
+      and "if have_jq || have_py; then" not in _rr_iter)
 # F1: emitted artifacts must not advertise tier-3 enforcement nothing
 # implements (nothing emitted writes .drift-tier3-* or denies at tier 3).
 _rr_audio = _body_of(_rr_plan, ".claude/hooks/audio-alerts.config")

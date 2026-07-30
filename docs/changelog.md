@@ -1,5 +1,104 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — the skeleton wrappers reported terminal success (2026-07-31)
+
+The first round that ever **executed** the emitted autonomous-mode wrappers
+rather than reading them. Four defects, all in artifacts three prior rounds had
+covered by byte assertion only.
+
+**1. A run that dispatched nothing reported success.** `auto.sh` set
+`EXIT_REASON="queue-empty"` and exited **0** — and its own emitted enum defines
+`queue-empty` as *"all ready-to-run tasks completed … (terminal success)"*.
+`loop.sh` and `goal-loop.sh` did the same with `max-iterations`. The refusal was
+loud on stderr and invisible everywhere else: under `nohup`, cron, or any
+supervisor reading `$?`, a skeleton that did no work was indistinguishable from
+a clean overnight run, and the morning-after summary's "Ended because" line —
+which keys off the code, not the text — would have said the backlog emptied.
+All three now keep their pessimistic default and exit non-zero.
+
+The 13-value enum is deliberately **not** extended. A `skeleton-not-implemented`
+value is contract surface (pinned at exactly 13, documented in `auto.sh`'s
+header, rendered by the morning-after summary), so it is an owner decision
+rather than part of a defect fix — recorded as backlog **O-3**, along with the
+honest cost: `infrastructure-failure` is defined in that same enum as *"two
+consecutive runner-level failures"*, and the skeleton now records it on a first
+run with zero failures. Safe in direction, still wrong in cause.
+
+**2. The iteration-summary demand could not block.** Per 6.D, exit 1 is "hook
+error, tool proceeds"; on a `Stop` hook exit **2** means "do not stop". The gate
+spent its whole life exiting 1 for the one violation it exists to catch, while
+its stderr claimed to be "feeding error to next iteration" — where exit 1's
+stderr reaches nobody. Now exits 2.
+
+**3. …and that block needed a bound, which took three attempts.** `exit 2` on a
+Stop hook means an agent that cannot produce a summary is refused the end of its
+turn — an unbounded stop-loop inside an unattended run, strictly worse than the
+inert gate it replaced. The bound is `stop_hook_active`, and getting it right
+was the hard part:
+
+* the first cut read it with a bare `[ "$(jget …) " = true ]`. `jget` routes a
+  missing parser through `hook_fail`, whose `exit 2` dies with the **command
+  substitution** rather than the script — so on a parserless host the guard read
+  empty, the bound could never fire, and the hook blocked every Stop forever.
+  The fixed defect's own class, re-entering through the fix;
+* the second cut tested `have_jq || have_py` and degraded to allow. The
+  adversarial round showed that is still a **presence** test: with a
+  broken-but-present `jq` the guard took the true branch, the bound read empty,
+  and the hook blocked every Stop (executed: pre-fix `rc=1`, post-fix `rc=2`,
+  with the degrade message never printed). Fixed at the root in the entry below
+  — `jget` now falls back on failure, not only on absence — and the local guard
+  is a parser **self-test** so the two layers cannot disagree.
+
+Degrading to allow is deliberate: on a `PreToolUse` gate fail-closed means deny,
+but on a `Stop` hook refusing forever is the unsafe direction. This hook
+enforces iteration discipline, not a security boundary. §6.C's
+`summary_failure_count` and three-failure halt remain unimplemented (**O-2**):
+that counter is per-task persistent state the Stop payload cannot scope, so it
+belongs in the operator-completed wrapper, not here. The bound shipped is the
+local one — never spin a single turn.
+
+**4. The tier-3 cooperation point could never fire.** `ls A B` with one
+unmatched glob exits non-zero, so `ls .loop-active-* .goal-active-*` required
+**both** modes active simultaneously. A task is in exactly one mode, so the
+branch was dead in normal operation — and would have stayed dead after an
+operator implemented tier-3, which is the completion path it exists to serve.
+Split into two tested globs, OR'd.
+
+**Two emission bugs closed alongside** (backlog **D-9**, **I-8**): a
+`.format`-doubling quirk made `log()` in `loop.sh`/`goal-loop.sh` emit a literal
+`\n`, so their `hooks.log` entries shared one physical line, and the
+`O_CREAT|O_EXCL` claim sentinel was written with the same doubled escape. D-9's
+own row was wrong about where the bug was — it named `loop.sh` as *correct*, so
+a fixer working from it would have fixed one of the two sites. Verified by
+execution: seven wrapper log entries, seven physical lines.
+
+**On the tests.** Four pre-existing checks asserted `rc == 0` on the skeleton
+path — the defect encoded as the expectation. They were rewritten rather than
+deleted, and the adversarial round then found two of the rewrites were vacuous:
+`test_installer.py`'s F-2 became `r.returncode is not None`, which cannot fail
+and which converted a live flock-less red into a permanent green; and the new
+`stop_hook_active` ordering check compared `str.find()` results with no lower
+guard, so `-1 < 28191` passed when the bound was deleted outright. Both now
+assert the refusal code and reason.
+
+`tests/test_wrapper_behavior.py` is new — 65 checks, demonstrated to fail
+against the pre-fix templates — and it no longer reports `0 passed, 0 failed`
+on a host without `flock` (stock macOS ships none). It emits `SUITE SKIPPED:`,
+which `bin/run-tests` renders as SKIPPED on the table, the totals line and the
+closing banner. A suite that declined to run has not passed, and the instrument
+added because *"a green suite sat on top of all four defects"* must not be able
+to disappear quietly.
+
+**Golden re-baseline: freeze-exception no. 27**, `full_autonomous` only —
+exactly five files, action count stable at 69, `default` and `design_steering`
+byte-identical, each of the five read byte by byte. Numbered 27 rather than 19:
+19 was already spent, and the duplicate would have made the changelog's existing
+no.-19 paragraph resolve to the wrong re-baseline (backlog **D-8** records that
+this ledger's numbering has drifted before).
+
+Residue this round recorded rather than fixed is backlog cluster **O**.
+Suite: 21 suites / 1905 checks / 0 failed.
+
 ## 2.6.0 in-version fix — a broken `jq` failed every gate open (2026-07-31)
 
 `jget` picked its JSON parser by asking whether one **exists**, not whether one

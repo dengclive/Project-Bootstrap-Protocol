@@ -2533,7 +2533,16 @@ FAIL_CLOSED=0
 # Retained as the documented cooperation point for that implementation.
 SID="${CLAUDE_SESSION_ID:-default}"
 S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
-if ls "$S"/.loop-active-* "$S"/.goal-active-* >/dev/null 2>&1; then
+# `ls A B` with ONE unmatched glob exits non-zero: bash passes the unmatched
+# pattern through literally and ls fails on it, so this condition used to
+# require BOTH modes to be active simultaneously. A task is in exactly one
+# mode - the wrappers enforce that with the cross-mode sentinel check - so the
+# tier-3 cooperation point could never fire in normal single-mode operation,
+# and would still not fire after an operator implemented tier-3 per backlog
+# I-1, which is the completion path this hook exists to serve. Test each glob
+# separately and OR them.
+if ls "$S"/.loop-active-* >/dev/null 2>&1 \\
+   || ls "$S"/.goal-active-* >/dev/null 2>&1; then
   if ls "$S"/.drift-tier3-* >/dev/null 2>&1; then
     echo "tier3-in-loop: write checkpoint and end turn." >&2
   fi
@@ -2557,10 +2566,90 @@ if ! ls "$S"/.goal-active-* >/dev/null 2>&1; then
   log "iteration-summary-enforcement: no goal-active marker; not a goal iteration"
   exit 0
 fi
+# THE BOUND ON THE BLOCK BELOW. `exit 2` on a Stop hook means "do not stop",
+# so an agent that cannot produce a summary would be blocked from ending its
+# turn forever - an unbounded stop-loop inside an UNATTENDED run, which is
+# strictly worse than the inert gate this replaced. `stop_hook_active` is set
+# by the runtime when the turn is already a stop-hook continuation: the demand
+# has been made once and refusing again cannot help. Allow, and say so.
+# Same idiom as cost-log and task-done-alarm, the other two Stop-family hooks.
+#
+# This is NOT the `summary_failure_count` / three-consecutive-failure halt of
+# 6.C - that is per-task persistent state the Stop payload cannot scope
+# (no task or iteration identity; backlog I-13), and it belongs in the
+# operator-completed wrapper where the counter can live beside loop_in_flight.
+# This bound is the local one: never spin a single turn.
+#
+# THE BOUND MUST BE READABLE BEFORE THE BLOCK IS ALLOWED TO HAPPEN. `jget`
+# routes a missing parser through `hook_fail`, which exits 2 - but it is
+# called inside `$( )`, so that exit kills the COMMAND SUBSTITUTION and not
+# this script. The guard would silently read empty, `stop_hook_active` could
+# never be true, and the block below would fire on every turn forever. That
+# is the fixed defect's own class walking back in through the fix: a control
+# whose bound is inoperative and silent about it.
+#
+# So the parser test is explicit, and its failure DEGRADES TO ALLOW. On a
+# PreToolUse gate fail-closed means deny; on a `Stop` hook exit 2 means "do
+# not stop", so refusing forever is the UNSAFE direction - an unbounded
+# stop-loop in an unattended overnight run, which is strictly worse than a
+# missed summary. This hook enforces iteration discipline, not a security
+# boundary; J-19 is the record of one exit code being applied across five
+# event semantics, and this is that lesson applied deliberately rather than
+# inherited.
+# USABILITY, NOT PRESENCE. The first version of this guard was
+# `if have_jq || have_py`, and that is still a presence test: `have_jq` is
+# `command -v jq`, which reports success for a version-manager shim, a jq
+# with a broken dynamic link, or a non-executable file of the right name.
+# With a broken-but-present jq the guard took the TRUE branch, `jget` read
+# empty, `stop_hook_active` could never be true, and this hook blocked every
+# Stop - the exact unbounded-block this bound exists to prevent, reached
+# through the test that was supposed to prevent it. Executed on the emitted
+# artifact with jq exiting 127 and python3 healthy: rc=2 where the bound
+# should have fired, and the degrade branch below was never taken, so the
+# operator was told the summary was missing rather than that the bound had
+# failed. `jget` itself was fixed at the root for this (it now falls back on
+# FAILURE, not only on absence); this probe mirrors its order so the two
+# layers cannot disagree about which parser is usable.
+parser_ok(){
+  local probe
+  if have_jq; then
+    probe="$(printf '%s' '{"p":"ok"}' | jq -r '.p // empty' 2>/dev/null)" \\
+      && [ "$probe" = "ok" ] && return 0
+  fi
+  if have_py; then
+    probe="$(printf '%s' '{"p":"ok"}' | python3 -c "$JGET_PY" p 2>/dev/null)" \\
+      && [ "$probe" = "ok" ] && return 0
+  fi
+  return 1
+}
+if parser_ok; then
+  if [ "$(jget '.stop_hook_active')" = "true" ]; then
+    log "iteration-summary-enforcement: stop_hook_active; not re-blocking"
+    exit 0
+  fi
+else
+  echo "iteration-summary-enforcement: no WORKING JSON parser (need jq or" >&2
+  echo "python3; one may be present but broken), so stop_hook_active cannot" >&2
+  echo "be read and this demand cannot be bounded." >&2
+  echo "Degrading to advisory rather than risking an unbounded stop-loop." >&2
+  log "iteration-summary-enforcement: no usable parser; advisory degrade (unbounded-block risk)"
+  exit 0
+fi
 latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
-  echo "iteration-summary missing/empty - feeding error to next iteration." >&2
-  exit 1
+  # EXIT 2, NOT 1. This gate used to exit 1 for the one violation it exists
+  # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-6-0.md
+  # :654-655) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
+  # means "do not stop" - so the iteration ended exactly as if the summary had
+  # been written, and the stderr line below claimed to be "feeding error to
+  # next iteration" when exit 1's stderr reaches nobody. The hook was already
+  # returning 2 from its fail-closed empty-payload path, so it was always
+  # CAPABLE of blocking; only the enforcement decision used the wrong code.
+  # Same class as upstream P1-1: present, documented, inert.
+  echo "iteration-summary missing or empty at $S/.iteration-summary-*." >&2
+  echo "Write the structured summary for this iteration before ending the turn" >&2
+  echo "(goal condition, completion-criteria status, what changed, what remains)." >&2
+  exit 2
 fi
 log "iteration-summary-enforcement ok"
 exit 0
@@ -3134,8 +3223,19 @@ log "auto.sh started (skeleton)."
 
 echo "Queue runner skeleton installed. Implement the dispatch loop per" \\
      "Bootstrap-Protocol-v2-2-0.md Phase 9.7 before any unattended use." >&2
-EXIT_REASON="queue-empty"   # skeleton: nothing dispatched, treated as no-op
-exit 0
+# A RUN THAT DISPATCHED NOTHING MUST NOT REPORT SUCCESS. This used to set
+# EXIT_REASON="queue-empty" and exit 0 - and the enum above defines
+# queue-empty as "all ready-to-run tasks completed ... (terminal success)".
+# The refusal was loud on stderr and invisible everywhere else: under nohup,
+# cron, or any supervisor that checks $?, a skeleton that did no work was
+# indistinguishable from a clean overnight run, and the morning-after
+# summary's "Ended because" line - which keys off this CODE - would have
+# said the backlog emptied. Leave the pessimistic default in place (the
+# runner's own machinery is, after all, not implemented) and exit non-zero.
+# The 13-value enum is deliberately NOT extended: it is contract surface,
+# pinned by tests/test_usage_limit_contract.py, and a "skeleton" value is an
+# owner decision rather than a fix (docs/deferred-backlog.md).
+exit 1
 '''
 
 
@@ -3303,7 +3403,7 @@ SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]:-$0}}")" && pwd)"
 PROJ="${{CLAUDE_PROJECT_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}}"
 LOG="$PROJ/.claude/logs/hooks.log"
 mkdir -p "$(dirname "$LOG")"
-log(){{ printf '%s %s\\\\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }}
+log(){{ printf '%s %s\\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; }}
 
 TASK_ID="${{1:-}}"
 if [ -z "$TASK_ID" ]; then
@@ -3378,7 +3478,7 @@ fi
 #    concurrency accounting (loop_in_flight/goal_in_flight in the state
 #    file under flock) - those stay here.
 #    2.1 O_CREAT|O_EXCL active sentinel.
-if ! ( set -C; printf '%s\\\\n' "$$" >"$ACTIVE" ) 2>/dev/null; then
+if ! ( set -C; printf '%s\\n' "$$" >"$ACTIVE" ) 2>/dev/null; then
   echo "Another {kind} run already owns '$TASK_ID' ($ACTIVE)." >&2
   EXIT_REASON="manual-halt-sentinel"
   exit 1
@@ -3409,8 +3509,13 @@ echo "claude -p iteration loop per Bootstrap-Protocol-v2-2-0.md Phase {phase} be
 echo "unattended use (dispatch with native routing + NDJSON stream: claude -p" >&2
 echo "--worktree \\"wt-$TASK_ID\\" --output-format stream-json --verbose - see the" >&2
 echo "[IC-6] and usage-limit headers). No agent work was dispatched." >&2
-EXIT_REASON="max-iterations"   # skeleton no-op: nothing iterated
-exit 0
+# A WRAPPER THAT DISPATCHED NOTHING MUST NOT REPORT SUCCESS. This used to set
+# EXIT_REASON="max-iterations" and exit 0 - i.e. "the loop ran and hit its
+# cap", a healthy terminal state - for a skeleton that never iterated once.
+# The trust ramp asks the operator to smoke-test the wrapper before relying
+# on it, and that smoke test reads $? and the logged reason; both said the
+# run succeeded. Leave the pessimistic default and exit non-zero.
+exit 1
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"
                                             else "goal-loop.sh"),
            active=active, sibling=sibling, my_list=my_list,

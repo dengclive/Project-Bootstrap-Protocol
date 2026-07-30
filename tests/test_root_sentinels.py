@@ -139,10 +139,17 @@ try:
           "ignore fragment",
           "queue/.halt" in frag and "queue/.resume" in frag)
 
-    # Sanity: with no sentinel, auto.sh still runs its (skeleton) course.
+    # Sanity: with no sentinel, auto.sh runs its (skeleton) course and reaches
+    # the skeleton refusal rather than a halt refusal. The distinction is the
+    # point of this check - every halt case above exits non-zero too, so an
+    # rc-only assertion would pass even if the halt path fired spuriously.
+    # (Asserted rc == 0 until 2026-07-30, when the skeleton stopped reporting
+    # a terminal-success exit_reason for a run that dispatched nothing.)
     r = _run_wrapper(d, "auto.sh")
-    check("sanity: auto.sh runs when no sentinel is present",
-          r.returncode == 0, f"rc={r.returncode} stderr={r.stderr!r}")
+    check("sanity: auto.sh gets past the halt checks when no sentinel is present",
+          "Halt sentinel present" not in r.stderr
+          and "skeleton" in r.stderr.lower(),
+          f"rc={r.returncode} stderr={r.stderr!r}")
 
     # ----------------------------------------------------------------- #
     # AC-4-5 fixture 1: fresh repo -> root .gitignore created with the

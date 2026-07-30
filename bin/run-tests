@@ -63,6 +63,15 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 TESTS = os.path.join(ROOT, "tests")
 
 SUMMARY_RE = re.compile(r"(\d+)\s+passed,\s+(\d+)\s+failed")
+# A suite that cannot run on this host must not be scored `ok`. Printing
+# "0 passed, 0 failed" and exiting 0 is indistinguishable, in this table and
+# in the totals, from a suite that ran and had nothing to report — and a
+# suite whose whole purpose is to execute the emitted artifacts is exactly
+# the one that goes missing first, because it needs the most from the host.
+# tests/test_wrapper_behavior.py needs `flock`, which stock macOS does not
+# ship; without this marker its 65 checks silently became zero while the run
+# still said ALL SUITES PASSED. Suites announce a skip with this line.
+SKIPPED_RE = re.compile(r"^SUITE SKIPPED:\s*(.+)$", re.M)
 
 # Under GitHub Actions, restore the per-suite log affordances the inlined loop
 # used to emit (folding + inline error annotations) that a bare command loses.
@@ -112,6 +121,7 @@ def run_one(path):
     out = r.stdout + r.stderr
     hits = SUMMARY_RE.findall(out)
     passed, failed = (int(hits[-1][0]), int(hits[-1][1])) if hits else (0, 0)
+    skip = SKIPPED_RE.search(out)
     return {
         "name": os.path.basename(path),
         "code": r.returncode,
@@ -120,6 +130,8 @@ def run_one(path):
         # A suite that dies before printing its summary is NOT a suite with
         # zero failures — flag it so it cannot be read as a clean run.
         "no_summary": not hits,
+        # ...and a suite that declined to run is not a suite that passed.
+        "skipped": skip.group(1).strip() if skip else None,
         "elapsed": elapsed,
         "output": out,
     }
@@ -176,6 +188,8 @@ def main(argv):
             status = f"CRASHED (exit {r['code']}, no summary)"
         elif r["code"] != 0:
             status = f"FAILED (exit {r['code']})"
+        elif r["skipped"]:
+            status = f"SKIPPED — {r['skipped']}"
         else:
             status = "ok"
         print(f"{r['name'].ljust(width)}  {r['passed']:>8}  {r['failed']:>5}  "
@@ -185,7 +199,13 @@ def main(argv):
     total_p = sum(r["passed"] for r in results)
     total_f = sum(r["failed"] for r in results)
     bad = [r for r in results if r["code"] != 0]
-    print(f"{len(results)} suites, {total_p} checks passed, {total_f} failed")
+    skipped = [r for r in results if r["skipped"] and r["code"] == 0]
+    line = f"{len(results)} suites, {total_p} checks passed, {total_f} failed"
+    # Carried on the totals line as well as in the table: the table is what
+    # gets skimmed, the totals line is what gets quoted into a commit message.
+    if skipped:
+        line += f", {len(skipped)} SKIPPED"
+    print(line)
 
     rc = 0
     # Flush stdout so the stderr diagnostics below land AFTER the summary table
@@ -236,7 +256,15 @@ def main(argv):
                       "running one.", file=sys.stderr)
 
     if rc == 0:
-        print("ALL SUITES PASSED")
+        # Never a bare "ALL SUITES PASSED" when something declined to run.
+        # That banner is what a reader takes away, and a skipped suite means
+        # the run covered less than the suite list implies.
+        if skipped:
+            names = ", ".join(r["name"] for r in skipped)
+            print(f"ALL SUITES PASSED — but {len(skipped)} SKIPPED on this "
+                  f"host and contributed no checks: {names}")
+        else:
+            print("ALL SUITES PASSED")
     return rc
 
 
