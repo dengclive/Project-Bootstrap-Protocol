@@ -1,5 +1,66 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — a broken `jq` failed every gate open (2026-07-31)
+
+`jget` picked its JSON parser by asking whether one **exists**, not whether one
+**works**, and then swallowed the answer.
+
+```bash
+if have_jq; then   ... jq  ... 2>/dev/null || true
+elif have_py; then ... python3 ... 2>/dev/null || true
+```
+
+`have_jq` is `command -v jq`. It reports success for a `pyenv`/`asdf`/`mise`
+shim that prints "command not found" and exits 127, for a jq whose dynamic
+link is broken (`libonig.so.5` — the Alpine/slim-image shape), and for a
+non-executable file of the right name. In every one of those cases jq ran,
+failed, `|| true` erased the failure, `jget` returned **empty**, and each gate's
+`case` fell through to **allow**. The `elif` is the second half: a working
+`python3` on the same PATH was never reached, because the selector had already
+committed on presence.
+
+Executed against the emitted artifact, jq exiting 127 with python3 present:
+
+| gate | command | before | after |
+|---|---|---|---|
+| `secrets-gate` | `cat .env` | **rc=0** (allowed) | rc=2 |
+| `dependency-gate` | `npm install evil` | **rc=0** (allowed) | rc=2 |
+
+Both silent — no stderr, and `hooks.log` recorded only the misleading
+`secrets-gate: no path`.
+
+This is upstream **P0-3b reopened through the selector**. P0-3b closed "neither
+parser installed"; a parser that is installed and does not work is the case a
+presence test reports as success, and the header's own comment — *"a security
+substrate must never degrade to allow"* — was written directly above the code
+that did.
+
+**The fix.** Try each parser in turn and accept its output only if it exited
+clean; `set -o pipefail` is what makes the pipeline's status the parser's
+rather than `printf`'s. Both parsers unusable is now the same condition as
+neither installed: `hook_fail`, which is fail-closed for a blocking gate and a
+logged degrade for an advisory one. `local out` is declared on its own line —
+`local out="$(...)"` would mask the substitution's status behind `local`'s,
+which is a variant of the same bug.
+
+**Why it survived.** `tests/test_hook_behavior.py` built symlink farms for jq
+**absent** and for **no parser**, under a comment reading "`command -v jq`
+cannot be fooled by shadowing". That is true and it is the wrong question:
+nothing was shadowing jq, it was broken, and no farm ever built a parser that
+exists and fails. `_broken_farm` now does, in all three shapes.
+
+7 checks in `tests/test_hook_behavior.py` (`P0-3b(ii)`), 5 of which were
+demonstrated to fail against the pre-fix header. **Freeze-exception no. 26**:
+all three golden fixtures move, because the change is one function in the
+shared `_HOOK_HEADER` that every hook body carries — 11/15/11 bodies, action
+counts stable at 57/69/59, nothing added or removed, and every moved body
+under `.claude/hooks/`. `sdk_gates/gates.py` deliberately does not move: the
+SDK substrate parses in-process and never had this defect.
+
+Found by the adversarial round on `fix/autonomous-mode-exit-contract`, which
+hit the same selector defect in that branch's new `stop_hook_active` bound.
+Fixed here at the root instead, so that branch inherits it.
+
 ## 2.6.0 in-version fix — a replaced symlink is now announced, not swallowed (2026-07-29)
 
 The inconsistency named as "not fixed" two entries below, closed on the half

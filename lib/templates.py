@@ -391,17 +391,54 @@ if cur is not None and not isinstance(cur, (dict, list)):
     else:
         sys.stdout.write(str(cur))
 '
-# jget '.a.b' -> value at path, or empty. Fails closed if no parser exists.
+# jget '.a.b' -> value at path, or empty. Fails closed if no parser WORKS.
+#
+# THE FALLBACK IS ON FAILURE, NOT ON ABSENCE [2026-07-31]. This used to read
+# `if have_jq ... elif have_py`, which binds the choice of parser to whether a
+# binary of that name EXISTS. `have_jq` is `command -v jq`: it cannot tell a
+# working jq from a version-manager shim (pyenv/asdf/mise print a
+# "command not found" line and exit 127), a jq whose dynamic link is broken
+# (`error while loading shared libraries: libonig.so.5`, the Alpine/slim-image
+# shape), a non-executable file of the right name, or a different tool
+# entirely. The old form then swallowed the failure with `|| true`, so jget
+# returned EMPTY and every parsing gate fell through its `case` to ALLOW -
+# with a perfectly good python3 sitting unused on the same PATH, and with the
+# `elif` guaranteeing it was never reached.
+#
+# Executed on the emitted artifact, jq exiting 127 with python3 present:
+# secrets-gate on `cat .env` returned rc=0 and dependency-gate on
+# `npm install evil` returned rc=0 - both silent, both logged only the
+# misleading "no path". That is upstream P0-3b's fail-open reopened through
+# the SELECTOR rather than through absence: P0-3b fixed "no parser at all",
+# and this is "a parser that does not work", which the presence test reports
+# as success. A security substrate must never degrade to allow.
+#
+# So: try each parser in turn and accept its output only if it actually
+# EXITED CLEAN. `set -o pipefail` is what makes the pipeline's status jq's
+# status rather than printf's. Both parsers failing is now the same condition
+# as neither being installed - hook_fail, which is fail-closed for a blocking
+# gate and a logged degrade for an advisory one. `local` is declared on its
+# own line: `local out="$(...)"` would mask the substitution's exit status
+# behind `local`'s own, which is the bug this function is being fixed for.
 jget(){
   local jqpath="$1"
+  local out
   if have_jq; then
-    printf '%s' "$INPUT" | jq -r "$jqpath // empty" 2>/dev/null || true
-  elif have_py; then
-    printf '%s' "$INPUT" | python3 -c "$JGET_PY" "${jqpath#.}" 2>/dev/null \\
-      || true
-  else
-    hook_fail "no JSON parser available (need jq or python3)"
+    if out="$(printf '%s' "$INPUT" | jq -r "$jqpath // empty" 2>/dev/null)"
+    then
+      printf '%s' "$out"
+      return 0
+    fi
   fi
+  if have_py; then
+    if out="$(printf '%s' "$INPUT" \\
+              | python3 -c "$JGET_PY" "${jqpath#.}" 2>/dev/null)"
+    then
+      printf '%s' "$out"
+      return 0
+    fi
+  fi
+  hook_fail "no WORKING JSON parser (need jq or python3; one may be present but broken)"
 }
 
 # --- Command matching [upstream P1-4] -------------------------------------- #
