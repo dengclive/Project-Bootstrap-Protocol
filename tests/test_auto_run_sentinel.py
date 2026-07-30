@@ -109,7 +109,14 @@ try:
     # (iv) normal run: claims, completes, removes its own sentinel
     # ----------------------------------------------------------------- #
     r = run_auto()
-    check("(iv) normal run exits 0", r.returncode == 0, r.stderr)
+    # This asserted rc == 0 until 2026-07-30, which encoded the defect as the
+    # expectation: the skeleton dispatches nothing, so exiting 0 told every
+    # unattended caller the queue had emptied cleanly. The property under test
+    # here is the sentinel lifecycle - claim, then release on exit - and that
+    # holds regardless of the refusal code. Assert the refusal too, so the
+    # exit-0 behaviour cannot come back silently.
+    check("(iv) skeleton run refuses non-zero rather than claiming success",
+          r.returncode != 0, r.stderr)
     check("(iv) normal run removed its own sentinel on exit",
           not os.path.exists(run_path))
 
@@ -204,9 +211,14 @@ try:
           r.returncode != 0 and open(run_path).read() == stale)
 
     r = run_auto(stdin_text="y\n", force_prompt=True)
-    check("(ii) stale + 'y' alerts with recorded start, clears, and runs",
-          r.returncode == 0
-          and "2026-07-16T00:00:00Z" in r.stderr, r.stderr)
+    # The behaviour under test is the ALERT-then-CLEAR sequence: the recorded
+    # start timestamp is surfaced and the stale sentinel is cleared so the run
+    # proceeds past it. What the skeleton then does at the end of that run is a
+    # separate question - it refuses, non-zero (see (iv)) - so this no longer
+    # asserts rc == 0.
+    check("(ii) stale + 'y' alerts with recorded start and clears",
+          "2026-07-16T00:00:00Z" in r.stderr
+          and "Stale .run-active" in r.stderr, r.stderr)
     check("(ii) cleared-and-completed run removed its own sentinel",
           not os.path.exists(run_path))
     log = open(os.path.join(d, ".claude", "logs", "hooks.log")).read()

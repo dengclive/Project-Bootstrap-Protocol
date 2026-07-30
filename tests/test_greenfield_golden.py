@@ -1059,10 +1059,57 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 18] same two files as `default` above
     # (dependency-gate.sh + sdk_gates/gates.py); the four extra hooks this
     # fixture carries are untouched.
-    # [freeze-exception no. 26] see the note on `default` above; this fixture
-    # moves 15 hook bodies for the same one-function shared-header change.
+    # [freeze-exception no. 27 - autonomous-mode exit contract, 2026-07-30]
+    # full_autonomous ONLY. The `default` fixture emits no wrappers and no
+    # autonomous hooks; its digest above is the no.-26 value (the shared
+    # `jget` header fix), NOT the no.-18 value an earlier draft of this note
+    # claimed - no. 18 left 29a670d0..., and b5d7f71 moved it again at no.
+    # 25. A provenance line that names the wrong predecessor is how a future
+    # re-baseline gets justified against a tree that never existed.
+    #
+    # Numbered 27, not 19: 19 was spent at :455 (two-lens adversarial-review
+    # batch, 2026-07-28) and the highest number already used is 26. The
+    # duplicate was caught by the adversarial round on this branch; backlog
+    # D-8 records that this ledger's numbering has drifted before.
+    #
+    # Action count stable at 69: zero added, zero removed. Exactly FIVE files
+    # move relative to the rebase parent, diff-verified by per-file body
+    # digest AND read byte by byte:
+    #   1. auto.sh - the skeleton refusal path stopped exiting 0 with a
+    #      terminal-SUCCESS exit_reason (queue-empty) for a run that
+    #      dispatched nothing. The 13-value enum is deliberately unchanged;
+    #      the wrapper keeps its pessimistic default and exits 1.
+    #   2. loop.sh and 3. goal-loop.sh - the same exit-contract change
+    #      (max-iterations), PLUS TWO MORE CHANGED LINES EACH that an
+    #      earlier draft of this note omitted: the D-9 `log()` printf escape
+    #      and the I-8 `O_CREAT|O_EXCL` claim-sentinel escape, both fixed
+    #      here because they are in the same emitted bytes. Their backlog
+    #      rows are marked `done` and point at this exception; a note that
+    #      described these two files as carrying one change each would have
+    #      left the escape fixes byte-pinned by nothing and explained by
+    #      nothing.
+    #   4. iteration-summary-enforcement.sh - the summary demand exits 2
+    #      (blocks) rather than 1 ("tool proceeds"), bounded by a
+    #      stop_hook_active guard so a Stop hook cannot spin.
+    #   5. drift-detector-loop-cooperation.sh - `ls A B` split into two
+    #      tested globs, so the tier-3 branch fires in a SINGLE active mode.
+    # Behaviour pinned by tests/test_wrapper_behavior.py, demonstrated to
+    # fail (11 checks) against the pre-fix templates.
+    #
+    # THE BOUND'S PARSER TEST, twice corrected. The first cut read
+    # stop_hook_active with a bare `[ "$(jget ...)" = true ]`; jget routes a
+    # missing parser through hook_fail, whose `exit 2` dies with the COMMAND
+    # SUBSTITUTION rather than the script, so on a parserless host the guard
+    # read empty and the hook blocked every Stop forever. That was replaced
+    # with an explicit `have_jq || have_py` test degrading to ALLOW. The
+    # adversarial round then showed THAT was still presence, not usability:
+    # with a broken-but-present jq the bound read empty and the hook blocked
+    # every Stop (executed: PRE rc=1, POST rc=2). Fixed at the root in
+    # freeze-exception no. 26 - `jget` now falls back on FAILURE, not only on
+    # absence - and the local guard is a parser SELF-TEST rather than a
+    # presence test, so both layers agree.
     "full_autonomous":
-        "af9ec1e7400faafd46fb9fd297658db7c919751893ec9782031f32d5ea514a39",
+        "1130dc96d67e8d4e4ca6b8da3d2d8ad996bb61c69209407aa6b5ed1b7305663b",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
