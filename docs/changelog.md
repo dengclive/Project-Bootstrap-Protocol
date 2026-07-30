@@ -1388,10 +1388,15 @@ RCE nor the dead-gate finding.
 not PATCH** — the emitted gates change *behavior*, not merely bytes:
 `test-gate` and `ci-mirror` were `async` and therefore could not block at
 all, and now do; a parser outage now fails closed where it used to allow.
-**Not a seam event** — `SEAM-CONTRACT-v2-0-0.md` §8.4 lists the triggers and
-none fire: no §7.2 security-critical tier membership change, no §7.4 shared
+**Not a seam event** — `SEAM-CONTRACT-v2-0-0.md` §8.4 lists **seven** triggers and
+none fire: no §7.2 security-critical tier membership change (matchers and gate
+behavior changed; §7.2 pins set *membership*, and no member was added or removed),
+**no §7.3 provenance-marker or synthesize-file-contract change** (added
+2026-07-30 — the enumeration previously walked six of the seven and claimed to
+have walked the list), no §7.4 shared
 sentinel change, no CLI entry point or contract-level flag, no §4.1/§5 table
-change, no `binds` change. §8.4's own closing line governs: *"changes that
+change, no `binds` change. The new `permissions.deny` key sits inside
+`settings.json`, already a §7.2 member. §8.4's own closing line governs: *"changes that
 touch only gate internals or dispatch policy do not bump `seam_version`."*
 `seam_version` stays 2.0.0; consumers need no re-pin.
 
@@ -1481,8 +1486,15 @@ touch only gate internals or dispatch policy do not bump `seam_version`."*
 
 - **P2-1/P2-2/P2-3.** `gates.py` and the shell suite returned opposite
   verdicts on five dependency cases and on commits. **Decision recorded: the
-  shell suite is canonical** (default substrate, ships everywhere, 11 gates to
-  the SDK's 7); the SDK module is a consistent *subset* that must neither
+  shell suite is canonical** (default substrate, ships everywhere). **Corrected
+  2026-07-30 (v2.6.0 release review):** this sentence read "11 gates to the
+  SDK's 7", which overstates it. A default install emits 11 hook *scripts*
+  (`BASE_HOOKS` is 9, plus `secrets-gate` and `ci-mirror`), but three of those
+  are loggers and alarms that gate nothing. The SDK module implements the same
+  seven gates the shell suite enforces; what the shell adds is `spec-gate-entry`,
+  `ci-mirror`, the drift detector and the session/alarm hooks. Both release
+  documents enumerate the seven by name instead of counting. The SDK module is a
+  consistent *subset* that must neither
   allow what the shell blocks nor block what the shell allows. The anchored
   matching, extended verb set, remote-script and requirements-file rules are
   ported; all 13 disputed cases now agree. The false "parity with the
