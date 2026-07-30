@@ -1,15 +1,31 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-> **Current release: v2.5.0.** `PROTOCOL_VERSION = 2.5.0`; the normative spec
-> is `Bootstrap-Protocol-v2-5-0.md` + `Bootstrap-Protocol-Companion-v2-5-0.md`
-> (older PRD/Companion pairs are retained as historical record). **External
-> consumers pin the annotated git tag `v2.5.0`** — the repo's first tag;
-> pinning a moving `main` is pinning a branch, not a release. Release record:
-> `docs/changelog.md` "2.4.0 → 2.5.0". Known deferrals:
-> `docs/deferred-backlog.md` (cluster I is the v2.5.0 release-review set).
+> **Current release: v2.6.0.** `PROTOCOL_VERSION = 2.6.0`; the normative spec
+> is `Bootstrap-Protocol-v2-6-0.md` + `Bootstrap-Protocol-Companion-v2-6-0.md`
+> (older PRD/Companion pairs are retained as historical record — with one
+> exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
+> corrections applied *in place* on 2026-07-28, each marked at its edit site,
+> made before a 2.6.0 document existed to hold them. They are native text in
+> the v2-6-0 pair now). **External consumers pin the annotated git tag
+> `v2.6.0`** — pinning a moving `main` is pinning a branch, not a release.
+> Release record: `docs/changelog.md` "2.5.0 → 2.6.0". Known deferrals:
+> `docs/deferred-backlog.md` (clusters **J**, **K** and **L** are the v2.6.0
+> upstream-fix and review residue; cluster I is the v2.5.0 release-review set).
+>
+> **2.6.0 is corrective, not additive — it changes what the emitted gates do.**
+> Every 2.x release before it was an opt-in flag defaulting to `false`, so an
+> operator who left it alone saw nothing change. This one has no such flag:
+> gates that were silently inert begin to block, `dependency-gate` starts catching
+> package-install channels it used to walk past (`cargo add`, `uv add`, `go get`,
+> `curl … | sh`, `npx`/`uvx`/`pnpm dlx`), and a parser outage now fails
+> closed instead of allowing. Upgrading an existing install is **not** a no-op.
+> Read the Companion's Migration notes ("2.5.0 → 2.6.0") before re-running the
+> installer — it closes a confirmed RCE, it will surface real test and
+> CI failures that 2.5.0 was reporting to nobody, and it rewrites
+> `.claude/steering/deps.md`, which you must merge by hand if you have edited it.
 
 This answers the question (as originally posed against the v2-0-0 document —
-the two-layer split below is unchanged through v2.5.0): *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
+the two-layer split below is unchanged through v2.6.0): *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
 deterministic code that configures Claude Code with all the hooks, commands,
 etc.?"*
 
@@ -171,7 +187,7 @@ bootstrap-installer/
   security-critical file, or whose tree does not dispatch its own plan, exits
   **3** with the reason on stderr. Exit 0 means enforcement was verified.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
-- **Faithful to Bootstrap-Protocol-v2-5-0.md** — encodes the skip-policy invariants
+- **Faithful to Bootstrap-Protocol-v2-6-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
   starter sets, the conditional hook set (eval-gate only for ai-agent,
   tdd-gate only when TDD is required, loop-cooperation hooks only when an
@@ -651,6 +667,51 @@ are intentionally operator-completed per BOOTSTRAP.md's own trust ramp.
 Unattended overnight use remains out of scope by construction and must not
 be certified until those loops are implemented and smoke-tested per
 Phase 9 stages 4–6.
+
+### v2.6.0 (gate enforcement & security fixes) + seven adversarial-review rounds
+
+**Upstream report (PR #18, 22 commits; PR #19 merged into the same line).**
+Source was not a code read — it was a **six-lens adversarial review of a real
+v2.5.0 install** that *executed* the emitted hooks against crafted payloads
+(`docs/bootstrap-protocol-upstream-bugs-2026-07-28.md`). Static review of the
+same files had found neither the RCE nor the dead gates, and a fully green
+1016-check suite coexisted with both.
+
+**P0 — security.** `drift-detector` incremented its counter with
+`n=$(( $(cat "$ST") + 1 ))`; bash runs command substitution *inside* arithmetic
+evaluation and the state file is gitignored and agent-writable, so
+`PATH[$(touch /tmp/PWNED)]` executed on the next `PostToolUse` — a clean path
+from "the agent writes a file" to arbitrary code execution, bypassing every
+`PreToolUse` `Bash` gate. `secrets-gate` was registered only on
+`Read|Write|Edit`, leaving every never-read path reachable through `cat .env`
+while `secrets.md` told the operator otherwise. Three fail-open paths (a 128 KiB
+env-var ceiling, a parser-absent `case` fall-through, `set -e` deaths at exit 1
+= "tool proceeds") now fail **closed** — which decides backlog **A-1**.
+
+**P1 — gates that did not do what the operator was told.** `test-gate`,
+`ci-mirror` and `format-lint-gate` shipped `async: true`; an async hook's exit
+code cannot block and its stderr is suppressed, so `test-gate` printed "Commit
+blocked: tests failing" and the commit went through. **The normative document
+was wrong too, not just the emission** — v2.5.0 recommended `async: true` for
+the CI mirror, a gate whose whole purpose is to exit 2. `spec-gate-commit`
+blocked every possible first commit, twice over. `dependency-gate` failed open
+on real installs and fired on prose.
+
+**A new class of test.** `tests/test_hook_behavior.py` **executes** the emitted
+hooks against a crafted-payload matrix and asserts exit codes — verified to fail
+before the fixes (10 failures on pre-fix templates, 0 after). Every other suite
+asserts emission determinism, which by construction cannot catch any of this.
+Suite 1016 → **1828 checks across 20 suites**.
+
+**Seven consecutive adversarial rounds, and the standing lesson.** Each fix
+batch shipped a defect into the class it was fixing; every one was caught by an
+independent round and **none** by the green suite. Round 7 alone found an
+unhashable `matcher` that aborted install at 22 of 58 files with no manifest and
+no gates registered, and a `displaced_keys` proxy that deleted the operator's
+`settings.json` keys on any declined write. Treat three green instruments as
+absence of evidence: the corpus and the sweep build into empty directories and
+never enter the merge, decline, restore or migrate branches where every one of
+these defects has lived.
 
 ### v2.5.0 (DS-01 design steering) + release-review fixes
 
