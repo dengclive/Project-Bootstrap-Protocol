@@ -1,5 +1,54 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 → 2.6.1 — release identity for the post-tag fixes (2026-07-31)
+
+**PATCH.** `PROTOCOL_VERSION` 2.6.0 → 2.6.1 in `lib/installer.py` and
+`lib/templates.py`, `plugin/plugin.json` version + description with it, and the
+protocol document's version header and history.
+
+**Why now, and why a bump rather than a bare tag.** Freeze-exceptions **18, 20,
+21, 23 and 25** each declined to bump, every one on the stated grounds that
+*"2.6.0 is unreleased, v2.5.0 remains the only tag"* and that *"a bump is owed
+when 2.6.0 is actually tagged."* v2.6.0 was tagged on 2026-07-30 (`f6bded0`),
+so the debt came due — and it is not bookkeeping:
+
+```
+broken-but-present jq, python3 healthy      v2.6.0 (f6bded0)   2.6.1
+  secrets-gate     cat .env                   rc=0 ALLOWED     rc=2
+  dependency-gate  npm install evil           rc=0 ALLOWED     rc=2
+```
+
+**The tag as published fails open** (P0-3d), and seventeen commits of fixes sat
+behind it untagged. Tagging those fixes *without* a bump would have stamped
+`bootstrap_protocol_version: "2.6.0"` into installs made from a `v2.6.1` tag —
+a version claim the artifact itself denies, and an operator could not tell the
+two apart by inspecting their own tree. That is the §4.5 disclosure-accuracy
+class the three preceding PRs were spent removing; reintroducing it in the
+release step would have been a poor joke.
+
+**What 2.6.1 contains** — everything merged since the v2.6.0 tag: the `jget`
+parser-usability fix (P0-3d) and its regression substrates; the autonomous-mode
+exit contract; the security KB's P0-3d entry and §4.6, plus two adversarial
+passes that corrected the document's own counts; **§6.D corrected, because it
+instructed authors to gate on `command -v jq`**; 33 phantom `v2.6.1`/`v2.6.2`
+citations retired; and O-3/P-9/P-10 closed — a refusal is not a run outcome.
+
+**Golden re-baseline: freeze-exception no. 31**, all three fixtures. Verified
+per-file before re-baselining: exactly **one** body moves per fixture,
+`.claude/settings.json`, action counts stable at **57 / 69 / 59**, 0 added, 0
+removed, and the only differing line is
+
+```
+- "_generatedBy": "bootstrap-installer (protocol 2.6.0)",
++ "_generatedBy": "bootstrap-installer (protocol 2.6.1)",
+```
+
+No hook, wrapper, skill, command or agent body moves; no gate behaviour changes
+in this commit. The `exit_reason` enum stays at 13 values.
+
+Suite: 21 suites / 1905 checks / 0 failed.
+
+
 ## 2.6.0 in-version fix — a refusal is not a run outcome (2026-07-31)
 
 Closes the three owner decisions that were blocking a release tag: **O-3**,

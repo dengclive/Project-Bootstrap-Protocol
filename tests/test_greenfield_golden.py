@@ -989,6 +989,26 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 31, 2026-07-31] THE PROTOCOL_VERSION BUMP,
+    # 2.6.0 -> 2.6.1, all three fixtures. This pays the debt recorded by
+    # exceptions no. 18, 20, 21, 23 and 25, each of which declined to bump on
+    # the stated grounds that "2.6.0 is unreleased, v2.5.0 remains the only
+    # tag" and that "a bump is owed when 2.6.0 is actually tagged". v2.6.0 WAS
+    # tagged on 2026-07-30 (f6bded0), so the debt came due - and it matters
+    # concretely: the v2.6.0 tag as published FAILS OPEN. Executed against an
+    # install from f6bded0 with a broken-but-present jq, secrets-gate on
+    # `cat .env` and dependency-gate on `npm install evil` both return rc=0
+    # (P0-3d); on this tree both return rc=2. Tagging the fixes without a bump
+    # would have stamped bootstrap_protocol_version "2.6.0" into installs made
+    # from a v2.6.1 tag - a version claim the artifact denies, which is the
+    # §4.5 class three PRs were just spent removing.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: exactly ONE body moves per
+    # fixture - .claude/settings.json - action counts stable at 57 / 69 / 59,
+    # 0 added, 0 removed, and the ONLY differing line is `_generatedBy`:
+    #   "bootstrap-installer (protocol 2.6.0)" -> "(protocol 2.6.1)"
+    # No hook, wrapper, skill, command or agent body moves; no gate behaviour
+    # changes. plugin/plugin.json's version and description track the constant
+    # and were bumped with it (pinned by tests/test_installer.py AC-A0-1).
     # [freeze-exception no. 30, 2026-07-31] full_autonomous ONLY, and NOT
     # comment-only - this one changes emitted behaviour. O-3/P-9 decided: a
     # REFUSAL IS NOT A RUN OUTCOME. The wrappers reported refusals using the
@@ -1049,7 +1069,7 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "bc4d8ce0a08121a4acfba19f0a51b4bfc3730448fd03b1182d4f4db415386a0d",
+        "511ec0cd94c4d3f6b47617328c5ecc3f6379ab548e3d9cf6efada5991c8fde96",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1162,7 +1182,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "1d20c73049f9dcfa149dca00ee9d759ef01b5f671ea5fa0f59e3dd457f61b260",
+        "1f9f12dc7fd6dbb2c88e1f9cef917643d39377365f7278162f2c7b065815f653",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1233,7 +1253,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "332daa6fdc05293940ed35fc39a0ed506f6f0fda3c1e8ec34cff556cc52f31ee",
+        "7e0872e972b13884443222eccffbd8a556319020cebea994db88925d6d8793c2",
 }
 
 EXPECTED_ACTION_COUNTS = {
