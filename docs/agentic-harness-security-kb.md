@@ -952,12 +952,11 @@ table, the totals line, and the closing banner.
 Worth recording plainly: **seven consecutive fix commits in this repository each
 shipped a defect into the class they were fixing**, and none was caught by the
 green suite — every one was caught by the next independent review. The chain is
-self-documenting, because most of them name the previous one's defect in their
-own subject line:
+taken from the repository's own three anchors, not inferred from subject lines:
 
 ```
-311bd67  two-lens adversarial-review batch — 25 findings
 0fba4d2  round-2 — "a fail-open and a false positive the last batch shipped"
+fac2897  batch 1 — repair the guards that could not fail
 9952741  batch 2a — the quoted-run rule, resolved structurally
 edac7c7  batch 2b — one quote-aware segmenter, and the SDK re-synced
 ff435f5  batch 3 — eight independent defects
@@ -965,6 +964,15 @@ b1782ec  round-3 — "four defects the last batch shipped"
 b5d7f71  round-4 — whose own new D12 validator rejected two legitimate
          never_read_paths minutes after it was declared done (f1ed58c)
 ```
+
+The three anchors, which reconcile exactly: round-3's entry says *"five
+consecutive fix commits have now introduced a defect"* and names the round-2
+remediation as `fac2897`, `9952741`, `edac7c7`, `ff435f5` — five with `0fba4d2`.
+The round-4 brief says *six*, *"the most recent of those six is `b1782ec`"*.
+`b5d7f71`'s own changelog says six had shipped and *"this is the seventh
+attempt"* — and it shipped too (`f1ed58c`), making seven. **This is a floor, not
+a ceiling:** `311bd67`, `4cc9742` and `0ec72d0` each have the same evidence
+against them and are simply outside the window anyone counted.
 
 Round 7 alone found an unhashable `matcher` that aborted install at 22 of 58
 files with no gates registered, and a proxy that deleted the operator's
@@ -981,6 +989,15 @@ files with no gates registered, and a proxy that deleted the operator's
 > at least one of them produced two in-class defects that **tests** caught before
 > landing, which the "never the suite" clause would have to exclude. **A number
 > that survives by inheritance stops being a measurement.**
+>
+> **And the first attempt at this list was wrong, which is the point.** It was
+> reconstructed by reading commit *subject lines* — plausible, self-consistent,
+> and it included `311bd67` (outside the counted window) while omitting
+> `fac2897` entirely, because `fac2897` is a `test(gates):` commit and the eye
+> skips it when scanning for `fix(`. Right count, wrong membership. The list
+> above comes from the three places that state it explicitly instead. **An
+> enumeration built from what a commit calls itself is the same error as a count
+> built from what the last document called it.**
 
 **The next batch to receive an independent round did it three times, and each
 catch needed a different instrument. `[+2026-07-31]`** The autonomous-mode batch
@@ -1123,15 +1140,21 @@ adding an always-deny shell hook with no twin left both parity suites
 green at 176/0 and 96/0.                                          (P-17)
 
 -- the parser fix stops at "exited clean", not "parsed" --
-P0-3d's fix accepts any parser that exits 0, so a tool named `jq` that
-exits 0 and prints nothing reads as a successful EMPTY parse and the
-`case` falls through to allow. The fourth shape §4.6 names is the one
-shape still open. Executed on main (3355e9c):
+P0-3d's fix accepts any parser that exits 0, so anything named `jq`
+that exits 0 without producing a parse reads as a successful EMPTY
+parse and the `case` falls through to allow. The realistic shape is
+NOT an exotic tool: it is a defensive wrapper — `real-jq "$@" || true;
+exit 0` — over a jq that is broken. That is the SAME `|| true` idiom
+the fix just removed from jget, one layer out, in a file the operator
+owns. Executed against that substrate, python3 healthy on the PATH:
   secrets-gate     cat .env           rc=0  ALLOWED
   dependency-gate  npm install evil   rc=0  ALLOWED
-  (absent / broken / non-executable jq all rc=2 BLOCKED)
-§4.6's remedy is the capability probe: parse a known literal, compare.
-                                                                  (P-19)
+Bounded honestly — these DENY, so the gap is narrower than "any
+wrapper": a swallowing wrapper over a WORKING jq (real answer still
+returned) and a wrapper that prepends a banner to stdout (polluted
+output still contains the command). Absent / broken / non-executable
+jq all rc=2. §4.6's remedy is the capability probe: parse a known
+literal, compare.                                                 (P-19)
 ```
 
 ---
