@@ -1,6 +1,22 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.6.0
+**Version:** 2.6.1
+
+> **v2.6.1 — parser-usability fail-open, PATCH (2026-07-31).** No phase, artifact,
+> state field, opt-in or gate *predicate* changes; the document itself is amended
+> only at §6.D. **v2.6.0 as tagged fails open.** `jget` chose its JSON parser with
+> `command -v jq` — a presence test — and bound its fallback to jq's *absence*
+> with `elif`, so a jq that exists and does not run made every parsing gate read
+> empty and fall through its `case` to allow, with a healthy `python3`
+> structurally unreachable on the same PATH. Executed against the v2.6.0 tag
+> (`f6bded0`) with a broken-but-present jq: `secrets-gate` on `cat .env` and
+> `dependency-gate` on `npm install evil` both return **rc=0 ALLOWED**; at 2.6.1
+> both return rc=2. Filed as P0-3d. §6.D's two parser items are corrected with
+> it — they were framed on the parser being *absent* and instructed authors to
+> "confirm `jq` is installed … fall back to Python's `json` module **if not**",
+> which is the same defect as normative guidance. Also: the autonomous-mode
+> wrappers no longer report a refusal using the termination vocabulary. The
+> `exit_reason` enum is unchanged at 13 values.
 
 > **v2.6.0 — gate enforcement & security fixes, MINOR (2026-07-30).** Corrective,
 > not additive: no new phase, no new artifact, no new state field, no new opt-in.

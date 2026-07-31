@@ -15,7 +15,7 @@ import cmdpos                                    # round-4: THE command-position
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 
-PROTOCOL_VERSION = "2.6.0"
+PROTOCOL_VERSION = "2.6.1"
 
 
 # --------------------------------------------------------------------------- #
