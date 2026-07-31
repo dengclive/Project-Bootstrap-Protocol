@@ -689,7 +689,7 @@ EXPECTED_DIGESTS = {
     #      `echo $(pip install leftpad)` blocked and the backtick spelling
     #      did not.
     #   3. sdk_gates/gates.py re-synced [F-381]. The shell's cmd_has_verb was
-    #      rewritten at v2.6.2 and _GIT_VERB_TMPL was left at the v2.6.0
+    #      rewritten by the round-2 review and _GIT_VERB_TMPL left at the v2.6.0
     #      form, so the SDK allowed what the shell blocked on five command
     #      shapes across three gates. `git show 4cc9742` proves the anchors
     #      AGREED at the parent - the divergence was created by the batch
@@ -989,6 +989,21 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 29, 2026-07-31] COMMENT-ONLY re-baseline of all
+    # three fixtures. Retired the phantom version labels `v2.6.1`/`v2.6.2`,
+    # which named releases that never existed: git blame resolves them to the
+    # two-lens batch (4cc9742, 311bd67) and the round-2 review (0fba4d2 and
+    # its remediation), and ALL of those commits are ancestors of the v2.6.0
+    # tag - so every change they described shipped INSIDE v2.6.0. Twelve of
+    # the 33 were EMITTED, so an operator on a 2.6.0 install read "the v2.6.2
+    # optimization pass" inside secrets-gate.sh and would go looking for an
+    # upgrade that cannot exist. Labels now name the batch. VERIFIED PER-FILE
+    # BEFORE RE-BASELINING: exactly THREE bodies move on each fixture -
+    # dependency-gate.sh (6 lines), secrets-gate.sh (8), sdk_gates/gates.py
+    # (10) - action counts stable at 57 / 69 / 59, 0 added, 0 removed, every
+    # differing line a comment, and nothing else in the emitted tree differs.
+    # gates.py DOES move here, unlike no. 28: five of the labels lived in
+    # lib/sdk_gates_template.py.
     # [freeze-exception no. 28, 2026-07-31] COMMENT-ONLY re-baseline of all
     # three fixtures, for TWO corrections to the jget comment block.
     # (1) It explained the fix with a wrong account of `set -o pipefail` - it
@@ -1016,7 +1031,7 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "9f300aad1b2f01bc72243a01ded5871db24142b72b8d5b079e4e6f542dbba537",
+        "bc4d8ce0a08121a4acfba19f0a51b4bfc3730448fd03b1182d4f4db415386a0d",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1129,7 +1144,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "4d199cf34bc55d13d0db8aa3ed1d40ac577206cc9c5045816239902580772811",
+        "4585eada68fb4502df65ab21e544432f0717147c6eb696edf8065d5469aed3fa",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1200,7 +1215,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "de5d3557ca623f7888e0cc50843bca0ff8a3f9f563811af9cb3c6e7e1b1d723b",
+        "332daa6fdc05293940ed35fc39a0ed506f6f0fda3c1e8ec34cff556cc52f31ee",
 }
 
 EXPECTED_ACTION_COUNTS = {

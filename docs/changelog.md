@@ -1,5 +1,46 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — two version numbers that never existed (2026-07-31)
+
+The tree carried **33 citations of `v2.6.1` and `v2.6.2`**, versions that were
+never tagged. `git blame` resolves them cleanly and consistently — whoever wrote
+them was disciplined about it — but to *development batches*, not releases:
+
+```
+v2.6.1  the two-lens adversarial-review batch, and the dependency-gate
+        regression repair            4cc9742, 311bd67          2026-07-28
+v2.6.2  the round-2 review and its remediation
+        0fba4d2, fac2897, 9952741, edac7c7, ff435f5             2026-07-29
+```
+
+**Every one of those commits is an ancestor of the `v2.6.0` tag** (`f6bded0`),
+so all the work these labels describe already shipped in v2.6.0. They were
+written mid-cycle expecting the batches to tag separately. They did not.
+
+**Twelve of the 33 were EMITTED** — 3 in `dependency-gate.sh`, 4 in
+`secrets-gate.sh`, 5 in `sdk_gates/gates.py`. An operator on a v2.6.0 install
+(`PROTOCOL_VERSION = "2.6.0"`, the only version there is) opening a security
+gate read *"the v2.6.2 optimization pass optimized CANDIDATES and left…"* and
+would conclude they were two versions behind on that gate, then go looking for
+an upgrade that cannot be obtained. That is §4.5's class — an advertised state
+that does not match the artifact — inside the controls themselves.
+
+Labels now name the batch (`[round-2 review]`, `two-lens`). Retired rather than
+resolved-to-a-tag on purpose: **tagging `v2.6.1` later would have made these
+worse, not better**, turning a dangling reference into a plausible one that
+points at a real version containing something else entirely.
+
+**Golden re-baseline: freeze-exception no. 29**, all three fixtures,
+**COMMENT-ONLY**. Verified per-file before re-baselining: exactly **three**
+bodies move on each fixture — `dependency-gate.sh` (6 lines), `secrets-gate.sh`
+(8), `sdk_gates/gates.py` (10) — action counts stable at **57 / 69 / 59**, 0
+added, 0 removed, every differing line a comment, and nothing else in the
+emitted tree differs. Unlike no. 28, **`gates.py` does move here**: five of the
+labels lived in `lib/sdk_gates_template.py`.
+
+Suite: 21 suites / 1905 checks / 0 failed.
+
+
 ## 2.6.0 in-version fix — the knowledge base described itself wrongly (2026-07-31)
 
 The security KB (`docs/agentic-harness-security-kb.md`) is the artifact that

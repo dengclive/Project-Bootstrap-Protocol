@@ -351,7 +351,7 @@ check("AC-7-1 deps: approved packages allowed", r == {})
 r = run_gate("dependency-gate",
              {"tool_input": {"command":
                              "pip install -r requirements.txt"}})
-# [v2.6.2] This used to assert the literal `requirements-file` appeared
+# [round-2 review] This used to assert the literal `requirements-file` appeared
 # anywhere in the deny dict -- which it did, as the SENTINEL
 # `<unverifiable-requirements-file>` folded into the package-NAME string, so
 # the operator was told "not in deps.md approved list:

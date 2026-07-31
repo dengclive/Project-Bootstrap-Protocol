@@ -464,7 +464,7 @@ def _segment_candidates(cmd, _depth=0):
         # the line as the quoted run. Fall back to a whitespace split rather
         # than returning nothing - a parse failure must not become an allow.
         #
-        # [v2.6.2] ...which is exactly what it DID become. A bare split
+        # [round-2 review] ...which is exactly what it DID become. A bare split
         # leaves the quote glued to the token, so `cat "secrets/prod.yaml`
         # yielded `"secrets/prod.yaml`, matched no pattern, and this
         # substrate ALLOWED what the shell blocked - the direction the
@@ -621,7 +621,7 @@ def _match_secret(target, patterns, dir_ok=True, dotenv_tmpl=False):
         # Grep{"path": "secrets"} allowed - and a Grep whose path is the
         # directory returns the matching file CONTENTS. Naming the directory
         # reaches everything under it. Empty for non-directory patterns.
-        # [v2.6.2] Gated on dir_ok: applied to every candidate it made
+        # [round-2 review] Gated on dir_ok: applied to every candidate it made
         # `grep secrets README.md` and `git commit -m secrets` block, which
         # is lens B finding 4's failure mode reintroduced. Shell parity.
         dstem = cpat[:-2] if (dir_ok and cpat.endswith("/*")) else ""
@@ -766,7 +766,7 @@ def _spec_gate_commit(config):
 # It also could not consume a wrapper's POSITIONAL, which is D9: `sudo -u
 # root pip install evilpkg` was rc=0 on both substrates at all three commits.
 # [round-2 review F-381] RE-SYNCED to the shell's cmd_has_verb. The shell
-# was rewritten at v2.6.2 - newline as a command separator, sudo/VAR=/path
+# was rewritten by the round-2 review - newline as a command separator, sudo/VAR=/path
 # prefixes - and this template was left at the v2.6.0 form, so the SDK
 # ALLOWED what the shell blocked across test-gate, spec-gate-commit and
 # eval-gate: `git add -A` + newline + `git commit`, `sudo git commit`,
@@ -901,7 +901,7 @@ _INDEX_FLAGS = frozenset({
     "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
     "--index", "--git", "--repo",
 })
-# [v2.6.2] See the shell gate's is_flag_value for the full account. The
+# [round-2 review] See the shell gate's is_flag_value for the full account. The
 # first version matched `=` and `^[0-9]` and therefore swallowed real
 # package names - `7zip-bin`, `0x`, `2to3`, `evil==1.0` - as if they were
 # flag values, installing them unapproved on BOTH substrates.
@@ -982,7 +982,7 @@ def _dependency_gate(config):
         # verb is one quoted run, and stays one segment) while removing the
         # fail-open. The name is now a misnomer and the docstring says so.
         for chunk in (cmd,):
-            # [v2.6.2] _scan_install_line returns (reason, names). It used
+            # [round-2 review] _scan_install_line returns (reason, names). It used
             # to fold its three non-package refusals into the package-name
             # string, so a piped remote script, an unverifiable requirements
             # file and a package-index override all denied with
