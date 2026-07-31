@@ -91,6 +91,17 @@ commands:
   format: ""            # e.g. "ruff format ."
   typecheck: ""         # e.g. "mypy ."
   ci_local: ""          # e.g. "make ci"
+  # Phase 2: do the five commands above run in the directory they are invoked
+  # from? The gates run them bare (no `cd`), so a plain `pytest -q` inherits
+  # the hook's cwd -- inside a worktree that IS the worktree, and everything
+  # composes. Set FALSE for fixed-mount indirection, where the command lands
+  # in a tree the mount chose rather than the one cwd names:
+  #   docker compose exec / kubectl exec / ssh / vagrant ssh / devcontainer CLI
+  # (`docker run -v "$(pwd)":/app ...` follows cwd -- leave this true for it.)
+  # False makes the installer drop `isolation: worktree` from the implementer
+  # agent, because an agent working in a worktree whose gate tests the main
+  # checkout gets a green gate on code that was never built.
+  execute_in_cwd: true
 
 # ---- Phase 6.5: Tools & MCP -------------------------------------------------
 mcp:
@@ -106,3 +117,11 @@ workflow:
   implementer_model: "sonnet"
   reviewer_model: "opus"
   integrator_model: "inherit"
+  # auto | worktree | none. `auto` derives from commands.execute_in_cwd above
+  # (worktree when true, none when false) and is what you want unless you know
+  # otherwise. Force `worktree` when each worktree gets its own mount (e.g. a
+  # per-worktree compose project); force `none` to disable the isolation
+  # outright. This key exists so you never have to hand-edit the emitted
+  # implementer.md -- a hand-edit trips the digest guard and that file then
+  # SKIPs forever, keeping your change and losing every upstream fix to it.
+  implementer_isolation: "auto"

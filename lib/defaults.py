@@ -290,6 +290,19 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
                 f"every gated action is refused with a bash syntax error and "
                 f"no explanation of why.")
 
+    # ---- [W-1] commands.execute_in_cwd must be a real boolean ------------
+    # minyaml yields a Python bool for unquoted true/false; a quoted "false"
+    # arrives as the string "false", which is truthy. Silently reading that as
+    # "yes, cwd is honored" re-arms the exact fail-open this key exists to
+    # close, so the type is checked rather than coerced.
+    eic = cfg.get("commands", {}).get("execute_in_cwd", True)
+    if not isinstance(eic, bool):
+        errors.append(
+            f"commands.execute_in_cwd must be a boolean (unquoted true or "
+            f"false); got {type(eic).__name__} ({eic!r}). It decides whether "
+            f"the implementer agent is emitted with `isolation: worktree`, "
+            f"and a quoted \"false\" would read as true.")
+
     # ---- [D18] never_read_paths spellings that guard nothing -------------
     sec = cfg.get("secrets", {})
     if isinstance(sec.get("never_read_paths"), list):
@@ -303,6 +316,96 @@ ARCHETYPES = {
     "cli", "library", "service", "fullstack", "mobile",
     "data-ml", "ai-agent", "platform", "other",
 }
+
+# [W-1] workflow.implementer_isolation — the operator's lever over the
+# `isolation:` line in the emitted implementer agent. Before this key the value
+# was hardcoded, so an operator whose commands do not honor cwd could only
+# hand-edit `implementer.md` — which trips the digest hand-edit guard and makes
+# that file SKIP forever, keeping their fix and losing every upstream fix.
+#   auto      derive from commands.execute_in_cwd (worktree when true, none
+#             when false). The default: the protocol decides, and the decision
+#             follows the one fact that determines whether it is sound.
+#   worktree  force the isolation on regardless of the commands answer.
+#   none      force it off regardless.
+IMPLEMENTER_ISOLATIONS = {"auto", "worktree", "none"}
+
+
+def _resolve_implementer_isolation(cfg: dict, errors: list) -> None:
+    """[W-1] Decide the implementer's `isolation:` line and say why.
+
+    Worktree isolation and the Phase 2 command contract are two protocol
+    features that do not automatically compose. The emitted gates run the
+    configured command bare — no `cd`, no `$CLAUDE_PROJECT_DIR` — which is
+    correct: a plain `pytest -q` inherits the hook process's cwd, and inside a
+    worktree that cwd IS the worktree, so plain commands compose fine.
+
+    What breaks is FIXED-MOUNT INDIRECTION. `docker compose exec -T app pytest`
+    lands inside a container whose bind mount points at the main checkout, so
+    cwd is irrelevant — the command always runs against `/app`. Same shape for
+    `kubectl exec`, `ssh`, `vagrant ssh`, and devcontainer CLIs. (`docker run
+    -v "$(pwd)":/app` DOES follow cwd and is fine; the fixed mount is the
+    problem.) An implementer working in `.claude/worktrees/<n>/` then has its
+    gate compile and test the MAIN checkout: the gate passes, and the code the
+    agent actually wrote was never built. That is a fail-open in a verification
+    control — the same class as P0-3d, and reachable with nothing more exotic
+    than a containerized dev environment.
+
+    So the default resolution (`auto`) drops `isolation: worktree` when the
+    operator declares the commands do not honor cwd. Losing the isolation costs
+    parallelism and is LOUD when it bites (two implementers touching one tree
+    collide visibly); keeping it costs a green gate on uncompiled code and is
+    SILENT. Trading a silent fail-open for a visible constraint is the same
+    call A-1 made.
+
+    Sets `cfg["_implementer_isolation"]` to "worktree" or "none" and, for the
+    non-default paths, appends an install-time note to `_config_notices`.
+    """
+    w = cfg.get("workflow", {})
+    requested = w.get("implementer_isolation", "auto")
+    if requested not in IMPLEMENTER_ISOLATIONS:
+        errors.append(
+            f"workflow.implementer_isolation must be one of "
+            f"{sorted(IMPLEMENTER_ISOLATIONS)}; got {requested!r}")
+        # Resolve to the safe status quo so downstream templates still render
+        # while the installer refuses on the error above.
+        cfg["_implementer_isolation"] = "worktree"
+        return
+
+    honors_cwd = cfg.get("commands", {}).get("execute_in_cwd", True)
+    honors_cwd = honors_cwd if isinstance(honors_cwd, bool) else True
+    notices = cfg.setdefault("_config_notices", [])
+
+    if requested == "auto":
+        resolved = "worktree" if honors_cwd else "none"
+        if not honors_cwd:
+            notices.append(
+                "commands.execute_in_cwd is false, so the implementer agent "
+                "is emitted WITHOUT `isolation: worktree` and the queue's "
+                "max_concurrent_tasks starts at 1. Commands that ignore cwd "
+                "(docker compose exec, kubectl exec, ssh) would otherwise run "
+                "the gate against the main checkout while the agent worked in "
+                "a worktree — a gate passing on code it never built. Set "
+                "workflow.implementer_isolation: worktree to override.")
+    else:
+        resolved = requested
+        if requested == "worktree" and not honors_cwd:
+            notices.append(
+                "workflow.implementer_isolation is FORCED to 'worktree' while "
+                "commands.execute_in_cwd is false. The implementer will work "
+                "in .claude/worktrees/<n>/ while its test/lint gates run "
+                "wherever the fixed mount points — so a gate can report green "
+                "on code it never compiled. Only sound if each worktree gets "
+                "its own mount (e.g. a per-worktree compose project). "
+                "Verify with: docker compose exec -T <svc> pwd")
+        elif requested == "none" and honors_cwd:
+            notices.append(
+                "workflow.implementer_isolation is FORCED to 'none' though "
+                "commands.execute_in_cwd is true. Parallel implementer tasks "
+                "will share one working tree; keep max_concurrent_tasks at 1 "
+                "unless you have another isolation mechanism.")
+
+    cfg["_implementer_isolation"] = resolved
+
 
 # Phase 4 step 2 starter principle sets, verbatim intent from Bootstrap-Protocol-v2-0-0.md.
 PRINCIPLE_STARTERS = {
@@ -488,11 +591,20 @@ DEFAULTS = {
         "drift_file_read_threshold": 3,
     },
     "commands": {"test": "", "lint": "", "format": "",
-                 "typecheck": "", "ci_local": ""},
+                 "typecheck": "", "ci_local": "",
+                 # [W-1] Do the five commands above honor the working directory
+                 # they are invoked from? True for anything that runs locally
+                 # (`pytest -q`, `npm test`) and for cwd-following container
+                 # invocations (`docker run -v "$(pwd)":/app ...`). FALSE for
+                 # fixed-mount indirection — `docker compose exec`, `kubectl
+                 # exec`, `ssh`, `vagrant ssh`, devcontainer CLIs — where the
+                 # command lands in a tree chosen by the mount, not by cwd.
+                 "execute_in_cwd": True},
     "mcp": {"servers": [], "rejected": []},
     "workflow": {"install_skills": True, "install_commands": True,
                  "install_agents": True, "implementer_model": "sonnet",
-                 "reviewer_model": "opus", "integrator_model": "inherit"},
+                 "reviewer_model": "opus", "integrator_model": "inherit",
+                 "implementer_isolation": "auto"},
 }
 
 
@@ -622,6 +734,12 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     # every sink is reachable from either. Fatal problems go to `errors` (the
     # installer refuses); spelling problems normalize and report.
     cfg["_config_notices"] = _validate_shell_reaching(cfg, errors)
+
+    # ---- [W-1] worktree isolation vs. where the gate commands execute ---- #
+    # Placed ahead of the retrofit branch: both modes emit an `implementer`
+    # agent whose `isolation:` line is decided here, and both read the same
+    # `commands` block, so the derivation must cover both.
+    _resolve_implementer_isolation(cfg, errors)
 
     # ---- Retrofit-mode: fill defaults + validate retrofit invariants ----- #
     # Runs only when mode == "retrofit". Greenfield path is byte-identical

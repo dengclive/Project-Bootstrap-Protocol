@@ -72,6 +72,11 @@ ANSWER_KEYS = [
     "commands_format",
     "commands_typecheck",
     "commands_ci_local",
+    # [W-1] Not a command, a FACT ABOUT the five above: do they honor the
+    # directory they are invoked from? Defaults true (the pre-W-1 behavior);
+    # false makes the installer drop `isolation: worktree` rather than emit a
+    # gate that tests a tree the agent never wrote to.
+    "commands_execute_in_cwd",
 ]
 
 
@@ -178,6 +183,11 @@ def default_answers(proposal: dict) -> dict:
         "commands_format": "",
         "commands_typecheck": "",
         "commands_ci_local": "",
+        # [W-1] True is the pre-W-1 behavior and the common case (a plain
+        # `pytest -q` does honor cwd). A PRD cannot tell us this any more than
+        # it can tell us the commands themselves, so it is proposed, shown, and
+        # overridable — never inferred from the PRD text.
+        "commands_execute_in_cwd": True,
     }
 
 
@@ -239,6 +249,9 @@ def answers_to_config(ans: dict) -> dict:
             "format": ans["commands_format"],
             "typecheck": ans["commands_typecheck"],
             "ci_local": ans["commands_ci_local"],
+            # [W-1] .get with a True default so a hand-trimmed answers dict
+            # lands on the pre-W-1 behavior rather than KeyError-ing.
+            "execute_in_cwd": bool(ans.get("commands_execute_in_cwd", True)),
         },
     }
 
@@ -323,6 +336,24 @@ DESIGN_SECTION_MARKER = f"## {DESIGN_SECTION_TITLE}"
 # against the protocol doc so the code string and the doc can never drift.
 DESIGN_STEERING_QUESTION = (
     """Generate a design steering doc? This writes `design.md` — a short, always-read reference for user-facing work: visual hierarchy, interaction cost, mobile reach, empty/loading states, accessibility floor, and an HONEST-USE-ONLY rule set for pricing and persuasion (no fake countdowns, no fictitious 'was' prices, no guilt-worded dismissals — the dark patterns regulators enforce against). It's guidance the implementer reads on every user-facing task, not a gate. I can also add an optional advisory review skill that checks changes against it at code-review time — it flags, it never blocks. Off by default; enable it now if this project has a user-facing surface, or add it any time later."""
+)
+
+# [W-1] The command-execution-location section, third of the same shape as
+# TELEMETRY_SECTION_MARKER and DESIGN_SECTION_MARKER. Emitted unconditionally,
+# so its PRESENCE dates an interview file to the version that added the key —
+# the discriminator parse_interview_answers needs to tell "predates the key"
+# (default true, which is exactly the pre-W-1 behavior) from "a current file
+# whose line was deleted or misspelled" (fail loud). NOT folded into the
+# existing "Project commands" section, because that title appears in older
+# renders too and would date nothing.
+COMMANDS_CWD_SECTION_TITLE = "Command execution location"
+COMMANDS_CWD_SECTION_MARKER = f"## {COMMANDS_CWD_SECTION_TITLE}"
+
+# [W-1] The Phase 2 question, VERBATIM from the protocol doc (the sole verbatim
+# source, as for TEL-01 and DS-01). test_interview.py pins this byte-for-byte
+# against the protocol doc so the code string and the doc cannot drift.
+COMMANDS_CWD_QUESTION = (
+    """Do your test, lint, format, typecheck and CI commands run in the directory they are invoked from? Answer yes for anything that runs locally (`pytest -q`, `npm test`, `make ci`) and for container invocations that follow the caller (`docker run -v "$(pwd)":/app ...`). Answer NO if a command reaches its code through a fixed mount — `docker compose exec`, `kubectl exec`, `ssh`, `vagrant ssh`, a devcontainer CLI — because those land in a tree the mount chose, not the one you were standing in. This matters because the implementer subagent works in its own git worktree: if the gates cannot follow it there, they compile and test the main checkout instead, and report green on code that was never built. Answering no makes the installer drop the worktree isolation rather than leave you with a gate that lies."""
 )
 
 
@@ -474,6 +505,19 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "only if you actually know them; otherwise leave empty and complete "
         "them before relying on the gates.",
     ])
+    # [W-1] Emitted UNCONDITIONALLY (like telemetry and design), so
+    # COMMANDS_CWD_SECTION_MARKER dates any interview file that carries it —
+    # the discriminator parse_interview_answers uses to distinguish a file
+    # predating the key (default true) from a current file whose line was
+    # deleted (fail loud). Question text is the protocol doc's verbatim
+    # Phase 2 string (single source).
+    section(COMMANDS_CWD_SECTION_TITLE, [
+        "**Proposed:** `commands_execute_in_cwd = true` (the common case, and "
+        "the pre-existing behavior; set it false only for fixed-mount "
+        "indirection)",
+        "",
+        f"\"{COMMANDS_CWD_QUESTION}\"",
+    ])
 
     if p["open_questions"]:
         w("## ⚠ OPEN QUESTIONS — these were too ambiguous to propose")
@@ -529,6 +573,8 @@ def parse_interview_answers(text: str) -> dict:
         "telemetry_export_enabled",
         # DS-01 (v2.5.0): twin top-level opt-in flags.
         "design_steering_enabled", "design_review_skill_enabled",
+        # [W-1] the command-execution-location fact.
+        "commands_execute_in_cwd",
     }
     list_keys = {"principles_ranked", "secrets_never_read_paths"}
 
@@ -612,6 +658,24 @@ def parse_interview_answers(text: str) -> dict:
                     "misspelled rather than predating the flag. Restore "
                     f"`{k}: true` or `: false` — an opt-in decision is never "
                     "defaulted silently.")
+            # [W-1] Same section-marker discriminator. Note the defaulted value
+            # here is TRUE, unlike the two opt-ins above: true reproduces the
+            # behavior every pre-W-1 interview file was written under, so an
+            # older file keeps meaning exactly what it meant. A CURRENT file
+            # missing the line still fails loud — the value decides whether a
+            # verification gate can see the code it is verifying.
+            if k == "commands_execute_in_cwd":
+                if COMMANDS_CWD_SECTION_MARKER not in text:
+                    out[k] = True
+                    continue
+                raise ValueError(
+                    f"ANSWERS block missing key: {k}. This interview file "
+                    f"carries the '{COMMANDS_CWD_SECTION_TITLE}' section, so "
+                    "the key was deleted or misspelled rather than predating "
+                    f"it. Restore `{k}: true` or `: false` — it decides "
+                    "whether the implementer gets `isolation: worktree`, and "
+                    "guessing it wrong makes a gate pass on code it never "
+                    "compiled.")
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
         if k in bool_keys:
@@ -849,6 +913,17 @@ def run_interactive(prd_text: str, *, instream, outstream,
                       ("commands_ci_local", "ci_local")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
                        instream=instream, outstream=outstream, eof=eof)
+
+    # [W-1] Asked UNCONDITIONALLY, right after the commands themselves — it is
+    # a fact about those five answers and belongs next to them. Not
+    # archetype-gated: fixed-mount dev environments show up under every
+    # archetype, which is precisely why the pairing went unnoticed.
+    show(COMMANDS_CWD_SECTION_TITLE, COMMANDS_CWD_QUESTION)
+    v = _ask("Do these commands run in the directory they are invoked from? "
+             "true|false",
+             str(ans["commands_execute_in_cwd"]).lower(),
+             instream=instream, outstream=outstream, eof=eof)
+    ans["commands_execute_in_cwd"] = v.lower() in ("true", "1", "yes", "on")
 
     return ans
 

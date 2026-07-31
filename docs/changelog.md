@@ -1,5 +1,109 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.1 in-version fix — worktree isolation and container-run commands did not compose (2026-07-31)
+
+Issue #29 (W-1). The protocol paired two of its own features that conflict and
+warned about it nowhere.
+
+1. **Worktree isolation is core drift-prevention machinery.** Phase 6.5 states
+   the principle (*"subagents and worktrees prevent drift"*), Phase 7 set
+   `isolation: worktree` on `implementer`, and `integrator` exists solely to
+   reconcile conflicting worktrees.
+2. **Phase 2 collected test/lint/build commands with no constraint on where
+   they execute.**
+
+**The mechanism, stated precisely, because the obvious reading is wrong.** The
+emitted gate runs the configured command bare:
+
+```sh
+( docker compose exec -T app gleam test ) || rc=$?
+```
+
+No `cd`, no `$CLAUDE_PROJECT_DIR` — **and that is correct design.** A plain
+`gleam test` or `npm test` inherits the hook process's cwd, which inside a
+worktree *is* the worktree. **Plain commands compose fine, and no gate hook
+body changed in this fix.** The break is **fixed-mount indirection**: `docker
+compose exec` enters a container whose bind mount points at the main checkout,
+so cwd is irrelevant and the command always runs against `/app`. Same shape for
+`kubectl exec`, `ssh`, `vagrant ssh`, devcontainer CLIs. (`docker run -v
+"$(pwd)":/app` *does* follow cwd and was never affected.)
+
+**The failure.** An `implementer` works in `.claude/worktrees/<n>/`. The gate
+compiles and tests the **main checkout**. The gate passes. The code the agent
+wrote was never built — a fail-open in a verification control, the same class
+as P0-3d, which forced the 2.6.1 release. Broader in reach than P0-3d, which
+required a broken `jq`: this needs only a containerized dev environment, which
+Phase 2 invited with no caveat. It stayed dormant while autonomous modes were
+off and went live the moment a decomposition marked tasks parallelizable.
+
+**Measured on the reporter's install** (2.6.1, `gate_substrate: shell`,
+fullstack, autonomous modes off): `.claude/agents/implementer.md:4` →
+`isolation: worktree`; `docker compose exec -T app pwd` → `/app`; one `docker`
+hit in the whole protocol document, at line 924, saying only "don't wrap it in
+an MCP"; no text reconciling the two features; no worktree entry in
+`docs/deferred-backlog.md`.
+
+**The fix — a config key, not a doc warning.** The issue offered a doc warning
+as the cheaper option and argued against it in the same breath: `isolation:
+worktree` was **hardcoded** (`lib/templates.py:2920`, `:4835`), so an affected
+operator's only local lever was hand-editing `implementer.md` — which trips the
+installer's digest hand-edit guard, after which that file is `SKIP`ped forever
+and they keep their fix while silently losing every upstream fix to it. That is
+the `deps.md` trap, and shipping it to a second file was not acceptable.
+
+- **`commands.execute_in_cwd`** (bool, default `true`) — the Phase 2 fact. Asked
+  verbatim by both interview front-ends, of every archetype, and **never
+  inferred**: a `docker-compose.yml` in the tree is not evidence that the test
+  command goes through it, and inferring wrong in the permissive direction
+  re-arms the fail-open. A *quoted* `"false"` is a validation error, not a
+  truthy string.
+- **`workflow.implementer_isolation`** (`auto` | `worktree` | `none`, default
+  `auto`) — the override. `auto` derives from the key above.
+
+**Why dropping the isolation rather than warning and keeping it.** Losing
+worktrees costs parallelism and is **loud** when it bites — two implementers in
+one tree collide visibly. Keeping them costs a green gate on uncompiled code
+and is **silent**. Trading a silent fail-open for a visible constraint is the
+call A-1 already made for the parser outage.
+
+**And the trade is paid, not just declared.** With every implementer in the main
+checkout, a `max_concurrent_tasks` of 2 would mean two agents editing one tree —
+swapping one silent failure for another. So `backlog.md` and `auto-config.md`
+emit `1` in that configuration, with the reason in-file. The two per-task
+wrappers are the other dispatch site with the same defect: they tell the
+operator how to write the `claude -p` call, so the `--worktree` guidance is now
+conditional too (IC-6 still passes — its contract is "no hand-rolled `git
+worktree add`", which holds either way).
+
+**Both directions are self-documenting.** When the isolation is on, the emitted
+`implementer.md` states the requirement it silently depends on and gives a
+one-command probe (`docker compose exec -T <svc> pwd` from inside a worktree).
+When it is off, the file records the absence as a **decision, not an
+oversight** — otherwise the next reader "fixes" it straight back into the
+fail-open.
+
+**On the unverified assumption.** The issue flagged one: that Claude Code sets
+an `isolation: worktree` subagent's cwd to its worktree. It is the documented
+behavior and everything rests on it. It was **not** confirmed by execution here,
+and is now recorded as an open item (`docs/deferred-backlog.md` W-1a) rather
+than quietly assumed. Note the direction of the risk: if it were untrue the
+pairing would fail *more* broadly — every command, not just fixed-mount ones —
+so the mitigation is directionally right either way, and the emitted probe
+settles it per-environment in one command.
+
+**Golden re-baseline: freeze-exception no. 32**, all three fixtures, verified
+per-file first. Action counts stable at **57 / 69 / 59**, 0 added, 0 removed;
+the moving bodies are exactly `tech.md` + `implementer.md` (all three fixtures)
+plus `loop.sh` + `goal-loop.sh` (full_autonomous only). All three fixtures leave
+`execute_in_cwd` at its default, so every `isolation: worktree` line and both
+`max_concurrent_tasks: 2` values are unchanged — **the OFF path is covered
+behaviorally, not by a golden**, in the new
+`tests/test_worktree_command_compat.py`. `tests/test_validate_only.py`'s
+mini-golden re-baselined for the single added `execute_in_cwd: true` line,
+verified by reproducing the previous digest bit-for-bit after stripping it.
+
+Suite: 22 suites / 1977 checks / 0 failed.
+
 ## 2.6.0 → 2.6.1 — release identity for the post-tag fixes (2026-07-31)
 
 **PATCH.** `PROTOCOL_VERSION` 2.6.0 → 2.6.1 in `lib/installer.py` and

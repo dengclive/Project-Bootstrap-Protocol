@@ -295,11 +295,24 @@ introduce — recorded because it is live, not because it is a regression.
 | P-18 | **10 backlog rows still carry more cells than their table header**, so their trailing cell is dropped by GFM rendering. Measured counting only *unescaped* pipes — a `\|` inside a row is content, not a delimiter, which is why a naive count reports more. The two rows this batch introduced (D-9, I-8) and section D's stale "All `open`" caption are fixed; the remainder predate it: **A-5, A-6** (4 cells / 3), **I-11** (4/3), **J-1** (5/3), **J-10, J-17, J-19, J-20, J-15** (4/3) and **J-18** (7/3). A status silently dropped from a tracking file is how a `done` row gets re-worked | `open` — `pre-existing` |
 | P-19 | **P0-3d's fix tests that the parser exited clean, not that it parsed — so a same-named different tool still fails the gates open.** `jget` accepts a parser's output whenever the pipeline's status is 0. Anything named `jq` that exits 0 without producing a parse is therefore read as a successful *empty* parse, and the gate's `case` falls through to allow. The realistic substrate is not an exotic tool but a **defensive wrapper over a broken jq** — `real-jq "$@" 2>/dev/null \|\| true; exit 0`, which is the same `\|\| true` idiom the P0-3d fix removed from `jget`, one layer out, in a file the operator owns. Executed against the emitted install with a healthy `python3` on the same PATH: `secrets-gate` on `cat .env` **rc=0 ALLOWED**, `dependency-gate` on `npm install evil` **rc=0 ALLOWED**, while jq absent / exiting 127 / `chmod 644` all give rc=2. **Bounded honestly:** two neighbouring shapes DENY and are not part of this — a swallowing wrapper over a *working* jq (the real answer is still returned) and a wrapper that prepends a banner to stdout (the polluted output still contains the command). §4.6's stated remedy is the capability probe — parse a known literal and compare — which the fix does not implement. Found reviewing PR #24, whose §7 checklist item claimed all four shapes already denied; that item now states the gap instead | `open` |
 
+## W. Worktree isolation (issue #29, 2026-07-31)
+
+The issue observed that this document had **no worktree entry at all**. It has
+one now. W-1 itself is fixed; the rows below are the residue.
+
+| ID | Item | Status |
+|---|---|---|
+| W-1 | **Worktree isolation and container-executed commands did not compose — gates tested the wrong tree, silently.** `isolation: worktree` was hardcoded on `implementer` while Phase 2 collected commands with no constraint on where they run, so under fixed-mount indirection (`docker compose exec`, `kubectl exec`, `ssh`, devcontainer CLIs) the gate compiled the main checkout while the agent worked in a worktree — green on code never built. Fixed with `commands.execute_in_cwd` + `workflow.implementer_isolation`; see `docs/changelog.md` | `done` |
+| W-1a | **The load-bearing assumption is documented, not executed.** That Claude Code sets an `isolation: worktree` subagent's cwd to its worktree is taken from the tooling docs; W-1's fix was NOT gated on confirming it by running an implementer task. Direction of risk is favorable — if it were untrue the pairing would fail *more* broadly (every command, not just fixed-mount ones), so the mitigation is directionally right either way — and the emitted `implementer.md` now ships a one-command probe so each operator can settle it locally. What is still missing is one execution on this side: dispatch one `implementer` task and record where its test command ran | `open` |
+| W-1b | **`worktree-budget.md` (G16) and the isolation decision do not consult each other.** The retrofit budget doc advises sequential over parallel worktrees above 5 GB; `_resolve_implementer_isolation` never reads `codebase_size_gb`. Two separate levers over the same behavior, each unaware of the other. Not wrong today (the budget doc is advisory prose to the agent, the config key is mechanical), but an operator can set `implementer_isolation: worktree` on a 20 GB repo and get no pushback from either | `open` |
+| W-1c | **No gate asserts that a gate ran where the agent worked.** W-1 closes the configuration path into the fail-open; it does not detect the fail-open. A gate could compare its own `pwd` against `$CLAUDE_PROJECT_DIR` (or record it in `hooks.log`) so a mismatch is observable rather than inferred from a config key an operator may have answered wrong. This is the mechanical check that would have caught the defect without anyone reasoning about mounts | `open` |
+
 ## Priority reading
 
 Highest-signal actionable clusters: **B** (seam follow-ups) and **E** (smoke /
 cross-mode coverage). **P-1** is the highest-impact open item overall — a
-safety fix that does not reach the installs that need it. **A**, **F-4**,
-**O-3** and **P-9** are decisions only. **D** and **G** are mostly small
-cleanups. **H** is effectively closed. B-2 and B-3 are blocked on the Tessera
-roadmap, not on us.
+safety fix that does not reach the installs that need it. **W-1a** is cheap and
+should be done before the next release that touches worktrees; **W-1c** is the
+mechanical detector W-1 deliberately did not build. **A**, **F-4**, **O-3** and
+**P-9** are decisions only. **D** and **G** are mostly small cleanups. **H** is
+effectively closed. B-2 and B-3 are blocked on the Tessera roadmap, not on us.

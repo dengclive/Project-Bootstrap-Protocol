@@ -75,6 +75,11 @@ ANSWER_KEYS = [
     "commands_format",
     "commands_typecheck",
     "commands_ci_local",
+    # [W-1] A fact about the five commands above, not a sixth command: do they
+    # honor the directory they are invoked from? Brownfield is where this bites
+    # hardest — an established codebase is far likelier to have a containerized
+    # dev environment than a greenfield one.
+    "commands_execute_in_cwd",
 ]
 
 _LIST_KEYS = {"principles_ranked", "legacy_allowlist"}
@@ -82,7 +87,16 @@ _BOOL_KEYS = {
     "secrets_enabled", "deps_enabled",
     "loop_mode_opted_in", "goal_supervised_mode_opted_in",
     "queue_mode_opted_in",
+    "commands_execute_in_cwd",
 }
+
+# [W-1] Section title/marker, mirroring the greenfield front-end's
+# COMMANDS_CWD_SECTION_MARKER. Its presence dates a retrofit interview file to
+# the version that added the key, so parse_interview_answers can default an
+# older file to true (the behavior it was written under) while still failing
+# loud on a current file whose line was deleted.
+COMMANDS_CWD_SECTION_TITLE = "Command execution location"
+COMMANDS_CWD_SECTION_MARKER = f"## {COMMANDS_CWD_SECTION_TITLE}"
 
 
 # --------------------------------------------------------------------------- #
@@ -129,6 +143,9 @@ def default_answers(proposal: dict) -> dict:
         "commands_format": cmds.get("format", {}).get("value", ""),
         "commands_typecheck": "",  # never auto-proposed
         "commands_ci_local": "",   # never auto-proposed
+        # [W-1] never auto-proposed either — the scan sees files, not how a
+        # command reaches the code. True is the pre-W-1 behavior.
+        "commands_execute_in_cwd": True,
     }
 
 
@@ -183,6 +200,7 @@ def answers_to_config(ans: dict, proposal: dict) -> dict:
             "format": ans["commands_format"],
             "typecheck": ans["commands_typecheck"],
             "ci_local": ans["commands_ci_local"],
+            "execute_in_cwd": bool(ans.get("commands_execute_in_cwd", True)),
         },
         "retrofit": {
             "state_path": ".claude/inventory",
@@ -506,6 +524,26 @@ def render_interview(proposal: dict, repo_root: Path) -> str:
     ]
     section("Project commands", cmd_lines)
 
+    # [W-1] Emitted UNCONDITIONALLY so the marker dates the file. Never
+    # auto-proposed from the scan: a repo containing a docker-compose.yml is
+    # not evidence that the TEST COMMAND goes through it, and guessing wrong in
+    # the permissive direction is the fail-open this key exists to close.
+    section(COMMANDS_CWD_SECTION_TITLE, [
+        "**Proposed:** `commands_execute_in_cwd = true` (the pre-existing "
+        "behavior). NOT inferred from the inventory scan — a compose file in "
+        "the repo does not tell us how the test command reaches the code.",
+        "",
+        "Do the commands above run in the directory they are invoked from? "
+        "Yes for anything local (`pytest -q`, `make test`). **No** if a "
+        "command reaches its code through a fixed mount — `docker compose "
+        "exec`, `kubectl exec`, `ssh`, a devcontainer CLI — which land in a "
+        "tree the mount chose rather than the one you were standing in. It "
+        "matters because the `implementer` subagent works in its own git "
+        "worktree: if the gates cannot follow it there, they test the main "
+        "checkout and report green on code that was never built. Answering "
+        "no makes the installer drop the worktree isolation instead.",
+    ])
+
     if p["debt"]:
         section(f"Initial debt registry ({len(p['debt'])} entries)", [
             (f"- **{d['what']}** — severity {d['severity']}; "
@@ -596,6 +634,21 @@ def parse_interview_answers(text: str) -> dict:
                 continue
             raise ValueError(f"ANSWERS block missing key: {k}")
         if k not in raw:
+            # [W-1] Section-marker discriminator (the greenfield front-end's
+            # pattern). Absent marker => the file predates the key, so default
+            # to true, which is exactly what it meant when it was written.
+            # Marker present but line gone => deleted or misspelled; fail loud,
+            # because this value decides whether a verification gate can see
+            # the code it verifies.
+            if k == "commands_execute_in_cwd":
+                if COMMANDS_CWD_SECTION_MARKER not in text:
+                    out[k] = True
+                    continue
+                raise ValueError(
+                    f"ANSWERS block missing key: {k}. This interview file "
+                    f"carries the '{COMMANDS_CWD_SECTION_TITLE}' section, so "
+                    "the key was deleted or misspelled rather than predating "
+                    f"it. Restore `{k}: true` or `: false`.")
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
         if k in _BOOL_KEYS:
@@ -822,6 +875,22 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
                       ("commands_ci_local", "ci_local")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
                         instream=instream, outstream=outstream, eof=eof)
+
+    # [W-1] Asked next to the commands it is a fact about. Brownfield weights
+    # this higher than greenfield: an established codebase is more likely to
+    # reach its toolchain through a container than a fresh one is.
+    o("\n--- Command execution location ---\n"
+      "Do those commands run in the directory they are invoked from? Yes for\n"
+      "anything local (`pytest -q`, `make test`). NO if one reaches its code\n"
+      "through a fixed mount - docker compose exec, kubectl exec, ssh, a\n"
+      "devcontainer CLI - which land in a tree the mount chose. The\n"
+      "`implementer` subagent works in its own git worktree; if the gates\n"
+      "cannot follow it there they test the main checkout and pass on code\n"
+      "that was never built. Answering false drops the worktree isolation.\n")
+    v = _ask("commands.execute_in_cwd true|false",
+             str(ans["commands_execute_in_cwd"]).lower(),
+             instream=instream, outstream=outstream, eof=eof)
+    ans["commands_execute_in_cwd"] = v.lower() in ("true", "1", "yes", "on")
 
     return ans, p
 

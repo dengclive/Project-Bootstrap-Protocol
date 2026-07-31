@@ -57,6 +57,14 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 # them from the new output reproduces the previous digest 798a30bf...bit-for-bit.
 # Freeze exception, not a drive-by. Previous digest:
 # 798a30bf895ef7aa2a27295344a5ffeee501ad63e31ef7464675baf03b274b17.
+#
+# [W-1 worktree/command-substrate compatibility] RE-BASELINED again, same
+# discipline. answers_to_config emits one more line — `execute_in_cwd: true`
+# inside the `commands:` block — the Phase 2 fact that decides whether the
+# implementer gets `isolation: worktree`. VERIFIED the delta is ONLY that line:
+# stripping it from the new output reproduces the previous digest
+# 9544a945...bit-for-bit. Freeze exception, not a drive-by. Previous digest:
+# 9544a945a166ad99cb7f699cfa42c3e900d60dc1e8759e3541b68b6c0cc9a1e9.
 def _run(args, cwd):
     return subprocess.run([sys.executable, BIN] + args, cwd=cwd,
                           capture_output=True, text=True)
@@ -120,7 +128,7 @@ finally:
 # unaffected (the flag branch has no side effects).
 # --------------------------------------------------------------------------- #
 EXPECTED_NOFLAG_SHA256 = \
-    "9544a945a166ad99cb7f699cfa42c3e900d60dc1e8759e3541b68b6c0cc9a1e9"
+    "de6d5086e0a5366ce0261d21ed9e52b9a84f5a8ceffb8be81752430f570a1089"
 
 d = tempfile.mkdtemp()
 try:

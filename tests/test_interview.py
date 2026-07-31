@@ -127,8 +127,15 @@ check("commands: all five emitted empty by default",
           ("commands_test", "commands_lint", "commands_format",
            "commands_typecheck", "commands_ci_local")))
 cfg = IV.answers_to_config(ans)
+# [W-1] Names the five COMMAND keys rather than sweeping .values(): the block
+# also carries `execute_in_cwd`, a boolean fact ABOUT the commands, and a
+# whole-block sweep would either fail on it or (worse, if someone "fixed" it by
+# loosening the predicate) stop pinning that the commands are empty at all.
+_CMD_KEYS = ("test", "lint", "format", "typecheck", "ci_local")
 check("commands: config commands block all empty strings",
-      all(v == "" for v in cfg["commands"].values()))
+      all(cfg["commands"][k] == "" for k in _CMD_KEYS))
+check("commands: execute_in_cwd defaults true (pre-W-1 behavior)",
+      cfg["commands"]["execute_in_cwd"] is True)
 
 # --------------------------------------------------------------------------- #
 # Emitted config: round-trips minyaml AND validates via resolve_config
@@ -327,7 +334,9 @@ cfg_ref = IV.answers_to_config(ans_ref)
 _, errs_ref = resolve_config(cfg_ref)
 check("llm: refined proposal still yields a valid config", errs_ref == [])
 check("llm: commands.* never populated by the model",
-      all(v == "" for v in cfg_ref["commands"].values()))
+      all(cfg_ref["commands"][k] == "" for k in _CMD_KEYS))
+check("llm: execute_in_cwd never flipped by the model",
+      cfg_ref["commands"]["execute_in_cwd"] is True)
 
 # low-confidence model output still becomes an OPEN QUESTION (no silent decide)
 os.environ["BOOTSTRAP_INTERVIEW_LLM_FAKE"] = json.dumps({

@@ -257,6 +257,21 @@ deterministic installer).
   (the wrappers fail closed — they refuse rather than run). Backlog I-1/I-2
   track both; complete them (or work operator-in-the-loop, where none of
   this binds) before relying on the autonomous modes.
+- **Worktree isolation only isolates what follows the working directory
+  (W-1, issue #29).** The gates run your configured command bare — no `cd` —
+  which is what lets a plain `pytest -q` follow the `implementer` subagent
+  into its worktree. A command that reaches its code through a *fixed mount*
+  (`docker compose exec`, `kubectl exec`, `ssh`, `vagrant ssh`, a devcontainer
+  CLI) does not follow it: it runs against the main checkout, so the gate can
+  report green on code the agent never built. Answer the interview's **command
+  execution location** question honestly — `commands.execute_in_cwd: false`
+  makes the installer drop `isolation: worktree` and start
+  `max_concurrent_tasks` at 1 rather than leave you with a gate that lies.
+  Override with `workflow.implementer_isolation` (`auto` | `worktree` |
+  `none`); **do not hand-edit the emitted `implementer.md`**, which trips the
+  digest guard and freezes that file against upstream fixes. To check your own
+  environment: from inside `.claude/worktrees/<n>/`, run your test command's
+  transport with `pwd` substituted (`docker compose exec -T app pwd`).
 
 ## Tests
 
@@ -302,6 +317,7 @@ python3 tests/test_auto_run_sentinel.py   # Phase 9.7 .run-active race safety
 python3 tests/test_ic_gate.py             # IC-1..IC-7 gate + changelog tripwire
 python3 tests/test_sdk_gates.py           # IC-5 SDK gate module
 python3 tests/test_usage_limit_contract.py # 2.2.0 usage-limit comment contract
+python3 tests/test_worktree_command_compat.py # W-1 isolation vs. command cwd
 ```
 
 Per-suite check counts are deliberately not listed here — they move with
