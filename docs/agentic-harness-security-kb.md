@@ -11,7 +11,7 @@ v2.5.0 → v2.6.0 delta this was compiled from stays legible as a delta.
 
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
-v2.5.0 → v2.6.0 delta closed thirteen defects, four of them fail-open security
+v2.5.0 → v2.6.0 delta closed fourteen defects, four of them fail-open security
 holes and one a confirmed RCE. This is the catalogue, the mechanisms, the repros,
 and — the part worth keeping — the **generalizable failure classes**, which are
 not specific to this project, this language, or this agent runtime.
@@ -75,8 +75,10 @@ Four harness notes that cost real time here, recorded so they cost you none:
    all real, all satisfying `command -v`:
 
    ```bash
-   # (i) version-manager shim for an uninstalled runtime — pyenv/asdf/mise
-   printf '#!/bin/sh\necho "pyenv: jq: command not found" >&2\nexit 127\n' > farm/jq
+   # (i) version-manager shim with no version resolved — asdf/mise both carry
+   #     jq as a first-class tool (`asdf-jq`; mise registry `aqua:jqlang/jq`),
+   #     and put their shim dir on PATH. Verified 2026-07-31.
+   printf '#!/bin/sh\necho "mise: jq is not installed" >&2\nexit 127\n' > farm/jq
    # (ii) broken dynamic link — the Alpine/slim-image shape
    printf '#!/bin/sh\necho "jq: error while loading shared libraries: libonig.so.5" >&2\nexit 127\n' > farm/jq
    # (iii) right name, not executable
@@ -113,9 +115,9 @@ correct-looking code — a hook can be perfectly written and completely inert.
 
 **(C) The failure mode is silence.** A gate that crashes loudly gets fixed in an
 hour. A gate that returns 0 because its JSON parser was missing looks exactly like
-a gate that ran and approved. **Seven of the thirteen defects below were silent
+a gate that ran and approved. **Seven of the fourteen defects below were silent
 allows** — P0-2, P0-3a, P0-3b, P0-3c, P1-1, P1-3 and P2-5. The 1016-check test
-suite was green over all thirteen.
+suite was green over all fourteen.
 
 **The composite risk:** the harness tells the operator "your secrets are gated,
 your tests must pass, your dependencies are reviewed." If any of that is false,
@@ -126,6 +128,14 @@ not documentation hygiene** — a theme this document returns to repeatedly.
 ---
 
 ## 2. The delta at a glance
+
+**How this is counted, stated once so it cannot drift. `[+2026-07-31]`** The
+delta is **fourteen** defects — the rows below, with **P0-3a/b/c counted
+separately**, which is the basis §4.2's own enumeration already uses and the
+basis on which "four of them fail-open" (P0-3a, P0-3b, P0-3c, P2-5) is correct.
+**P0-3d is post-tag and sits outside the fourteen**: v2.6.0 ships it, so the
+delta did not close it. This document said "thirteen" in six places from the day
+it was written, against a table that has never had thirteen rows; corrected here.
 
 | ID | Defect | Class | v2.5.0 | v2.6.0 |
 |---|---|---|---|---|
@@ -350,7 +360,7 @@ fallback is bound to jq's **absence**, never to its **failure**, so a healthy
 `python3` on the same PATH was structurally unreachable.
 
 ```
-jq PRESENT but exiting 127 (broken libonig / pyenv shim), python3 healthy:
+jq PRESENT but exiting 127 (broken libonig / mise shim), python3 healthy:
                                      v2.6.0 (f6bded0)      main (3355e9c)
   secrets-gate     cat .env            rc=0  ALLOWED         rc=2 BLOCKED
   dependency-gate  npm install evil    rc=0  ALLOWED         rc=2 BLOCKED
@@ -365,13 +375,18 @@ that chooses between two correct implementations.
 
 Both fail-opens were silent — no stderr, and `hooks.log` recorded only a
 misleading `secrets-gate: no path`. The fix tries each parser in turn and accepts
-its output only if it **exited clean** (`set -o pipefail` makes the pipeline's
-status the parser's, not `printf`'s); both unusable is now the same condition as
-neither installed.
+its output only if it **exited clean**; both unusable is now the same condition as
+neither installed. The parser is the *last* command in the pipeline, so its status
+is already the pipeline's — that is plain POSIX and needs no option. What the
+header's `set -o pipefail` adds is the reverse direction: a failed `printf`
+(SIGPIPE, if the parser dies before reading) also fails the pipeline, so a
+half-fed parse cannot be mistaken for a clean one. `[+2026-07-31]`
 
 **Why the suite could not see it, which is the part to keep.**
-`tests/test_hook_behavior.py` was written specifically to close P0-3b. It builds
-symlink farms for *jq absent* and for *no parser*, under this comment:
+`tests/test_hook_behavior.py` covers the whole executing-suite gap — P0-1, P0-2,
+P0-3a/b/c, P1-1, P1-3, P1-4, P2-4 through P2-8 — but its *parser* substrates were
+built specifically for P0-3b. They are symlink farms for *jq absent* and for
+*no parser*, under this comment:
 
 > *"A symlink farm is the only honest way — `command -v jq` cannot be fooled by
 > shadowing."*
@@ -754,7 +769,7 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Thirteen defects, six recurring shapes — five from the v2.5.0 → v2.6.0 delta and
+Fourteen defects, six recurring shapes — five from the v2.5.0 → v2.6.0 delta and
 one added post-tag. If this document is read for one section, this is it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
@@ -770,7 +785,7 @@ can manufacture the same evidence. Re-run the check.
 
 ### 4.2 Silence is the default failure mode, and it is indistinguishable from success
 
-Seven of thirteen were silent allows — P0-2, P0-3a, P0-3b, P0-3c, P1-1, P1-3, P2-5.
+Seven of fourteen were silent allows — P0-2, P0-3a, P0-3b, P0-3c, P1-1, P1-3, P2-5.
 The suite was green over every one. Two more (P2-7, P2-8) were silent *non*-fires:
 controls present, enumerated in the docs, that never once executed their decision.
 
@@ -825,15 +840,34 @@ version-manager shim for an uninstalled runtime, a broken dynamic link, a
 non-executable file, a different tool with the same name.
 
 The shape is general, and it is attractive because the cheap check is *almost*
-the right one:
+the right one. **All five rows EXECUTED 2026-07-31** (bash 5, Python 3.14.6,
+docker 29.6.1) — the evidence is in the note under the table:
 
 | the cheap check | what it actually asserts | what the caller needed |
 |---|---|---|
-| `command -v X` / `which X` | a name resolves | X runs and does its job |
+| `command -v X` | a name resolves *(even to a non-executable file)* | X runs and does its job |
+| `which X` | a name resolves **and** carries the exec bit | X runs and does its job |
 | `[ -x path ]` | a bit is set | exec succeeds |
 | `importlib.util.find_spec` | a module is importable-by-name | import has no side-effect failure |
 | `docker --version` | a client exists | a daemon is reachable |
 | config key is present | the key exists | the value resolves to something usable |
+
+**The evidence, so no row here is taken on trust. `[+2026-07-31]`**
+
+```
+command -v / which  a file named jq, chmod 644, alone on PATH:
+                    `command -v jq` -> rc=0 (reports it);  `which jq` -> "no jq".
+                    The two disagree on exactly the shape §0 note 4(iii) uses.
+[ -x path ]         TRUE for a script with an unresolvable shebang, for a
+                    DIRECTORY, and for a non-ELF file with the bit set.
+                    Executing each: rc=126 in all three.
+find_spec           a package whose __init__.py raises RuntimeError -> find_spec
+                    returns a spec; `import` then raises. Same for a module
+                    importing an absent dependency.
+docker --version    DOCKER_HOST=unix:///nonexistent/docker.sock ->
+                    `docker --version` rc=0, `docker info` rc=1, `docker ps` rc=1.
+config key present  definitional; STATIC, not executed.
+```
 
 **Rule:** probe the capability, not the name — for a parser, parse a known
 literal and compare. Where a probe is genuinely too expensive, then at minimum
@@ -852,7 +886,7 @@ any answer with one element.
 
 ## 5. Why detection failed, and what actually worked
 
-**A 1016-check suite was green over all thirteen defects, including the RCE.**
+**A 1016-check suite was green over all fourteen defects, including the RCE.**
 Understanding why is more valuable than the defect list.
 
 **Every suite asserted emission determinism** — *does the installer write the
@@ -915,16 +949,43 @@ table, the totals line, and the closing banner.
 
 ### 5.1 The recurrence pattern
 
-Worth recording plainly: **eight consecutive fix batches in this repository each
-produced a defect in the class they were fixing**, and none was caught by the green
-suite — every one was caught by an independent adversarial round. Round 7 alone
-found an unhashable `matcher` that aborted install at 22 of 58 files with no gates
-registered, and a proxy that deleted the operator's `settings.json` keys on any
-declined write.
+Worth recording plainly: **seven consecutive fix commits in this repository each
+shipped a defect into the class they were fixing**, and none was caught by the
+green suite — every one was caught by the next independent review. The chain is
+self-documenting, because most of them name the previous one's defect in their
+own subject line:
 
-**The eighth batch did it three times, and each catch needed a different
-instrument. `[+2026-07-31]`** The batch fixed an *unbounded-block* class — a
-control whose bound was inoperative and silent about it.
+```
+311bd67  two-lens adversarial-review batch — 25 findings
+0fba4d2  round-2 — "a fail-open and a false positive the last batch shipped"
+9952741  batch 2a — the quoted-run rule, resolved structurally
+edac7c7  batch 2b — one quote-aware segmenter, and the SDK re-synced
+ff435f5  batch 3 — eight independent defects
+b1782ec  round-3 — "four defects the last batch shipped"
+b5d7f71  round-4 — whose own new D12 validator rejected two legitimate
+         never_read_paths minutes after it was declared done (f1ed58c)
+```
+
+Round 7 alone found an unhashable `matcher` that aborted install at 22 of 58
+files with no gates registered, and a proxy that deleted the operator's
+`settings.json` keys on any declined write.
+
+> **The unit is COMMITS, and the drift is the lesson. `[+2026-07-31]`** The
+> round-4 brief established this figure over *commits*, and its three reviewers
+> confirmed it independently. The round-5 brief then warned in terms that
+> re-deriving it *"from batches produces a different, worse-supported number"* —
+> and it was relabelled "batches" anyway, then carried forward twice more, to
+> seven and to eight, without anyone re-deriving anything. Restored here. The six
+> fix commits between `b5d7f71` and the autonomous-mode batch were never assessed
+> against this predicate, so nothing supports an unbroken run past round 4 — and
+> at least one of them produced two in-class defects that **tests** caught before
+> landing, which the "never the suite" clause would have to exclude. **A number
+> that survives by inheritance stops being a measurement.**
+
+**The next batch to receive an independent round did it three times, and each
+catch needed a different instrument. `[+2026-07-31]`** The autonomous-mode batch
+fixed an *unbounded-block* class — a control whose bound was inoperative and
+silent about it.
 
 1. **First cut:** the new `stop_hook_active` bound read
    `[ "$(jget '.stop_hook_active')" = "true" ]`. `jget` routes a missing parser
@@ -944,7 +1005,8 @@ control whose bound was inoperative and silent about it.
    testing.*
 
 Three instances, one batch, three different detection instruments, and **none of
-them was the test suite**, which was green throughout at 1895 checks.
+them was the test suite** — which was green at every point, running 1835 checks
+before the batch and 1905 after. It grew by 70 while all three slipped past it.
 
 > **Two rules from the third one, because it is the least obvious.** A *repair*
 > can be unsound in the same class as the thing it repairs — re-run the mutation
@@ -961,10 +1023,13 @@ backlog row that had been flagged **the previous day** as "describing neither
 substrate."
 
 > **Rule:** when new normative text cites a tracking row, read the row's *status*,
-> not just its claim. A row awaiting a decision is not settled fact. And budget for
-> an independent adversarial pass on every security fix batch, because in this
-> repository's entire history that is the only thing that has ever caught the
-> follow-on defect.
+> not just its claim. A row awaiting a decision is not settled fact. And budget an
+> out-of-suite pass on every security fix batch, because in this repository's
+> entire history the green suite has never once caught the follow-on defect —
+> every catch came from an independent adversarial round, from executing the
+> artifact, or from mutating it. `[+2026-07-31]` Budget all three: the eighth
+> batch needed a different one of them for each of its three instances, and no
+> one instrument would have found the other two.
 
 ---
 
@@ -1056,6 +1121,17 @@ Every substrate-differential assertion iterates SDK_GATES, the smaller
 side, so a shell control with no SDK counterpart is invisible. Executed:
 adding an always-deny shell hook with no twin left both parity suites
 green at 176/0 and 96/0.                                          (P-17)
+
+-- the parser fix stops at "exited clean", not "parsed" --
+P0-3d's fix accepts any parser that exits 0, so a tool named `jq` that
+exits 0 and prints nothing reads as a successful EMPTY parse and the
+`case` falls through to allow. The fourth shape §4.6 names is the one
+shape still open. Executed on main (3355e9c):
+  secrets-gate     cat .env           rc=0  ALLOWED
+  dependency-gate  npm install evil   rc=0  ALLOWED
+  (absent / broken / non-executable jq all rc=2 BLOCKED)
+§4.6's remedy is the capability probe: parse a known literal, compare.
+                                                                  (P-19)
 ```
 
 ---
@@ -1077,7 +1153,7 @@ Derived from the above; ordered by how much each would have caught here.
 **Fail-closed**
 - [ ] Every dispatch has an explicit deny arm; no `case` falls through to allow.
 - [ ] Missing parser, oversized payload, unwritable filesystem, timeout, and malformed input each **deny**, each with a distinct reason.
-- [ ] Every dependency is probed for **function**, not presence: a shim, a broken dynamic link, a non-executable file of the right name, and a same-named different tool all route to the same deny as an absent one. `[+2026-07-31]`
+- [ ] Every dependency is probed for **function**, not presence — parse a known literal and compare. A shim, a broken dynamic link, a non-executable file of the right name, and a same-named different tool must all route to the same deny as an absent one; checking only that the dependency *exited clean* catches the first three and not the fourth. `[+2026-07-31]`
 - [ ] Fallback between redundant implementations triggers on **failure**, not only on absence — and "returned nothing" is never the same value as "could not run". `[+2026-07-31]`
 - [ ] Incidental work (logging, temp files, `mkdir`) cannot kill the process before the decision.
 - [ ] An `ERR` trap routes *unanticipated* failures to deny.

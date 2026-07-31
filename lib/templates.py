@@ -396,8 +396,10 @@ if cur is not None and not isinstance(cur, (dict, list)):
 # THE FALLBACK IS ON FAILURE, NOT ON ABSENCE [2026-07-31]. This used to read
 # `if have_jq ... elif have_py`, which binds the choice of parser to whether a
 # binary of that name EXISTS. `have_jq` is `command -v jq`: it cannot tell a
-# working jq from a version-manager shim (pyenv/asdf/mise print a
-# "command not found" line and exit 127), a jq whose dynamic link is broken
+# working jq from a version-manager shim with no version resolved (asdf and
+# mise both carry jq as a first-class tool - `asdf-jq`, mise registry
+# `aqua:jqlang/jq` - and put their shim dir on PATH; the shim prints a
+# "not installed" line and exits non-zero), a jq whose dynamic link is broken
 # (`error while loading shared libraries: libonig.so.5`, the Alpine/slim-image
 # shape), a non-executable file of the right name, or a different tool
 # entirely. The old form then swallowed the failure with `|| true`, so jget
@@ -414,8 +416,12 @@ if cur is not None and not isinstance(cur, (dict, list)):
 # as success. A security substrate must never degrade to allow.
 #
 # So: try each parser in turn and accept its output only if it actually
-# EXITED CLEAN. `set -o pipefail` is what makes the pipeline's status jq's
-# status rather than printf's. Both parsers failing is now the same condition
+# EXITED CLEAN. The parser is the LAST command in the pipeline, so its status
+# is already the pipeline's - plain POSIX, no option needed. The header's
+# `set -o pipefail` adds the reverse direction: a failed printf (SIGPIPE, if
+# the parser dies before reading its input) also fails the pipeline, so a
+# half-fed parse cannot pass as a clean one. Both parsers failing is now the
+# same condition
 # as neither being installed - hook_fail, which is fail-closed for a blocking
 # gate and a logged degrade for an advisory one. `local` is declared on its
 # own line: `local out="$(...)"` would mask the substitution's exit status
