@@ -1,5 +1,75 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — a refusal is not a run outcome (2026-07-31)
+
+Closes the three owner decisions that were blocking a release tag: **O-3**,
+**P-9** and **P-10**.
+
+**The question O-3 asked was the wrong shape.** It framed the choice as
+*"should the `exit_reason` enum gain a 14th value, `skeleton-not-implemented`?"*
+and recorded the blocker as contract surface — the enum is pinned at exactly 13
+by `tests/test_usage_limit_contract.py`, documented in `auto.sh`'s header, and
+rendered by the morning-after summary. Two findings changed the answer.
+
+**The enum is queue-scoped by the protocol, not just by the pin.** P-10 noted
+the `exactly 13` pin reads `body(AUTO)` only. It is stronger than that:
+`Bootstrap-Protocol-v2-6-0.md:283` already says *"successful per-task
+terminations (`max-iterations`, `goal-condition-suspect`, `terminal-success`)
+do not produce a queue-level `exit_reason`"*. For `loop.sh`/`goal-loop.sh` there
+was never a contract question at all.
+
+**The blast radius was one log line.** Executed against the emitted skeleton:
+`auto.sh` writes **no** `queue_runs_history` entry and no run-summary. The
+pessimistic `EXIT_REASON` escapes only through the exit trap, into `hooks.log`.
+No durable record was ever corrupted.
+
+So the decision is **no 14th value** — because every enum value answers *why a
+RUN ended*, and "the dispatch loop was never written" answers *why no run
+started*. A 14th value would have put an authoring state into a run-outcome
+vocabulary, and propagated through both protocol docs, the Companion and the
+pin to do it. The wrappers now set a `REFUSAL` and log `REFUSED: <cause>`,
+claiming no enum value:
+
+```
+auto.sh REFUSED: dispatch loop not implemented rc=1
+loop.sh task=T-1 REFUSED: no task file for T-1 rc=1
+```
+
+**Acting on it found a live defect nothing had predicted.** The per-task
+wrappers were reporting `goal-condition-suspect` for a **missing task file**, an
+**ineligible task** and an **already-claimed task** — the same category error as
+the skeleton, not confined to the skeleton, and on `loop.sh` it named a goal
+condition on a wrapper that has no goal. Executed before the fix:
+`loop.sh task=T-1 exit reason=goal-condition-suspect rc=1`, for a task that did
+not exist. All three now refuse by name. `goal-condition-suspect` is left to
+mean what the protocol says it means, set by the operator's completed loop.
+
+`manual-halt-sentinel` is deliberately **retained** as a reason on the halt
+paths: a halt sentinel genuinely was observed, so that one names a real cause.
+The rule is not "refusals log differently" but *a reason must name a cause that
+happened*.
+
+**P-9 — eight refusal causes, one exit code — resolved as: keep one code.**
+`0` = the run ended, see `exit_reason`; `1` = refused, see `REFUSED`. The 0–255
+space is already spoken for at 126 (found, not executable), 127 (not found) and
+128+n (killed by signal n), and `auto.sh` itself exits 130 on SIGINT, so a
+custom code map risks colliding with shell convention — and executed, **no
+mechanical consumer of a wrapper's exit status exists anywhere** in the repo or
+the emitted tree. `auto.sh`'s header now enumerates the eight causes and states
+that an operator-completed implementation MAY subdivide, and should document its
+map there if it does.
+
+**Golden re-baseline: freeze-exception no. 30**, `full_autonomous` only — and
+unlike 28 and 29 this one is **not** comment-only; it changes emitted behaviour.
+Verified per-file before re-baselining: exactly three bodies move (`auto.sh`,
+`loop.sh`, `goal-loop.sh`), action count stable at **69**, 0 added, 0 removed,
+and `default` + `design_steering` are **byte-identical** — they emit no
+wrappers, which is why only one of the three digests moves. The exactly-13 pin
+is untouched and still passes; no protocol document changed.
+
+Suite: 21 suites / 1905 checks / 0 failed.
+
+
 ## 2.6.0 in-version fix — two version numbers that never existed (2026-07-31)
 
 The tree carried **33 citations of `v2.6.1` and `v2.6.2`**, versions that were

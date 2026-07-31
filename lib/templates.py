@@ -3009,9 +3009,25 @@ def _auto_sh(cfg):
 # Bootstrap-Protocol-v2-2-0.md Phase 9.7. Do not use unattended until the loop and the
 # exit_reason accounting below are completed and smoke-tested.
 #
+# [REFUSALS vs RUN OUTCOMES, and why exit 1 covers every refusal - P-9,
+#  decided 2026-07-31.] This runner exits 1 for EIGHT distinct refusal
+#  causes: root .halt, .halt-hard, queue .halt, a missing task file, an
+#  ineligible task, an already-claimed task, flock absent, and an
+#  unimplemented dispatch loop. They are distinguished in hooks.log by the
+#  `REFUSED:` line, not by the exit code, and that is deliberate: the 0-255
+#  space is already spoken for at 126 (found, not executable), 127 (not
+#  found) and 128+n (killed by signal n) - this script itself exits 130 on
+#  SIGINT - so a custom code map risks colliding with shell convention, and
+#  nothing in the emitted tree reads a wrapper's exit status mechanically.
+#  An operator-completed implementation MAY subdivide, and should document
+#  its map alongside this block if it does. Until then: 0 = the run ended,
+#  see exit_reason; 1 = refused before or during dispatch, see REFUSED.
+#
 # [exit_reason enum - Bootstrap-Protocol-v2-2-0.md Recovery & State. The
 #  operator-completed dispatch loop MUST implement the WHOLE enum, not just
-#  the subset this skeleton exercises. All 13 values with their triggers:]
+#  the subset this skeleton exercises. These describe why a RUN ENDED; a
+#  refusal is not one of them and claims no value here. All 13 values with
+#  their triggers:]
 #   queue-empty                            all ready-to-run tasks completed; nothing left to dispatch, nothing deferred (terminal success).
 #   deferred-only-remaining                all "Ready to run" candidates done; only "Deferred" tasks remain with no operator-actionable predecessor.
 #   urgent-escalation                      a dispatched wrapper halted with one of the five urgent-escalation criteria; non-configurable, the queue always halts.
@@ -3096,6 +3112,14 @@ if [ -e "$ROOT_HALT" ] || [ -e "$HALT" ]; then
 fi
 
 EXIT_REASON="infrastructure-failure"   # pessimistic default; set on clean paths
+# A REFUSAL IS NOT A RUN OUTCOME [O-3, decided 2026-07-31]. Every value in the
+# enum above answers "why did a RUN end". A refusal answers a different
+# question - why no run started - and the two must not share a vocabulary.
+# When REFUSAL is set the exit line names the real cause and claims NO enum
+# value, which is why the 13-value enum is not extended: an unimplemented
+# dispatch loop is a fact about this file, not a run outcome. Exit code stays
+# 1 for every refusal cause (see the refusal note in the header).
+REFUSAL=""
 
 CLAIMED=0
 cleanup(){
@@ -3105,7 +3129,11 @@ cleanup(){
   # a deleted winner sentinel would let a third invocation start a
   # concurrent runner past the combined-concurrency cap.
   [ "$CLAIMED" = 1 ] && rm -f "$RUN"
-  log "auto.sh exit reason=$EXIT_REASON rc=$rc"
+  if [ -n "$REFUSAL" ]; then
+    log "auto.sh REFUSED: $REFUSAL rc=$rc"
+  else
+    log "auto.sh exit reason=$EXIT_REASON rc=$rc"
+  fi
   # NOTE: a complete implementation updates the dangling queue_runs_history
   # entry here with end_timestamp and exit_reason before exiting.
   exit "$rc"
@@ -3238,9 +3266,14 @@ echo "Queue runner skeleton installed. Implement the dispatch loop per" \\
 # summary's "Ended because" line - which keys off this CODE - would have
 # said the backlog emptied. Leave the pessimistic default in place (the
 # runner's own machinery is, after all, not implemented) and exit non-zero.
-# The 13-value enum is deliberately NOT extended: it is contract surface,
-# pinned by tests/test_usage_limit_contract.py, and a "skeleton" value is an
-# owner decision rather than a fix (docs/deferred-backlog.md).
+# The 13-value enum is deliberately NOT extended - decided 2026-07-31, O-3.
+# It is queue-level contract surface describing why a RUN ended, and an
+# unimplemented dispatch loop is a fact about this artifact, not a run
+# outcome; a 14th value would have put an authoring state into a
+# run-outcome vocabulary. Refuse instead, name the real cause, claim no
+# enum value. `infrastructure-failure` stays the pessimistic default for
+# paths that genuinely are runs.
+REFUSAL="dispatch loop not implemented"
 exit 1
 '''
 
@@ -3433,11 +3466,21 @@ ROOT_HALT_HARD="$PROJ/.halt-hard"
 {judge_resolution}
 CLAIMED=0
 EXIT_REASON="infrastructure-failure"   # pessimistic; set on clean paths
+# A REFUSAL IS NOT A TERMINATION REASON [O-3, decided 2026-07-31]. This
+# wrapper's reasons answer "how did the loop end" - max-iterations,
+# goal-condition-suspect, terminal-success. A refusal answers why it never
+# ran, and reporting one as the other named a cause that did not happen.
+# When REFUSAL is set, say so and claim no termination reason.
+REFUSAL=""
 cleanup(){{
   rc=$?
   # Only remove the sentinel if WE claimed it (never yank another wrapper's).
   [ "$CLAIMED" = 1 ] && rm -f "$ACTIVE"
-  log "{self} task=$TASK_ID exit reason=$EXIT_REASON rc=$rc"
+  if [ -n "$REFUSAL" ]; then
+    log "{self} task=$TASK_ID REFUSED: $REFUSAL rc=$rc"
+  else
+    log "{self} task=$TASK_ID exit reason=$EXIT_REASON rc=$rc"
+  fi
   # NOTE: a complete implementation removes this task's entry from
   # {my_list} (flock + tmpfile-rename) and writes loop-final-$TASK_ID.md here.
   exit "$rc"
@@ -3466,13 +3509,13 @@ for d in "$PROJ"/.claude/specs/*/tasks/; do
 done
 if [ -z "$TASKFILE" ]; then
   echo "No task file for '$TASK_ID' under .claude/specs/*/tasks/." >&2
-  EXIT_REASON="goal-condition-suspect"
+  REFUSAL="no task file for $TASK_ID"
   exit 1
 fi
 if ! grep -qE '^[[:space:]]*{elig}:[[:space:]]*true[[:space:]]*$' "$TASKFILE"
 then
   echo "Task '$TASK_ID' is not {elig}: true. Refusing." >&2
-  EXIT_REASON="goal-condition-suspect"
+  REFUSAL="task not {elig}: true"
   exit 1
 fi
 
@@ -3503,7 +3546,7 @@ flock 9
 if ls "$SESS"/{sibling}-"$TASK_ID" >/dev/null 2>&1; then
   flock -u 9
   echo "Task '$TASK_ID' is already in the other autonomous mode. Aborting." >&2
-  EXIT_REASON="goal-condition-suspect"
+  REFUSAL="task already claimed by the other autonomous mode"
   exit 1
 fi
 # Append-to-{my_list} + tmpfile-then-rename is the operator-completed step;
@@ -3520,7 +3563,9 @@ echo "[IC-6] and usage-limit headers). No agent work was dispatched." >&2
 # cap", a healthy terminal state - for a skeleton that never iterated once.
 # The trust ramp asks the operator to smoke-test the wrapper before relying
 # on it, and that smoke test reads $? and the logged reason; both said the
-# run succeeded. Leave the pessimistic default and exit non-zero.
+# run succeeded. Exit non-zero, and report a REFUSAL rather than a
+# termination reason - the loop did not end, it never began [O-3].
+REFUSAL="dispatch loop not implemented"
 exit 1
 '''.format(title=title, phase=phase, self=("loop.sh" if kind == "loop"
                                             else "goal-loop.sh"),

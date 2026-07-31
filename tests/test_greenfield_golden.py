@@ -989,6 +989,24 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 30, 2026-07-31] full_autonomous ONLY, and NOT
+    # comment-only - this one changes emitted behaviour. O-3/P-9 decided: a
+    # REFUSAL IS NOT A RUN OUTCOME. The wrappers reported refusals using the
+    # termination vocabulary - the auto.sh skeleton as `infrastructure-
+    # failure`, and the per-task wrappers as `goal-condition-suspect` for a
+    # missing task file, an ineligible task and an already-claimed task
+    # (executed: `loop.sh T-1` logged "exit reason=goal-condition-suspect"
+    # for a task that did not exist, on a wrapper with no goal at all).
+    # Each now sets REFUSAL and the exit line reads "REFUSED: <cause>",
+    # claiming no enum value. The 13-value enum is deliberately NOT extended
+    # (it is queue-level contract surface describing why a RUN ended), so
+    # tests/test_usage_limit_contract.py's exactly-13 pin is untouched and
+    # still passes. `manual-halt-sentinel` is deliberately RETAINED as a
+    # reason: a halt sentinel genuinely was observed, so that one names a
+    # real cause. VERIFIED PER-FILE BEFORE RE-BASELINING: exactly three
+    # bodies move - auto.sh, loop.sh, goal-loop.sh - action count stable at
+    # 69, 0 added, 0 removed, and `default` + `design_steering` are BYTE-
+    # IDENTICAL (they emit no wrappers), which is why only one digest moves.
     # [freeze-exception no. 29, 2026-07-31] COMMENT-ONLY re-baseline of all
     # three fixtures. Retired the phantom version labels `v2.6.1`/`v2.6.2`,
     # which named releases that never existed: git blame resolves them to the
@@ -1144,7 +1162,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "4585eada68fb4502df65ab21e544432f0717147c6eb696edf8065d5469aed3fa",
+        "1d20c73049f9dcfa149dca00ee9d759ef01b5f671ea5fa0f59e3dd457f61b260",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
