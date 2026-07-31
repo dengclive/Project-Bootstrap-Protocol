@@ -989,14 +989,34 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 28, 2026-07-31] COMMENT-ONLY re-baseline of all
+    # three fixtures, for TWO corrections to the jget comment block.
+    # (1) It explained the fix with a wrong account of `set -o pipefail` - it
+    # claimed pipefail is what makes the pipeline's status the parser's. It is
+    # not: the parser is the LAST command, so that is already true by plain
+    # POSIX (executed: parser exits 127 -> substitution rc=127 with pipefail
+    # OFF). What pipefail actually adds is the reverse - a failed producer
+    # also fails the pipeline.
+    # (2) It named pyenv as a source of a `jq` shim. pyenv is a Python version
+    # manager and would shim jq only via a pip console script; asdf and mise
+    # are the managers that carry jq as a first-class tool (`asdf-jq`, mise
+    # registry `aqua:jqlang/jq`). Verified 2026-07-31 against a live mise.
+    # The mechanism was right, the example was not.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING:
+    # 11 / 15 / 11 bodies move, action counts stable at 57 / 69 / 59, 0 added,
+    # 0 removed, every moved body under .claude/hooks/, and every differing
+    # line in every moved body is a COMMENT line. sdk_gates/gates.py is
+    # byte-identical - the SDK parses in-process and never had this defect.
+    # No behaviour changes; the suite is unchanged at 1905 checks.
     # THE FIX. Try each parser in turn; accept its output only if it exited
-    # clean (`set -o pipefail` makes the pipeline's status the parser's).
+    # clean - the parser is last in the pipeline, so its status is already the
+    # pipeline's; `set -o pipefail` additionally surfaces a failed printf.
     # Both unusable is now the same condition as neither installed: hook_fail,
     # fail-closed for a blocking gate and a logged degrade for an advisory
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "0e098fdf9838eaa48f431ea1e12e9790e9d3c1f7dc5b5f39e099fa1dd73666ec",
+        "9f300aad1b2f01bc72243a01ded5871db24142b72b8d5b079e4e6f542dbba537",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1109,7 +1129,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "1130dc96d67e8d4e4ca6b8da3d2d8ad996bb61c69209407aa6b5ed1b7305663b",
+        "4d199cf34bc55d13d0db8aa3ed1d40ac577206cc9c5045816239902580772811",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1180,7 +1200,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "ce8e2ffae8af5a32ab3a9dd15f9decbd582d24191352a085e80dcc46ecfc7c76",
+        "de5d3557ca623f7888e0cc50843bca0ff8a3f9f563811af9cb3c6e7e1b1d723b",
 }
 
 EXPECTED_ACTION_COUNTS = {
