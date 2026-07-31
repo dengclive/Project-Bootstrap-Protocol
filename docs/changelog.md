@@ -1,5 +1,81 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.0 in-version fix — the knowledge base described itself wrongly (2026-07-31)
+
+The security KB (`docs/agentic-harness-security-kb.md`) is the artifact that
+framed the last review: that brief opened by citing §5.1, and the framing is why
+the round attacked the fix's own bound instead of re-testing the four fixes it
+shipped. `3ba205a` amended it with **P0-3d** — a fourth parsing fail-open, in the
+*selector* rather than the parse. Two adversarial passes over that amendment then
+found nine defects, **all of them in the document's own claims, none in the code
+it describes.** Merged as PR #24.
+
+**§7's brand-new checklist item asserted a deny that does not happen.** It
+claimed a shim, a broken dynamic link, a non-executable file *and a same-named
+different tool* all route to the same deny as an absent dependency. Executed
+against the emitted install: the first three deny (`rc=2`); the fourth
+**allows**. `jget` accepts any parser that exits 0, so anything named `jq` that
+exits 0 without producing a parse reads as a clean *empty* parse and the `case`
+falls through. This is the §6.D failure class in the document that names it — a
+normative item that was false the day it was written. The item now states the
+gap; the gap is backlog **P-19**.
+
+The realistic substrate is not an exotic tool. It is a defensive wrapper —
+`real-jq "$@" 2>/dev/null || true; exit 0` — over a jq that is broken: the same
+`|| true` idiom the P0-3d fix removed from `jget`, one layer out, in a file the
+operator owns. Bounded by execution: a swallowing wrapper over a *working* jq
+and a banner-prepending wrapper both **deny**, so the gap is narrower than "any
+wrapper".
+
+**"Eight consecutive fix batches" was a count of COMMITS, relabelled.** The
+round-4 brief established six over commits and its three reviewers confirmed it;
+the round-5 brief warned in terms that re-deriving it *"from batches produces a
+different, worse-supported number"*. It was relabelled "batches" anyway at a
+checkpoint that also incremented it, then carried to seven and eight without
+anyone re-deriving anything. Restored to **seven commits**, enumerated from the
+three records that state the membership explicitly and reconcile exactly.
+
+**The first replacement enumeration was itself wrong** — right count, wrong
+membership. It was rebuilt from commit *subject lines*, which included a commit
+outside the counted window and omitted `fac2897` entirely, because that one is a
+`test(gates):` commit and the eye skips it when scanning for `fix(`. An
+enumeration built from what a commit calls itself is the same error as a count
+built from what the last document called it.
+
+**Also corrected.** `set -o pipefail` was described as *"what makes the
+pipeline's status the parser's, not `printf`'s"* — backwards: the parser is the
+last command, so that holds already by plain POSIX (executed: pipefail off,
+parser exits 127, substitution `rc=127`); pipefail adds the reverse, surfacing a
+failed producer. The delta is **fourteen** defects, not thirteen — wrong in six
+places since the file was created, against a table that has never had thirteen
+rows; the counting basis is now stated once in §2 so it cannot drift.
+*"Green throughout at 1895 checks"* named a count belonging to `5510889`, the
+pre-rebase form of the batch, which is not in `main`'s history — measured across
+the window the suite ran 1828 → 1835 → 1905. §4.6's five-row table is now
+labelled EXECUTED with its evidence, and `command -v` is split from `which`,
+which disagree on a `chmod 644` file. `pyenv` was the wrong manager for a `jq`
+shim; asdf and mise carry jq as a first-class tool.
+
+**Golden re-baseline: freeze-exception no. 28**, all three fixtures,
+**COMMENT-ONLY** — two corrections to the `jget` comment block in the emitted
+hook header (the `pipefail` account, and the shim example). Verified per-file
+*before* re-baselining, which is the discipline this ledger exists for:
+**11 / 15 / 11** bodies move, action counts stable at **57 / 69 / 59**, 0 added,
+0 removed, every moved body under `.claude/hooks/`, and every differing line in
+every moved body is a comment. `sdk_gates/gates.py` is byte-identical — the SDK
+parses in-process and never had this defect.
+
+**§6.D corrected, because it taught the defect.** Two items were framed entirely
+on the parser being *absent*: *"Fails closed when the parser is missing"*, and
+*"Confirm `jq` is installed … fall back to Python's `json` module if not"* — the
+second being the `elif have_py` bug written as instruction. §6.D is normative, so
+an author conforming to it wrote P0-3d and it looked like conformance. Both now
+turn on the parser **failing**, not on its absence. Same correction in
+`Bootstrap-Protocol-Companion-v2-6-0.md`.
+
+Suite: 21 suites / 1905 checks / 0 failed, unchanged throughout.
+
+
 ## 2.6.0 in-version fix — the skeleton wrappers reported terminal success (2026-07-31)
 
 The first round that ever **executed** the emitted autonomous-mode wrappers
