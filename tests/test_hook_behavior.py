@@ -594,7 +594,7 @@ DEP = [
     ("npm run install-deps", 0),             # `run` is not an install verb
     ("pip install --upgrade gleeunit", 0),   # valueless flag, approved package
     ("git commit -m 'run npm install after pulling'", 0),
-    # -- v2.6.1: newly blocked, and newly allowed. The `2` rows below are
+    # -- two-lens batch: newly blocked, and newly allowed. The `2` rows below are
     # additions to the cumulative set; the `0` rows are lens A F9's
     # false-positive fixes and join the deliberate-relaxation list.
     #
@@ -641,7 +641,7 @@ DEP = [
     ("npm install -f evil", 2),
     ("npm install -d evil", 2),
     ("pip install -t evil", 2),
-    # -- v2.6.2 [round-2 review]: the inversion above SHIPPED FAILING OPEN,
+    # -- round-2 review: the inversion above SHIPPED FAILING OPEN,
     # and this block is why the row above was not enough. `is_flag_value`
     # counted `[0-9]*` and `*=*` as value-shaped, so a package name that
     # merely STARTS WITH A DIGIT or carries a VERSION PIN was swallowed.
@@ -773,7 +773,7 @@ SECRETS_BASH = [
     ('git commit -m "fix the .env loader"', 0),
     ('git commit -m "docs: describe secrets/README"', 0),
     ('git commit -m "rotate the deploy.pem we ship"', 0),
-    # -- v2.6.2 [round-2 review]. The v2.6.1 fix for lens A F6 (a bare
+    # -- round-2 review. The two-lens fix for lens A F6 (a bare
     # directory name should match its own `dir/**` pattern) was applied to
     # EVERY candidate, so any token equal to a never-read directory stem
     # blocked - reintroducing lens B finding 4's failure mode through a
@@ -784,8 +784,8 @@ SECRETS_BASH = [
     ("grep secrets README.md", 0),
     ("git commit -m secrets", 0),
     ("cat notes/secrets-plan.md", 0),
-    # THE COST, STATED RATHER THAN HIDDEN. These two were blocked at v2.6.1
-    # and are allowed again. That is a real loss and it is the reason this
+    # THE COST, STATED RATHER THAN HIDDEN. These two were blocked by the
+    # two-lens batch and are allowed again. That is a real loss, the reason this
     # row is here instead of quietly deleted from the `2` set above.
     #
     # The judgement: a bare token equal to a directory stem is a path in
@@ -808,7 +808,7 @@ SECRETS_BASH = [
     ("cd secrets/prod; cat x", 2),
     ("tar cf /tmp/s.tar secrets/", 2),
     ("cp secrets/prod.yaml /tmp", 2),
-    # -- v2.6.2. An unbalanced quote made the SDK's shlex fallback keep the
+    # -- round-2 review. An unbalanced quote made the SDK's shlex fallback keep the
     # quote glued to the token, so `cat "secrets/prod.yaml` was ALLOWED on
     # that substrate while the shell blocked it - a fail-open in the
     # fallback whose own comment promised "a parse failure must not become

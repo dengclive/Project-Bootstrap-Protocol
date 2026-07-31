@@ -1213,7 +1213,7 @@ done
 # to sit in the list above where a bare directory NAME counts as naming the
 # directory. So `Grep{{pattern:"secrets"}}` exited 2 - searching your own
 # codebase for the word "secrets" was impossible on a default install, in
-# the gate whose own comment says it has no override path. The v2.6.2 note
+# the gate whose own comment says it has no override path. The round-2 note
 # claims this failure mode was retired; it turned the arm off for the `cmd`
 # phase and left `pattern` in the `path` phase, where it still applied.
 # It still has to be MATCHED - `Grep{{pattern:"*.pem"}}` returns the contents
@@ -1320,7 +1320,7 @@ _sg_push(){{
     # --- COMMAND POSITION and the quoted-run rule [round-2 review] --------
     # The first token of a command decides how the quoted runs that follow
     # have to be read. `git commit -m "..."` takes PROSE; `sh -c "..."`
-    # takes SHELL CODE. v2.6.2 applied ONE rule to both and so had to be
+    # takes SHELL CODE. Round 2 applied ONE rule to both and so had to be
     # wrong for one of them: joining a run into a single candidate fixed
     # the prose false positive (lens B finding 4) and in the same stroke
     # made `sh -c 'cat secrets/prod.yaml'` invisible to every
@@ -1540,7 +1540,7 @@ PAT_EOF
 # were being recomputed inside the (candidate x pattern) loop - four parameter
 # expansions and two `case` statements per pair. Hoisting them here turns
 # O(candidates x patterns) shell work into O(patterns) plus one array read per
-# pair. The v2.6.2 optimization pass optimized CANDIDATES and left
+# pair. The round-2 optimization pass optimized CANDIDATES and left
 # candidates x patterns, which is why the bound was still being crossed.
 #
 # NOTE ON ORDERING: this had to land BEFORE the D5 recursion, because
@@ -1629,7 +1629,7 @@ declare -A _SG_SEEN=()
 # directory name is UNAMBIGUOUSLY a path. `cmd` = tokens recovered from a
 # Bash command string, where it is not.
 #
-# [v2.6.2 - the round-2 review found the F6 fix over-matching.] The
+# [round-2 review found the F6 fix over-matching.] The
 # bare-directory arm was applied to every candidate, so ANY token equal to a
 # never-read directory stem blocked: `grep secrets README.md`,
 # `git commit -m secrets` and `echo secrets` all exited 2. That is lens B
@@ -2033,7 +2033,7 @@ _REMOTE_RUN='(^| )([^ ]*/)?deno +run( +-[^ ]+)* +[^ ]*://'
 _UV_WITH='(^| )([^ ]*/)?uv +run( +-[^ ]+)* +--with(=| )'
 # Command-position prefixes that do not change WHICH program runs, so the
 # install verb is still the verb. Shared with the header's CMD_PFX so the
-# two anchors cannot drift [v2.6.1 defect 1c - the v2.6.0 anchor admitted
+# two anchors cannot drift [two-lens defect 1c - the v2.6.0 anchor admitted
 # only a literal `env `, so `sudo pip install evil`, `FOO=1 npm install evil`
 # and `uv pip install evil` all sailed through, every one of which the
 # v2.5.0 substring match had caught].
@@ -2043,7 +2043,7 @@ PFX="$CMD_PFX"
 # spelled out because the token at command position is not the installer.
 HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|${{RUNNERS}}|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
 
-# SEGMENT FIRST, then judge each segment on its own [v2.6.1 defects 1a/1b].
+# SEGMENT FIRST, then judge each segment on its own [two-lens defects 1a/1b].
 # v2.6.0 searched the whole line for ONE install invocation and got both
 # halves wrong:
 #   1a. The extraction sed's leading `.*` is greedy, so it anchored on the
@@ -2082,7 +2082,7 @@ blocked=""
 # That inversion is what makes it safe to include short flags whose meaning
 # differs by ecosystem - `npm install -d evil` and `npm i -f evil` must still
 # block `evil`, and they do, because `evil` is package-shaped.
-# [v2.6.2 - the round-2 review found this inversion FAILING OPEN, which is
+# [round-2 review found this inversion FAILING OPEN, which is
 # the second time this exact spot has shipped a hole.] The first version
 # treated `[0-9]*` and `*=*` as value-shaped. Both are far too broad:
 #   npm install -f 7zip-bin   -> `7zip-bin` starts with a digit  -> swallowed
@@ -2725,7 +2725,7 @@ HOOK_EXTRA_EVENTS = {
 TIMEOUTS = {
     "test-gate": 600,
     "ci-mirror": 900,
-    # [v2.6.2, round-2 review] secrets-gate was the ONLY PreToolUse gate with
+    # [round-2 review] secrets-gate was the ONLY PreToolUse gate with
     # no bound, and it is the one that runs on every Bash call as well as
     # every file tool - the hottest matcher in a session. Its pure-bash
     # tokenizer is superlinear in command length (measured on the emitted

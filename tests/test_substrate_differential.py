@@ -182,8 +182,8 @@ for cmd, want in (
         ("F=.env; cat $F", "deny"),
         ('cat ".env"', "deny"),
         ("base64 <.env", "deny"),
-        # [v2.6.2] The BARE directory stem is allowed again on the Bash
-        # surface - v2.6.1 blocked it and that blocked `git commit -m
+        # [round-2 review] The BARE directory stem is allowed again on the Bash
+        # surface - the two-lens batch blocked it and that blocked `git commit -m
         # secrets` too. Recorded as J-14; the narrowing is that anything
         # naming a path UNDER the directory still blocks (next two rows).
         ("tar cf /tmp/s.tar secrets", "allow"),
@@ -199,16 +199,16 @@ for cmd, want in (
         ("cat .env.example", "allow"),
         ("cat .env.sample", "allow"),
         ("cat .env.production", "deny"),
-        # [v2.6.2, round-2 review] An UNBALANCED QUOTE. shlex raises, and
+        # [round-2 review] An UNBALANCED QUOTE. shlex raises, and
         # the fallback kept the quote glued to the token, so the SDK
         # ALLOWED what the shell blocked - the exact direction the module's
         # binding rule forbids, in the fallback whose comment says "a parse
-        # failure must not become an allow". The v2.6.1 corpus had no
+        # failure must not become an allow". The two-lens corpus had no
         # unbalanced-quote case, which is why the differential passed.
         ('cat "secrets/prod.yaml', "deny"),
         ("cat '.env", "deny"),
         ('cat "unterminated .env', "deny"),
-        # [v2.6.2] A bare word equal to a never-read directory stem is NOT
+        # [round-2 review] A bare word equal to a never-read directory stem is NOT
         # a path on the Bash surface. The F6 fix applied it everywhere and
         # blocked ordinary prose.
         ("echo secrets", "allow"),
@@ -392,7 +392,7 @@ for cmd, want in (
         # ...but a short flag must not swallow a package name.
         ("npm install -f evil", "deny"),
         ("npm install -d evil", "deny"),
-        # [v2.6.2, round-2 review] The value-shaped inversion shipped
+        # [round-2 review] The value-shaped inversion shipped
         # FAILING OPEN on both substrates: `[0-9]*` and `*=*` counted as
         # value-shaped, so a digit-initial package name or a version pin was
         # swallowed. Every one of these is a real registry package.
@@ -429,7 +429,7 @@ for cmd, want in (
 # verdict with a wrong reason still breaks the contract, and this suite
 # structurally could not see it while it compared verdicts alone.
 #
-# [v2.6.2, round-2 review] It was broken for all three of dependency-gate's
+# [round-2 review] It was broken for all three of dependency-gate's
 # non-package refusals. `_scan_install_line` folded them into the package
 # NAME string, so a package-index override denied with "not in deps.md
 # approved list: <package-index-override> / Approve in-session and update
