@@ -1994,6 +1994,113 @@ _sec5 = open(os.path.join(HOOKS, "secrets-gate.sh"), encoding="utf-8").read()
 check("R5 structural: the shell hook has no _sg_exclhead",
       "_sg_exclhead" not in _sec5)
 
+print("\n-- close pass: THE FOLD IS DENY-ONLY (both allow lists) --")
+# The normalization this batch added is a FOLD, and a fold is sound for a DENY
+# list and UNSOUND for an ALLOW list. This suite holds exactly two allow lists
+# - secrets-gate's dotenv TEMPLATE carve-out and dependency-gate's
+# `deps.approved` - and both were handing their exemption to DECORATED
+# spellings that a pristine 2.6.1 install denies, measured over an 876-payload
+# decoration sweep across all five PreToolUse-on-Bash gates:
+#
+#   cat .env.example$''      2.6.1 rc=2 -> rc=0     (50 rows in secrets-gate)
+#   pip install requests$''  2.6.1 rc=2 -> rc=0     (16 rows in dependency-gate)
+#
+# The same sweep over the three Bash gates that hold NO allow list -
+# test-gate, spec-gate-commit, ci-mirror - moved zero payloads.
+#
+# The repair is one rule, not a list of decoration characters: a gate that
+# consults an allow list judges BOTH spellings - the folded one and the one
+# the operator typed - and refuses if either refuses. The unfolded pass feeds
+# the walk exactly the string 2.6.1 fed it, so these rows are 2.6.1's verdict
+# by construction. See lib/cmdpos.py "THE FOLD IS DENY-ONLY".
+#
+# Every row below is `2.6.1 DENY`, so every row is a fail-open if it flips.
+_DEC_SUFFIX = ("$''", '$""', _BS, _BSNL)
+_DEC_PREFIX = ("$''", '$""')
+for _tmpl in (".env.example", ".env.sample", ".env.template", ".env.dist",
+              ".env.defaults"):
+    # The carve-out itself is intact: the bare name and its ordinary quoted
+    # spellings still read, which is the whole reason the carve-out exists.
+    both(f"cat {_tmpl}", 0, "fold: the undecorated template still reads")
+    both(f"cat '{_tmpl}'", 0, "fold: a quoted template still reads")
+    for _d in _DEC_SUFFIX:
+        both(f"cat {_tmpl}{_d}", 2,
+             "fold: a decorated template is NOT the template")
+    for _d in _DEC_PREFIX:
+        both(f"cat {_d}{_tmpl}", 2,
+             "fold: a decorated template is NOT the template")
+# ...including through a directory prefix, where the basename is what the
+# carve-out reads.
+for _p in ("x/", "./", "sub/dir/"):
+    both(f"cat {_p}.env.example$''", 2,
+         "fold: decoration survives a directory prefix")
+# The leading-continuation spelling, pinned PER SUBSTRATE because 2.6.1
+# disagreed with itself about it: shell rc=0, SDK deny. The unfolded pass
+# reproduces each substrate's own 2.6.1 verdict by construction, so the
+# divergence is INHERITED, not introduced - and it is inherited in the
+# direction that matters, since the SDK's is the strict one. Converging it
+# would mean either allowing what 2.6.1's SDK denied (forbidden) or refusing
+# `cat \<newline>.env.example`, which bash resolves to a read of the exempt
+# template. Recorded as residue rather than closed by guesswork.
+_cont_tmpl = bash_payload(f"cat {_BSNL}.env.example")
+_rc, _err = shell_run("secrets-gate", _cont_tmpl)
+check("fold: leading continuation, shell keeps its 2.6.1 verdict (allow)",
+      _rc == 0, f"rc={_rc} stderr={_err.strip()[:120]!r}")
+check("fold: leading continuation, SDK keeps its 2.6.1 verdict (deny)",
+      sdk_denies(sdk_run("secrets-gate", _cont_tmpl)))
+# Controls that must NOT move: a non-template secret was already denied and
+# stays denied, decorated or not.
+both("cat .env", 2, "fold control: .env is not a template")
+both("cat .env.example.real", 2, "fold control: suffix form is not a template")
+both("cat secrets/.env.example", 2,
+     "fold control: a template under secrets/ is a secret by location")
+
+for _verb in ("pip install", "poetry add", "uv pip install"):
+    dep_both(f"{_verb} requests", 0, "fold: the approved package installs")
+    dep_both(f"{_verb} requests''", 0,
+             "fold: quote removal is the tokenizer's, not the fold's")
+    for _d in ("$''", '$""'):
+        dep_both(f"{_verb} requests{_d}", 2,
+                 "fold: a decorated package is NOT the approved package")
+        dep_both(f"{_verb} {_d}requests", 2,
+                 "fold: a decorated package is NOT the approved package")
+dep_both("pip install $'' requests", 2,
+         "fold: an empty ANSI-C word is still a token to approve")
+# The multi-line install every operator writes must NOT start refusing: it was
+# allowed at 2.6.1 and the second pass reproduces 2.6.1, not something stricter.
+dep_both(f"pip install {_BSNL}  requests", 0,
+         "fold control: a continuation in an approved install still passes")
+dep_both(f"pip install {_BSNL}  requests {_BSNL}  --upgrade", 0,
+         "fold control: two continuations still pass")
+
+print("\n-- close pass structural: the second spelling exists on both --")
+# The invariant is carried by NAMED state on both substrates, so a future edit
+# that drops the second pass fails here rather than in a sweep nobody runs.
+_hdr = open(os.path.join(HOOKS, "secrets-gate.sh"), encoding="utf-8").read()
+check("close pass: the shell header exposes _CMD_UNFOLDED",
+      "_CMD_UNFOLDED=" in _hdr)
+check("close pass: secrets-gate runs one pass per spelling",
+      _hdr.count("_sg_pass \"$") == 2,
+      f"_sg_pass call sites: {_hdr.count(chr(95) + 'sg_pass ' + chr(34) + '$')}")
+_dep = open(os.path.join(HOOKS, "dependency-gate.sh"), encoding="utf-8").read()
+check("close pass: dependency-gate segments the unfolded spelling too",
+      'cmd_segments "$_CMD_UNFOLDED"' in _dep)
+_g = open(GATES_PY, encoding="utf-8").read()
+check("close pass: the SDK module exposes _cmd_spellings",
+      "def _cmd_spellings(" in _g)
+check("close pass: the SDK secrets gate walks every spelling",
+      "for _spelling in _cmd_spellings(input_data)" in _g)
+check("close pass: the SDK dependency gate walks every spelling",
+      "_cmd_spellings(input_data) if _c" in _g)
+# ...and the reference model agrees with both about WHICH commands need the
+# second pass. An empty second spelling is what makes the ordinary command
+# free, so "needs a second pass" is itself a contract.
+for _raw, _wants in _cmdpos.SPELLING_VECTORS:
+    _folded, _unfolded = _cmdpos.command_spellings(_raw)
+    check(f"close pass: command_spellings({_raw!r}) second pass "
+          f"{'wanted' if _wants else 'free'}",
+          bool(_unfolded) == _wants, repr((_folded, _unfolded)))
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

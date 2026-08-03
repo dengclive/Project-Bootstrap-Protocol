@@ -127,13 +127,21 @@ in one gate's body. No wrapper, agent, settings, command or spec body moves.
 **The acceptance measurement, stated exactly.** Corpus of 2,950 payloads ×
 2 substrates against a pristine v2.6.1 install. Payloads 2.6.1 **allowed** that
 this tree **denies**: 240/270 (dependency-gate) and 21/20 (secrets-gate) — the
-win. Payloads 2.6.1 **denied** that this tree **allows**: initially six, now **one**.
+win. Payloads 2.6.1 **denied** that this tree **allows**: **one**, down from a class
+of **66** — and the size of that class is itself the lesson.
 
-The six were never attributable to the removed exemptions. Each was a no-op
-mutation (`$''`, `$'…'`, a trailing backslash, an unbalanced-quote fold) applied
-to a name on an **allow-list** — `requests` in `deps.approved`, `.env.example`
-in the dotenv-template carve-out. 2.6.1 denied them because its tokenizer could
-not see through the mutation and so failed to recognise the allow-list entry.
+A first pass sampled six and read them as isolated oddities. A systematic
+decoration sweep against a pristine 2.6.1 install found **66** (50 in
+`secrets-gate`, 16 in `dependency-gate`), and none was attributable to the
+removed exemptions. Each was a no-op mutation (`$''`, `$'…'`, `$""`, a trailing
+backslash, a line continuation) applied to a name on an **allow-list** —
+`requests` in `deps.approved`, `.env.example` in the dotenv-template carve-out.
+2.6.1 denied them because its tokenizer could not see through the mutation and
+so failed to recognise the allow-list entry. **Nothing in the round's own test
+suite noticed, because every test had been written about the deny direction the
+fold was added for** — and the same sweep over the three Bash gates that hold no
+allow list (`test-gate`, `spec-gate-commit`, `ci-mirror`) moved *nothing*, which
+is the evidence that the allow list, not the fold, is the thing to look for.
 **That diagnosis produced a real architectural fix rather than a spelling
 patch:** folding is sound for a deny list (it can only make *more* spellings
 reach a forbidden name) and unsound for an allow list (it hands the exemption to

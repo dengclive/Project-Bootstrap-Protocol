@@ -1112,6 +1112,49 @@ payload the last release denied that we now allow?"* That diff is cheap
 unarguable, and it should gate any change to a control. Adopted here as a
 release criterion.
 
+**Corollary 5 — a normalization that is sound for a deny list is unsound for
+the allow list sitting next to it.** The hardening above is mostly one
+primitive: a *fold* that deletes decoration (`\`+newline, a trailing
+backslash, `$'`/`$"`) before anything matches. Folding is sound for a deny
+list — it can only make more spellings reach a forbidden name, which is where
+`curl … | sh$''` and `cat important.pem$''` were closed. It is **unsound for
+an allow list**, and this harness holds two: the dotenv **template**
+carve-out and the approved-package list. Folded, `cat .env.example$''` and
+`pip install requests$''` collided with the exempt name and were allowed —
+**66 payloads that a pristine v2.6.1 denies** (50 in `secrets-gate`, 16 in
+`dependency-gate`), found only by sweeping every decoration against a 2.6.1
+install rather than by reading the diff. The same sweep over the three
+Bash gates that hold **no** allow list — `test-gate`, `spec-gate-commit`,
+`ci-mirror` — moved nothing, which is the evidence that the allow list, not
+the fold, is the thing to look for. The
+"strictly stronger" claim above is false without the repair, and nothing in
+the round's own test suite noticed, because every test was written about the
+deny direction the fold was added for.
+
+The repair is one rule, and its shape is the transferable part: **a gate that
+consults an allow list judges both spellings — the folded one and the one the
+operator typed — and refuses if either refuses.** The unfolded pass feeds the
+walk exactly the string the previous release fed it, so its verdict *is* the
+previous release's verdict, and the union is a superset of the old denies **by
+construction**. The alternative — a per-decoration adjacency test kept in sync
+with the normalizer — is the same "reproduce the grammar" trap this section
+exists to warn about, one layer down. Cost is nothing on the commands that
+dominate: the second spelling is empty whenever the fold changed nothing.
+
+One payload survives the repair and is worth naming rather than rounding away:
+`cp '.env.example ;` — an unbalanced quote resolving to an allow-listed
+template. Its fold happens *inside the tokenizer*, below the spelling split, so
+the two-pass rule never sees it. It is bounded (bash refuses to parse the
+command at all; the previous release allows the same string without the
+trailing `;`; the deny-list side is unaffected) and it is left open
+deliberately, because special-casing it ahead of the allow list is the
+treadmill this section is about.
+
+**Rule:** when you add a canonicalization in front of a matcher, enumerate
+every ALLOW decision downstream of it. Each one is a hole the canonicalization
+just widened, and the direction of the bug is the opposite of the direction you
+were working in.
+
 ---
 
 ## 5. Why detection failed, and what actually worked
