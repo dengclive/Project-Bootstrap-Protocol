@@ -897,7 +897,7 @@ _cs_isinv(){
   done
 }
 _cs_scan(){
-  local _s _pre _q _rest _run _pd _ps _tok _rem
+  local _s _pre _q _rest _run _pd _ps _tok _rem _spl
   _s="$1"
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
   # operators in the UNQUOTED stretches only. Run-at-a-time, not
@@ -947,6 +947,25 @@ _cs_scan(){
       case "$_tok" in
         *$_CS_ESP*)
           _cs_esc_restore "$_tok"
+          _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R" ;;
+      esac
+      # [issue #41] ADJACENT QUOTED RUNS ARE ONE WORD. bash concatenates
+      # them before it resolves anything, so `sh -c 'pi''px install evil'`
+      # runs `pipx install evil` - but the loop above pushes each RUN as its
+      # own segment, so this arrived as `pi` and `px install evil` and
+      # matched no installer. rc=0 here while the SDK denied.
+      #
+      # The token buffer has already spliced the runs (that is why top-level
+      # `p''ip install evil` denies); what was missing is handing the
+      # SPLICED word to the invoker rule. A quoted run holding whitespace is
+      # a command line by definition here - we only reach this inside an
+      # invoker's argument - so restoring the sentinel and pushing it is the
+      # same additive move the escaped-space arm above makes. Additive: the
+      # per-run segments are still pushed, so this can only ADD denies.
+      case "$_tok" in
+        *$_CS_WS*)
+          _spl="${_tok//$_CS_WS/ }"
+          _cs_esc_restore "$_spl"
           _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R" ;;
       esac
       _rem="${_rem#"$_tok"}"
@@ -3583,9 +3602,25 @@ while IFS= read -r nseg; do
   rest=""
   _hfound=0
   _cand=""
+  # [issue #41 / X-36e] THE CANDIDATE IS BUILT FROM THE WORD BASH WILL
+  # RESOLVE, not from the raw token. bash removes quote characters and
+  # backslashes before it resolves a word, so `pi\\p` names pip - and this
+  # hook's cmd_segments RESTORES escapes, so the anchor (a regex over that
+  # text) saw no installer and `pi\\p install evil` was rc=0 here while the
+  # SDK, whose _flatten_seg drops backslashes, denied. `_uqw` is
+  # cmdpos.unquote_word: the quote-removal half of cmd_word, WITHOUT the
+  # basename step, because the anchor has its own path arm.
+  #
+  # Only the MATCH reads the reduced word. `rest` keeps the ORIGINAL tokens,
+  # so package names are judged exactly as before - the allow-list posture
+  # (cmdpos "THE FOLD IS DENY-ONLY") is deliberately untouched here.
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
-    if [ -z "$_cand" ]; then _cand="${{_NTOKS[$_hi]}}"
-    else _cand="$_cand ${{_NTOKS[$_hi]}}"; fi
+    _uqw="${{_NTOKS[$_hi]}}"
+    _uqw="${{_uqw//\\'/}}"
+    _uqw="${{_uqw//\\\"/}}"
+    _uqw="${{_uqw//\\\\/}}"
+    if [ -z "$_cand" ]; then _cand="$_uqw"
+    else _cand="$_cand $_uqw"; fi
     if [[ "$_cand" =~ $HEAD ]]; then
       head_txt="$_cand"
       for ((_hj=_hi+1; _hj<${{#_NTOKS[@]}}; _hj++)); do

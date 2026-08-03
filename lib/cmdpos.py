@@ -968,12 +968,28 @@ SPELLING_VECTORS = (
 #
 # [batch 30-33] The other exemption-granting walk this note used to name
 # (`rg_head_resolve`) is gone with the X-31 exemption.
-def cmd_word(tok: str) -> str:
-    """The basename of `tok` after shell quote removal."""
+def unquote_word(tok: str) -> str:
+    """`tok` with shell quote characters and backslashes removed - the word
+    bash resolves, WITHOUT the basename step.
+
+    [issue #41 / X-36e] Split out of `cmd_word` because the install anchor
+    needs the reduction but must keep the path: it has its own `([^ ]*/)?`
+    arm, so handing it a basename would lose the distinction. The anchor was
+    the one deny-granting consumer that had never adopted this reduction, and
+    `pi\\p install evil` was shell rc=0 / SDK deny as a result - bash removes
+    the backslash before resolving the word, so it names pip and installs
+    `evil`, while the shell's cmd_segments restores escapes and the anchor
+    (a regex over that text) saw no installer.
+    """
     out = tok
     for _c in ("'", '"', "\\"):
         out = out.replace(_c, "")
-    return out.rsplit("/", 1)[-1]
+    return out
+
+
+def cmd_word(tok: str) -> str:
+    """The basename of `tok` after shell quote removal."""
+    return unquote_word(tok).rsplit("/", 1)[-1]
 
 
 # ---- [round-4 P2] THE WRITE SET IS A SET OF PATHS, NOT A SET OF STRINGS ---- #

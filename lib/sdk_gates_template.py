@@ -214,10 +214,23 @@ def _cmd_word(tok):
     head word is UNMODELLABLE there, and reducing it would let `'python3'`
     pass as a stage this model can read.
     """
+    return _unquote_word(tok).rsplit("/", 1)[-1]
+
+
+def _unquote_word(tok):
+    """[issue #41 / X-36e] The quote-removal half of `_cmd_word`, WITHOUT the
+    basename step. Reference: cmdpos.unquote_word.
+
+    Split out because the install anchor needs the reduction but must KEEP
+    the path - it carries its own path arm, so a basename would lose
+    the distinction. The anchor was the one deny-granting consumer that had
+    never adopted this reduction, and on the shell substrate that left
+    `pi\\\\p install evil` allowed while this module denied it.
+    """
     out = tok
     for _c in ("'", '"', chr(92)):
         out = out.replace(_c, "")
-    return out.rsplit("/", 1)[-1]
+    return out
 
 
 def _cmd_spellings(input_data) -> tuple:
@@ -2066,11 +2079,23 @@ def _install_head_split(seg):
     16-of-27 regression measured when an arity table replaced them. Those
     stay unbounded; only the CHOICE of match changes. Shell parity
     (`_install_head_split` in the emitted hook).
+
+    [issue #41 / X-36e] The candidate is built from `_unquote_word(tok)` -
+    the word bash will resolve - not from the raw token. bash removes quote
+    characters and backslashes before resolving a word, so `pi\\\\p` names pip.
+    This substrate already denied those spellings because `_flatten_seg`
+    drops backslashes upstream; reading through the reduction here is what
+    makes that a PROPERTY of the anchor rather than a side effect of another
+    pass, so the two substrates agree by construction. Shell parity (`_uqw`).
+
+    Only the MATCH reads the reduced word; `rest` keeps the ORIGINAL tokens,
+    so package names are judged exactly as before.
     """
     toks = seg.split()
     cand = ""
     for i, tok in enumerate(toks):
-        cand = tok if not cand else cand + " " + tok
+        red = _unquote_word(tok)
+        cand = red if not cand else cand + " " + red
         if _INSTALL_HEAD.match(cand):
             return cand, " ".join(toks[i + 1:])
     return None, ""

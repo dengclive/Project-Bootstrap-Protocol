@@ -1070,6 +1070,34 @@ EXPECTED_DIGESTS = {
     # pristine install built from the v2.7.0 TAG - 40 verdicts move
     # allow -> deny (this and no. 36 together) and the
     # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
+    #
+    # [freeze-exception no. 38, 2026-08-04] ISSUE #41 / X-36e: the install
+    # anchor reads THE WORD BASH WILL RESOLVE. bash removes quote characters
+    # and backslashes before resolving a word, so `pi\\p` names pip - and the
+    # emitted hook's cmd_segments RESTORES escapes, so its anchor saw no
+    # installer and `pi\\p install evil` was rc=0 on the SHELL while the SDK
+    # denied. The canonical substrate was the one allowing an unapproved
+    # install. cmdpos.cmd_word's quote-removal half is now named
+    # `unquote_word` and the anchor's token scan reads through it - an
+    # existing, tested reduction applied at one more site.
+    #
+    # THIS EXCEPTION MOVES 12/12/16 BODIES, NOT TWO, and that is expected:
+    # the second half of the fix is in the SHARED _HOOK_HEADER (`_cs_scan`),
+    # so every hook that carries the header moves. Adjacent quoted runs are
+    # ONE word to bash - `sh -c 'pi''px install evil'` runs
+    # `pipx install evil` - but the invoker rule pushed each RUN as its own
+    # segment, so `pi` and `px install evil` arrived and matched nothing.
+    # The spliced word is now pushed too. ADDITIVE: the per-run segments are
+    # still pushed, so the change can only ADD denies, which is what the
+    # empty regression set below measures rather than assumes.
+    # Same body-only-placeholder break as no. 33, and for the same reason.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed; every moved file carries the shared header or is
+    # the SDK module.
+    # ACCEPTANCE (KB §7): 461 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 49 verdicts move
+    # allow -> deny across no. 36/37/38 together, and the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
     # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
     # substrates, run against a pristine 8276300 baseline and against this
     # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
@@ -1241,7 +1269,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "50687e9c07a1cea98922ba37d6871470dbd601623578a278db2b38f65b669502",
+        "2b384f477c0ede42d78f097324829f949ec73abf05cbb734ee104395959721db",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1355,7 +1383,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "a7927f41c99057b1f1b3d58871661a27f3bf99bd3738447c9b6290a7ac818760",
+        "fba95a4469a540a4225ed08ea551fbfd332105c8f2bff8e65921cc1db3a9a8d1",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1427,7 +1455,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "fa900b46bb336a2215c682fcd20dc9746b20d3950b87e58585346be6da4a53ca",
+        "228d4c1d1efe160caf6134ebd28f2268af3f7e99f38aa9d5c73748c1a5fa287a",
 }
 
 EXPECTED_ACTION_COUNTS = {
