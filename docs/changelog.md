@@ -1,108 +1,180 @@
 # Changelog — Bootstrap Protocol implementation
 
-## 2.6.1 in-version fix — worktree isolation and container-run commands did not compose (2026-07-31)
+## 2.6.1 in-version fixes — four issues, and two over-refusals that could not be safely relaxed (2026-08-03)
 
-Issue #29 (W-1). The protocol paired two of its own features that conflict and
-warned about it nowhere.
+GitHub issues **#30, #31, #32, #33**, filed against 2.6.1 alongside #29.
+**#30 and #33 are fixed. #31 and #32 are closed message-only**, with their gate
+behaviour deliberately unchanged — and the gates left **strictly stronger than
+2.6.1**. The reasoning is the valuable part; see KB §4.9.
 
-1. **Worktree isolation is core drift-prevention machinery.** Phase 6.5 states
-   the principle (*"subagents and worktrees prevent drift"*), Phase 7 set
-   `isolation: worktree` on `implementer`, and `integrator` exists solely to
-   reconcile conflicting worktrees.
-2. **Phase 2 collected test/lint/build commands with no constraint on where
-   they execute.**
+### X-30 — the alarm truncated the escalation record it is documented to preserve
 
-**The mechanism, stated precisely, because the obvious reading is wrong.** The
-emitted gate runs the configured command bare:
+The protocol instructs the agent, in two normative places, to write four fields
+— timestamp, escalation reason, what it was about to do, what input it needs —
+into `.claude/sessions/.decision-pending-<session-id>`. The emitted hook ran
+`: >"$P"` on **every fire**. A conforming agent and a conforming hook **could
+not both be right**; measured on a real install, all eight `.decision-pending-*`
+files were 0 bytes.
 
-```sh
-( docker compose exec -T app gleam test ) || rc=$?
+Not a tidiness defect. Phase 9.5 promises the operator "the decision-pending
+file **ready for action**" after an unattended halt. Ready for action was a
+filename.
+
+**Which half to fix was the whole question**, and the issue honestly flagged its
+own answer as unverified — the truncate sits between `mkdir -p` and a
+`find -mtime +7 -delete`, so it *reads* as a latch. Settled by asking something
+checkable: **does anything read this file's contents, or key on its emptiness?**
+Nothing does. So the truncate was collateral, the hook was the wrong half to
+keep, and the documented contract stands. Fixed hook-side: create-if-absent +
+`touch`.
+
+### X-33 — `/resume` had no selection rule; `/checkpoint` stamped from model memory
+
+The emitted `/resume` body was **one sentence**; "most recent" was undefined, so
+an agent picked differently each session. `/checkpoint` named files from a
+model-supplied timestamp that had run ahead of true UTC **twice** on a real
+install, so filename order and actual age disagreed and a name sort loaded the
+**oldest** state while believing it newest.
+
+Fixed both ends: `/checkpoint` stamps from the clock (`date -u +%Y-%m-%dT%H%MZ`,
+verbatim); `/resume` states three rules **in precedence order** — a named
+checkpoint **ends** selection, otherwise resolve by **mtime never filename
+sort**, and the banner cross-check applies **only** to the mtime path. The
+scoping was itself a fix: the first cut said a named checkpoint "always wins"
+and then let rule 3 walk off it — the X-30 shape, inside the fix for a different
+issue. It recurred a third time in a Companion row and was caught by the
+verification pass.
+
+**The clock rule now binds every producer**, not just `/checkpoint`: Phase 7
+step 6 carries the normative statement, and the tier-3 drift demand, its stderr
+text and `RETROFIT.md` each state it inline. Those are the **unattended** write
+paths, and they are the ones that matter — `/resume` loads by mtime while a
+human reading the directory sorts by name, with nobody watching.
+
+### X-31 / X-32 — the two over-refusals, and why the exemptions were removed
+
+Both issues are real:
+
+- `secrets-gate` refused `rg -g '!*.pem'` — a **negated** glob that *excludes*
+  the protected path, i.e. a command reading strictly fewer files than the bare
+  `rg` it allowed.
+- `dependency-gate` refused `curl … | python3 -c '<prog>'` — where `-c` supplies
+  the program and the fetched bytes are **data on stdin**.
+
+Both were filed as **usability** defects erring in the safe direction, and both
+issues name a clean workaround themselves. Implementing either means **widening
+a deny-list control**, which is a security change however it was filed.
+
+**Four rounds tried. Each closed its own findings and the next pass broke it:**
+
+| round | blocking fail-opens found | representative |
+|---|---|---|
+| 1 | 4 | sticky arm exempts a whole run of tokens |
+| 2 | 6 | `rg -g '\!*.pem'` — a backslash makes it a **positive** glob |
+| 3 | 12 | `python3 -m code` — `-m` names a module, and `code` is a stdin REPL |
+| 4 (architectural) | ~20 | `node -p`; a trailing `#` comment; a subshell |
+
+Round 4 went after the primitives, not the spellings — routing both walks
+through the shared command-position model, canonicalizing the write set into
+paths, widening the writer set, fixing the tokenizer. Right diagnosis, still no
+convergence: the exemption's precondition is *"parse this command the way bash
+and then ripgrep/CPython will"*, and a gate that must answer that exactly has
+taken on an adversary's entire grammar.
+
+**So the relaxations were removed and the hardening was kept.** That split is
+the outcome worth recording. Measured against a pristine v2.6.1 install, the
+same rounds had closed five pre-existing fail-opens unrelated to the exemptions:
+
+```
+curl … 2>&1 | sh        2.6.1 ALLOW -> DENY
+curl … |<newline>sh     2.6.1 ALLOW -> DENY
+curl … | \sh            2.6.1 ALLOW -> DENY
+curl … | 'sh'           2.6.1 ALLOW -> DENY
+curl … | ${SHELL}       2.6.1 ALLOW -> DENY
 ```
 
-No `cd`, no `$CLAUDE_PROJECT_DIR` — **and that is correct design.** A plain
-`gleam test` or `npm test` inherits the hook process's cwd, which inside a
-worktree *is* the worktree. **Plain commands compose fine, and no gate hook
-body changed in this fix.** The break is **fixed-mount indirection**: `docker
-compose exec` enters a container whose bind mount points at the main checkout,
-so cwd is irrelevant and the command always runs against `/app`. Same shape for
-`kubectl exec`, `ssh`, `vagrant ssh`, devcontainer CLIs. (`docker run -v
-"$(pwd)":/app` *does* follow cwd and was never affected.)
+and the three the exemptions had opened went away with them. **Net: strictly
+stronger than 2.6.1, zero new fail-opens.**
 
-**The failure.** An `implementer` works in `.claude/worktrees/<n>/`. The gate
-compiles and tests the **main checkout**. The gate passes. The code the agent
-wrote was never built — a fail-open in a verification control, the same class
-as P0-3d, which forced the 2.6.1 release. Broader in reach than P0-3d, which
-required a broken `jq`: this needs only a containerized dev environment, which
-Phase 2 invited with no caveat. It stayed dormant while autonomous modes were
-off and went live the moment a decomposition marked tasks parallelizable.
+**#31 and #32 are answered the way their own Impact sections ask for — a better
+refusal.** #31 says *"the refusal text does not hint at [the workaround]"*; #32
+says the message *"describes a situation the operator is not in and sends them
+looking for an installer that does not exist."* Both messages now name what was
+refused, why, and the concrete next step: a positive glob scope for
+`secrets-gate`, and write-then-read (or a dedicated fetch tool) for
+`dependency-gate`. A better refusal costs nothing and cannot fail open.
 
-**Measured on the reporter's install** (2.6.1, `gate_substrate: shell`,
-fullstack, autonomous modes off): `.claude/agents/implementer.md:4` →
-`isolation: worktree`; `docker compose exec -T app pwd` → `/app`; one `docker`
-hit in the whole protocol document, at line 924, saying only "don't wrap it in
-an MCP"; no text reconciling the two features; no worktree entry in
-`docs/deferred-backlog.md`.
+**Release criterion adopted from this episode** (KB §7): no change to a control
+ships without the previous-release diff — install the last tag and the
+candidate, run one corpus through both substrates of both, and require the
+"previously denied, now allowed" set to be **empty**. That question ended this
+episode; "did we close our findings" never could, because every round could
+answer yes.
 
-**The fix — a config key, not a doc warning.** The issue offered a doc warning
-as the cheaper option and argued against it in the same breath: `isolation:
-worktree` was **hardcoded** (`lib/templates.py:2920`, `:4835`), so an affected
-operator's only local lever was hand-editing `implementer.md` — which trips the
-installer's digest hand-edit guard, after which that file is `SKIP`ped forever
-and they keep their fix while silently losing every upstream fix to it. That is
-the `deps.md` trap, and shipping it to a second file was not acceptable.
+### Verification
 
-- **`commands.execute_in_cwd`** (bool, default `true`) — the Phase 2 fact. Asked
-  verbatim by both interview front-ends, of every archetype, and **never
-  inferred**: a `docker-compose.yml` in the tree is not evidence that the test
-  command goes through it, and inferring wrong in the permissive direction
-  re-arms the fail-open. A *quoted* `"false"` is a validation error, not a
-  truthy string.
-- **`workflow.implementer_isolation`** (`auto` | `worktree` | `none`, default
-  `auto`) — the override. `auto` derives from the key above.
+Golden re-baseline: **freeze-exception no. 33**, all three fixtures, verified
+per-file before re-baselining. Action counts stable at **57 / 69 / 59**, 0
+added, 0 removed; **16 / 20 / 16** bodies move. That is *every emitted hook in
+each fixture* (11 / 15 / 11) plus `.claude/sdk_gates/gates.py`, the two `#33`
+skill bodies, and the two steering docs carrying the message-only prose
+(`deps.md`, `secrets.md`). All eleven-plus hooks move because
+`normalize_command` and the command-position model live in the shared
+`_HOOK_HEADER` — a deliberate break of the old body-only-placeholder property,
+recorded because a per-command normalization every gate must share cannot live
+in one gate's body. No wrapper, agent, settings, command or spec body moves.
 
-**Why dropping the isolation rather than warning and keeping it.** Losing
-worktrees costs parallelism and is **loud** when it bites — two implementers in
-one tree collide visibly. Keeping them costs a green gate on uncompiled code
-and is **silent**. Trading a silent fail-open for a visible constraint is the
-call A-1 already made for the parser outage.
+**The acceptance measurement, stated exactly.** Corpus of 2,950 payloads ×
+2 substrates against a pristine v2.6.1 install. Payloads 2.6.1 **allowed** that
+this tree **denies**: 240/270 (dependency-gate) and 21/20 (secrets-gate) — the
+win. Payloads 2.6.1 **denied** that this tree **allows**: **one**, down from a class
+of **66** — and the size of that class is itself the lesson.
 
-**And the trade is paid, not just declared.** With every implementer in the main
-checkout, a `max_concurrent_tasks` of 2 would mean two agents editing one tree —
-swapping one silent failure for another. So `backlog.md` and `auto-config.md`
-emit `1` in that configuration, with the reason in-file. The two per-task
-wrappers are the other dispatch site with the same defect: they tell the
-operator how to write the `claude -p` call, so the `--worktree` guidance is now
-conditional too (IC-6 still passes — its contract is "no hand-rolled `git
-worktree add`", which holds either way).
+A first pass sampled six and read them as isolated oddities. A systematic
+decoration sweep against a pristine 2.6.1 install found **66** (50 in
+`secrets-gate`, 16 in `dependency-gate`), and none was attributable to the
+removed exemptions. Each was a no-op mutation (`$''`, `$'…'`, `$""`, a trailing
+backslash, a line continuation) applied to a name on an **allow-list** —
+`requests` in `deps.approved`, `.env.example` in the dotenv-template carve-out.
+2.6.1 denied them because its tokenizer could not see through the mutation and
+so failed to recognise the allow-list entry. **Nothing in the round's own test
+suite noticed, because every test had been written about the deny direction the
+fold was added for** — and the same sweep over the three Bash gates that hold no
+allow list (`test-gate`, `spec-gate-commit`, `ci-mirror`) moved *nothing*, which
+is the evidence that the allow list, not the fold, is the thing to look for.
+**That diagnosis produced a real architectural fix rather than a spelling
+patch:** folding is sound for a deny list (it can only make *more* spellings
+reach a forbidden name) and unsound for an allow list (it hands the exemption to
+spellings that never earned it). So **a gate that consults an allow list now
+judges both spellings — the folded one and the one the operator typed — and
+refuses if either refuses.** The unfolded pass feeds the walk exactly the string
+2.6.1 fed it, so the union is a superset of 2.6.1's denies *by construction*, with
+nothing to keep in sync with the normalizer. That closed five of the six.
 
-**Both directions are self-documenting.** When the isolation is on, the emitted
-`implementer.md` states the requirement it silently depends on and gives a
-one-command probe (`docker compose exec -T <svc> pwd` from inside a worktree).
-When it is off, the file records the absence as a **decision, not an
-oversight** — otherwise the next reader "fixes" it straight back into the
-fail-open.
+The survivor is `cp '.env.example ;` — an unbalanced quote naming an
+allow-listed **template**, on a command **bash itself refuses to parse**
+(`unexpected EOF while looking for matching '`). 2.6.1 allows the same thing
+without the trailing `;`. It is recorded rather than chased: special-casing it
+ahead of the allow list is the spelling-patch treadmill that cost four rounds.
 
-**On the unverified assumption.** The issue flagged one: that Claude Code sets
-an `isolation: worktree` subagent's cwd to its worktree. It is the documented
-behavior and everything rests on it. It was **not** confirmed by execution here,
-and is now recorded as an open item (`docs/deferred-backlog.md` W-1a) rather
-than quietly assumed. Note the direction of the risk: if it were untrue the
-pairing would fail *more* broadly — every command, not just fixed-mount ones —
-so the mitigation is directionally right either way, and the emitted probe
-settles it per-environment in one command.
+The deny-list side is unaffected throughout — `npm install evil$''`,
+`npm install $'evil'`, `cat .env.production$''`, `cat .env.example.real$''` and
+`cat 'secrets/prod.yaml ;` deny at both versions — and the same normalization
+closes live secret disclosures 2.6.1 shipped: `cat important.pem$''`,
+`cat tls.key$''`, `cat $'secrets/prod.yaml'` and `cat 'important.pem ;` were all
+rc=0 at 2.6.1 and are rc=2 here. Verified independently by execution, not taken
+from a report.
 
-**Golden re-baseline: freeze-exception no. 32**, all three fixtures, verified
-per-file first. Action counts stable at **57 / 69 / 59**, 0 added, 0 removed;
-the moving bodies are exactly `tech.md` + `implementer.md` (all three fixtures)
-plus `loop.sh` + `goal-loop.sh` (full_autonomous only). All three fixtures leave
-`execute_in_cwd` at its default, so every `isolation: worktree` line and both
-`max_concurrent_tasks: 2` values are unchanged — **the OFF path is covered
-behaviorally, not by a golden**, in the new
-`tests/test_worktree_command_compat.py`. `tests/test_validate_only.py`'s
-mini-golden re-baselined for the single added `execute_in_cwd: true` line,
-verified by reproducing the previous digest bit-for-bit after stripping it.
+Also closed by the kept hardening, having been fail-open at 2.6.1 and found
+while investigating #32: `curl u | (sh)`, `| { sh; }`, `| FOO=1 sh`,
+`| python3.11`, `curl u 2>&1 | sh`, and a control operator inside a quoted
+filename (`tee 'a;b.sh'`). Backlog **X-32e**, now `done`.
 
-Suite: 22 suites / 1977 checks / 0 failed.
+Residue: backlog **cluster X**, including `python -m pipx/poetry/pipenv/uv`
+installs (open in both spellings, pre-existing) which deserves its own issue.
+
+Suite: **23 suites / 6910 checks / 0 failed** (from 21 / 1905 at v2.6.1).
+
 
 ## 2.6.0 → 2.6.1 — release identity for the post-tag fixes (2026-07-31)
 

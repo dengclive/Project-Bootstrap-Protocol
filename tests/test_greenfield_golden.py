@@ -989,6 +989,44 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 33, 2026-08-03] X-30..X-33 — the four issues filed
+    # against 2.6.1 alongside #29 (GitHub #30-#33). All three fixtures, and
+    # emphatically NOT comment-only.
+    #   X-30  FIXED. decision-required-alarm truncated
+    #         `.decision-pending-<sid>` to 0 bytes on every fire, erasing the
+    #         four fields the protocol tells the agent to write there (§6.E,
+    #         Phase 8). Now create-if-absent + touch, never truncate.
+    #   X-33  FIXED. /resume stated no selection rule while /checkpoint stamped
+    #         from model-supplied time. Both skill bodies gained real content:
+    #         clock stamp, and mtime-not-filename with a three-rule precedence.
+    #   X-31  CLOSED MESSAGE-ONLY. secrets-gate still refuses `rg -g '!*.pem'`.
+    #   X-32  CLOSED MESSAGE-ONLY. dependency-gate still refuses
+    #         `curl … | python3 -c '<prog>'`.
+    # WHY THE TWO GATES ARE MESSAGE-ONLY, because a digest cannot show it:
+    # exemptions for both were attempted over FOUR rounds and found 4, then 6,
+    # then 12, then ~20 blocking fail-opens. They were REMOVED. What was KEPT
+    # is the deny-direction hardening those rounds produced, and that is why so
+    # many bodies move here: `normalize_command` / `_join_cont` and the
+    # command-position model live in the SHARED _HOOK_HEADER, so a per-command
+    # normalization every gate must share cannot live in one gate's body. This
+    # deliberately breaks the old body-only-placeholder property.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING (digest dump at 90a3504 vs this
+    # tree): action counts stable at 57 / 69 / 59, 0 added, 0 removed. Moved
+    # bodies: 16 / 20 / 16 — every emitted hook in the fixture (11 / 15 / 11,
+    # i.e. the shared header), plus .claude/sdk_gates/gates.py,
+    # .claude/skills/{checkpoint,resume}/SKILL.md (X-33) and
+    # .claude/steering/{deps,secrets}.md (the message-only prose for X-31/X-32).
+    # No wrapper, agent, settings, command or spec body moves.
+    # THE ACCEPTANCE CRITERION THIS BATCH ADOPTED, which a golden cannot check:
+    # no payload a pristine v2.6.1 install DENIES may be ALLOWED here. Measured
+    # over 2,950 payloads x 2 substrates: 240/270 + 21/20 payloads that 2.6.1
+    # allowed now deny (the win), and ONE that 2.6.1 denied now allows —
+    # `cp '.env.example ;`, an unbalanced quote naming an allow-listed dotenv
+    # TEMPLATE, which bash itself refuses to parse ("unexpected EOF"). See KB
+    # §4.9 and tests/test_issue_fixes.py; the behavioural fences are there, not
+    # here. A green golden proves the bytes are stable, never that they are
+    # right.
+    #
     # [freeze-exception no. 32, 2026-07-31] W-1 — worktree isolation vs. where
     # the gate commands execute (issue #29). All three fixtures, and NOT
     # comment-only: the emitted `implementer` agent's `isolation:` line stops
@@ -1100,7 +1138,7 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "e781052311aaa441269ad0504478f750f16208a01ba8ac45b6ed4b0e0281db29",
+        "bb66d4564e9833448cdaa02335663a3ab221b93bdeeb08f4239d648d8a74d67b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1213,7 +1251,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "2be8569b4e77d63b85f04a6c7dd2e86a4f29ff259e7a7e6594b817553d77e0d1",
+        "e64b16a1a047ab1d4d6712eb05609e605969186e68242730a93ad8a99e8133bf",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1284,7 +1322,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "9e7e87eb6e3cd93079157ac99fd1ea6528b557423bd4b8ef800a457c1f675163",
+        "d0235191f8c5f0bd72c201c075abf317f974f896ad6c45ca9c4809ed2ca8fe4f",
 }
 
 EXPECTED_ACTION_COUNTS = {
