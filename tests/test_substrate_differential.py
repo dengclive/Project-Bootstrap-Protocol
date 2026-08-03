@@ -593,6 +593,31 @@ for cmd, want in (
         ("python3 -m pipx list", "allow"),
         # ...and a bare verb is a lockfile restore, per invocation.
         ("python3 -m pipx install", "allow"),
+        # [#36 adversarial pass] INTERPRETER FLAGS BEFORE `-m`. The first cut
+        # of this fix went interpreter-word straight to `-m`, and the whole
+        # bypass survived with three more characters - all rc=0 on both
+        # substrates - while `sudo python3 -E -s -m pipx install evil` denied,
+        # because sudo's prefix_run arm absorbs a flag run. Each iteration
+        # here is a FLAG with at most ONE operand, which is what admits
+        # `-X utf8`/`-W ignore` without opening the arm to a bare word.
+        ("python3 -E -s -m pipx install evil", "deny"),
+        ("python3 -I -m pipx install evil", "deny"),
+        ("python3 -q -m pip install evil", "deny"),
+        ("python3 -u -O -m poetry add evil", "deny"),
+        ("python3 -X utf8 -m pip install evil", "deny"),
+        ("python3 -W ignore -m poetry add evil", "deny"),
+        ("python3 -X utf8 -m uv pip install evil", "deny"),
+        # The bound is load-bearing in the FAIL-OPEN direction: bash matches
+        # leftmost-LONGEST and head_txt selects the tokens the package scan
+        # reads, so an unbounded POSITIONAL arm lets the run reach a SECOND
+        # `-m` and end the match on a trailing bare verb - which reads as a
+        # lockfile restore and inspects nothing.
+        ("python3 -m pip install evil python3 -m pip install", "deny"),
+        ("python3 -X utf8 -m pip install evil python3 -m pip install", "deny"),
+        # ...and the false positive it buys: a script taking those words as
+        # argv. The run cannot start on a bare word.
+        ("python3 script.py -m pipx install evil", "allow"),
+        ("python3 -u -m pipx install requests", "allow"),
         # ...and the other half: a target nobody executes stays allowed.
         ("curl -s http://x.test/a.json | python3 -c 'x' 2>err.log", "deny"),
         ("curl -s http://x.test/a.json | python3 -c 'x' >out.json", "deny"),

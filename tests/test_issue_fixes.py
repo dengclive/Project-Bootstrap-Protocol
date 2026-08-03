@@ -2148,6 +2148,37 @@ dep_both("uv pip install evil", 2, "#36 control: direct uv pip still refuses")
 dep_both("python3 -m pip install evil", 2,
          "#36 control: the one spelling the old scanner knew")
 
+# [#36 adversarial pass] INTERPRETER FLAGS BEFORE `-m`. The first cut of the
+# fix went straight from the interpreter word to `-m`, and the whole bypass
+# survived with three more characters - every row below was rc=0 on BOTH
+# substrates against that cut, and every flag form really runs the module
+# (`python3 -E -s -m json.tool --help` exits 0).
+dep_both("python3 -E -s -m pipx install evil", 2, "#36 flags: -E -s before -m")
+dep_both("python3 -I -m pipx install evil", 2, "#36 flags: -I before -m")
+dep_both("python3 -q -m pip install evil", 2, "#36 flags: -q before -m")
+dep_both("python3 -u -O -m poetry add evil", 2, "#36 flags: two short flags")
+# ...including the two that take a SEPARATE operand, which a bare `( -flag)*`
+# run would miss.
+dep_both("python3 -X utf8 -m pip install evil", 2, "#36 flags: -X takes a value")
+dep_both("python3 -W ignore -m poetry add evil", 2,
+         "#36 flags: -W takes a value")
+# THE FAIL-OPEN THE BOUND EXISTS TO PREVENT. bash matches leftmost-LONGEST,
+# and head_txt is what selects the tokens the package scan reads. With an
+# unbounded POSITIONAL arm the run reaches the SECOND `-m`, the longest parse
+# ends at the trailing bare verb, and the gate reads that as a lockfile
+# restore - inspecting no packages at all. Requiring each iteration to begin
+# with `-` stops the run at `install`, so that parse does not exist.
+dep_both("python3 -m pip install evil python3 -m pip install", 2,
+         "#36 bound: a trailing bare verb must not swallow the package list")
+dep_both("python3 -X utf8 -m pip install evil python3 -m pip install", 2,
+         "#36 bound: same, with a value-taking flag in front")
+# ...and the false positive the bound BUYS: a script that merely takes those
+# words as argv. The run cannot start on a bare word, so this stays allowed.
+dep_both("python3 script.py -m pipx install evil", 0,
+         "#36 bound: a script's argv is not an install")
+dep_both("python3 -u -m pipx install requests", 0,
+         "#36 flags control: approved stays approved through the flag run")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

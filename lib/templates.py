@@ -3448,11 +3448,19 @@ HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"
 # a trailing `#` comment, and is pure bash, so it cannot degrade if `tr` is
 # missing [lens A F5].
 #
-# KNOWN AND ACCEPTED: a separator inside a quoted string starts a new segment,
-# so `git commit -m "fix; npm install evil"` blocks. Deny-list bias is
-# over-match (the same call the secrets-gate patterns make); skipping
-# odd-quote segments would fix it in the FAIL-OPEN direction, so it is not
-# done. The message names the token, so the cause is legible.
+# [issue #36 review] THIS NOTE USED TO CLAIM `git commit -m "fix; npm install
+# evil"` BLOCKS, as a known-and-accepted over-match. IT DOES NOT, and has not
+# since `cmd_segments` became quote-aware [F-435]: measured rc=0 here and at
+# 8276300. A separator inside a quoted run no longer starts a segment, so the
+# example the note was built on stopped being true and the note was never
+# revisited - a false comment of exactly the class KB §4.8 is about, found by
+# an adversarial pass on an unrelated change.
+#
+# What IS still true, and is why the paragraph is corrected rather than
+# deleted: an UNBALANCED quote is unmodellable, and the walk over-matches
+# there rather than skipping it, because skipping an odd-quote segment would
+# fix it in the FAIL-OPEN direction. The message names the token, so the
+# cause is legible either way.
 blocked=""
 
 # [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so

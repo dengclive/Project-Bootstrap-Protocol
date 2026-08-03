@@ -123,21 +123,57 @@ members as appearing **nowhere** outside `cmdpos.py`.
 widening. After this change it **does** match, on purpose, so the claim is
 retired at both sites rather than left to become a false comment (KB §4.8).
 
+**The first cut of this fix was itself incomplete, and an adversarial pass
+caught it.** Going from the interpreter word straight to `-m` left the whole
+bypass alive behind three more characters — `python3 -E -s -m pipx install
+evil`, `-I -m`, `-X utf8 -m`, `-q -m` were all allow on both substrates, and
+every one of those flag forms really runs the module. The tell was that `sudo
+python3 -E -s -m pipx install evil` **denied**: `sudo`'s arm absorbs a flag run
+and finds `pipx install` underneath, so the gap was a modelling omission rather
+than a limit. The interpreter word now carries a flag run of its own.
+
+**That run is bounded — a flag with at most one operand — and the bound is
+load-bearing in both directions.** `prefix_run`'s unbounded
+`(flag|positional)*` would **fail open** here: bash matches leftmost-*longest*,
+and `head_txt`/`m.end()` is what selects the tokens the package scan reads, so
+a positional arm lets the run reach a *second* `-m` in `python3 -m pip install
+evil python3 -m pip install`, ending the match on a trailing bare verb the gate
+reads as a lockfile restore — inspecting nothing. Requiring every iteration to
+begin with `-` stops the run dead at `install`. A flag-*only* run would have
+been too narrow the other way, missing `-X utf8` and `-W ignore`. The false
+positive the bound buys is the one that matters: `python3 script.py -m pipx
+install evil` merely passes those words to a script as argv, and stays allowed.
+
 **Acceptance, per the KB §7 release criterion:** a pristine baseline built from
 `8276300` (= the 2.7.0 release commit), the differential suite's full corpus of
-**400 distinct commands** driven through **both substrates** on both builds.
-Result: **24 verdicts move allow → deny** (the twelve #36 spellings × two
+**411 distinct commands** driven through **both substrates** on both builds.
+Result: **40 verdicts move allow → deny** (the twenty #36 spellings × two
 substrates), and the *previously-denied, now-allowed* set is **empty**. No
 verdict regressed in the fail-open direction on either substrate.
+
+**Five residues were opened rather than quietly fixed**, all measured and all
+pre-existing: **X-36a** (the shell/SDK whitespace-class split, in the safe
+direction), **X-36b** (`--python 3.12` blames the wrong token), **X-36c** (a
+wrapper word's unbounded skip swallows the package list — `sudo pip install
+evil npx` is a real fail-open on both substrates), **X-36d** (`pypy3` and
+`python3.13t` are unknown to the interpreter word *and* to the pipe trigger,
+where `curl u | pypy3` is a live remote-execution hole), **X-36e** (an escaped
+installer word, `pi\p install evil`, bypasses the shell hook only). Each needs
+its own measurement; riding them on this change is the treadmill KB §4.9 is
+about.
 
 **Golden re-baseline: freeze-exception no. 35**, all three fixtures, verified
 per-file first. Action counts stable at **57 / 69 / 59**, 0 added, 0 removed,
 and **exactly two** bodies move per fixture — `.claude/hooks/dependency-gate.sh`
 and `.claude/sdk_gates/gates.py`, precisely the two the install anchor is
 rendered into. Nothing else moves; `secrets-gate.sh` is byte-identical against
-an install built from `8276300`.
+an install built from `8276300`. `dependency-gate.sh` additionally moves for a
+**comment-only** correction the same adversarial pass found: the "KNOWN AND
+ACCEPTED" note claimed `git commit -m "fix; npm install evil"` *blocks*, which
+has been false since `cmd_segments` became quote-aware (F-435) — measured rc=0
+both here and at `8276300`.
 
-Suite: 23 suites / 7149 checks / 0 failed.
+Suite: 23 suites / 7180 checks / 0 failed.
 
 ## 2.6.1 in-version fixes — four issues, and two over-refusals that could not be safely relaxed (2026-08-03)
 
