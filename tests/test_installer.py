@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import sys
+import warnings
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1906,6 +1907,39 @@ check("D18: the default never_read_paths list is unchanged",
       _c["secrets"]["never_read_paths"]
       == [".env*", "secrets/**", "*.pem", "*.key"]
       and _c.get("_config_notices") == [])
+
+# --------------------------------------------------------------------------- #
+# Every lib module compiles CLEAN — no SyntaxWarning
+# --------------------------------------------------------------------------- #
+# WHY THIS EXISTS, because the failure mode is genuinely sneaky: CPython emits
+# `SyntaxWarning: invalid escape sequence` only when it COMPILES the source.
+# Once a `__pycache__/*.pyc` exists the module loads from bytecode and the
+# warning never fires again — so a developer's suite runs green over a warning
+# that CI, which always compiles fresh, prints to stderr on every run. Two
+# suites here assert an installer run "writes nothing to stderr"; a warning
+# leaking into that stream fails them, and it did (5 checks, PR #35), while the
+# same tree was green locally.
+#
+# The escapes that caused it (`\.` and a backslash-backtick inside emitted
+# shell COMMENT text) were harmless to the emitted bytes — Python keeps an
+# unrecognised escape verbatim — which is exactly why nothing behavioural
+# caught them. In a future Python they become a SyntaxError, so this is also
+# forward-cover, not only tidiness.
+print("\n-- lib modules compile without SyntaxWarning --")
+_LIB = os.path.join(ROOT, "lib")
+for _mod in sorted(f for f in os.listdir(_LIB) if f.endswith(".py")):
+    with warnings.catch_warnings(record=True) as _w:
+        warnings.simplefilter("always")
+        try:
+            compile(open(os.path.join(_LIB, _mod), encoding="utf-8").read(),
+                    _mod, "exec")
+            _syn = [str(x.message) for x in _w
+                    if issubclass(x.category, SyntaxWarning)]
+        except SyntaxError as _e:          # pragma: no cover - would be loud
+            _syn = [f"SyntaxError: {_e}"]
+    if _syn:                                # this suite's check() is (name, cond)
+        print(f"        {_mod}: {_syn}")
+    check(f"lib/{_mod} compiles with no SyntaxWarning", not _syn)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

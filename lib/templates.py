@@ -1631,8 +1631,8 @@ _SG_EXTRA=""
 # from the same input instead of two hand-matched approximations.
 #
 # All four, not just the endpoints: an INTERMEDIATE form can be the only one
-# that matches. `'.env\.example` fully stripped is the exempt template
-# `.env.example`, while its quote-stripped twin `.env\.example` is not a
+# that matches. `'.env\\.example` fully stripped is the exempt template
+# `.env.example`, while its quote-stripped twin `.env\\.example` is not a
 # template and DOES match the `.env*` family - so dropping the intermediate
 # would lose a deny.
 #
@@ -1931,7 +1931,7 @@ _sg_scan(){{
 # FOLD IS DENY-ONLY" and `_CMD_UNFOLDED` in this header.
 #
 # Measured: without the second pass, `cat .env.example$''`,
-# `cat $''.env.example`, `cat .env.example\`, the `$""` twins of each and the
+# `cat $''.env.example`, `cat .env.example\\`, the `$""` twins of each and the
 # same six spellings of `.env.sample`/`.env.template`/`.env.dist`/
 # `.env.defaults` - 24 payloads a pristine 2.6.1 install DENIES - reached the
 # carve-out folded to the bare template name and were ALLOWED here.
