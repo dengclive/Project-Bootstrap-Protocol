@@ -553,6 +553,139 @@ def runners_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
     return "|".join(parts)
 
 
+# ---- [issue #36 / X-32i] the install anchor's word sets and tail ---------- #
+#
+# TOOLS and VERBS were FORKED literals - one copy in lib/templates.py's
+# dependency-gate body, one in lib/sdk_gates_template.py's static body -
+# which is precisely the two-copies arrangement this module exists to end
+# (D3), and the reason a fix applied to one substrate could have silently
+# missed the other. Both substrates now render the ONE tail below.
+#
+# `pip[0-9.]*` is a regex fragment rather than a word: `pip3`, `pip3.11` and
+# `pip38` are the same installer, and both dialects read the fragment
+# identically. `deps[.]get` spells its dot as a bracket expression for the
+# same reason - no backslash has to survive two emission paths unchanged.
+INSTALL_TOOLS = ("npm", "pnpm", "yarn", "bun", "pip[0-9.]*", "pipx",
+                 "poetry", "uv", "pipenv", "cargo", "gem", "composer",
+                 "mix", "rebar3", "gleam", "go", "deno")
+INSTALL_VERBS = ("install", "i", "add", "get", "require", "get-deps",
+                 "deps[.]get")
+
+
+def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
+                      space0: str = " *", wsp: str = " ") -> str:
+    """The install anchor after the command-position prefix run.
+
+    [issue #36] `python[0-9.]* ... -m` is a TRANSPARENT COMMAND-POSITION
+    PREFIX here, so the
+    remainder is re-judged by the arms that already exist. The scanner used
+    to spell `python -m pip install` as ONE literal arm, so the `-m`
+    spelling of every OTHER installer walked through while its direct
+    spelling refused: `-m pipx install`, the attached `-mpipx`, `-m poetry
+    add`, `-m pipenv install` and `-m uv pip install` were all allow/allow
+    at v2.6.1. The last one is why the fix is a prefix and not an
+    enumeration: uv's verb is `pip`, not an INSTALL_VERBS member, so an
+    enumerated `-m (TOOLS) (VERBS)` arm matches the other four and misses
+    it - the route-through-one-model lesson four X-31/X-32 passes paid for.
+
+    `space0` admits the attached spelling: `-mpipx` is `-m` glued to its
+    module exactly as `-mpip` was (X-32 repair F14), and the module after
+    `-m` IS the installer, so it now matches ON PURPOSE. What keeps the
+    prefix from over-matching is that the next word must still be an arm:
+    `python3 -m json.tool` and `-m venv` name no INSTALL_TOOLS member and
+    fall through to allow.
+
+    The prefix carries the `([^ ]*/)?` path arm every wrapper word gets;
+    the old literal spelled `python` bare, so `/usr/bin/python3 -m pip
+    install` missed even the ONE spelling the scanner knew (measured
+    allow/allow on both substrates, closed by the same arm).
+
+    INTERPRETER FLAGS BEFORE `-m`, AND WHY THE RUN IS BOUNDED RATHER THAN
+    prefix_run's UNBOUNDED ONE. The first cut of this fix went straight from
+    the interpreter word to `-m`, and an adversarial pass on it measured the
+    whole bypass surviving with three more characters: `python3 -E -s -m
+    pipx install evil`, `-I -m`, `-X utf8 -m`, `-q -m` were all rc=0 on both
+    substrates, and every one of those flag forms really does run the module
+    (verified: `python3 -E -s -m json.tool --help` exits 0). The contrast
+    that proved it a modelling gap rather than a limit is that `sudo python3
+    -E -s -m pipx install evil` DENIED - the `sudo` arm of prefix_run admits
+    a flag run, absorbs the flags, and finds `pipx install` underneath.
+
+    So each iteration here is A FLAG, OPTIONALLY FOLLOWED BY ONE OPERAND -
+    NOT prefix_run's `(flag|positional)*`. The bound is load-bearing in two
+    directions, and both were measured rather than reasoned about alone:
+
+      * UNBOUNDED POSITIONALS WOULD FAIL OPEN. bash picks the leftmost-
+        LONGEST overall match, and `head_txt`/`m.end()` is what selects the
+        tokens the package scan then reads. With a positional arm, the run
+        in `python3 -m pip install evil python3 -m pip install` can reach
+        the SECOND `-m`, making the longest parse end at the trailing bare
+        verb - which the gate classifies as a lockfile restore, so the
+        package list is never inspected at all. Requiring every iteration to
+        BEGIN with `-` stops the run dead at `install`, so that parse does
+        not exist. This is the wrapper-absorption shape recorded as X-36c,
+        reached without a wrapper word.
+      * FLAG-ONLY WOULD BE TOO NARROW. `-X utf8` and `-W ignore` take a
+        separate operand, so a bare `( -flag)*` run misses them; the
+        optional single operand is what admits those two without opening
+        the arm to a bare word.
+
+    The residual over-refusal is `python3 -c 'x' -m pipx install evil`,
+    where python runs `x` and never reaches pipx - contrived, and the
+    deny-list direction. The false positive the bound BUYS is the one that
+    matters: `python3 script.py -m pipx install evil` runs a script that
+    merely takes those words as argv, the run cannot start on `script.py`,
+    and it stays ALLOW.
+
+    NOT CLOSED HERE, and pinned as X-36b rather than half-fixed: the
+    interpreter word is spelled `python[0-9.]*`, so `pypy3 -m pip install
+    evil` and `python3.13t -m pipx install evil` (CPython's free-threaded
+    binary) are still allow/allow. Widening it belongs with the SAME miss in
+    `interpreter_word()`/INTERPRETERS - where it is a live remote-execution
+    hole, `curl u | pypy3` being allow/allow today - and that is a change to
+    the pipe trigger owed its own measurement, not a rider on this one.
+
+    Consistency with issue #32's finding that `-m` is NOT a program flag
+    for the pipe rule: both say THE MODULE IS WHAT RUNS. For the pipe rule
+    that means stdin is still the program (`python3 -m code` is a REPL);
+    for this anchor it means the module is the installer.
+
+    `wsp` is the one-character trailing class - a literal space for the
+    shell (whose normalizer has already mapped VT/FF/CR to spaces and
+    whose segments split on newline) and `\\s` for the SDK, whose scanner
+    collapses `[ \\t]+` to spaces first. THE TWO ARE NOT THE SAME CLASS,
+    and saying so here is a correction of what this docstring first
+    claimed: Python's `\\s` also matches U+00A0, U+2028, U+0085 and
+    `\\x1c`-`\\x1f`, none of which either normalizer rewrites, so they
+    reach both regexes and only the SDK matches them. Measured, e.g.
+    `pipx install<U+00A0>evil` is shell-ALLOW / SDK-DENY.
+
+    That divergence is BOUNDED and is left alone rather than papered over.
+    It predates this change - the same split is measurable at 8276300 on
+    the DIRECT spelling, because `space`/`space0` in the pre-existing arms
+    were already `\\s`-vs-space - and the shell is the side that is RIGHT:
+    bash word-splits on IFS, which contains none of those characters, so
+    `pipx install<U+00A0>evil` passes ONE argument `install<U+00A0>evil`
+    as pipx's subcommand and installs nothing (verified under real bash,
+    argc=2 for all five characters). The SDK's extra denial is therefore
+    an over-refusal on a non-executable string, which is the permitted
+    direction - the contract forbids SDK MORE PERMISSIVE, not stricter.
+    Recorded as backlog X-36a rather than fixed here, because narrowing
+    the SDK to a literal space touches every arm of this anchor and is a
+    parity change owed its own measurement, not a rider on #36.
+    """
+    return (
+        "((" + nonspace + "*/)?python[0-9.]*"
+        + "(" + space + "-" + nonspace + "*(" + space + "[^- ]" + nonspace
+        + "*)?)*" + space + "-m" + space0 + ")?"
+        + "((" + nonspace + "*/)?uv" + space + "pip" + space + "install"
+        + "|(" + runners_regex(space, nonspace) + ")"
+        + "|(" + nonspace + "*/)?(" + alt(INSTALL_TOOLS) + ")"
+        + space + "(" + alt(INSTALL_VERBS) + "))"
+        + "(" + wsp + "|$)"
+    )
+
+
 def anchor_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
     """The prefix-run regex. `space`/`nonspace` are parameterised only so the
     Python side can keep its `\\s`/`\\S` spelling; the STRUCTURE - and every

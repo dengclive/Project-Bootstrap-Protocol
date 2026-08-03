@@ -2101,6 +2101,84 @@ for _raw, _wants in _cmdpos.SPELLING_VECTORS:
           f"{'wanted' if _wants else 'free'}",
           bool(_unfolded) == _wants, repr((_folded, _unfolded)))
 
+# ========================================================================= #
+# X-32i (issue #36): `python -m <tool> install` bypasses the approved list
+# for every tool except pip.
+#
+# The install scanner's HEAD spelled `python -m pip` as a LITERAL, so the
+# interpreter-prefix spelling of every OTHER installer - each of which the
+# gate refuses when invoked directly - walked through: `python3 -m pipx
+# install`, `-mpipx` attached, `-m poetry add`, `-m pipenv install` and
+# `-m uv pip install` were all rc=0 on both substrates at v2.6.1, with the
+# direct spellings rc=2 in the same corpus. Pre-existing, not from the
+# #29-#33 batch.
+#
+# The fix makes `python[0-9.]* -m` a transparent COMMAND-POSITION PREFIX
+# for the install anchor - the treatment sudo/env/timeout already get - so
+# the remainder is re-judged by the arms that already exist. That is what
+# closes `-m uv pip install` (uv's verb is `pip`, not a VERBS member; an
+# enumerated `-m (TOOLS) (VERBS)` arm would have missed it) with no new
+# enumeration, and it retires the forked TOOLS/VERBS literals into
+# lib/cmdpos.py (the D3 two-copies shape) on the way.
+# ========================================================================= #
+print("\n== X-32i (#36): python -m is a prefix, not a pip literal ==")
+
+dep_both("python3 -m pipx install evil", 2, "#36 pin: -m pipx install")
+dep_both("python3 -mpipx install evil", 2, "#36 pin: attached -mpipx")
+dep_both("python3 -m poetry add evil", 2, "#36 pin: -m poetry add")
+dep_both("python3 -m pipenv install evil", 2, "#36 pin: -m pipenv install")
+dep_both("python3 -m uv pip install evil", 2,
+         "#36 pin: -m uv pip install, the arm enumeration would miss")
+dep_both("/usr/bin/python3 -m pip install evil", 2,
+         "#36 pin: path-qualified python was missed even for pip")
+dep_both("sudo python3 -m pipx install evil", 2,
+         "#36 pin: composes with the wrapper prefixes")
+# Controls: the prefix must not swallow what was allowed before it.
+dep_both("python3 -m pipx install requests", 0,
+         "#36 control: approved stays approved through the prefix")
+dep_both("python3 -m json.tool file.json", 0,
+         "#36 control: a module that is not an installer")
+dep_both("python3 -m venv .venv", 0, "#36 control: venv is not a tool")
+dep_both("python3 -m poetry lock", 0, "#36 control: a non-install verb")
+dep_both("python3 -m pipx install", 0,
+         "#36 control: a bare verb is a lockfile restore, per invocation")
+# The direct spellings were never broken and must not move.
+dep_both("pipx install evil", 2, "#36 control: direct pipx still refuses")
+dep_both("uv pip install evil", 2, "#36 control: direct uv pip still refuses")
+dep_both("python3 -m pip install evil", 2,
+         "#36 control: the one spelling the old scanner knew")
+
+# [#36 adversarial pass] INTERPRETER FLAGS BEFORE `-m`. The first cut of the
+# fix went straight from the interpreter word to `-m`, and the whole bypass
+# survived with three more characters - every row below was rc=0 on BOTH
+# substrates against that cut, and every flag form really runs the module
+# (`python3 -E -s -m json.tool --help` exits 0).
+dep_both("python3 -E -s -m pipx install evil", 2, "#36 flags: -E -s before -m")
+dep_both("python3 -I -m pipx install evil", 2, "#36 flags: -I before -m")
+dep_both("python3 -q -m pip install evil", 2, "#36 flags: -q before -m")
+dep_both("python3 -u -O -m poetry add evil", 2, "#36 flags: two short flags")
+# ...including the two that take a SEPARATE operand, which a bare `( -flag)*`
+# run would miss.
+dep_both("python3 -X utf8 -m pip install evil", 2, "#36 flags: -X takes a value")
+dep_both("python3 -W ignore -m poetry add evil", 2,
+         "#36 flags: -W takes a value")
+# THE FAIL-OPEN THE BOUND EXISTS TO PREVENT. bash matches leftmost-LONGEST,
+# and head_txt is what selects the tokens the package scan reads. With an
+# unbounded POSITIONAL arm the run reaches the SECOND `-m`, the longest parse
+# ends at the trailing bare verb, and the gate reads that as a lockfile
+# restore - inspecting no packages at all. Requiring each iteration to begin
+# with `-` stops the run at `install`, so that parse does not exist.
+dep_both("python3 -m pip install evil python3 -m pip install", 2,
+         "#36 bound: a trailing bare verb must not swallow the package list")
+dep_both("python3 -X utf8 -m pip install evil python3 -m pip install", 2,
+         "#36 bound: same, with a value-taking flag in front")
+# ...and the false positive the bound BUYS: a script that merely takes those
+# words as argv. The run cannot start on a bare word, so this stays allowed.
+dep_both("python3 script.py -m pipx install evil", 0,
+         "#36 bound: a script's argv is not an install")
+dep_both("python3 -u -m pipx install requests", 0,
+         "#36 flags control: approved stays approved through the flag run")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

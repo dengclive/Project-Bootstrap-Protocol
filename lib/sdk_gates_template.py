@@ -1000,40 +1000,36 @@ def _git_verb(cmd, verb):
                    _shell_segments(cmd, _CMD_OPS)))
 
 
-_TOOLS = (r"npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem"
-          r"|composer|mix|rebar3|gleam|go|deno")
-_VERBS = r"install|i|add|get|require|get-deps|deps\\.get"
 # Command-position prefixes that do not change WHICH program runs, so the
 # install verb is still the verb. Shell parity (the shell gate's PFX) - the
 # same _CMD_PFX_RE the git-verb anchor uses, so the two anchors cannot drift
 # apart again the way F-381 let them.
 _PREFIX = _CMD_PFX_RE
 # An install invocation at the START of a segment - not merely present
-# somewhere in it. The tool may carry a path (`/usr/bin/pip install`);
-# `python -m pip install` and `uv pip install` are spelled out because the
-# token at command position is not the installer. Shell parity (HEAD).
-# [lens A F3 residue] Run-without-installing channels: `npx evil`, `uvx
-# evil`, `pnpm dlx evil`, `bunx evil`, `npm exec evil`, `yarn dlx evil` all
-# fetch and EXECUTE an unapproved package. Not installing it first is not a
-# mitigation. NEWLY BLOCKED on both substrates. Shell parity (RUNNERS).
-# [round-4 D16/D20] Interpolated from lib/cmdpos.py in the emitted prelude,
-# together with _PIPE_TO_SHELL, _REMOTE_RUN and _UV_WITH. `yarn create`,
-# `npm init <pkg>`, `pnpm create`, `bun create`, `pipx run`, `uv tool run` and
-# `bun x` were all missing, and the shell's list was a separate literal - the
-# same two-copies arrangement that produced D3.
-#   Defined in the emitted prelude: _RUNNERS
-# [X-32 repair F14] `-m\\s*pip`, not `-m\\s+pip`: the ATTACHED spelling
-# `python3 -mpip install evil` was allow on both substrates at 2.6.1 with no
-# pipe involved at all, and the X-32 relaxation removed the pipe rule that
-# had been masking it in the `curl ... | python3 -mpip install evil` shape.
-# `\\s*` cannot over-match - `pip` must still be followed by whitespace and
-# `install`, so `-mpipx install` does not match. Shell parity (HEAD).
-_INSTALL_HEAD = re.compile(
-    r"^\\s*" + _PREFIX
-    + r"(?:python[0-9.]*\\s+-m\\s*pip\\s+install"
-      r"|(?:\\S*/)?uv\\s+pip\\s+install"
-      r"|" + _RUNNERS
-    + r"|(?:\\S*/)?(?:" + _TOOLS + r")\\s+(?:" + _VERBS + r"))(?:\\s|$)")
+# somewhere in it. The tail after the prefix run - the tool words, the
+# install verbs, the run-without-installing channels (`npx evil`, `pnpm dlx
+# evil`: fetching and EXECUTING an unapproved package is the same arrival,
+# and not installing it first is not a mitigation) and the `uv pip install`
+# arm whose verb is `pip` - is _INSTALL_TAIL, rendered from lib/cmdpos.py
+# (install_head_tail) in the emitted prelude. _TOOLS/_VERBS used to be
+# literals HERE plus a second set in the shell body: the D3 two-copies
+# shape, and the reason a one-substrate fix could silently miss. Shell
+# parity (HEAD) is now BY CONSTRUCTION - the two anchors are one rendering.
+# [issue #36] `python[0-9.]*\\s+-m\\s*` is a transparent COMMAND-POSITION
+# PREFIX inside that tail - the treatment sudo/env/timeout get - so
+# `-m pipx install`, `-m poetry add`, `-m pipenv install` and `-m uv pip
+# install` are re-judged by the arms that already refuse their direct
+# spellings. The old anchor spelled `python -m pip install` as ONE literal
+# arm, so every other installer walked through behind `-m`.
+# [X-32 repair F14, revised by #36] The ATTACHED `-mpip` spelling was allow
+# on both substrates at 2.6.1 and the repair widened the literal to
+# `-m\\s*pip`. Its claim that `-mpipx install` must NOT match is retired ON
+# PURPOSE: the module after `-m` is what runs, so `-mpipx` is pipx and now
+# matches like every other attached spelling. Consistent with #32's finding
+# that `-m` is NOT a program flag for the pipe rule - both say the module
+# is what runs; there it keeps stdin the program, here it makes the module
+# the installer.
+_INSTALL_HEAD = re.compile(r"^\\s*" + _PREFIX + _INSTALL_TAIL)
 # [lens A F3 residue] A package-index override redirects even an APPROVED
 # package to another server, which no package-name check can see. Tested
 # against the matched HEAD only - an assignment that is genuinely a
@@ -2599,7 +2595,10 @@ def sdk_gates_module(cfg: dict) -> str:
         "_XP_WS = %r\n"
         "_XP_OPS = %r\n"
         "_PIPE_TO_SHELL = re.compile(%r)\n"
-        "_RUNNERS = %r\n"
+        "# [issue #36] The whole install anchor after the prefix run -\n"
+        "# tools, verbs, runner channels and the `python -m` transparent\n"
+        "# prefix - ONE rendering with the shell gate's HEAD.\n"
+        "_INSTALL_TAIL = %r\n"
         "# [round-4 D20] The two channels that need a DISTINGUISHING token.\n"
         "# `deno run main.ts` and `uv run python` are ordinary; blocking them\n"
         "# is the unactionable-refusal shape this suite has shipped twice.\n"
@@ -2616,7 +2615,8 @@ def sdk_gates_module(cfg: dict) -> str:
            cmdpos.XP_WS, tuple(cmdpos.XP_OPS),
            _py(cmdpos.pipe_to_shell_regex(space=r"\s+", nonspace=r"\S",
                                           ws=r"\s")),
-           _py(cmdpos.runners_regex(space=r"\s+", nonspace=r"\S")),
+           _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
+                                        space0=r"\s*", wsp=r"\s")),
            r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
            r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
     )
