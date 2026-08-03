@@ -745,6 +745,64 @@ check("GR2-01: implementer points at the template file",
       _impl is not None and "progress-template.md" in _impl)
 
 # ---------------------------------------------------------------------------
+# X-33 (issue #33): the checkpoint/resume SKILL.md bodies carry normative
+# rules, not just the one-line description. Checkpoint: the filename stamp
+# comes from the CLOCK (date -u +%Y-%m-%dT%H%MZ), never model memory -
+# model-supplied stamps have run ahead of true UTC on real installs, and a
+# wrong stamp poisons every consumer that sorts checkpoints by name.
+# Resume: "most recent" resolves by file MTIME (ls -t), never filename
+# sort; an explicitly named checkpoint always wins; a supersession banner
+# is followed forward. The paired commands/*.md stay thin pointers (the
+# frontmatter desc is the routing key shared by both surfaces - any desc
+# edit moves the command files in the golden diff too). All pinned
+# substrings are single rendered lines, immune to the ~79-col body wraps.
+# ---------------------------------------------------------------------------
+_ckpt33 = _body_of(_gplan, ".claude/skills/checkpoint/SKILL.md")
+_res33 = _body_of(_gplan, ".claude/skills/resume/SKILL.md")
+check("X-33: checkpoint skill emitted", _ckpt33 is not None)
+check("X-33: resume skill emitted", _res33 is not None)
+check("X-33: checkpoint stamps from the clock (exact command)",
+      _ckpt33 is not None and "date -u +%Y-%m-%dT%H%MZ" in _ckpt33)
+check("X-33: checkpoint says WHY (stamps ran ahead of true UTC; name-sort "
+      "consumers poisoned)",
+      _ckpt33 is not None and "ahead of true UTC" in _ckpt33
+      and "sorts" in _ckpt33)
+check("X-33: resume resolves most-recent by file MTIME, with the exact "
+      "ls -t pipeline",
+      _res33 is not None and "by file MTIME" in _res33
+      and "ls -t .claude/sessions/*-checkpoint.md | head -1" in _res33)
+check("X-33: resume forbids filename sort",
+      _res33 is not None and "filename sort" in _res33)
+check("X-33: explicitly named checkpoint always wins",
+      _res33 is not None
+      and "explicitly named checkpoint always wins" in _res33)
+check("X-33: resume follows a supersession banner forward",
+      _res33 is not None and "supersession banner" in _res33)
+# Silent-fallback tripwire: _SKILL_BODIES.get(name, desc) reverts a
+# typo'd key to the one-liner - the frontmatter desc must ALSO stay
+# byte-identical (routing key, shared with commands/*.md).
+check("X-33: checkpoint frontmatter description unchanged",
+      _ckpt33 is not None and
+      "description: Write a structured session synopsis to "
+      ".claude/sessions/<timestamp>-checkpoint.md." in _ckpt33)
+check("X-33: resume frontmatter description unchanged",
+      _res33 is not None and
+      "description: Load the most recent checkpoint (or a chosen one)."
+      in _res33)
+_ckpt33_cmd = _body_of(_gplan, ".claude/commands/checkpoint.md")
+_res33_cmd = _body_of(_gplan, ".claude/commands/resume.md")
+check("X-33: commands stay thin pointers, no rule duplication",
+      _ckpt33_cmd is not None
+      and "Invoke the `checkpoint` skill." in _ckpt33_cmd
+      and "date -u" not in _ckpt33_cmd
+      and _res33_cmd is not None
+      and "Invoke the `resume` skill." in _res33_cmd
+      and "ls -t" not in _res33_cmd)
+check("X-33: commands keep the explicit-only note",
+      _ckpt33_cmd is not None and "Explicit-only" in _ckpt33_cmd
+      and _res33_cmd is not None and "Explicit-only" in _res33_cmd)
+
+# ---------------------------------------------------------------------------
 # GR2-02 (v2.4.0 fold): trajectory retention is a comment-contract in the
 # shared per-task wrapper skeleton (loop.sh + goal-loop.sh), no new file.
 # Two non-overlapping markers (AR-01 class): the retention item via the path

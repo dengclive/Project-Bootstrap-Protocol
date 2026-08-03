@@ -318,6 +318,7 @@ python3 tests/test_ic_gate.py             # IC-1..IC-7 gate + changelog tripwire
 python3 tests/test_sdk_gates.py           # IC-5 SDK gate module
 python3 tests/test_usage_limit_contract.py # 2.2.0 usage-limit comment contract
 python3 tests/test_worktree_command_compat.py # W-1 isolation vs. command cwd
+python3 tests/test_issue_fixes.py         # X-30..X-33 (issues #30-#33)
 ```
 
 Per-suite check counts are deliberately not listed here — they move with

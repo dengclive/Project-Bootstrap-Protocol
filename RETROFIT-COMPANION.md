@@ -235,10 +235,10 @@ If you're retrofitting one of several projects you maintain, certain conventions
 | Drift alert tier 2 (insistent chime) | Plan to checkpoint within 10 min |
 | Drift alert tier 3 (firm chime, **enforced**) | Mandatory: agent writes `<timestamp>-checkpoint.md` (auto-blocked from other tool calls); operator runs `/clear` then `/resume`. `/ack-drift` does not dismiss tier 3. |
 | Task-done chime | Subagent finished — review output when convenient |
-| Decision-required alarm | Agent is blocked — respond now; check `.claude/sessions/.decision-pending-*` for details |
+| Decision-required alarm | Agent is blocked — respond now; check `.claude/sessions/.decision-pending-*` for details. **[X-30]** True only on installs carrying the fix: through 2.6.1 the alarm hook truncated that file on every fire, so it was always 0 bytes. The retrofit overlay reuses the greenfield alarm body, so the fix reaches retrofit installs unchanged. |
 | Spec turns out to be wrong | Bump spec version (R8.D protocol) |
 | Hook blocks me | Read the message; either fix the underlying issue or escalate per `CLAUDE.md` |
-| Want to add a dependency | Confirm in-session; bootstrap updates `deps.md` |
+| Want to add a dependency | Approve it and **write it into `deps.md` in the same change** — the gate reads that file and nothing else, so an in-session "yes" on its own does not unblock the install |
 | Need quiet for focus work | `/quiet 2h` mutes audio for 2 hours; visual notifications continue |
 | Equivalence checklist has ✗ items | Return to relevant phase before R7 completes |
 | 30/60/90-day baseline review | Re-measure metrics from `inventory/baseline-metrics.md`; track drift rate + spec coverage growth |

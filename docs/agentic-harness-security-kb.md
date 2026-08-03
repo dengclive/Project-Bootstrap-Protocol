@@ -11,10 +11,20 @@ v2.5.0 → v2.6.0 delta this was compiled from stays legible as a delta.
 
 **Amended again 2026-07-31**, from issue #29 (W-1) against 2.6.1: a **seventh**
 pattern, §4.7 — two individually-correct features composing into a fail-open,
-with no owner of the pair. It is a new *class*, not a new member of the delta;
+with no owner of the pair.
+
+**Amended a third time 2026-07-31, revised 2026-08-03**, from issues #30–#33
+against 2.6.1: an **eighth** (§4.8 — a normative instruction and its enforcement
+contradicting each other, both halves green because each was tested only against
+itself) and a **ninth** (§4.9 — relaxing a deny-list control is a security
+change, *and sometimes cannot be done*: two over-refusal fixes were attempted
+over four rounds, found 4 → 6 → 12 → ~20 blocking fail-opens, and were
+**removed**, with the deny-direction hardening from those rounds kept).
+
+All four post-tag patterns are new **classes**, not new members of the delta;
 the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
-and describe v2.5.0 → v2.6.0 only. So §4 now carries **seven** patterns: five
-compiled from the delta, two added post-tag.
+and describe v2.5.0 → v2.6.0 only. So §4 now carries **nine** patterns: five
+compiled from the delta, four added post-tag.
 
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
@@ -776,10 +786,10 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Fourteen defects, seven recurring shapes — five from the v2.5.0 → v2.6.0 delta
-and two added post-tag (§4.6 from P0-3d, §4.7 from W-1, which is a class the
-delta contains no member of). If this document is read for one section, this is
-it.
+Fourteen defects, nine recurring shapes — five from the v2.5.0 → v2.6.0 delta
+and four added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
+five issues filed against 2.6.1, which contribute classes the delta contains no
+member of). If this document is read for one section, this is it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
 
@@ -953,6 +963,154 @@ a green gate on uncompiled code and is *silent*. When both options are bad,
 prefer the one that announces itself — and pay the cost explicitly rather than
 declaring it (here: `max_concurrent_tasks` drops to 1 in the emitted queue
 config, with the reason in-file, instead of a doc note nobody reads).
+
+### 4.8 A normative instruction and its enforcement can contradict each other, and per-half tests will not notice `[+2026-07-31]`
+
+X-30 (issue #30). Not a delta member; recorded for the class.
+
+The protocol **instructs the agent**, in two normative places, to write four
+fields — timestamp, escalation reason, what it was about to do, what input it
+needs — into `.claude/sessions/.decision-pending-<session-id>`. The protocol's
+**own emitted hook** ran, on every fire:
+
+```sh
+: >"$P" 2>/dev/null || true
+```
+
+An unconditional truncate. **A conforming agent and a conforming hook could not
+both be right.** Measured on a real install: all eight `.decision-pending-*`
+files were 0 bytes.
+
+The consequence is not tidiness. The file is the operator's only record of *why*
+an unattended overnight run stopped, and the protocol builds on it explicitly —
+*"the operator returns to a halted loop with the decision-pending file **ready
+for action**."* Ready for action was a zero-byte file: a filename, and nothing
+else, at exactly the moment the halt exists to deliver the reason.
+
+**Why every test passed.** Each half was correct *against itself*. The hook's
+tests asserted it fires, exits 0, sweeps stale sentinels, and namespaces by
+session — all true. The doc's reviewers checked the instruction was clear — it
+was. Nothing tested the *pair*, because a pair has no owner: the instruction
+lives in the doc-emission phase, the truncate in the hook body, and neither
+file mentions the other.
+
+| what was verified | what nobody verified |
+|---|---|
+| the hook fires and exits 0 | that what the agent wrote is still there afterward |
+| the instruction is unambiguous | that anything honors it |
+| the sentinel is swept after 7 days | that it carries a payload before then |
+
+**Rule:** for every artifact one component *writes* and another *manages*, write
+down which component owns its **contents** — separately from who owns its
+existence and its lifecycle. Then test the round trip: write the documented
+payload, run the manager, assert the payload survives. Here existence (the alarm
+cue) and mtime (the 7-day sweep) were genuinely load-bearing; contents were
+not read by anything, so the truncate looked free. It was free to the *code* and
+expensive to the *operator*, which is a cost no code-level test measures.
+
+**Corollary — "it looks deliberate" is not a reading, it is a guess.** The
+truncate sat between `mkdir -p` and a `find -mtime +7 -delete`, so it read as
+latch-or-lifecycle machinery. The issue said so, and honestly flagged the
+inference as unverified. Settling it took one question with a checkable answer:
+*does anything read this file's contents, or key on its emptiness?* Nothing did
+— so the truncate was collateral, the hook was the wrong half to keep, and the
+documented contract could stand. Ask what **reads** the thing before deciding
+what may destroy it.
+
+### 4.9 Relaxing a deny-list control is a security change — and sometimes the honest outcome is that it cannot be done `[+2026-07-31, revised 2026-08-03]`
+
+X-31 and X-32 (issues #31, #32). The most transferable lesson in this document,
+and the one it cost the most to learn. **Read the ending first: after four
+rounds the relaxations were REMOVED, not shipped.**
+
+Both issues were **usability** reports, filed responsibly, each erring in the
+safe direction:
+
+- `secrets-gate` refused `rg -g '!*.pem'` — a **negated** glob that *excludes*
+  the protected path. It refused a command that reads strictly fewer files than
+  the bare `rg` it allowed.
+- `dependency-gate` refused `curl … | python3 -c '<script>'` — where `-c`
+  supplies the program and the fetched bytes are **data on stdin**. `curl … |
+  python3` with no program argument is genuine RCE and must keep blocking.
+
+Both are real defects. Both have clean workarounds the issues name themselves.
+And implementing either exemption means **widening a deny-list control**, which
+is a security change no matter how it was filed.
+
+**What four rounds of trying looked like.** Each round closed every finding on
+its list, declared success, and was proved wrong by the next adversarial pass:
+
+| round | blocking fail-opens found | representative |
+|---|---|---|
+| 1 | 4 | sticky arm exempts a run of tokens; command-agnostic arm |
+| 2 | 6 | `rg -g '\!*.pem'` — a backslash makes it a **positive** glob |
+| 3 | 12 | `python3 -m code` — `-m` names a module, and `code` is a stdin REPL |
+| 4 (architectural) | ~20 | `node -p`; a trailing `#` comment; a subshell |
+
+Round 4 was not another patch pass. It went after the *primitives* — routing
+both walks through the shared command-position model, canonicalizing the write
+set into paths, widening the writer set, fixing the tokenizer. It was the right
+diagnosis and it still did not converge, because the exemption's precondition is
+**"parse this shell command the way bash and then ripgrep/CPython will"**, and a
+gate that must answer that question exactly has taken on an adversary's whole
+grammar.
+
+**The decision, and the shape worth copying.** The relaxations were removed; the
+**deny-direction hardening from the same rounds was kept.** That split is the
+point: those rounds were not wasted. Measured against a pristine v2.6.1 install,
+the hardening closed five pre-existing fail-opens that had nothing to do with the
+exemptions —
+
+```
+curl … 2>&1 | sh        2.6.1 ALLOW -> DENY
+curl … |<newline>sh     2.6.1 ALLOW -> DENY
+curl … | \sh            2.6.1 ALLOW -> DENY
+curl … | 'sh'           2.6.1 ALLOW -> DENY
+curl … | ${SHELL}       2.6.1 ALLOW -> DENY
+```
+
+— while the three the exemptions had opened (`node -p`, trailing comment,
+subshell) went away with them. **Net: strictly stronger than before, and the
+issues answered by a refusal message that names the workaround**, which is what
+both issues actually asked for in their Impact sections.
+
+**Rule:** before widening a control, decide what you will do if it does not
+converge, and set a round budget. A widening that needs the attacker's full
+grammar is not a patch, it is a parser — price it that way. When the budget is
+spent, the honest fix for an over-refusal is often a **better refusal**: it
+costs nothing, cannot fail open, and addresses the actual complaint, which is
+usually that the operator could not tell what to do next.
+
+**Corollary 1 — a wrong pin is worse than no pin.** One under-block was asserted
+as *correct* in four suites at once. A green suite was actively defending the
+defect, and repairing it **required editing the pins**. A test written from the
+same misunderstanding as the code does not catch the code; it ratifies it. When
+a fix and its tests are authored together from one premise, the premise is what
+needs review — not the diff.
+
+**Corollary 2 — ambiguity the substrates cannot resolve identically goes
+fail-closed.** The shell tokenizer genuinely cannot separate `rg -g \!*.pem`
+(shell eats the backslash → negation) from `rg -g '\!*.pem'` (backslash survives
+→ positive glob); both arrive identical. Where one substrate has information the
+other cannot get, the tempting move is to discard it for parity. Discard it
+*toward deny*. Parity bought by throwing away the safer substrate's knowledge is
+parity at the permissive bound.
+
+**Corollary 3 — comments that claim completeness are load-bearing and were
+false.** *"EVERY redirect spelling"* and *"EVERY file a stage downstream of the
+downloader writes"* were both written in good faith and both wrong (`>|` was
+eaten by the stage splitter; `dd of=` and `sponge` were not writers to the code).
+A future reader trusts a comment like that instead of re-deriving the set, so an
+overclaiming comment is a defect with a delayed fuse. Enumerate what is covered,
+or say "these three shapes" and record the rest as residue.
+
+**Corollary 4 — measure a security change against the previous release, not
+against your own last commit.** The question that ended this episode was not
+"did we close our findings" — every round could say yes — but *"is there any
+payload the last release denied that we now allow?"* That diff is cheap
+(`git worktree add` the tag, install both, run one corpus through both), it is
+unarguable, and it should gate any change to a control. Adopted here as a
+release criterion.
 
 ---
 
@@ -1246,6 +1404,14 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Mutation is re-run against a **repaired check**, not only against repaired code — a fix to a test can reproduce the defect it was fixing. `[+2026-07-31]`
 - [ ] A verification control is proven to run against **the tree the work happened in**. Anything reaching its code through a fixed mount or a remote shell (`docker compose exec`, `kubectl exec`, `ssh`) ignores the caller's directory, so a control paired with per-task worktrees can verify a tree nobody edited. Probe it (`… exec -T <svc> pwd` from inside the worktree) rather than assuming. `[+2026-07-31]`
 - [ ] For any two features touching the same execution, the requirement each places on the other is written where **both** are read from — or the dependent feature refuses to switch on while the precondition is unstated. Per-feature review cannot see a pair. `[+2026-07-31]`
+- [ ] For every artifact one component **writes** and another **manages**, ownership of its *contents* is written down separately from ownership of its *existence* and *lifecycle* — and the round trip is tested: write the documented payload, run the manager, assert the payload survives. `[+2026-07-31]`
+- [ ] Before any code is allowed to destroy state, the question *"what reads this, and does anything key on its emptiness?"* is answered by inspection, not inferred from surrounding code that looks like lifecycle machinery. `[+2026-07-31]`
+- [ ] Every **widening** of a deny-list control is reviewed as a new control: the original corpus is re-run *and* the new allowance is fuzzed specifically, because the exemption's own guardrails are the surface the widening created. "The error is in the safe direction" describes the bug, never the fix. `[+2026-07-31]`
+- [ ] Every widening carries a **round budget decided in advance**, and an answer to "what if it does not converge". A widening that needs the attacker's full grammar is a parser, not a patch — price it that way, and remember that the honest fix for an over-refusal is often a better *refusal*. `[+2026-08-03]`
+- [ ] No release of a control ships without the **previous-release diff**: install the last tag and the candidate, run one corpus through both substrates of both, and require the "previously denied, now allowed" set to be empty. Cheap, unarguable, and it is the check that ends arguments about whether a fix converged. `[+2026-08-03]`
+- [ ] Where two substrates cannot resolve a spelling identically, the tie is broken **toward deny** — parity bought by discarding the better-informed substrate's knowledge is parity at the permissive bound. `[+2026-07-31]`
+- [ ] A fix and its tests authored from one premise get the **premise** reviewed, not just the diff — a pin written from the same misunderstanding as the code ratifies the defect under a green banner. `[+2026-07-31]`
+- [ ] Comments claiming completeness ("every redirect spelling", "every file a stage writes") are treated as assertions and verified, or downgraded to the enumerated subset with the remainder recorded as residue. `[+2026-07-31]`
 
 **Fail-closed**
 - [ ] Every dispatch has an explicit deny arm; no `case` falls through to allow.

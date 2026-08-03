@@ -1465,12 +1465,12 @@ Write `CLAUDE.md` at repo root with:
   - **🔔** A secret or credential is encountered in code or output.
   - **🔔** The implementation reveals the spec was wrong (triggers spec-versioning protocol).
   - The active spec version has changed since the task started.
-  - The drift detector has fired Alert 3 (firm). **Tier 3 is enforced** (standard as of the BOOTSTRAP v1.9.0 this protocol targets): the agent writes `.claude/sessions/<timestamp>-checkpoint.md` with the standard synopsis schema, and is then hard-blocked from further tool calls until the operator runs `/clear`. The agent's responsibility is to produce a complete, useful checkpoint promptly; the operator's responsibility is to run `/clear` and `/resume`. `/ack-drift` does not dismiss tier 3.
+  - The drift detector has fired Alert 3 (firm). **Tier 3 is enforced** (standard as of the BOOTSTRAP v1.9.0 this protocol targets): the agent writes `.claude/sessions/<timestamp>-checkpoint.md` with the standard synopsis schema (**[X-33]** `<timestamp>` from the clock — `date -u +%Y-%m-%dT%H%MZ` — never from model memory), and is then hard-blocked from further tool calls until the operator runs `/clear`. The agent's responsibility is to produce a complete, useful checkpoint promptly; the operator's responsibility is to run `/clear` and `/resume`. `/ack-drift` does not dismiss tier 3.
   - **Retrofit-specific 🔔** Modifying a file in the legacy allowlist without first creating a spec via touch-based backfill.
   - **Retrofit-specific 🔔** *(v1.3)* Modifying a file in `inventory/danger-zones.md` without first generating a `legacy-pin-test` (or for AI/agent prompt files, a `prompt-pinning-eval`).
   - **Retrofit-specific (in-chat only)** A categorization in `tech.md` looks wrong in light of new evidence (the operator should review and possibly update R2 categorizations).
 
-- When triggering the decision-required alarm, the agent writes to `.claude/sessions/.decision-pending-<session-id>` with: timestamp, escalation reason, what the agent was about to do, what input it needs.
+- When triggering the decision-required alarm, the agent writes to `.claude/sessions/.decision-pending-<session-id>` with: timestamp, escalation reason, what the agent was about to do, what input it needs. **[X-30]** The retrofit overlay reuses the greenfield `decision-required-alarm` body unchanged, so the never-truncate requirement (`Bootstrap-Protocol-v2-6-0.md` §6.E) reaches retrofit installs identically: the hook creates the file if absent and refreshes its mtime, and never blanks it. Through 2.6.1 it truncated on every fire, which made this instruction unsatisfiable in both modes.
 
 Keep under **100 lines** — substantial retrofit content (extracted operational rules, complexity tiers, workflow definitions) goes in steering docs and skill files, not here. CLAUDE.md is the thin index, not the encyclopedia.
 

@@ -136,9 +136,11 @@ def _deps(cfg):
     lines = "\n".join(f"- `{d}`" for d in approved) or "_(none yet)_"
     return f"""# Dependency Policy
 
-New runtime/build dependencies must be on this list or explicitly approved
-in-session (which then updates this file). The dependency gate hook enforces
-this at install-command time.
+New runtime/build dependencies must appear on this list before the
+dependency gate will allow the install command. Approving one in-session is
+the operator's decision, not a channel the gate can see: the gate reads this
+FILE and nothing else, so the approval has to be written here in the same
+change and the command retried.
 
 ## Approved
 
@@ -164,9 +166,22 @@ refuses, read the refusal - it names which of these fired:
   Set the index in the project's own package-manager config instead.
 - **A requirements or constraints FILE.** `-r requirements.txt` installs
   names this gate cannot read. Install them explicitly, or approve them here.
-- **A remote script.** `curl ... | sh`, downloading a script and then running
-  it, and `deno run <url>` all arrive as unapproved software with no
-  inspectable name. Vendor it, review it, then run it.
+- **Downloaded bytes piped into an interpreter.** `curl ... | sh`,
+  `curl ... | python3 -c '<prog>'` and every other shape that pipes a fetch
+  into an interpreter are refused, and the reason is not "you are installing
+  something": this gate cannot tell a fetched PROGRAM from fetched DATA,
+  because both arrive as the same bytes on the same stdin. Two ways out,
+  depending on which you actually have. If the bytes are **DATA**, write
+  them to a file first (`curl -o f URL`) and read the file, or fetch with a
+  dedicated tool - the refusal disappears because the fetch and the read are
+  now two separable steps. If the bytes are a **PROGRAM**, vendor it, review
+  it, then run it explicitly.
+- **A downloaded file that is then run.** `curl ... -o setup.sh && sh
+  setup.sh` is the same arrival channel with a file in the middle, and
+  `deno run <url>` skips the file entirely. Both bring in unapproved
+  software with no inspectable name. Here you really are running a
+  downloaded program, so there is one way out: vendor it, review it, then
+  run it explicitly.
 - **A run-without-installing channel.** `npx`, `uvx`, `pnpm dlx`,
   `yarn create`, `npm init <pkg>`, `pipx run`, `uv tool run`,
   `uv run --with <pkg>` fetch and EXECUTE a package. Not installing it first
@@ -183,8 +198,29 @@ def _secrets(cfg):
 
 {paths}
 
-The secrets gate hook blocks Read/Write/Edit on these paths. Unlike other
-gates this one blocks mid-plan by design - secret exposure is catastrophic.
+The secrets gate hook blocks these paths on `Read`, `Write`, `Edit`,
+`NotebookEdit`, `Grep` and `Glob` - and on `Bash`, where the command is
+tokenized the way a shell would (split on unquoted whitespace, quoted runs
+joined into one argument) and every argument is tested as a candidate path.
+The `Bash` surface is the one that matters in practice: without it
+`cat .env`, `grep -r . secrets/` and `git diff -- '*.pem'` each read a
+protected path while this file told the operator they could not. Unlike
+other gates this one blocks mid-plan by design - secret exposure is
+catastrophic.
+
+## When the gate refuses a search you believe is safe
+
+**This gate matches the PATH YOU NAMED, not your intent.** A negated glob
+still names the protected path, so `rg -g '!*.pem' TODO` is refused even
+though it would read strictly fewer files than the bare `rg` the gate
+allows. The gate will not read that negation as safe, because doing so means
+reproducing the search tool's own flag grammar exactly, and a gate that
+guesses wrong here fails open on the one class of file it exists to protect.
+
+**Scope POSITIVELY instead.** Name what you DO want to read -
+`rg -g '*.md' TODO` - and the protected paths are excluded structurally,
+with nothing for the gate to parse. This is the workaround the refusal
+message names.
 
 ## On encountering a secret in code
 
@@ -508,6 +544,158 @@ jget(){
     fi
   fi
   hook_fail "no WORKING JSON parser (need jq or python3; one may be present but broken)"
+}
+
+# --- [round-4 P4] ONE command read, ONE normalization ---------------------- #
+#
+# The full argument is written once, in lib/cmdpos.py's `normalize_command`
+# docstring block; `_join_cont` is a transcription of it and the SDK's
+# `_cmd_norm` is the other. In short: the string these gates tokenize must be
+# the string bash would execute.
+#
+#   1. `\\`+NEWLINE PAIRS GO. A bash line continuation is not two characters,
+#      it is nothing at all. Every walk here splits on whitespace, so the pair
+#      survived as a LONE BACKSLASH token that is non-empty but strips to the
+#      empty string - round-4 finding 10 (`curl u | python3 \\<nl>-m code`
+#      allowed on this substrate, denied on the SDK, live RCE under real
+#      bash), finding 11 (the pair adjacent to a redirect operator lost the
+#      launder-then-run deny), finding 13 (a trailing pair glued to a
+#      protected path defeated the END-anchored `*.pem` glob on the SDK) and
+#      finding 14 (a pair after the pipe hid the interpreter from the trigger
+#      on BOTH substrates). Four spellings, one defect; removing the pair
+#      first is the root-cause fix, and teaching four walks about
+#      continuations is the spelling fix rounds 1-3 kept losing.
+#   2. TRAILING NEWLINES GO. Not a choice here - jget's own read is a command
+#      substitution and eats them - so the SDK matches this rather than the
+#      two normalizers disagreeing about a byte no command needs.
+#   3. TRAILING BACKSLASHES GO, ALL OF THEM. This step exists BECAUSE of step
+#      2's asymmetry, and the GENERATED corpus is what found it: `$( )` eats
+#      the newline of a TRAILING continuation before any of this code runs,
+#      leaving a lone `\\` glued to the last word, so `curl u | sh<nl-cont>`
+#      arrived as `curl u | sh\\`, matched `(sh)( |$)` nowhere and ALLOWED.
+#      Verified under real bash - the fetched bytes ran. Stripping ALL of them
+#      is what makes this commute with step 2, so the two substrates land on
+#      the same string from their two different inputs. A command that
+#      legitimately ends in a backslash loses an escape at end-of-string only:
+#      the over-match (deny) direction for every consumer.
+#   4. VT/FF/CR BECOME SPACES. `norm_cmd` already did this for the four gates
+#      that call it; secrets-gate's walk and the SDK's `[ \t]+` collapse did
+#      not, so `curl u |<VT>sh` denied HERE and allowed on the SDK - the
+#      forbidden direction - while `cat<CR>secrets/prod.yaml` did the reverse.
+#      AFTER step 1: in a CRLF file the CR sits between the backslash and the
+#      newline, and `\\`+CR is an escaped CR, not a continuation.
+#
+# The join is UNCONDITIONAL, including inside single quotes, where bash keeps
+# both characters literally. That is a real divergence from bash and it is
+# recorded residue: the direction is over-match for candidate matching, and a
+# conditional join would need a quote parser upstream of the quote parsers
+# this feeds. A TAB is deliberately untouched: it is already an IFS character
+# on both substrates.
+#
+# Returns through the global `_CMD_R`, never through stdout - a `$( )` helper
+# on this path costs a fork per call [see _cs_esc_park].
+#   5. `$'` -> `'` AND `$"` -> `"`. [round-5 P4] ANSI-C and locale quoting are
+#      QUOTING CONSTRUCTS: the `$` is part of the quote, not a word character,
+#      and nothing in this suite modelled them. `cat important.pem$''` printed
+#      SECRET-KEY-MATERIAL, `cat $'secrets/prod.yaml'` printed the secret and
+#      `curl u | sh$''` ran the fetched bytes - allow on BOTH substrates and
+#      BOTH gates, and two spellings of it were REGRESSIONS against 2.6.1
+#      (`... tee a.sh$'' | python3 -c 'x' ; sh a.sh`). Removing the `$` leaves
+#      an ORDINARY quoted run that every tokenizer downstream already handles,
+#      which is why it belongs here rather than as a `$'` case in each of the
+#      five walks that key on a word. The escape sequences INSIDE such a run
+#      are left literal - recorded residue, and the over-match direction.
+#   6. A NEWLINE AFTER `|` OR `&&` IS A LINE JOIN, NOT A TERMINATOR.
+#      [round-5 P1] `curl u |<LF>sh` is one pipeline in bash and it ran the
+#      fetched bytes while both substrates allowed: this substrate segments on
+#      newline so the two halves never met, and the SDK's trigger joins the
+#      pipe to the interpreter with spaces only. Round-4 F14 fixed the
+#      BACKSLASH-newline spelling of exactly this and left the bare newline
+#      open. A LONE `&` is NOT joined - `cmd &<LF>other` really is
+#      backgrounding then a new command - so only the `&&` pair is a join.
+#      Blanks before the newline go first and the loop runs to a FIXPOINT, so
+#      `|<LF><LF>sh` (bash accepts blank lines there) reduces too.
+_CMD_R=""
+_join_cont(){
+  # The ANSI-C / locale quote OPENERS as literals a `${//}` pattern can carry:
+  # a bare `$'` cannot be written inside the double quotes these substitutions
+  # need. LOCAL rather than file-scope constants, deliberately - the
+  # differential suite extracts THIS FUNCTION ALONE from the emitted hook and
+  # runs it in a bare bash, so everything it depends on has to be inside it.
+  local _jc_prev
+  local _nc_asq=$'$\\'' _nc_adq='$"' _nc_sq="'" _nc_dq='"'
+  _CMD_R="${1:-}"
+  _CMD_R="${_CMD_R//\\\\$'\\n'/}"
+  _CMD_R="${_CMD_R//"$_nc_asq"/"$_nc_sq"}"
+  _CMD_R="${_CMD_R//"$_nc_adq"/"$_nc_dq"}"
+  while : ; do
+    case "$_CMD_R" in
+      *$'\\n') _CMD_R="${_CMD_R%$'\\n'}" ;;
+      *) break ;;
+    esac
+  done
+  while : ; do
+    case "$_CMD_R" in
+      *\\\\) _CMD_R="${_CMD_R%\\\\}" ;;
+      *) break ;;
+    esac
+  done
+  _CMD_R="${_CMD_R//$'\\v'/ }"
+  _CMD_R="${_CMD_R//$'\\f'/ }"
+  _CMD_R="${_CMD_R//$'\\r'/ }"
+  while : ; do
+    _jc_prev="$_CMD_R"
+    _CMD_R="${_CMD_R// $'\\n'/$'\\n'}"
+    _CMD_R="${_CMD_R//$'\\t'$'\\n'/$'\\n'}"
+    # QUOTED replacements: since bash 5.2 an UNQUOTED `&` in a `${//}`
+    # replacement means THE MATCHED TEXT, so `/&& /` would put the newline
+    # straight back. Same trap _xp_unpark documents.
+    _CMD_R="${_CMD_R//|$'\\n'/'| '}"
+    _CMD_R="${_CMD_R//&&$'\\n'/'&& '}"
+    if [ "$_CMD_R" = "$_jc_prev" ]; then break; fi
+  done
+  return 0
+}
+# _read_cmd -> the tool event's Bash command, normalized, RETURNED THROUGH THE
+# GLOBAL `_CMD_R`. THE ONLY SANCTIONED WAY to read `.tool_input.command`: a
+# gate that calls `jget` directly gets an un-normalized string and re-opens the
+# class above. tests/test_issue_fixes.py greps the emitted tree for any read
+# site that is not this one.
+#
+# NOT `printf`, and the call sites read the global rather than wrapping this
+# function in a command substitution [measured]. jget's no-parser path is
+# `hook_fail`, i.e. `exit 2`, and it already runs one level down inside
+# `$(jget ...)`; wrapping THAT in a SECOND command substitution puts the exit
+# two subshells below the script, where `set -e` unwinds only as far as the
+# outer `$( )` and the hook returns 0 - upstream P0-3b's fail-open, reopened
+# by a convenience helper. Confirmed by execution: with neither jq nor python3
+# on PATH, the substitution form printed the BLOCKED line and exited 0, while
+# this form exits 2. A global costs no fork and keeps the substitution depth
+# exactly what it was before this helper existed.
+#
+# [batch 30-33 close pass] SECOND GLOBAL, `_CMD_UNFOLDED`: THE SPELLING THE
+# OPERATOR TYPED, and EMPTY whenever the fold changed nothing. The full
+# argument is in lib/cmdpos.py under "THE FOLD IS DENY-ONLY"; the short form is
+# that `_join_cont` is a fold, a fold is sound for a DENY list and unsound for
+# an ALLOW list, and this suite holds two allow lists (secrets-gate's dotenv
+# TEMPLATE carve-out and dependency-gate's `deps.approved`). A gate that
+# consults one judges BOTH spellings and refuses if either refuses; the
+# unfolded pass feeds the walk exactly the string 2.6.1 fed it, so the union
+# is a superset of 2.6.1's denies BY CONSTRUCTION rather than by a list of
+# decoration characters kept in sync with the normalizer.
+#
+# EMPTY, not a copy, when the two agree: every consumer skips an empty
+# spelling, so the commands that carry no continuation and no ANSI-C quote -
+# which is nearly all of them - pay nothing, and this gate's 60 s fail-CLOSED
+# budget does not move.
+_CMD_UNFOLDED=""
+_read_cmd(){
+  local _rc_raw
+  _rc_raw="$(jget '.tool_input.command')"
+  _join_cont "$_rc_raw"
+  if [ "$_rc_raw" = "$_CMD_R" ]; then _CMD_UNFOLDED=""
+  else _CMD_UNFOLDED="$_rc_raw"; fi
+  return 0
 }
 
 # --- Command matching [upstream P1-4] -------------------------------------- #
@@ -863,6 +1051,35 @@ git_verb(){ cmd_has_verb "$1" "git" "$2"; }
 # `.replace` rather than an f-string: `_HOOK_HEADER` is 300 lines of shell and
 # making it an f-string would mean doubling every `${...}` in it, a diff with
 # far more risk than value.
+def _bash_case_words(words):
+    """A cmdpos word set as a bash `case` pattern list, with any member that
+    is not plain alphanumeric QUOTED.
+
+    cmdpos.FILE_RUNNERS carries `.` and cmdpos.COMPOUND_HEADS carries `{`, `(`
+    and `!`. A bare `(` in a pattern list is a bash SYNTAX ERROR - the emitted
+    hook would not parse at all - and `!` is only safe by accident. Quoting is
+    what makes a word set safe to grow without re-deriving this each time.
+    """
+    return "|".join(w if w.isalnum() else '"%s"' % w for w in words)
+
+
+def _writer_attached_arms(indent: str) -> str:
+    """[round-5 P3] cmdpos.WRITER_FLAGS as bash `case` arms for the ATTACHED
+    spelling, generated so the two substrates cannot know different sets.
+
+    A short flag glues its value (`-oNAME`); a long one glues it with `=`
+    (`--output=NAME`). `?*` rather than `*` so a bare flag - whose operand is
+    the NEXT token, and which the `_prev` arm already handles - does not
+    produce an empty target here.
+    """
+    arms = []
+    for f in cmdpos.WRITER_FLAGS:
+        pat = f + "=?*" if f.startswith("--") else f + "?*"
+        cut = f + "=" if f.startswith("--") else f
+        arms.append('%s) _XP_WFV="${_t#%s}" ;;' % (pat, cut))
+    return ("\n" + indent).join(arms)
+
+
 _SHELL_SUBST = {
     "@@INV_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_INVOKERS, "      "),
     "@@PFX_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_PREFIXES, "      "),
@@ -871,6 +1088,37 @@ _SHELL_SUBST = {
     "@@RUNNERS_ERE@@": cmdpos.runners_regex(),
     "@@DL_CASE@@": cmdpos.bash_case_alt(cmdpos.DOWNLOADERS, "      "),
     "@@INT_CASE@@": cmdpos.alt(cmdpos.INTERPRETERS),
+    # BODY-ONLY on purpose: not in _HEADER_PLACEHOLDERS, so the shared
+    # header's bytes do not move. SHELL_INT_CASE is the shells within
+    # INTERPRETERS; the D20 run scan reads it to tell a terminal shell from
+    # an ordinary interpreter.
+    "@@SHELL_INT_CASE@@": cmdpos.alt(cmdpos.INVOKERS),
+    # [X-32 repair F5] The DUAL words, needed as their own alternation: they
+    # are in ALL_PREFIXES, so the stage walk skipped them as transparent -
+    # but `xargs -I{} python3 -c {}` SUBSTITUTES the fetched line into the
+    # -c argument, so none of them is a stage this model can read.
+    "@@DUAL_CASE@@": cmdpos.alt(cmdpos.DUAL),
+    # [round-4 P1/P3] The four word sets the D20 walks were missing. BODY-ONLY,
+    # like the three above. `_bash_case_words` quotes any member that is not
+    # alphanumeric - `.`, `{`, `(` and `!` all reach a bash `case` pattern
+    # list, and an unquoted `(` there is a syntax error.
+    "@@FILE_RUNNER_CASE@@": _bash_case_words(cmdpos.FILE_RUNNERS),
+    "@@COMPOUND_CASE@@": _bash_case_words(cmdpos.COMPOUND_HEADS),
+    "@@INERT_CASE@@": _bash_case_words(cmdpos.INERT_FILTERS),
+    "@@WRITER_WORD_CASE@@": _bash_case_words(cmdpos.WRITER_WORDS),
+    "@@WRITER_FLAG_CASE@@": _bash_case_words(cmdpos.WRITER_FLAGS),
+    # [batch 30-33] SIX PLACEHOLDERS WERE DELETED HERE, all of them X-31:
+    # EXCL_GLOB_CASE, EXCL_GLOB_ATT_CASE, RG_BOOL_CASE, HEAD_KW_CASE,
+    # PFX_FREE_CASE (and, on the X-32 side, PROG_FLAG_CASE / STDIN_PATH_ERE /
+    # A0_META_ALT). Every one rendered a table that existed only to fence an
+    # exemption; the exemptions are gone and so are the tables.
+    # [round-5 P3] The ATTACHED writer-flag spellings, as `case` arms
+    # GENERATED from the one flag list rather than typed out: a short flag
+    # glues its value directly (`-oNAME`), a long one glues it with `=`
+    # (`--output=NAME`). The SEPARATED shape was the only one every consumer
+    # of WRITER_FLAGS knew, so `sort -oa.sh` laundered a fetch past the write
+    # capture and was then run.
+    "@@WRITER_ATT_ARMS@@": _writer_attached_arms("    "),
 }
 # The header carries the command-position model; the gate BODIES carry the
 # arrival-channel patterns. Both are filled from _SHELL_SUBST - the split is
@@ -1178,7 +1426,7 @@ exit 0
 # intent; harness, docs and config files are exempt because no spec will ever
 # name them. Edit ENFORCED_PREFIXES to match this project's layout.
 ENFORCED_PREFIXES='src/ lib/ app/ test/ tests/'
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "commit"; then
     PROJ="${CLAUDE_PROJECT_DIR:-.}"
@@ -1315,6 +1563,11 @@ _v="$(jget '.tool_input.pattern')"
 # call F-788 made for `pattern`, and for the same reason (`Glob{{"secrets"}}`
 # as a search must stay possible while `glob:"secrets/**"` must not).
 _v="$(jget '.tool_input.glob')"
+# [batch 30-33, issue #31] NO '!'-STRIP HERE. A `!`-leading glob was briefly
+# dropped from candidacy on the argument that it EXCLUDES files - the
+# structured-payload half of the X-31 exemption. It is gone with the rest of
+# that exemption, so `Glob{{"!secrets/**"}}` is a candidate again, exactly as
+# at 2.6.1.
 [ -n "$_v" ] && PAT_CANDIDATES+=("$_v")
 
 # --- Bash surface: a QUOTE-AWARE tokenizer ---------------------------------
@@ -1348,12 +1601,77 @@ _v="$(jget '.tool_input.glob')"
 _SG_CMDPOS=1
 _SG_INVOKER=0
 _SG_PFXSEEN=0
+# [batch 30-33, issue #31] THE X-31 STATE MACHINE LIVED HERE and is gone:
+# _SG_EXCLARM (the one-shot arm), _SG_EXCLOK (the rg command-word key),
+# _SG_EXCLHEAD (the bounded head slot), _SG_EXCLKNOWN (rg's `--` /
+# consuming-flag grammar), _SG_HADQ (the empty-quoted-token disarm) and
+# _SG_NOEXCL (the backslash and substitution vetoes). All six existed only to
+# decide whether a `!`-leading token could SKIP CANDIDACY; with the exemption
+# removed nothing asks, so `rg -g '!*.pem' TODO` denies exactly as at 2.6.1
+# and the refusal names the positive-scope workaround instead.
+# [round-4 P4, finding 15] 1 when the token being pushed is the fold of an
+# UNTERMINATED quote - the whole rest of the line as one candidate. That fold
+# is this tokenizer's answer to a shape bash itself rejects, and it is the
+# mirror image of the SDK's whitespace-split fallback: the SDK splits and saw
+# the secret path, this substrate folded and did not, so `cp 'tls.key ;` and
+# `rg -g '!*.pem secrets/prod.yaml` ALLOWED here and denied there. Reset at
+# every push. DENY-DIRECTION and kept: it is candidate GENERATION, not the
+# removed exemption - the fold hid a secret path from every END-anchored
+# pattern, and splitting it is what makes the tail reachable.
+_SG_UNBAL=0
 # [round-4 D5/D8] The queue of invoker arguments awaiting a re-parse. NOT
 # reset by _sg_scan - the driver owns it, so a recursive pass can add to it
 # while an outer pass is being drained.
 _SG_EXTRA=""
+# [round-4 P4, finding 15] The FOUR twin spellings of ONE argv word, appended
+# to the candidate list: raw, quote-stripped, backslash-stripped, and both.
+# This is the SDK's fallback twin set verbatim (_segment_candidates), and it is
+# emitted only on the unbalanced-quote path - which is exactly where that
+# fallback is the SDK's rule too, so the two produce the same candidate set
+# from the same input instead of two hand-matched approximations.
+#
+# All four, not just the endpoints: an INTERMEDIATE form can be the only one
+# that matches. `'.env\.example` fully stripped is the exempt template
+# `.env.example`, while its quote-stripped twin `.env\.example` is not a
+# template and DOES match the `.env*` family - so dropping the intermediate
+# would lose a deny.
+#
+# `if` blocks, not `&&` chains: a false `&&` list as the last command in a
+# function returns non-zero, which under this header's ERR trap is hook_fail.
+_sg_twins(){{
+  local _t="$1" _a _b _c
+  if [ -z "$_t" ]; then return 0; fi
+  CMD_CANDIDATES+=("$_t")
+  _a="${{_t//\\"/}}"; _a="${{_a//\\'/}}"
+  _b="${{_t//\\\\/}}"
+  _c="${{_a//\\\\/}}"
+  if [ -n "$_a" ] && [ "$_a" != "$_t" ]; then CMD_CANDIDATES+=("$_a"); fi
+  if [ -n "$_b" ] && [ "$_b" != "$_t" ] && [ "$_b" != "$_a" ]; then
+    CMD_CANDIDATES+=("$_b")
+  fi
+  if [ -n "$_c" ] && [ "$_c" != "$_t" ] && [ "$_c" != "$_a" ] \\
+     && [ "$_c" != "$_b" ]; then
+    CMD_CANDIDATES+=("$_c")
+  fi
+  return 0
+}}
+# [round-4 P4(f)] RAW-VS-STRIPPED AUDIT OF THIS WALK, stated once because one
+# such confusion in the SIBLING walk produced two blocking regressions. Every
+# spelling here was re-derived by reading, and each is deliberate:
+#   * `_w` (backslash-STRIPPED) drives `_b` for the whole cmdpos machine.
+#     ONE spelling for the whole machine is the round-2 F3 repair; a token
+#     that survives stripping as EMPTY takes the `*)` arm of every `case`
+#     below, which is the fail-closed default the sibling walk lacked.
+#   * `_CUR` (RAW) is what becomes a CANDIDATE, plus its backslash-stripped
+#     twin, plus (new) each whitespace piece of an unbalanced-quote fold.
+#     Candidacy is the over-match direction, so RAW-plus-twins is right here
+#     and the twins are additive, never replacements.
+#   * the invoker-argument queue tests `_CUR` RAW, ON PURPOSE: `_cs_esc_restore`
+#     has already turned an escaped space into a real one at the top of this
+#     function, so "contains whitespace" identifies exactly the quoted runs
+#     the re-parse rule is about.
 _sg_push(){{
-  local _lhs _b _w
+  local _lhs _b _w _sgu _sgu_arr=()
   if [ -n "$_CUR" ]; then
     # [round-4 D5] Un-park first, so everything below - the candidate, the
     # assignment arm, the command-position `case` and the whitespace test
@@ -1362,24 +1680,77 @@ _sg_push(){{
     # `sh -c pip\\ install\\ evil` reach the invoker rule at all: that shape
     # has no quoted run to notice.
     _cs_esc_restore "$_CUR"; _CUR="$_CS_R"
-    CMD_CANDIDATES+=("$_CUR")
-    # A backslash escapes the next character, so `cat .en\\v` names `.env`.
-    # Emitted as an ADDITIONAL candidate rather than a replacement: deny-list
-    # bias is over-match, and a path may legitimately contain a backslash.
-    case "$_CUR" in
-      *\\\\*) CMD_CANDIDATES+=("${{_CUR//\\\\/}}") ;;
-    esac
-    # `F=.env; cat $F` hides the path behind an expansion this gate cannot
-    # perform, but the ASSIGNMENT is in plain sight. Strictly shaped (a
-    # valid shell name, then `=`) so prose does not trip it.
-    case "$_CUR" in
-      [A-Za-z_]*=*)
-        _lhs="${{_CUR%%=*}}"
-        case "$_lhs" in
-          *[!A-Za-z0-9_]*) ;;
-          *) CMD_CANDIDATES+=("${{_CUR#*=}}") ;;
-        esac ;;
-    esac
+    _w="${{_CUR//\\\\/}}"
+    # [round-4 P4, finding 15] SPLIT, THEN JUDGE - the SDK's model, adopted
+    # here so the two agree by construction instead of by two matching edits.
+    # On an UNTERMINATED quote this tokenizer folds the rest of the line into
+    # ONE token; the SDK's fallback splits it on whitespace and judges each
+    # piece. The fold made the end-anchored patterns (`*.pem`, `*.key`)
+    # unreachable for anything but the FIRST word in it, so `cp 'tls.key ;`
+    # and `rg -g '!*.pem secrets/prod.yaml` allowed here and denied there.
+    #
+    # `_w` stays the fold for the cmdpos machine below; `_sgu_arr` carries the
+    # PIECES, which is what the end-anchored patterns need to reach.
+    _sgu_arr=()
+    if [ "$_SG_UNBAL" = "1" ]; then
+      set -f
+      read -ra _sgu_arr <<< "$_CUR"
+      set +f
+    fi
+    # [batch 30-33] UNCONDITIONAL. This block used to sit inside
+    # `if [ "$_sg_excl" = "0" ]` - the X-31 negated-glob exemption, which
+    # skipped candidacy for a `!`-leading token behind an rg glob flag. The
+    # exemption is removed, so every token becomes a candidate again.
+    if true; then
+      # [round-4 P4, finding 15] THE FOLD ITSELF IS NOT A CANDIDATE on the
+      # unbalanced path - it is a tokenizer artifact, not an argv word on
+      # either substrate, and pushing it caused the LAST divergence the
+      # generated corpus found: `cat '.env.example <cont>` folds to
+      # `.env.example ` with a trailing space, whose BASENAME is not the exact
+      # template name, so the QOT-23 dotenv exemption missed it and this
+      # substrate blocked a file whose entire purpose is to be read while the
+      # SDK allowed it. The pieces below carry everything the fold did.
+      if [ "$_SG_UNBAL" = "0" ]; then
+        CMD_CANDIDATES+=("$_CUR")
+        # A backslash escapes the next character, so `cat .en\\v` names `.env`.
+        # Emitted as an ADDITIONAL candidate rather than a replacement:
+        # deny-list bias is over-match, and a path may legitimately contain a
+        # backslash.
+        case "$_CUR" in
+          *\\\\*) CMD_CANDIDATES+=("${{_CUR//\\\\/}}") ;;
+        esac
+      fi
+      # `F=.env; cat $F` hides the path behind an expansion this gate cannot
+      # perform, but the ASSIGNMENT is in plain sight. Strictly shaped (a
+      # valid shell name, then `=`) so prose does not trip it.
+      case "$_CUR" in
+        [A-Za-z_]*=*)
+          _lhs="${{_CUR%%=*}}"
+          case "$_lhs" in
+            *[!A-Za-z0-9_]*) ;;
+            *) CMD_CANDIDATES+=("${{_CUR#*=}}") ;;
+          esac ;;
+      esac
+    fi
+    # [round-4 P4, finding 15] THE PIECES OF AN UNBALANCED FOLD, each its own
+    # candidate. `_sgu_arr` is non-empty only on that path, so a BALANCED
+    # quoted run is untouched - splitting one would restore lens B finding 4's
+    # prose false positives wholesale.
+    #
+    # Measured before: `cp 'tls.key ;`, `cat 'important.pem &` and
+    # `cp 'tls.key \\` all ALLOWED here and DENIED on the SDK.
+    # Each piece goes through `_sg_twins`, which emits the SAME FOUR
+    # spellings the SDK's fallback emits for the same token - raw,
+    # quote-stripped, backslash-stripped, both - so the two substrates build
+    # the same candidate set rather than two hand-matched approximations.
+    #
+    # [batch 30-33] EVERY piece, including piece 1. Piece 1 used to be skipped
+    # when the X-31 exemption had been granted on it; there is no exemption
+    # now, so there is nothing to skip.
+    for _sgu in ${{_sgu_arr[@]+"${{_sgu_arr[@]}}"}}; do
+      [ -n "$_sgu" ] || continue
+      _sg_twins "$_sgu"
+    done
     # --- COMMAND POSITION and the quoted-run rule [round-2 review] --------
     # The first token of a command decides how the quoted runs that follow
     # have to be read. `git commit -m "..."` takes PROSE; `sh -c "..."`
@@ -1392,7 +1763,27 @@ _sg_push(){{
     # discriminator cannot be a property of the RUN. Deciding it
     # STRUCTURALLY - on who the command is - is what lets both hold.
     if [ "$_SG_CMDPOS" = "1" ]; then
-      _b="${{_CUR##*/}}"
+      # [X-31 repair, round-2 F3] ONE spelling for the WHOLE machine:
+      # the backslash-STRIPPED basename. The first cut keyed rg off the
+      # stripped `_w` while every other arm of this machine judged the
+      # RAW `_CUR` basename - two transcriptions of one machine judging
+      # DIFFERENT STRINGS, and the SDK twin runs ALL of its tests on
+      # the stripped token (shlex has already eaten unquoted escapes
+      # before it looks). The split was live in both directions:
+      # `\\sudo rg -g '!*.pem' TODO` denied here and allowed on the SDK
+      # (the forbidden direction), and `\\sh -c 'cat secrets/prod.yaml'`
+      # - which bash EXECUTES as `sh`, reading the secret - closed
+      # cmdpos at the raw `\\sh`, skipped the invoker re-parse, and
+      # ALLOWED on this substrate only. Direction argument: for an
+      # UNQUOTED word the stripped spelling IS the executed spelling
+      # (bash removes the escape before exec), and a QUOTED backslash
+      # word names a program with a literal backslash in it - treating
+      # it as its stripped twin can only widen prefix/invoker tracking,
+      # which is the over-match (deny) direction. [batch 30-33] The one
+      # place the stripped reading used to be MORE permissive was the
+      # negated-glob exemption, which is gone, so this reduction is now
+      # over-match at every site that reads it.
+      _b="${{_w##*/}}"
       # [round-4 D1/D2/D7] ONE model, interpolated from lib/cmdpos.py - this
       # `case` and the shared header's _cs_isinv are now generated from the
       # same list. They were transcribed copies, and the copy that did not
@@ -1463,6 +1854,7 @@ _sg_push(){{
     fi
   fi
   _CUR=""
+  _SG_UNBAL=0
   return 0
 }}
 _sg_raw(){{                     # an UNQUOTED run: split on whitespace
@@ -1487,8 +1879,10 @@ _sg_raw(){{                     # an UNQUOTED run: split on whitespace
   _t="${{_t//</$'\\n'}}"; _t="${{_t//>/$'\\n'}}"
   while IFS= read -r _piece || [ -n "$_piece" ]; do
     if [ "$_pfirst" = "0" ]; then
-      _sg_push; _SG_CMDPOS=1; _SG_INVOKER=0
-      _SG_PFXSEEN=0
+      # Operators translate to newlines above, so this one site covers
+      # `;`, `&`, `|`, `(`, `)`, `<`, `>` and literal newlines, and the
+      # new command's word is judged afresh.
+      _sg_push; _SG_CMDPOS=1; _SG_INVOKER=0; _SG_PFXSEEN=0
     fi
     _pfirst=0
     if [ -n "$_piece" ]; then
@@ -1510,7 +1904,8 @@ _sg_raw(){{                     # an UNQUOTED run: split on whitespace
 }}
 _sg_scan(){{
   local _l="$1" _pre _q _rest _run _pd _ps
-  _CUR=""; _SG_CMDPOS=1; _SG_INVOKER=0; _SG_PFXSEEN=0
+  # Scan start and every depth-N recursion pass start at command position.
+  _CUR=""; _SG_CMDPOS=1; _SG_INVOKER=0; _SG_PFXSEEN=0; _SG_UNBAL=0
   while : ; do
     case "$_l" in *[\\"\\']*) ;; *) _sg_raw "$_l"; _sg_push; return 0 ;; esac
     _pd="${{_l%%\\"*}}"; _ps="${{_l%%\\'*}}"
@@ -1520,14 +1915,33 @@ _sg_scan(){{
     _rest="${{_l#*"$_q"}}"
     case "$_rest" in
       *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest#*"$_q"}}" ;;
-      *)       _run="$_rest"; _l="" ;;   # unterminated quote: take the rest
+      # [round-4 P4, finding 15] The fold is FLAGGED, not merely taken: the
+      # push below re-splits it on whitespace so an end-anchored pattern can
+      # still reach a secret path hidden in its tail (see _sg_push).
+      *)       _run="$_rest"; _l=""; _SG_UNBAL=1 ;;   # unterminated quote
     esac
     _CUR="$_CUR$_run"
     if [ -z "$_l" ]; then _sg_push; return 0; fi
   done
 }}
-_cmd="$(jget '.tool_input.command')"
-if [ -n "$_cmd" ]; then
+# [batch 30-33 close pass] ONE PASS OVER ONE SPELLING, called once per
+# spelling. The body below was the driver; it is a function now because this
+# gate holds an ALLOW LIST - the dotenv-TEMPLATE carve-out - and an allow list
+# may not be consulted on a FOLDED candidate only. See lib/cmdpos.py's "THE
+# FOLD IS DENY-ONLY" and `_CMD_UNFOLDED` in this header.
+#
+# Measured: without the second pass, `cat .env.example$''`,
+# `cat $''.env.example`, `cat .env.example\`, the `$""` twins of each and the
+# same six spellings of `.env.sample`/`.env.template`/`.env.dist`/
+# `.env.defaults` - 24 payloads a pristine 2.6.1 install DENIES - reached the
+# carve-out folded to the bare template name and were ALLOWED here.
+#
+# CANDIDATES accumulate across passes and a deny needs only one candidate, so
+# "refuse if either spelling refuses" needs no second verdict and no second
+# refusal path: it is one candidate list, filled twice.
+_sg_pass(){{
+  local _cmd="$1" _sg_depth _sg_queue _sg_item
+  if [ -z "$_cmd" ]; then return 0; fi
   # [round-2 review F-891] ONE scan over the WHOLE command, not one per
   # line. The per-line driver reset _CUR at every newline and treated an
   # unterminated quote as ending at the line end, so a quoted argument
@@ -1567,7 +1981,13 @@ if [ -n "$_cmd" ]; then
     done <<< "$_sg_queue"
     _sg_depth=$((_sg_depth + 1))
   done
-fi
+  return 0
+}}
+_read_cmd
+_sg_pass "$_CMD_R"
+# The spelling the operator typed, EMPTY when the fold changed nothing - so
+# the overwhelmingly common command pays for exactly one pass.
+_sg_pass "$_CMD_UNFOLDED"
 if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#PAT_CANDIDATES[@]}}" -eq 0 ] \
    && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
@@ -1683,7 +2103,20 @@ _sg_refuse(){{
   _t="${{_t//$'\\n'/ }}"; _t="${{_t//$'\\r'/ }}"; _t="${{_t//$'\\t'/ }}"
   while [ "$_t" != "${{_t//  / }}" ]; do _t="${{_t//  / }}"; done
   if [ "${{#_t}}" -gt 120 ]; then _t="${{_t:0:117}}..."; fi
-  echo "BLOCKED: $_t matches never-read pattern $_p" >&2
+  # [batch 30-33, issue #31] THE REFUSAL NAMES THE WAY OUT. #31's actual
+  # complaint is not that `rg -g '!*.pem' TODO` denies - it is that the text
+  # "does not hint at" the workaround the issue itself names. It does now.
+  #
+  # ONE LINE and the `BLOCKED: <candidate> matches never-read pattern
+  # <pattern>` prefix is byte-identical, so every existing log parse and every
+  # pinned prefix still matches; the actionable half is appended.
+  #
+  # The hint is worded for BOTH shapes this gate refuses. For a read
+  # (`cat .env`) the first sentence is the whole answer - the gate matched a
+  # path, and there is no negation that makes that path unnamed. For a search
+  # it names the positive scope, which excludes protected paths STRUCTURALLY
+  # rather than by a negation this gate would have to parse.
+  echo "BLOCKED: $_t matches never-read pattern $_p. This gate matches the PATH you named, not your intent - a negated glob (-g '!*.pem') still names it. To search while excluding secrets, scope POSITIVELY: rg -g '*.md' TODO" >&2
   log "secrets-gate BLOCK $_t"
   exit 2
 }}
@@ -1851,7 +2284,7 @@ exit 0
 # REMOVED WITH IT: the P2-5 staleness walk (absolute `find` over
 # src/lib/app/test/tests) and backlog I-5's shell-vs-SDK staleness
 # divergence - both were properties of a cache that no longer exists.
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "commit"; then
     echo "Running test gate: {cmd}" >&2
@@ -1912,7 +2345,7 @@ exit 0
         ci = c["ci_local"] or c["test"] or "true"
         return _HOOK_HEADER + f'''
 # PreToolUse git push: run the same checks CI runs, locally.
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "push"; then
   echo "CI mirror: {ci}" >&2
@@ -1980,7 +2413,7 @@ exit 0
 # Approved names stay in a quoted heredoc (S-5: never interpolated into
 # shell) but now land in an array rather than a mktemp file, which under
 # `set -e` could kill the gate at exit 1 = tool proceeds [upstream P0-3c].
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 mapfile -t APPROVED <<'APPROVED_EOF'
 {approved_body}
@@ -2018,9 +2451,562 @@ pkg_name(){{
 # shells, and could not read across a second pipe. See cmdpos.py for the nine
 # executed evasions.
 _PIPE_RE='@@PIPE_ERE@@'
-if [[ "$NCMD" =~ $_PIPE_RE ]]; then
-  echo "Dependency gate: piping a downloaded script into a shell is blocked." >&2
-  echo "Vendor the installer, review it, then run it explicitly." >&2
+_XP_WRITES=""
+_XP_NP=""
+# [batch 30-33, issue #32] THE REGEX IS THE VERDICT. It used to be a broad
+# TRIGGER in front of `pipe_data_exempt`, an X-32 data-pipe exemption that
+# allowed `curl url | python3 -c '<parse>'` on the argument that with `-c` the
+# program is the flag's argument and stdin is left as DATA. That premise only
+# holds if this model can reconstruct bash's argv, and four rounds of repairs
+# each found a new spelling where it could not (`-m code`, `2>&1` read as a
+# script path, `${{X:--}}`, a lone continuation backslash, `PERL5OPT=-d`,
+# `xargs -I{{}} python3 -c {{}}`). The exemption is removed; see lib/cmdpos.py
+# for the full list of what went with it and why none of it may come back
+# piecemeal. `curl url | python3 -c 'x'` DENIES, as at 2.6.1.
+#
+# WHAT STAYS, because every one of them is deny-direction and now guards the
+# UNRELAXED rule: the four trigger evaluations (raw, quote-stripped,
+# redirect-normalized, parked), the `_xp_*` write-set canonicalizer, the stage
+# classifier, and the D20 launder-then-run pass below.
+#
+# [X-32 repair F3] Textual path canonicalization. It arrived for a stdin-path
+# guard that is now gone; `_xp_key` is its remaining consumer, and the write
+# set it feeds is a set of PATHS rather than a set of strings because of it.
+# Result in _XP_NP: a `$( )` per token is the fork-per-token shape this header
+# avoids everywhere else.
+_xp_normpath(){{
+  local _p="$1" _seg="" _o="" _lead="" IFS=/
+  case "$_p" in /*) _lead="/" ;; esac
+  for _seg in $_p; do          # `set -f` is the caller's: no glob expansion
+    case "$_seg" in
+      ""|".") ;;
+      "..") case "$_o" in
+              ""|".."|*/..) _o="${{_o:+$_o/}}.." ;;
+              */*)          _o="${{_o%/*}}" ;;
+              *)            _o="" ;;
+            esac ;;
+      *) _o="${{_o:+$_o/}}$_seg" ;;
+    esac
+  done
+  _XP_NP="$_lead$_o"
+}}
+# [round-4 P2] THE WRITE SET IS A SET OF PATHS, NOT A SET OF STRINGS.
+#
+# The old spelling here removed ONE leading dot-slash by prefix; the SDK's was
+# a Python lstrip of the CHARACTER SET dot-slash. (Neither byte sequence is
+# written out anywhere in this file or the SDK's: a structural test greps the
+# emitted surface for both, and a comment quoting one would defeat it.)
+# Neither is path canonicalization, and they failed in OPPOSITE
+# directions (round-4 finding 7): this substrate ALLOWED `tee ././a.sh ... ;
+# sh a.sh` and `tee a.sh ... ; sh .//a.sh` - both spellings of one file, both
+# RCEs executed - while the SDK DENIED `.a.sh` vs `a.sh` and `/tmp/a.sh` vs
+# `tmp/a.sh`, which are different files.
+#
+# One canonicalizer, called on BOTH the recording side and the lookup side, on
+# both substrates. Its steps, in order, and each one earns its place:
+#   0. UNMODELLABLE detection. An ODD quote count means the token's quoted run
+#      does not close inside it, i.e. the real name contains a whitespace this
+#      walk's tokenizer already split on (`tee 'a b.sh'` -> `'a` + `b.sh'`).
+#      There is no key; the caller must mark the STAGE unmodellable - which
+#      tells the run scan "something here wrote a file I cannot name", so the
+#      command denies if it ALSO runs a file - rather than silently record
+#      nothing, which is the fail-OPEN reading [finding 6, where this
+#      substrate lost the name and ALLOWED while the SDK denied - the
+#      forbidden direction]. [batch 30-33] The rule used to read "cost the
+#      stage its exemption"; there is no exemption now, and the consumer is
+#      the D20 download-then-run correlation.
+#   1. the tokenizer's in-quote whitespace sentinel back to a space, then
+#      whitespace runs collapsed, so both substrates key the same bytes.
+#   2. quote and backslash removal - what the shell performs before argv
+#      exists. This is also what makes the park/unpark round trip irrelevant
+#      [finding 8]: _xp_unpark hands an escaped operator back WITHOUT its
+#      backslash while cmd_segments keeps it, and a mismatch both sides erase
+#      cannot exist.
+#   3. _xp_normpath.
+#   4. reject what is not a path: empty, `-`-leading, and the bare `&N`/`&-`
+#      descriptor forms (`>&out.log` IS a write, so the `&` alone cannot be
+#      the test).
+# See lib/cmdpos.py xp_key/xp_unmodellable for the reference implementation
+# and cmdpos.KEY_VECTORS, which the differential suite drives through both
+# transcriptions and compares BYTE-FOR-BYTE.
+_XP_K=""
+_XP_BAD=0
+_XP_QN=0
+_xp_qcount(){{
+  local _s="${{1-}}" _q="${{2-}}"
+  _XP_QN=0
+  while [ "$_s" != "${{_s#*"$_q"}}" ]; do
+    _s="${{_s#*"$_q"}}"; _XP_QN=$((_XP_QN + 1))
+  done
+}}
+_xp_key(){{
+  local _n="${{1-}}" _u="${{1-}}"
+  _XP_K=""; _XP_BAD=0
+  # Step 0, on the name with any LEADING `&` removed - `>&out.log` is bash's
+  # other spelling of `&>out.log` and is a perfectly modellable write.
+  _u="${{_u#&}}"
+  _xp_qcount "$_u" "$_XP_SQC"
+  if [ $((_XP_QN % 2)) = 1 ]; then _XP_BAD=1; fi
+  _xp_qcount "$_u" "$_XP_DQC"
+  if [ $((_XP_QN % 2)) = 1 ]; then _XP_BAD=1; fi
+  # A CONTROL OPERATOR in the body cannot round-trip: this side reads the
+  # token off a stage that PARKED the escape and hands it back bare
+  # (`a\\&b.sh` -> `a&b.sh`), while cmd_segments SPLIT there (` sh a\\ ` +
+  # ` b.sh `). No key can bridge that, so the stage is unmodellable - and
+  # before this line the shell lost the name and ALLOWED while the SDK denied
+  # (finding 6, the forbidden direction).
+  case "$_u" in *";"*|*"&"*|*"|"*|*$'\\n'*) _XP_BAD=1 ;; esac
+  case "$_n" in
+    "&"*) _n="${{_n#&}}"
+          case "$_n" in
+            ""|"-") return 0 ;;
+            *[!0-9]*) ;;
+            *) return 0 ;;
+          esac ;;
+  esac
+  _n="${{_n//$_CS_WS/ }}"
+  while [ "$_n" != "${{_n//  / }}" ]; do _n="${{_n//  / }}"; done
+  _n="${{_n//\\'/}}"; _n="${{_n//\\"/}}"; _n="${{_n//\\\\/}}"
+  _xp_normpath "$_n"; _n="$_XP_NP"
+  case "$_n" in ""|-*) return 0 ;; esac
+  _XP_K="$_n"
+}}
+# [round-5 P1] THE WORD BASH WILL EXECUTE. Quote characters and backslashes
+# removed, then the basename - which is what bash does before it looks at a
+# command word at all. Five DENY-granting walks answered this question with a
+# bare `${{tok##*/}}` on the RAW token, so a backslash-escaped `sh`, `bash`,
+# `source`, `.` or `curl` (and, on the SDK, every QUOTED spelling) named a
+# program the walk could not see while bash ran it: each of those executed a
+# file the same command had just fetched.
+#
+# DELIBERATELY NOT USED by `_xp_stage_kind`, which decides whether a
+# post-download stage is MODELLABLE: there a quoted or escaped head word is a
+# word this model cannot resolve and the stage must go to the unmodellable
+# arm, and reducing it would let `'python3'` pass as a recognised stage. Same
+# words, opposite rules - the inversion this file states at every walk that
+# has one. Reference: cmdpos.cmd_word.
+#
+# [batch 30-33] The removed X-32 data-pipe exemption had a head walk with the
+# same inversion, and this note used to name it instead. The exemption is
+# gone; the rule is not, because `_xp_stage_kind` still has to answer the same
+# question for the D20 write capture.
+_XP_CW=""
+_xp_cw(){{
+  local _t="${{1-}}"
+  _t="${{_t//\\'/}}"; _t="${{_t//\\"/}}"; _t="${{_t//\\\\/}}"
+  _XP_CW="${{_t##*/}}"
+}}
+# [round-5 P3] The write target GLUED to a writer flag, or "" for none.
+# cmdpos.WRITER_FLAGS was consulted only in the SEPARATE-token shape (`case
+# "$_prev" in @@WRITER_FLAG_CASE@@`), so `sort -oa.sh` and `sort
+# --output=a.sh` matched no arm at all - not the tee arm, not `_prev`, not
+# `of=`, not `*">"*` - and the file that stage wrote never entered the write
+# set while the same command's `sh a.sh` ran it (verified RCE; 2.6.1 denied
+# both). `sort` is on INERT_FILTERS BECAUSE its write channel was claimed
+# covered, and the pin exercised only the separated forms, so the claim and
+# the test agreed with each other and not with the binary. The arms are
+# GENERATED from the one flag list, so a new writer flag reaches all four
+# spellings. Reference: cmdpos.writer_flag_value.
+_XP_WFV=""
+_xp_wfv(){{
+  local _t="${{1-}}"
+  _XP_WFV=""
+  case "$_t" in
+    @@WRITER_ATT_ARMS@@
+  esac
+}}
+# The quote state across a stage's tokens: 0 outside, 1 inside a `'` run, 2
+# inside a `"` run. A WRITE TARGET IS ONLY A WRITE TARGET IF IT BEGINS OUTSIDE
+# A QUOTED RUN, and this is what tells the two apart. The four-shape capture
+# reads whitespace-split tokens, so a stage's own quoted PROGRAM TEXT walks
+# into it: `-e 'print scalar <STDIN>'` has a `>`-bearing token,
+# `-e 'let d=""; ...c=>d+=c)'` has two, and `-c 'a >| b'` looks exactly like a
+# noclobber redirect. Without the run tracking each of those puts a PHANTOM
+# path into the D20 write set, and the run scan then denies an unrelated later
+# command for "running a file this command downloaded" that nothing ever
+# wrote.
+#
+# [batch 30-33] This note used to call those three commands PINNED ALLOWS, on
+# the strength of the X-32 exemption that allowed `curl u | python3 -c '...'`.
+# THEY ARE NOT ALLOWS ANY MORE: with the exemption removed, `curl u | perl -e
+# '...'`, `| node -e '...'` and `| python3 -c '...'` all DENY at the pipe
+# trigger, exactly as at 2.6.1. What this function still buys is measured on
+# the stages that are NOT interpreters and do reach the capture -
+# `curl u | jq -r '.x > b.sh' ; sh b.sh` is rc=0 because `b.sh'` never enters
+# the write set, and is rc=2 the moment the run tracking is removed. Correct
+# either way: nothing in that pipeline wrote `b.sh`.
+#
+# Run-at-a-time, like _xp_park: a per-character loop is O(n^2) under bash's
+# substring expansion.
+_XP_QS=0
+_xp_qadv(){{
+  local _t="${{1-}}" _ps="" _pd=""
+  while [ -n "$_t" ]; do
+    if [ "$_XP_QS" = "0" ]; then
+      case "$_t" in
+        *"$_XP_SQC"*) _ps="${{_t%%"$_XP_SQC"*}}" ;;
+        *) _ps="$_t$_t$_t" ;;
+      esac
+      case "$_t" in
+        *"$_XP_DQC"*) _pd="${{_t%%"$_XP_DQC"*}}" ;;
+        *) _pd="$_t$_t$_t" ;;
+      esac
+      if [ "${{#_ps}}" -gt "${{#_t}}" ] && [ "${{#_pd}}" -gt "${{#_t}}" ]; then
+        _t=""
+      elif [ "${{#_ps}}" -le "${{#_pd}}" ]; then
+        _XP_QS=1; _t="${{_t#*"$_XP_SQC"}}"
+      else
+        _XP_QS=2; _t="${{_t#*"$_XP_DQC"}}"
+      fi
+    elif [ "$_XP_QS" = "1" ]; then
+      case "$_t" in
+        *"$_XP_SQC"*) _XP_QS=0; _t="${{_t#*"$_XP_SQC"}}" ;;
+        *) _t="" ;;
+      esac
+    else
+      case "$_t" in
+        *"$_XP_DQC"*) _XP_QS=0; _t="${{_t#*"$_XP_DQC"}}" ;;
+        *) _t="" ;;
+      esac
+    fi
+  done
+}}
+# A GENUINE write target (the four-shape capture). A target with no key is
+# not "nothing to record": it is a stage this walk cannot model, and P3's
+# rule is that such a stage COSTS THE EXEMPTION.
+_XP_UNMOD=0
+_xp_write(){{
+  _xp_key "${{1-}}"
+  if [ "$_XP_BAD" = "1" ]; then _XP_UNMOD=1; fi
+  if [ -n "$_XP_K" ]; then _XP_WRITES="$_XP_WRITES $_XP_K "; fi
+}}
+# A DOWNLOADER'S OWN write target, from the D20 first pass. Same key, but a
+# target with no key here is not a refusal: this pass is over the whole
+# command rather than over one modelled pipe stage, so it has no exemption to
+# withdraw and its absence is the pre-existing behaviour. SDK parity
+# (_xp_cap).
+_xp_cap(){{
+  _xp_key "${{1-}}"
+  if [ -n "$_XP_K" ]; then _XP_WRITES="$_XP_WRITES $_XP_K "; fi
+}}
+# [X-32 repair F9; kept at batch 30-33 as deny-direction hardening for the
+# UNRELAXED rule] THE CHAIN SPLITTER MUST NOT BE QUOTE-BLIND, or every guard
+# below becomes unreachable on any command whose quoted text carries a
+# control operator. Splitting by unconditional substitution
+# (`_s="${{_s//;/$'\\n'}}"`) severs the pipeline at a `;`, `&` or newline
+# INSIDE A QUOTED ARGUMENT: the chain ends early, every stage after the
+# operator lands in a fresh chain with `_dl=0`, and the post-download write
+# capture NEVER EXAMINES it.
+#
+# Measured on this tree, with the exemption already gone:
+#
+#   curl u | jq -r '.a;.b' | tee f.sh ; sh f.sh   rc=2  (this split)
+#                                                 rc=0  (quote-blind split)
+#
+# The fetched bytes reach `f.sh` and the same command runs it; the only
+# reason the D20 correlation sees it is that the `;` inside jq's program did
+# not end the chain. So this is a FAIL-OPEN repair, not a leftover of the
+# relaxation - it now guards the rule at its strictest setting. Same failure
+# MODE as repair F1 below, one character over: F1 considered `&` inside a
+# REDIRECT and never considered `;`/`&`/newline inside a quoted argument.
+#
+# PARSED, not refused - and that is the one place in this file where the
+# fail-closed reflex is wrong, on its own terms and not on the removed
+# exemption's. A quoted control operator is ORDINARY in an argument
+# (`jq -r '.a;.b'`, `awk 'BEGIN{{x=1;y=2}}'`, `sed 's/a/b/;s/c/d/'`), and
+# taking the `_bad=1` posture here would refuse every one of them the moment
+# a downloader appeared anywhere in the command - a large over-refusal that
+# buys nothing, because a downloader piped into an INTERPRETER is already an
+# unconditional deny at the trigger above. Refusing here would only cost
+# `curl u | jq -r '.a;.b' > out.json`, which is exactly the shape issue #32
+# was filed about. THE ONE INPUT THAT IS REFUSED is an unterminated quote,
+# which has no shell parse at all.
+#
+# Operators inside a quoted run are parked under sentinel bytes across the
+# split and handed back to each STAGE verbatim, so every guard downstream
+# still reads the text the shell would build. Escapes are parked FIRST, in
+# the same order _cs_esc_park uses in the header, because `\\;` is a
+# literal semicolon with no quote around it at all and `"a\\";b\\""` is ONE
+# word whose `;` a quote-only scanner reads as unquoted.
+_XP_SEMI=$'\\016'                # a `;`, `&`, `|` or newline that is NOT a
+_XP_AMP=$'\\017'                 # control operator: quoted, or escaped.
+_XP_BAR=$'\\020'
+_XP_NL=$'\\021'
+_XP_BS=$'\\022'                  # an escaped `\\`, `"` or `'`, parked so it
+_XP_DQ=$'\\023'                  # cannot open or close a quoted run.
+_XP_SQ=$'\\024'
+_XP_BSC='\\'                     # the literal bytes, named once: quoting
+_XP_DQC='"'                      # them inline in every pattern below is
+_XP_SQC="'"                      # where a scanner like this goes wrong.
+_XP_PK=""
+_XP_R=""
+_xp_park(){{
+  local _s="$1" _o="" _h="" _t="" _c="" _pre="" _q="" _rest="" _run=""
+  local _pd="" _ps=""
+  # The sentinels are ours; a command carrying one raw could otherwise
+  # forge a non-split. Same scrub cmd_segments performs, same reason.
+  _s="${{_s//$'\\001'/ }}"
+  _s="${{_s//"$_XP_SEMI"/ }}"; _s="${{_s//"$_XP_AMP"/ }}"
+  _s="${{_s//"$_XP_BAR"/ }}";  _s="${{_s//"$_XP_NL"/ }}"
+  _s="${{_s//"$_XP_BS"/ }}";   _s="${{_s//"$_XP_DQ"/ }}"
+  _s="${{_s//"$_XP_SQ"/ }}"
+  while : ; do                        # phase 1: backslash escapes
+    case "$_s" in *"$_XP_BSC"*) ;; *) _o="$_o$_s"; break ;; esac
+    _h="${{_s%%"$_XP_BSC"*}}"; _t="${{_s#*"$_XP_BSC"}}"
+    _o="$_o$_h"; _c="${{_t:0:1}}"
+    case "$_c" in
+      ";")        _o="$_o$_XP_SEMI" ;;
+      "&")        _o="$_o$_XP_AMP" ;;
+      "|")        _o="$_o$_XP_BAR" ;;
+      "$_XP_SQC") _o="$_o$_XP_SQ" ;;
+      "$_XP_DQC") _o="$_o$_XP_DQ" ;;
+      "$_XP_BSC") _o="$_o$_XP_BS" ;;
+      $'\\n')      : ;;                # a line continuation: bash drops both
+      "")         _o="$_o$_XP_BSC" ;; # trailing backslash: escapes nothing
+      *)          _o="$_o$_XP_BSC$_c" ;;
+    esac
+    _s="${{_t:1}}"
+  done
+  _s="$_o"; _o=""
+  # Run-at-a-time, like _cs_scan: a per-character loop is O(n^2) under
+  # bash's substring expansion, and F-937 is what that costs.
+  while : ; do                        # phase 2: quoted runs
+    case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) ;; *) _o="$_o$_s"; break ;; esac
+    _pd="${{_s%%"$_XP_DQC"*}}"; _ps="${{_s%%"$_XP_SQC"*}}"
+    if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q="$_XP_DQC"; _pre="$_pd"
+    else _q="$_XP_SQC"; _pre="$_ps"; fi
+    _o="$_o$_pre"
+    _rest="${{_s#*"$_q"}}"
+    case "$_rest" in
+      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _s="${{_rest#*"$_q"}}" ;;
+      # An unterminated quote has no shell parse, so it is REFUSED rather
+      # than guessed at - the F8 posture, applied to the one input this
+      # parser genuinely cannot model.
+      *) _XP_PK=""; return 1 ;;
+    esac
+    _run="${{_run//;/"$_XP_SEMI"}}"; _run="${{_run//&/"$_XP_AMP"}}"
+    _run="${{_run//|/"$_XP_BAR"}}"
+    _run="${{_run//$'\\n'/"$_XP_NL"}}"
+    _o="$_o$_q$_run$_q"
+    if [ -z "$_s" ]; then break; fi
+  done
+  _XP_PK="$_o"
+  return 0
+}}
+# Sentinels back to the bytes they stood for, per STAGE - parking is a
+# transport across the split, never an exemption: `| 'sh'` must still
+# reach the head-token metachar guard with its quotes on.
+_xp_unpark(){{
+  local _t="$1"
+  # `'&'`, never a bare `&`: since bash 5.2 an UNQUOTED `&` in a `${{//}}`
+  # replacement means THE MATCHED TEXT, so `${{_t//$'\\001'/&}}` puts the
+  # sentinel straight back and every `>&word` write silently vanished from
+  # the D20 set - measured, shell rc=0 against SDK deny.
+  _t="${{_t//$'\\001'/'&'}}"
+  _t="${{_t//"$_XP_SEMI"/;}}"; _t="${{_t//"$_XP_AMP"/'&'}}"
+  _t="${{_t//"$_XP_BAR"/|}}";  _t="${{_t//"$_XP_NL"/$'\\n'}}"
+  _t="${{_t//"$_XP_BS"/"$_XP_BSC"}}"
+  _t="${{_t//"$_XP_DQ"/"$_XP_DQC"}}"
+  _t="${{_t//"$_XP_SQ"/"$_XP_SQC"}}"
+  _XP_R="$_t"
+}}
+# [round-5 P3] THE STAGE CLASSIFIER, EXTRACTED INTO A FUNCTION.
+#
+# It was written INLINE inside the X-32 data-pipe exemption, which was then
+# the only walk that needed it, and round 5 needed the IDENTICAL judgement in
+# a second place - `pipe_stage_writes` below, the unconditional post-download
+# write capture, which has to know when a stage wrote somewhere it cannot
+# NAME. Extracting it beat a second inline copy of a classification, which is
+# exactly the shape D3 records.
+#
+# [batch 30-33] The exemption is removed, so `pipe_stage_writes` is now the
+# ONLY caller and the extraction has one consumer rather than two. It stays a
+# function: the classification is what the write capture fails closed on, and
+# it is pinned as a unit by cmdpos.STAGE_VECTORS across both substrates.
+# Inlining it back into its one caller would delete the seam those vectors
+# test through.
+#
+# Returns through _XP_KIND alone - the four codes cmdpos.STAGE_VECTORS pins.
+#
+# [batch 30-33] It used to ALSO return _XP_INT (the interpreter word) and
+# _XP_A0 (its args[0], with every redirection stripped). Both existed only so
+# the X-32 exemption could ask "does this stage carry an explicit program?".
+# With that exemption removed nothing reads them, and the redirect-stripping
+# grammar they needed (`_xp_redir`) went with them: dead fence code around a
+# deleted gate is how the next reader is misled into rebuilding it.
+_XP_KIND=""
+_xp_stage_kind(){{
+  local _stage="$1"
+  _XP_KIND=""
+  local _tok _ib _iv _cw _pfx=0 _bad=0 _asg=0 _ntok=0
+  _ntok=0
+  for _tok in $_stage; do _ntok=1; break; done
+  set -- $_stage
+  while [ "$_ntok" = "1" ] && [ "$#" -gt 0 ]; do
+    _tok="$1"
+    # [X-32 repair F5] A DUAL word is in ALL_PREFIXES, so the walk
+    # skipped it as transparent - but `xargs -I{{}} python3 -c {{}}`
+    # SUBSTITUTES the piped (fetched) line into the -c argument, and
+    # `ssh` forwards the pipe to a remote shell. None of these is a
+    # stage this model can read, so all of them classify `x`.
+    case "${{_tok##*/}}" in
+      @@DUAL_CASE@@) _bad=1; break ;;
+    esac
+    # [round-4 P1(c)] AN ASSIGNMENT IS TRANSPARENT FOR THE TRIGGER and is
+    # tracked separately here. It must be transparent to
+    # cmdpos.prefix_run or `curl u | FOO=1 python3` hides the
+    # interpreter from the trigger entirely (finding 9, live RCE at
+    # every commit). The `a` code it produces is kept distinct from `i`
+    # because an assignment really does change what an interpreter does
+    # with its stdin (`PERL5OPT=-d perl -e 'print 1'` opens a debugger
+    # whose command loop EVALUATES stdin), and a future reader must not
+    # collapse the two codes on the assumption that they are the same
+    # stage.
+    case "$_tok" in
+      [A-Za-z_]*=*) _asg=1; shift; continue ;;
+      @@PFX_CASE@@) _pfx=1; shift; continue ;;
+    esac
+    # Interpreter membership on the BASENAME, with a trailing version
+    # suffix reduced one character at a time and only as far as a
+    # spelling that IS an interpreter: `python3.12` -> `python3`,
+    # `python3` -> `python3` (untouched, it is already a member).
+    # [round-4 P1, finding 9] `curl u | python3.12` was rc=0 on both
+    # substrates - a complete bypass spelled with two characters. The
+    # trigger now matches it (cmdpos.interpreter_word's `[.0-9]*`) and
+    # this reduction is what keeps `python3.12 -c 'x'` an ordinary data
+    # pipeline instead of collateral over-refusal.
+    _ib="${{_tok##*/}}"
+    case "$_ib" in
+      @@INT_CASE@@) ;;
+      *) _iv="$_ib"
+         while : ; do
+           case "$_iv" in
+             *[0-9.]) _iv="${{_iv%?}}" ;;
+             *) _iv=""; break ;;
+           esac
+           if [ -z "$_iv" ]; then break; fi
+           case "$_iv" in @@INT_CASE@@) break ;; esac
+         done
+         if [ -n "$_iv" ]; then _ib="$_iv"; fi ;;
+    esac
+    case "$_ib" in
+      @@INT_CASE@@)
+        if [ "$_asg" = "1" ]; then _XP_KIND="a"; else _XP_KIND="i"; fi
+        break ;;
+    esac
+    # [X-32 repair F5] AFTER A PREFIX, THE WALK MAY NOT SKIP. A prefix
+    # run here may contain only prefixes and assignments; anything else
+    # and the command word is unknown, which classifies `x`. No
+    # flag-arity table can separate `sudo -u nobody python3` from
+    # `sudo nobody python3`, so the fail-closed answer is the only one.
+    if [ "$_pfx" = "1" ] || [ "$_asg" = "1" ]; then _bad=1; fi
+    # With no prefix in front, an ordinary command word IS the command
+    # word: this stage does not execute stdin as a PROGRAM, and that
+    # is a POSITIVE finding about it. A head token carrying shell
+    # metacharacters is not one - it is a stage the walk cannot model
+    # (`(sh)`, `{{ sh; }}`, `'sh'`, `$SHELL`, a leading redirect) -
+    # and an unmodelled stage classifies `x` [X-32 repair F8].
+    #
+    # [X-32 repair F9] `;` and `|` joined the set. They cannot reach a
+    # head token as ordinary text - unquoted, they are the separators
+    # this walk splits on - so the ONLY way one arrives here is
+    # backslash-escaped (`\\;sh`), and _xp_unpark hands the operator
+    # back WITHOUT its backslash, which would otherwise have been the
+    # metacharacter that caught it. Adding them keeps the guard armed
+    # by construction instead of by an argument about which escaped
+    # spellings happen not to name a shell.
+    case "$_tok" in
+      *'<'*|*'>'*|*'('*|*')'*|*'{{'*|*'}}'*|*'`'*|*'$'*|*'&'*|\\
+      *'\\'*|*'"'*|*"'"*|*';'*|*'|'*) _bad=1 ;;
+    esac
+    # [round-4 P3] ...and "an ordinary command word" is no longer a
+    # positive finding on its own. It must be on cmdpos.INERT_FILTERS -
+    # a deliberately small allow-list whose admission rule is "executes
+    # no stdin, writes nothing outside the tokens this walk already
+    # over-captures". Everything else, INCLUDING a
+    # cmdpos.COMPOUND_HEADS word (finding 18), is unmodellable.
+    if [ "$_bad" = "0" ]; then
+      _cw="${{_tok##*/}}"
+      case "$_cw" in
+        @@INERT_CASE@@) _XP_KIND="f" ;;
+        *) _XP_KIND="x" ;;
+      esac
+      case "$_tok" in
+        @@COMPOUND_CASE@@) _XP_KIND="x" ;;
+      esac
+    fi
+    break
+  done
+  if [ "$_bad" = "1" ]; then _XP_KIND="x"; fi
+  if [ "$_ntok" = "1" ] && [ -z "$_XP_KIND" ]; then _XP_KIND="x"; fi
+}}
+# [round-4 P1(b)] THE TRIGGER IS EVALUATED TWICE: once on the command, once on
+# a quote/backslash-stripped copy of it. `curl u | 'python3'`, `| "sh"` and
+# `| \\python3` were rc=0 on both substrates (finding 9) because the trigger is
+# a REGEX over raw text and a quote character is not in any of its classes.
+# Stripping a COPY closes all three without teaching the regex about quoting.
+#
+# [batch 30-33] THE TRIGGER IS NOW THE VERDICT. `pipe_data_exempt` - the X-32
+# data-pipe exemption that used to stand between this match and the refusal -
+# is removed, so every one of these four evaluations is a deny-direction
+# widening with nothing downstream that can wave it back through. All four
+# stay: they are the hardening, not the exemption.
+# QUOTED expansions in the pattern position: an unquoted `$_XP_BSC` is a lone
+# backslash, which bash reads as an ESCAPE rather than as a literal, so the
+# substitution silently did nothing and `| \\python3` still allowed.
+_QCMD="${{NCMD//"$_XP_SQC"/}}"
+_QCMD="${{_QCMD//"$_XP_DQC"/}}"
+_QCMD="${{_QCMD//"$_XP_BSC"/}}"
+# ...and a THIRD time on the PARKED text [round-4, found by the generated
+# corpus]. The trigger's `[^;&]*` refuses to read across a `;` or `&` because
+# those really do end the command - but an ESCAPED or QUOTED one does not, and
+# a write target may carry one: `curl u | tee a\\&b.sh | python3 -c 'x' ;
+# sh a\\&b.sh` really does write `a&b.sh` and then run it, and matched the
+# trigger NOWHERE, on either substrate, so no X-32 guard ever saw it.
+# Stripping quotes (above) does not help - it leaves the bare `&`. _xp_park
+# already computes exactly the string where a non-operator `;`/`&`/`|` is not
+# an operator, so the third evaluation is a reuse rather than a fourth
+# encoding. This arm on its own is STRICTLY NARROWER than the raw one for
+# quoted text - a `|` inside quotes becomes a sentinel and cannot match `[|]`
+# - so it adds no new prose over-match. The raw arm's own blindness to quoting
+# (`git commit -m "curl u | sh"` denies) is pre-existing recorded residue and
+# is neither widened nor closed here.
+#
+# ...and a FOURTH time on a REDIRECT-NORMALIZED copy [round-5 P1]. The
+# `[^;&]*` window refuses to read across a `&` - and `2>&1` puts one BETWEEN
+# the downloader and the pipe, so `curl url 2>&1 | sh` reached the `|` NOWHERE:
+# not on the raw string, not on the quote-stripped copy, and not on the parked
+# copy, because parking does not rewrite `>&`. The refusal was never reached,
+# `_download_then_run` has no interpreter-vs-terminal-shell model for a bare
+# `curl ... | sh`, and the fetched bytes ran (verified). This is the SAME
+# normalization `_D20CMD` below has used for two rounds, applied to the string
+# the trigger reads - a reuse of a named rule, not a fifth encoding.
+# `curl url 2>&1 | sh` is one of the five 2.6.1 fail-opens this batch closes
+# and keeps closed.
+_RCMD="${{NCMD//>|/>}}"
+_RCMD="${{_RCMD//|&/|}}"
+_RCMD="${{_RCMD//&>/> }}"
+_RCMD="${{_RCMD//>&/> }}"
+_RQCMD="${{_RCMD//"$_XP_SQC"/}}"
+_RQCMD="${{_RQCMD//"$_XP_DQC"/}}"
+_RQCMD="${{_RQCMD//"$_XP_BSC"/}}"
+_PK_HIT=0
+if _xp_park "$NCMD"; then
+  if [[ "$_XP_PK" =~ $_PIPE_RE ]]; then _PK_HIT=1; fi
+fi
+if [[ "$NCMD" =~ $_PIPE_RE ]] || [[ "$_QCMD" =~ $_PIPE_RE ]] \\
+   || [[ "$_RCMD" =~ $_PIPE_RE ]] || [[ "$_RQCMD" =~ $_PIPE_RE ]] \\
+   || [ "$_PK_HIT" = "1" ]; then
+  # [batch 30-33, issue #32] THE REFUSAL IS UNCONDITIONAL, and the MESSAGE is
+  # what changed. Issue #32's complaint is not that the rule is wrong - it is
+  # that the old text ("vendor the installer, review it, then run it
+  # explicitly") described a situation the operator was not in and sent them
+  # looking for an installer that does not exist. The new text names the shape
+  # the gate actually saw and both real ways out, and it stops asserting that
+  # an install is under way. See lib/cmdpos.py for why the exemption that used
+  # to sit here is gone.
+  echo "Dependency gate: piping downloaded bytes into an interpreter is blocked - this gate cannot tell a fetched program from fetched data." >&2
+  echo "If the bytes are DATA, write them to a file first (curl -o f URL) and read the file, or fetch with a dedicated tool. If they are a PROGRAM, vendor it, review it, then run it explicitly." >&2
   exit 2
 fi
 # [round-4 D20] DOWNLOAD-THEN-RUN. `curl url > /tmp/a.sh && sh /tmp/a.sh` is
@@ -2030,43 +3016,365 @@ fi
 # an ordinary `curl -o out.json url` or an ordinary `sh ./deploy.sh` is
 # untouched - which is why this is a two-pass rule rather than another
 # alternation.
+#
+# [round-4, found by the generated corpus] ONE normalized command for BOTH
+# passes, computed once instead of spelled twice - the earlier inline
+# `${{CMD//>|/>}}` carried a comment saying the two copies must stay in sync,
+# which is the shape this round is here to remove.
+#
+# `>&` and `&>` are REDIRECTIONS, and cmd_segments splits on `&` as a control
+# operator - so `curl u >& a.sh` came apart into ` curl u > `, ` a.sh ` and
+# the target was never captured, while `curl u >&a.sh` lost it the same way.
+# Both really do put the fetched BODY in a.sh (bash merges stdout and stderr
+# there). The pipe walk has parked these since an earlier repair; this pass
+# never did. Mapped to `> ` rather than parked, because a space is exactly
+# what cmd_segments would have produced from the parked sentinel anyway.
+# [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
+#
+# The write capture that makes a file "fetched-derived" used to live inside
+# the X-32 data-pipe exemption, which ran ONLY when the broad pipe trigger had
+# already matched a downloader followed by an INTERPRETER. With no interpreter
+# anywhere in the pipeline that walk never ran, nothing was captured, and the
+# later `sh f.sh` was judged as an ordinary command:
+#
+#   curl u > f.sh && sh f.sh                    rc=2  (top-level redirect)
+#   curl u | tee f.sh | python3 s.py ; sh f.sh  rc=2  (the walk ran)
+#   curl u | tee f.sh && sh f.sh                rc=0  MISSED
+#
+# `tee`, `cat >`, `dd of=` and `sort -o` are all on cmdpos.INERT_FILTERS
+# SPECIFICALLY so they would be captured here - on a path that never executed
+# for them. The capture belongs to the download-then-run rule, which owns both
+# halves of the correlation, not to the exemption. This function is that
+# capture, and it runs on every command.
+#
+# `_XP_OPAQUE` is the P3 fail-closed half. A post-download stage the walk
+# cannot MODEL wrote somewhere no capture rule can NAME (`split - a.sh` writes
+# `a.shaa`; `awk '{{print > f}}'` writes from inside its program; `cp`,
+# `install` and `rsync` write through channels the four shapes do not see).
+# Recording nothing for it is the fail-OPEN reading of an unmodellable stage.
+# Instead the run scan is told, and it denies only if this same command ALSO
+# RUNS a file - a CONJUNCTION, so `curl u | less` alone is untouched and the
+# cost is bounded and recorded.
+pipe_stage_writes(){{
+  local _s="${{1-}}" _chain="" _stage="" _tok="" _prev="" _tee=0 _dl=0
+  # `if !`, never `_xp_park ... || return`: a failing `&&`/`||` list routes
+  # through the ERR trap into hook_fail [see cmd_has_verb].
+  if ! _xp_park "$_s"; then return 0; fi
+  _s="$_XP_PK"
+  # The SAME five rewrites the SDK's `_xp_chains` performs, in the same
+  # order, so the two SUBSTRATES build the same stages: `>|` is a redirect
+  # not a pipe, `|&` is a pipe, and an `&` adjacent to `<`/`>` belongs to the
+  # redirect. [batch 30-33] The removed X-32 walk was the third copy of this
+  # sequence and the one this note used to point at; two copies remain, one
+  # per substrate, and tests/test_substrate_differential.py byte-compares
+  # what they build.
+  _s="${{_s//>|/>}}"
+  _s="${{_s//|&/|}}"
+  _s="${{_s//>&/>$'\001'}}"
+  _s="${{_s//<&/<$'\001'}}"
+  _s="${{_s//&>/$'\001'>}}"
+  _s="${{_s//;/$'\n'}}"; _s="${{_s//&/$'\n'}}"
+  set -f                              # a token holding `*` must not expand
+  while IFS= read -r _chain; do
+    _dl=0
+    _chain="$_chain|"
+    while [ -n "$_chain" ]; do
+      _stage="${{_chain%%|*}}"; _chain="${{_chain#*|}}"
+      _xp_unpark "$_stage"; _stage="$_XP_R"
+      if [ "$_dl" = "1" ]; then
+        _tee=0; _prev=""; _XP_UNMOD=0; _XP_QS=0
+        for _tok in $_stage; do
+          # A token that BEGINS inside a quoted run is program text, not a
+          # write target. See _xp_qadv.
+          if [ "$_XP_QS" != "0" ]; then _xp_qadv "$_tok"; _prev="$_tok"
+            continue
+          fi
+          _xp_qadv "$_tok"
+          if [ "$_tee" = "1" ]; then
+            case "$_tok" in -*|*">"*) : ;; *) _xp_write "$_tok" ;; esac
+          fi
+          case "${{_tok##*/}}" in @@WRITER_WORD_CASE@@) _tee=1 ;; esac
+          case "$_prev" in
+            *">"|*">&"|@@WRITER_FLAG_CASE@@) _xp_write "$_tok" ;;
+          esac
+          _xp_wfv "$_tok"
+          if [ -n "$_XP_WFV" ]; then _xp_write "$_XP_WFV"; fi
+          case "$_tok" in of=?*) _xp_write "${{_tok#of=}}" ;; esac
+          case "$_tok" in *">"*) _xp_write "${{_tok##*>}}" ;; esac
+          _prev="$_tok"
+        done
+        if [ "$_XP_UNMOD" = "1" ]; then _XP_OPAQUE=1; fi
+        _xp_stage_kind "$_stage"
+        if [ "$_XP_KIND" = "x" ]; then _XP_OPAQUE=1; fi
+      fi
+      for _tok in $_stage; do
+        _xp_cw "$_tok"
+        case "$_XP_CW" in @@DL_CASE@@) _dl=1; break ;; esac
+      done
+    done
+  done <<< "$_s"
+  set +f
+  return 0
+}}
+_D20CMD="${{CMD//>|/>}}"
+_D20CMD="${{_D20CMD//&>/> }}"
+_D20CMD="${{_D20CMD//>&/> }}"
 _dl_files=""
+# [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
+#
+# The X-32 write capture that makes a file "fetched-derived" ran only when the
+# broad pipe trigger had already matched a downloader followed by an
+# INTERPRETER. With no interpreter anywhere in the pipeline the walk never ran,
+# nothing was captured, and the later `sh f.sh` was judged as an ordinary
+# command: `curl u | tee f.sh && sh f.sh` was rc=0 on both substrates, and so
+# were `| cat > f.sh`, `| dd of=f.sh` and `| sort -o f.sh` - every one of them
+# a word this batch admitted to INERT_FILTERS specifically SO it would be
+# captured, on a path that never executed for them. The capture belongs to the
+# download-then-run rule, which owns both halves of the correlation, not to the
+# exemption.
+#
+# `_XP_OPAQUE` is the P3 fail-closed half: a post-download stage the walk
+# cannot model wrote SOMEWHERE, and no capture rule can name it (`split - a.sh`
+# writes `a.shaa`; `awk '{{print > f}}'` writes from inside its program).
+# Recording nothing for it is the fail-OPEN reading. Instead the run scan is
+# told, and it denies only if this same command also RUNS a file - a
+# CONJUNCTION, so an ordinary `curl u | less` is untouched.
+_XP_OPAQUE=0
+pipe_stage_writes "$NCMD"
 while IFS= read -r _seg; do
   _has_dl=0
   for _w in $_seg; do
-    case "${{_w##*/}}" in @@DL_CASE@@) _has_dl=1; break ;; esac
+    # [round-5 P1] _xp_cw, the word bash will execute. `'curl'`, `"curl"`,
+    # `c''url`, `curl''` and a backslash-escaped `curl` all run curl; the
+    # backslash spellings matched nothing HERE and the quoted ones matched
+    # nothing on the SDK, so the write set stayed empty and the fetched file
+    # was then run.
+    _xp_cw "$_w"
+    case "$_XP_CW" in @@DL_CASE@@) _has_dl=1; break ;; esac
   done
   [ "$_has_dl" = "0" ] && continue
   _prev=""
   for _w in $_seg; do
+    # [round-4 P2] _xp_cap, i.e. _xp_key - the SAME canonicalizer the lookup
+    # pass below and both sides of the pipe walk use. The bare prefix strip
+    # that stood here was one of the two wrong spellings finding 7 measured.
+    # It writes into _XP_WRITES, which is merged into _dl_files below.
+    #
+    # [round-4, found by the generated corpus] The arms are now the SAME four
+    # shapes _xp_stage_writes uses, and they were narrower here: `">"|">>"`
+    # exactly, plus a `${{_w#>}}` that strips ONE `>`. So `curl u >& a.sh ;
+    # sh a.sh` - which really does put the fetched BODY in a.sh - captured
+    # nothing, `curl u 2> a.sh` captured nothing, and `curl u >>a.sh` captured
+    # the literal `>a.sh`. 138 of 5,986 generated payloads walked out through
+    # this pass alone, on BOTH substrates. The narrowness was recorded as a
+    # pre-existing divergence in an earlier repair's comment and measured here
+    # as a live one; one list, one behaviour.
     case "$_prev" in
-      ">"|">>"|"-o"|"--output"|"-O"|"--output-document")
-        _dl_files="$_dl_files ${{_w#./}} " ;;
+      *">"|*">&"|@@WRITER_FLAG_CASE@@) _xp_cap "$_w" ;;
     esac
+    # [round-5 P3] ...and the ATTACHED spelling. `curl -oa.sh u ; sh a.sh`,
+    # `curl --output=a.sh u ; sh a.sh` and `wget -Oa.sh u ; sh a.sh` were
+    # rc=0 at 2.6.1 and here: one token, matching no arm.
+    _xp_wfv "$_w"
+    if [ -n "$_XP_WFV" ]; then _xp_cap "$_XP_WFV"; fi
     case "$_w" in
-      ">"?*) _dl_files="$_dl_files ${{_w#>}} " ;;
+      *">"*) _xp_cap "${{_w##*>}}" ;;
     esac
     _prev="$_w"
   done
-done < <(cmd_segments "$CMD")
-if [ -n "${{_dl_files// /}}" ]; then
-  while IFS= read -r _seg; do
-    _first=1
-    for _w in $_seg; do
-      if [ "$_first" = "1" ]; then
-        _first=0
-        case "${{_w##*/}}" in @@INT_CASE@@) ;; *) break ;; esac
-        continue
-      fi
-      case "$_w" in -*) continue ;; esac
-      case "$_dl_files" in
-        *" $_w "*|*" ${{_w#./}} "*)
-          echo "Dependency gate: running a script this command just downloaded is blocked." >&2
-          echo "Vendor the installer, review it, then run it explicitly." >&2
-          exit 2 ;;
-      esac
+# [X-32 repair F12] `>|` normalized to `>` HERE TOO, and this half is what
+# catches the DOWNLOADER'S OWN stage: `curl u >| a.sh | python3 -c 'x' ;
+# sh a.sh` was rc=2 at 2.6.1 and rc=0 once the exemption existed, because
+# cmd_segments breaks on the `|` of `>|` and the target landed in a segment
+# of its own with no downloader in it. Normalizing before segmentation keeps
+# the target token with its redirect. It closes a PRE-EXISTING gap in the
+# same stroke (`curl u >| a.sh ; sh a.sh` is rc=0 at 2.6.1 on both
+# substrates) - fail-closed, deny-list bias, and the alternative was to
+# model one noclobber spelling in the exemption and leave the identical
+# spelling open one rule down.
+done < <(cmd_segments "$_D20CMD")
+# [X-32; batch 30-33] A file a POST-DOWNLOAD PIPE STAGE wrote is
+# fetched-derived too, so `pipe_stage_writes`' set is folded into the D20 set
+# rather than kept beside it. This line arrived because an EXEMPTED stage's
+# writes would otherwise escape through the relaxation; with the exemption
+# removed it is doing the same job for the unconditional capture, which is the
+# only producer left - `curl u | tee f.sh && sh f.sh` is rc=2 because of this
+# fold and rc=0 without it.
+_dl_files="$_dl_files$_XP_WRITES"
+# [round-4 P1(d)] THE RUN SIDE GETS REAL COMMAND-POSITION RESOLUTION.
+#
+# This pass used to be `if the segment's FIRST word is an interpreter`. One
+# transparent word made the whole segment invisible to the only guard standing
+# between fetched bytes and execution: `; env sh a.sh`, `; sudo sh a.sh`,
+# `; timeout 5 sh a.sh`, `; nohup sh a.sh`, `; . a.sh`, `; source a.sh` and
+# `; chmod +x a.sh && ./a.sh` were ALL rc=0 on both substrates against a file
+# the same command had just written from a fetch (finding 4; every one rc=2 at
+# 2.6.1, and three of them executed live RCE). It simultaneously nullified
+# four earlier repairs - tee, sponge, `dd of=`, `>|` and every quote spelling
+# were faithfully collected into the write set and then never consulted.
+#
+# THIS WALK GRANTS DENIES, so it takes cmdpos.py's UNBOUNDED walker rule and
+# over-consumption is the safe direction - the exact inverse of
+# `_xp_stage_kind`'s head walk, which grants a stage the MODELLABLE reading
+# and therefore may skip prefixes and assignments ONLY (see its "AFTER A
+# PREFIX, THE WALK MAY NOT SKIP" arm). Both rules are written at their call
+# sites because getting them the wrong way round is what F5 and D9 each were.
+# [batch 30-33] The inverse used to be named as the X-32 exemption's head
+# walk; that walk is gone and `_xp_stage_kind` is where the rule now lives.
+_XP_RUN=0
+_xp_run_hit(){{                     # key ONE token against the write set
+  _xp_key "${{1-}}"
+  if [ -n "$_XP_K" ]; then
+    case "$_dl_files" in *" $_XP_K "*) _XP_RUN=1 ;; esac
+  fi
+}}
+_xp_meta_hit(){{                    # ...and every piece of it once shell
+  local _t="${{1-}}" _p=""         # metacharacters are blanked
+  _t="${{_t//\\$/ }}"; _t="${{_t//(/ }}"; _t="${{_t//)/ }}"
+  _t="${{_t//$_CS_BT/ }}"
+  _t="${{_t//$_XP_SQC/ }}"; _t="${{_t//$_XP_DQC/ }}"
+  _t="${{_t//$_XP_BSC/ }}"
+  _t="${{_t//;/ }}"; _t="${{_t//&/ }}"; _t="${{_t//|/ }}"
+  _t="${{_t//</ }}"; _t="${{_t//>/ }}"
+  _t="${{_t//\\{{/ }}"; _t="${{_t//\\}}/ }}"
+  # ...and the tokenizer's in-quote whitespace sentinel. cmd_segments folds a
+  # quoted run into ONE token with $_CS_WS where its spaces were, so without
+  # this line `eval "$(cat b.sh)"` reduces to the single piece `cat<WS>b.sh`
+  # and the fetched file's name is never keyed (finding 19's third row).
+  _t="${{_t//$_CS_WS/ }}"
+  for _p in $_t; do _xp_run_hit "$_p"; done
+}}
+_xp_run_scan(){{
+  local _seg="${{1-}}" _tok="" _b="" _pfx=0 _cw="" _fwd=0
+  _XP_RUN=0
+  set -- $_seg
+  # Phase 1 - the head prefix run and the command word. Every token of the
+  # prefix run is itself keyed: a cheap over-match that closes
+  # `sudo -u a.sh cat`, where the FLAG'S OPERAND is the fetched file.
+  while [ "$#" -gt 0 ]; do
+    _tok="$1"
+    # [round-5 P1] _xp_cw, the word bash will execute, not a bare basename of
+    # the RAW token. bash removes quote characters and backslashes before it
+    # looks at a command word, so a backslash-escaped `sh`, `bash`, `source`,
+    # `.` or an interior-escaped `curl` named a program this walk could not
+    # see - each of them ran a file the same command had just fetched. THIS
+    # WALK GRANTS DENIES, so reducing to the executed spelling can only find
+    # MORE: the exact inverse of _xp_stage_kind, where the RAW token is
+    # deliberate because a quoted head must be unmodellable.
+    _xp_cw "$_tok"; _b="$_XP_CW"
+    # A file runner ENDS the prefix run. `.` and `source` are here and NOT in
+    # the forward scan below: they are builtins no wrapper can exec, so
+    # honouring them deeper would resolve `env jq . x.json` to `.` and deny an
+    # ordinary jq invocation.
+    case "$_b" in
+      @@FILE_RUNNER_CASE@@) _cw="$_b"; shift; break ;;
+    esac
+    case "$_tok" in
+      [A-Za-z_]*=*) _xp_run_hit "$_tok"; _pfx=1; shift; continue ;;
+    esac
+    case "$_b" in
+      @@PFX_CASE@@) _xp_run_hit "$_tok"; _pfx=1; shift; continue ;;
+    esac
+    # A COMPOUND HEAD or shell KEYWORD opens a command position too - which is
+    # why cmdpos.anchor_regex has had a KEYWORDS arm since round 2.
+    # [round-4, found by the generated corpus] Without this arm the segmenter
+    # hands this walk ` then sh a.sh ` and ` {{ sh a.sh `, whose FIRST token is
+    # `then`/`{{`; that was read as an ordinary command word, the walk stopped,
+    # and `sh a.sh` was never examined. 167 of 3,217 generated payloads walked
+    # out this way - finding 18's class on the RUN side rather than the
+    # pipe-stage side, which no report covered.
+    case "$_tok" in
+      @@COMPOUND_CASE@@) _xp_run_hit "$_tok"; _pfx=1; shift; continue ;;
+    esac
+    if [ "$_pfx" = "1" ]; then
+      case "$_tok" in -*) _xp_run_hit "$_tok"; shift; continue ;; esac
+    fi
+    # The first ordinary word. With no prefix in front it IS the command word
+    # - which is what closes a bare `./a.sh` and `a.sh` after `chmod +x`,
+    # because the file the command runs is the command word itself.
+    _xp_run_hit "$_tok"
+    # [round-5 P3] ...and under _XP_OPAQUE a PATH-FORM command word is the
+    # "runs a file" half on its own. bash executes a file directly ONLY when
+    # the command word contains a slash (otherwise it is a PATH lookup of a
+    # binary), so this is the tightest test that still catches
+    # `curl u | awk '{{print > "f.sh"}}' ; ./f.sh` - found by the round-5
+    # corpus, not by a report, and the one runner spelling that reaches no
+    # FILE_RUNNER and so never sets `_cw` below.
+    if [ "$_XP_OPAQUE" = "1" ]; then
+      case "$_tok" in */*) _XP_RUN=1; return 0 ;; esac
+    fi
+    if [ "$_pfx" = "1" ]; then _fwd=1; fi
+    shift
+    break
+  done
+  # Phase 2 - the UNBOUNDED forward scan, opened ONLY by a prefix run. With a
+  # wrapper word at the head there is no arity table that can separate
+  # `sudo -u nobody sh a.sh` from `sudo nobody sh a.sh`, so the walk keeps
+  # looking for a runner rather than stopping at the first operand - AND KEYS
+  # EVERY TOKEN ON THE WAY.
+  #
+  # [round-4, found by the generated corpus, not by any report] Scanning for a
+  # runner alone is not enough, because the thing being run need not BE a
+  # runner: `sudo -u root ./a.sh`, `nice -n 5 . a.sh` and
+  # `timeout -k 1 -s KILL 5 source a.sh` put the fetched file itself where the
+  # command word would be, behind a wrapper flag whose arity nothing here
+  # knows. 259 of 5,986 generated payloads walked out that way. Keying every
+  # token of the run is the fail-closed reading of the same ambiguity phase 1
+  # already resolves that way, and the cost is recorded: an ordinary reader
+  # behind a prefix (`curl -o x.json u ; env jq . x.json`) now refuses.
+  if [ "$_fwd" = "1" ]; then
+    while [ "$#" -gt 0 ]; do
+      _xp_run_hit "$1"
+      _xp_cw "$1"; _b="$_XP_CW"
+      case "$_b" in @@INT_CASE@@) _cw="$_b"; shift; break ;; esac
+      shift
     done
-  done < <(cmd_segments "$CMD")
+  fi
+  # Phase 3 - what the resolved command word does with the rest.
+  if [ -n "$_cw" ]; then
+    # [round-5 P3] An UNNAMEABLE write upstream plus a file run HERE is the
+    # fail-closed reading of a stage the model cannot interpret. `_cw` is set
+    # only for a FILE_RUNNER or an interpreter behind a prefix run, and one
+    # non-flag operand is required, so a bare interactive `sh` does not trip
+    # it. See pipe_stage_writes for what sets _XP_OPAQUE.
+    if [ "$_XP_OPAQUE" = "1" ]; then
+      for _tok in "$@"; do
+        case "$_tok" in -*) continue ;; esac
+        _XP_RUN=1; return 0
+      done
+    fi
+    case "$_cw" in
+      @@SHELL_INT_CASE@@)
+        # An INVOKER's argument is a command line, so every token counts -
+        # and so does every piece of it once metacharacters are blanked,
+        # which is what reaches `b.sh` inside `eval "$(cat b.sh)"`.
+        for _tok in "$@"; do _xp_run_hit "$_tok"; _xp_meta_hit "$_tok"; done ;;
+      *)
+        for _tok in "$@"; do
+          case "$_tok" in -*) continue ;; esac
+          _xp_run_hit "$_tok"
+        done ;;
+    esac
+  fi
+}}
+if [ -n "${{_dl_files// /}}" ] || [ "$_XP_OPAQUE" = "1" ]; then
+  set -f
+  while IFS= read -r _seg; do
+    _xp_run_scan "$_seg"
+    if [ "$_XP_RUN" = "1" ]; then
+      set +f
+      echo "Dependency gate: running a script this command just downloaded is blocked." >&2
+      echo "Vendor the installer, review it, then run it explicitly." >&2
+      exit 2
+    fi
+  # [X-32 repair F12] The SAME `>|` normalization the write pass above uses.
+  # Both passes must read one command or the substrates diverge: with the
+  # raw text here, `curl u | python3 -c 'x' >| out.json` split the target
+  # into a segment of its own and the shell ALLOWED what the SDK - which
+  # normalizes once at the top of _download_then_run - denied. Measured as a
+  # shell-allow/SDK-deny divergence during this repair.
+  done < <(cmd_segments "$_D20CMD")
+  set +f
 fi
 
 # [lens A F3 residue] An index/registry override redirects an APPROVED
@@ -2104,7 +3412,13 @@ PFX="$CMD_PFX"
 # An install invocation at the START of a segment. The tool may carry a path
 # (`/usr/bin/pip install`); `python -m pip install` and `uv pip install` are
 # spelled out because the token at command position is not the installer.
-HEAD="^ *${{PFX}}(python[0-9.]* +-m +pip +install|([^ ]*/)?uv +pip +install|${{RUNNERS}}|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
+# [X-32 repair F14] `-m *pip`, not `-m +pip`: the ATTACHED spelling
+# `python3 -mpip install evil` was rc=0 on both substrates at 2.6.1 with no
+# pipe involved at all, and the X-32 relaxation removed the pipe rule that
+# had been masking it in the `curl ... | python3 -mpip install evil` shape.
+# ` *` cannot over-match - `pip` must still be followed by whitespace and
+# `install`, so `-mpipx install` does not match.
+HEAD="^ *${{PFX}}(python[0-9.]* +-m *pip +install|([^ ]*/)?uv +pip +install|${{RUNNERS}}|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
 
 # SEGMENT FIRST, then judge each segment on its own [two-lens defects 1a/1b].
 # v2.6.0 searched the whole line for ONE install invocation and got both
@@ -2307,7 +3621,22 @@ while IFS= read -r nseg; do
       blocked="$blocked $name_only"
     fi
   done
-done < <(cmd_segments "$CMD")
+# [batch 30-33 close pass] BOTH SPELLINGS, one stream. `is_approved` is the
+# other ALLOW LIST in this suite, and lib/cmdpos.py's "THE FOLD IS DENY-ONLY"
+# applies to it exactly as it does to secrets-gate's dotenv carve-out: folding
+# `requests$''` to `requests` hands an approved-package exemption to a token
+# that never had it. Measured, a pristine 2.6.1 install DENIES all sixteen of
+# `pip install requests$''`, `pip install $''requests`, `pip install $'' requests`
+# and their `$""` twins across pip/poetry/uv, and this gate allowed every one.
+#
+# Concatenating the SEGMENTS is the whole change: the walk below is a pure
+# function of the segment stream, so appending the unfolded command's segments
+# makes the verdict the OR over both spellings - which is already what this
+# loop does across segments of one spelling. `_CMD_UNFOLDED` is EMPTY when the
+# fold changed nothing, and `cmd_segments ""` emits nothing, so the ordinary
+# command is scanned exactly once.
+done < <(cmd_segments "$CMD"
+         if [ -n "$_CMD_UNFOLDED" ]; then cmd_segments "$_CMD_UNFOLDED"; fi)
 if [ -n "$blocked" ]; then
   echo "Dependency gate: not in deps.md approved list:$blocked" >&2
   echo "Approve in-session and update .claude/steering/deps.md." >&2
@@ -2412,7 +3741,7 @@ exit 0
 # divergence in the direction the module's own binding rule forbids ("MUST
 # NOT block what the shell allows" reads the other way round only because
 # the shell was the wrong one).
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "push"; then
     # [round-2 review F-1420] This was
@@ -2582,7 +3911,19 @@ P="$S/.decision-pending-$SID"
 mkdir -p "$S" 2>/dev/null || true
 find "$S" -maxdepth 1 -name '.decision-pending-*' -mtime +7 -delete \\
   2>/dev/null || true
-: >"$P" 2>/dev/null || true
+# [X-30] Create-if-absent + refresh mtime - NEVER truncate. The protocol
+# (6.E ~787, Phase 8 ~1163; RETROFIT.md ~1473) directs the agent to WRITE
+# four fields (timestamp, reason, what it was about to do, what input it
+# needs) into this file at escalation; the unconditional `: >"$P"` erased
+# them on every Notification fire - i.e. at exactly the moment a halted
+# loop's operator returns to read them. Nothing in the emitted tree reads
+# the file's CONTENTS or keys on emptiness (wrappers check .loop-halt-*;
+# the sweep above keys on mtime), so the truncate was pure collateral.
+# Existence + mtime are the only load-bearing signals; touch keeps both.
+# Both `|| true` guards are load-bearing under set -e + trap ERR: an
+# unwritable sessions dir must stay non-fatal on an advisory hook.
+[ -e "$P" ] || : >"$P" 2>/dev/null || true
+touch "$P" 2>/dev/null || true
 echo "DECISION REQUIRED: operator action needed (see chat)." >&2
 log "decision-required-alarm fired"
 exit 0
@@ -2946,6 +4287,53 @@ _SKILL_LIST = [
 ]
 
 
+# X-33: checkpoint and resume are the only skills whose one-line
+# description is not an adequate body — each carries a normative rule
+# with real failure history. On a real install a model-supplied
+# filename stamp ran ahead of true UTC twice, so filename order and
+# actual age disagreed and a name-sorting consumer loads the OLDEST
+# state believing it the newest. Rules live HERE once; the retrofit
+# overlay reuses _skills() verbatim (installer.py appends retrofit
+# skills, never re-renders these), so both modes emit the same bodies.
+_SKILL_BODIES = {
+    "checkpoint": (
+        "Write a structured session synopsis to\n"
+        "`.claude/sessions/<timestamp>-checkpoint.md`.\n\n"
+        "Timestamp rule (X-33): take `<timestamp>` from the CLOCK, never\n"
+        "from memory. Run:\n\n"
+        "    date -u +%Y-%m-%dT%H%MZ\n\n"
+        "and use its output verbatim as the filename prefix.\n"
+        "Model-supplied stamps have run ahead of true UTC on real\n"
+        "installs; a wrong stamp poisons every consumer that sorts\n"
+        "checkpoints by name.\n\n"
+        "Synopsis sections: current task and spec ID, completed work\n"
+        "this session, in-flight (uncommitted) changes, files touched,\n"
+        "key decisions made, open questions, state of tests, next\n"
+        "steps. Update `.claude/specs/INDEX.md` to flag the checkpoint."),
+    "resume": (
+        "Load the most recent checkpoint (or a chosen one) from\n"
+        "`.claude/sessions/`.\n\n"
+        "Selection rule (X-33):\n\n"
+        "1. An explicitly named checkpoint always wins: if the operator\n"
+        "   passes a timestamp or filename, load exactly that file and\n"
+        "   STOP — rules 2 and 3 do not apply. The operator asked for\n"
+        "   that file; silently following a banner off it would be the\n"
+        "   same class of surprise this rule exists to remove.\n"
+        "2. Otherwise resolve \"most recent\" by file MTIME, never by\n"
+        "   filename sort:\n\n"
+        "       ls -t .claude/sessions/*-checkpoint.md | head -1\n\n"
+        "   Filename stamps have run ahead of true UTC when supplied\n"
+        "   from model memory, so name order and actual age can\n"
+        "   disagree — a name sort can load the OLDEST state while\n"
+        "   believing it the newest.\n"
+        "3. Only when rule 2 chose the file: cross-check its\n"
+        "   supersession banner if one is present, and follow it forward\n"
+        "   to the superseding checkpoint.\n\n"
+        "Then load the relevant steering + spec + decision log,\n"
+        "summarize, and ask the operator to confirm before continuing."),
+}
+
+
 def _skills(cfg):
     tdd = cfg["principles"]["tdd_policy"]
     out = {}
@@ -2953,8 +4341,13 @@ def _skills(cfg):
         rec = ""
         if name in ("spec-review", "code-review"):
             rec = "\n> Recommended: invoke from an Opus session.\n"
+        # X-33: body defaults to the one-line description; checkpoint
+        # and resume carry real bodies (clock-stamp rule, mtime
+        # selection rule). Frontmatter desc is untouched so the paired
+        # .claude/commands/*.md files do not move.
+        body = _SKILL_BODIES.get(name, desc)
         out[name] = (f"---\nname: {name}\n"
-                     f"description: {desc}\n---\n\n# {name}\n{rec}\n{desc}\n")
+                     f"description: {desc}\n---\n\n# {name}\n{rec}\n{body}\n")
     if tdd != "off":
         out["test-author"] = ("---\nname: test-author\n"
                               "description: Tests-first workflow per task.\n"
@@ -4255,7 +5648,7 @@ def _hook_body_retrofit(name: str, cfg: dict):
     if name == "spec-gate-commit":
         checks = r'''
 HOOK_NAME=spec-gate-commit
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 # [round-2 review F-2923] This gated the warn-only exemptions on a raw
 # SUBSTRING while the greenfield body it wraps is anchored to command
 # position - so the two disagreed in BOTH directions during the weeks the
@@ -4311,7 +5704,7 @@ fi
     elif name == "test-gate":
         checks = r'''
 HOOK_NAME=test-gate
-CMD="$(jget '.tool_input.command')"
+_read_cmd; CMD="$_CMD_R"
 # [round-2 review F-2923] Same substring-vs-anchor mismatch as
 # spec-gate-commit above; see that comment. `git  commit -m x` reported
 # "Commit blocked: tests failing" in a week whose table says nothing blocks.
