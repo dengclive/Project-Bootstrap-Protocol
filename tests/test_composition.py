@@ -107,6 +107,21 @@ for word in ("proxychains", "unbuffer", "stdbuf", "setsid", "ionice"):
     check(f"{word!r} appears exactly ONCE in lib/cmdpos.py", n == 1,
           f"found {n}")
 
+# [issue #36] The install scanner's word sets moved to cmdpos too:
+# TOOLS/VERBS were the LAST forked pair (one literal per substrate, exactly
+# the D3 arrangement, and the reason the #36 fix could have silently missed
+# a substrate). The five below are set members that are not ordinary
+# English and appear in no emitted prose or refusal message.
+for word in ("rebar3", "gleam", "pipenv", "poetry", "get-deps"):
+    for lbl, src in (("lib/templates.py", _tmpl),
+                     ("lib/sdk_gates_template.py", _sdk)):
+        n = src.count(word)
+        check(f"{word!r} is not written into {lbl} (it comes from cmdpos)",
+              n == 0, f"found {n} occurrence(s) outside comments")
+    n = _cmdpos.count(word)
+    check(f"{word!r} appears exactly ONCE in lib/cmdpos.py", n == 1,
+          f"found {n}")
+
 check("the dead _CS_INVOKERS list is gone",
       "_CS_INVOKERS" not in _tmpl,
       "round-4 D17: emitted into all hooks, zero call sites, already drifted")

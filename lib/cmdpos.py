@@ -553,6 +553,74 @@ def runners_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
     return "|".join(parts)
 
 
+# ---- [issue #36 / X-32i] the install anchor's word sets and tail ---------- #
+#
+# TOOLS and VERBS were FORKED literals - one copy in lib/templates.py's
+# dependency-gate body, one in lib/sdk_gates_template.py's static body -
+# which is precisely the two-copies arrangement this module exists to end
+# (D3), and the reason a fix applied to one substrate could have silently
+# missed the other. Both substrates now render the ONE tail below.
+#
+# `pip[0-9.]*` is a regex fragment rather than a word: `pip3`, `pip3.11` and
+# `pip38` are the same installer, and both dialects read the fragment
+# identically. `deps[.]get` spells its dot as a bracket expression for the
+# same reason - no backslash has to survive two emission paths unchanged.
+INSTALL_TOOLS = ("npm", "pnpm", "yarn", "bun", "pip[0-9.]*", "pipx",
+                 "poetry", "uv", "pipenv", "cargo", "gem", "composer",
+                 "mix", "rebar3", "gleam", "go", "deno")
+INSTALL_VERBS = ("install", "i", "add", "get", "require", "get-deps",
+                 "deps[.]get")
+
+
+def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
+                      space0: str = " *", wsp: str = " ") -> str:
+    """The install anchor after the command-position prefix run.
+
+    [issue #36] `python[0-9.]* -m` is a TRANSPARENT COMMAND-POSITION PREFIX
+    here - the treatment sudo/env/timeout get from prefix_run - so the
+    remainder is re-judged by the arms that already exist. The scanner used
+    to spell `python -m pip install` as ONE literal arm, so the `-m`
+    spelling of every OTHER installer walked through while its direct
+    spelling refused: `-m pipx install`, the attached `-mpipx`, `-m poetry
+    add`, `-m pipenv install` and `-m uv pip install` were all allow/allow
+    at v2.6.1. The last one is why the fix is a prefix and not an
+    enumeration: uv's verb is `pip`, not an INSTALL_VERBS member, so an
+    enumerated `-m (TOOLS) (VERBS)` arm matches the other four and misses
+    it - the route-through-one-model lesson four X-31/X-32 passes paid for.
+
+    `space0` admits the attached spelling: `-mpipx` is `-m` glued to its
+    module exactly as `-mpip` was (X-32 repair F14), and the module after
+    `-m` IS the installer, so it now matches ON PURPOSE. What keeps the
+    prefix from over-matching is that the next word must still be an arm:
+    `python3 -m json.tool` and `-m venv` name no INSTALL_TOOLS member and
+    fall through to allow.
+
+    The prefix carries the `([^ ]*/)?` path arm every wrapper word gets;
+    the old literal spelled `python` bare, so `/usr/bin/python3 -m pip
+    install` missed even the ONE spelling the scanner knew (measured
+    allow/allow on both substrates, closed by the same arm).
+
+    Consistency with issue #32's finding that `-m` is NOT a program flag
+    for the pipe rule: both say THE MODULE IS WHAT RUNS. For the pipe rule
+    that means stdin is still the program (`python3 -m code` is a REPL);
+    for this anchor it means the module is the installer.
+
+    `wsp` is the one-character trailing class - a literal space for the
+    shell (whose normalizer has already mapped VT/FF/CR to spaces and
+    whose segments split on newline) and `\\s` for the SDK, whose scanner
+    collapses `[ \\t]+` to spaces first. Over the bytes that can reach
+    them, the two spellings are the same class.
+    """
+    return (
+        "((" + nonspace + "*/)?python[0-9.]*" + space + "-m" + space0 + ")?"
+        + "((" + nonspace + "*/)?uv" + space + "pip" + space + "install"
+        + "|(" + runners_regex(space, nonspace) + ")"
+        + "|(" + nonspace + "*/)?(" + alt(INSTALL_TOOLS) + ")"
+        + space + "(" + alt(INSTALL_VERBS) + "))"
+        + "(" + wsp + "|$)"
+    )
+
+
 def anchor_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
     """The prefix-run regex. `space`/`nonspace` are parameterised only so the
     Python side can keep its `\\s`/`\\S` spelling; the STRUCTURE - and every

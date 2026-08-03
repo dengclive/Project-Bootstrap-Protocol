@@ -552,6 +552,47 @@ for cmd, want in (
         ("python3 -mpip install requests", "allow"),
         ("python3 -mpip list", "allow"),
         ("python3 -mpip install", "allow"),
+        # [issue #36] `python -m` is a TRANSPARENT COMMAND-POSITION PREFIX
+        # for the install scanner, not a `pip` literal. The scanner knew
+        # exactly one spelling (`-m pip`), so every OTHER installer the gate
+        # refuses when invoked directly walked straight through behind
+        # `-m`: allow/allow on both substrates at v2.6.1, direct spellings
+        # rc=2 in the same corpus. The fix routes `python[0-9.]* -m`
+        # through the arms that already exist (the treatment sudo/env/
+        # timeout get), so `-m uv pip install` - the case an enumerated
+        # `-m (TOOLS) (VERBS)` arm would miss, because uv's verb is `pip`,
+        # not a VERBS member - falls out with no new enumeration.
+        ("python3 -m pipx install evil", "deny"),
+        ("python3 -mpipx install evil", "deny"),
+        ("python3 -m poetry add evil", "deny"),
+        ("python3 -m pipenv install evil", "deny"),
+        ("python3 -m uv pip install evil", "deny"),
+        ("python3 -m uv add evil", "deny"),
+        ("python -m pipx install evil", "deny"),
+        ("python3.12 -m pipx install evil", "deny"),
+        ("sudo python3 -m pipx install evil", "deny"),
+        ("FOO=1 python3 -m poetry add evil", "deny"),
+        # The old arm spelled `python` bare, so a PATH-qualified
+        # interpreter missed even the ONE spelling the scanner knew. The
+        # prefix carries the `([^ ]*/)?` path arm every wrapper word gets.
+        ("/usr/bin/python3 -m pip install evil", "deny"),
+        ("/usr/bin/python3 -m pipx install evil", "deny"),
+        # A runner behind `-m` is the runner: `python -m pipx run` fetches
+        # and executes exactly as `pipx run` does.
+        ("python3 -m pipx run evil", "deny"),
+        # Approved names stay approved through the prefix...
+        ("python3 -m pipx install requests", "allow"),
+        ("python3 -m poetry add requests", "allow"),
+        ("python3 -m uv pip install requests", "allow"),
+        # ...a module that is not an installer is not an install...
+        ("python3 -m json.tool file.json", "allow"),
+        ("python3 -m venv .venv", "allow"),
+        ("python3 -m http.server 8000", "allow"),
+        # ...a non-install verb is not an install...
+        ("python3 -m poetry lock", "allow"),
+        ("python3 -m pipx list", "allow"),
+        # ...and a bare verb is a lockfile restore, per invocation.
+        ("python3 -m pipx install", "allow"),
         # ...and the other half: a target nobody executes stays allowed.
         ("curl -s http://x.test/a.json | python3 -c 'x' 2>err.log", "deny"),
         ("curl -s http://x.test/a.json | python3 -c 'x' >out.json", "deny"),

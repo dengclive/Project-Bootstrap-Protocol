@@ -1008,6 +1008,31 @@ EXPECTED_DIGESTS = {
     # description prose track the constant and were bumped with it - that file
     # is the one release-identity surface no test read until AC-A0-1 was
     # extended, and it was missed twice historically.
+    #
+    # [freeze-exception no. 35, 2026-08-03] ISSUE #36 / X-32i: `python -m` is
+    # a transparent COMMAND-POSITION PREFIX for the install anchor, not a
+    # `pip` literal. All three fixtures. The anchor spelled `python -m pip
+    # install` as ONE literal arm, so the `-m` spelling of every OTHER
+    # installer bypassed the approved list while its direct spelling refused
+    # - `-m pipx install`, attached `-mpipx`, `-m poetry add`, `-m pipenv
+    # install`, `-m uv pip install` and (path-qualified) `/usr/bin/python3
+    # -m pip install` were all ALLOW on both substrates, identically at
+    # v2.6.1. Fixed as a PREFIX rather than an enumerated `-m (TOOLS)
+    # (VERBS)` arm because `-m uv pip install` has verb `pip`, not a VERBS
+    # member, and an enumeration misses it. TOOLS/VERBS - the last forked
+    # pair, one literal per substrate - moved into lib/cmdpos.py
+    # (install_head_tail), so both anchors are ONE rendering.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: action counts stable at
+    # 57 / 69 / 59, 0 added, 0 removed, and EXACTLY TWO bodies move per
+    # fixture - .claude/hooks/dependency-gate.sh and
+    # .claude/sdk_gates/gates.py - which are precisely the two the anchor is
+    # rendered into. Nothing else moves: no wrapper, skill, command, agent,
+    # steering or settings body, and secrets-gate.sh is byte-identical
+    # (checked against an install built from 8276300, the 2.7.0 commit).
+    # ACCEPTANCE (KB §7): the differential corpus, 400 distinct commands x 2
+    # substrates, run against a pristine 8276300 baseline and against this
+    # tree - 24 verdicts move allow -> deny (the twelve #36 spellings on both
+    # substrates) and the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
     # The protocol document keeps its `v2-6-0` filename: the filename tracks
     # DOC FOLDS, not code releases. 2.1.0 was likewise a code MINOR served by
     # the v2-0-0 document. Its `**Version:**` header and version-history block
@@ -1161,8 +1186,9 @@ EXPECTED_DIGESTS = {
     # fail-closed for a blocking gate and a logged degrade for an advisory
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
+    # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "14900a223ceb7a58fd24cc5e8549a7a7e1e4ecd5b7e2a4dc42f1001230ea6793",
+        "cec2b805d6764a3f2a6997d98acca8b2444dc2ab3f5495d198f6acbb093766aa",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1274,8 +1300,9 @@ EXPECTED_DIGESTS = {
     # freeze-exception no. 26 - `jget` now falls back on FAILURE, not only on
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
+    # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "3c9998a4f022721245dd7a985462d8fc18c802e5471601b87ece190bc1070332",
+        "60c71920cf64917755f4189919b52b076f6fa59d33b5a42c2d245f8f1b10e01d",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1345,8 +1372,9 @@ EXPECTED_DIGESTS = {
     # design artifacts themselves are UNCHANGED (frozen twins intact).
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
+    # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "a4dddc397ebc522a714c8aa6e7c68d71585252002335d46f45027d89e316a98c",
+        "934f3940fddf565a26fc2eb900ca2065cff5a8f8ea676874edb68c168198c368",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -1085,7 +1085,12 @@ _SHELL_SUBST = {
     "@@PFX_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_PREFIXES, "      "),
     "@@ANCHOR_ERE@@": cmdpos.anchor_regex(),
     "@@PIPE_ERE@@": cmdpos.pipe_to_shell_regex(),
-    "@@RUNNERS_ERE@@": cmdpos.runners_regex(),
+    # [issue #36] The WHOLE install anchor after the prefix run - tools,
+    # verbs, runner channels and the `python -m` transparent prefix - so
+    # the dependency gate's HEAD and the SDK's _INSTALL_HEAD are one
+    # rendering. This replaced RUNNERS_ERE, whose only consumer was the
+    # old HEAD's runner arm; runners_regex still feeds this tail.
+    "@@INSTALL_TAIL_ERE@@": cmdpos.install_head_tail(),
     "@@DL_CASE@@": cmdpos.bash_case_alt(cmdpos.DOWNLOADERS, "      "),
     "@@INT_CASE@@": cmdpos.alt(cmdpos.INTERPRETERS),
     # BODY-ONLY on purpose: not in _HEADER_PLACEHOLDERS, so the shared
@@ -3387,19 +3392,11 @@ fi
 # invocation - so prose merely naming the variable does not block.
 _IDX_RE='(^| )(PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS|UV_INDEX_URL|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY|npm_config_registry|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER|COMPOSER_REPOSITORIES|GOPROXY|GEM_SOURCE)='
 
-TOOLS='(npm|pnpm|yarn|bun|pip[0-9.]*|pipx|poetry|uv|pipenv|cargo|gem|composer|mix|rebar3|gleam|go|deno)'
-VERBS='(install|i|add|get|require|get-deps|deps\\.get)'
-# [lens A F3 residue] Run-without-installing channels. `npx evil-package`,
-# `uvx evil`, `pnpm dlx evil`, `bunx evil`, `npm exec evil` and `yarn dlx
-# evil` all fetch and EXECUTE an unapproved package; the gate exists for
-# "unapproved software arrives", and not installing it first is not a
-# mitigation. NEWLY BLOCKED - see docs/changelog.md. deps.md is the escape
-# hatch, as it is for every other arrival channel.
-RUNNERS='(@@RUNNERS_ERE@@)'
 # [round-4 D20] The two channels that need a DISTINGUISHING token, kept out of
-# RUNNERS on purpose: `deno run main.ts` and `uv run python` are ordinary and
-# blocking them is the unactionable-refusal shape this suite has shipped
-# twice. Only the remote form and the `--with` form are arrival channels.
+# the runner channels on purpose: `deno run main.ts` and `uv run python` are
+# ordinary and blocking them is the unactionable-refusal shape this suite has
+# shipped twice. Only the remote form and the `--with` form are arrival
+# channels.
 _REMOTE_RUN='(^| )([^ ]*/)?deno +run( +-[^ ]+)* +[^ ]*://'
 _UV_WITH='(^| )([^ ]*/)?uv +run( +-[^ ]+)* +--with(=| )'
 # Command-position prefixes that do not change WHICH program runs, so the
@@ -3409,16 +3406,26 @@ _UV_WITH='(^| )([^ ]*/)?uv +run( +-[^ ]+)* +--with(=| )'
 # and `uv pip install evil` all sailed through, every one of which the
 # v2.5.0 substring match had caught].
 PFX="$CMD_PFX"
-# An install invocation at the START of a segment. The tool may carry a path
-# (`/usr/bin/pip install`); `python -m pip install` and `uv pip install` are
-# spelled out because the token at command position is not the installer.
-# [X-32 repair F14] `-m *pip`, not `-m +pip`: the ATTACHED spelling
-# `python3 -mpip install evil` was rc=0 on both substrates at 2.6.1 with no
-# pipe involved at all, and the X-32 relaxation removed the pipe rule that
-# had been masking it in the `curl ... | python3 -mpip install evil` shape.
-# ` *` cannot over-match - `pip` must still be followed by whitespace and
-# `install`, so `-mpipx install` does not match.
-HEAD="^ *${{PFX}}(python[0-9.]* +-m *pip +install|([^ ]*/)?uv +pip +install|${{RUNNERS}}|([^ ]*/)?${{TOOLS}} +${{VERBS}})( |$)"
+# An install invocation at the START of a segment. The tail after the prefix
+# run - the tool words, the install verbs, the run-without-installing
+# channels (`npx evil`, `pnpm dlx evil`: fetching and EXECUTING an
+# unapproved package is the same arrival, and not installing it first is not
+# a mitigation), and the `uv pip install` arm whose verb is `pip` - is
+# rendered whole from lib/cmdpos.py (install_head_tail). TOOLS and VERBS
+# used to be literals HERE plus a second set in the SDK's static body: the
+# D3 two-copies shape, and the reason a one-substrate fix could miss.
+# [issue #36] `python[0-9.]* -m` is a transparent COMMAND-POSITION PREFIX
+# inside that tail - the treatment sudo/env/timeout get - so `-m pipx
+# install`, `-m poetry add`, `-m pipenv install` and `-m uv pip install`
+# are re-judged by the arms that already refuse their direct spellings.
+# The old HEAD spelled `python -m pip install` as ONE literal arm, so every
+# other installer walked through behind `-m`.
+# [X-32 repair F14, revised by #36] The ATTACHED `-mpip` spelling was rc=0
+# at 2.6.1 and the repair widened the literal to `-m *pip`. Its claim that
+# `-mpipx install` must NOT match is retired ON PURPOSE: the module after
+# `-m` is what runs, so `-mpipx` is pipx and now matches like every other
+# attached spelling.
+HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"
 
 # SEGMENT FIRST, then judge each segment on its own [two-lens defects 1a/1b].
 # v2.6.0 searched the whole line for ONE install invocation and got both
