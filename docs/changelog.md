@@ -151,16 +151,23 @@ Result: **40 verdicts move allow → deny** (the twenty #36 spellings × two
 substrates), and the *previously-denied, now-allowed* set is **empty**. No
 verdict regressed in the fail-open direction on either substrate.
 
-**Five residues were opened rather than quietly fixed**, all measured and all
+**Six residues were opened rather than quietly fixed**, all measured and all
 pre-existing: **X-36a** (the shell/SDK whitespace-class split, in the safe
 direction), **X-36b** (`--python 3.12` blames the wrong token), **X-36c** (a
 wrapper word's unbounded skip swallows the package list — `sudo pip install
 evil npx` is a real fail-open on both substrates), **X-36d** (`pypy3` and
 `python3.13t` are unknown to the interpreter word *and* to the pipe trigger,
 where `curl u | pypy3` is a live remote-execution hole), **X-36e** (an escaped
-installer word, `pi\p install evil`, bypasses the shell hook only). Each needs
-its own measurement; riding them on this change is the treadmill KB §4.9 is
-about.
+installer word, `pi\p install evil`, bypasses the shell hook only), **X-36f**
+(an APPROVED package with extras, `pip install requests[socks]`, is refused).
+Each needs its own measurement; riding them on this change is the treadmill
+KB §4.9 is about.
+
+**The three that are real bypasses are now issues #39 (X-36c), #40 (X-36d) and
+#41 (X-36e)**, each re-measured against a clean install from the `v2.7.0` tag
+rather than inherited from the review. X-36a is in the safe direction and
+X-36b/X-36f are wrong-token and over-refusal defects, so they stay backlog
+rows — the same split X-32i got before it became issue #36.
 
 **Golden re-baseline: freeze-exception no. 35**, all three fixtures, verified
 per-file first. Action counts stable at **57 / 69 / 59**, 0 added, 0 removed,
