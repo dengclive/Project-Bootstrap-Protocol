@@ -214,10 +214,23 @@ def _cmd_word(tok):
     head word is UNMODELLABLE there, and reducing it would let `'python3'`
     pass as a stage this model can read.
     """
+    return _unquote_word(tok).rsplit("/", 1)[-1]
+
+
+def _unquote_word(tok):
+    """[issue #41 / X-36e] The quote-removal half of `_cmd_word`, WITHOUT the
+    basename step. Reference: cmdpos.unquote_word.
+
+    Split out because the install anchor needs the reduction but must KEEP
+    the path - it carries its own path arm, so a basename would lose
+    the distinction. The anchor was the one deny-granting consumer that had
+    never adopted this reduction, and on the shell substrate that left
+    `pi\\\\p install evil` allowed while this module denied it.
+    """
     out = tok
     for _c in ("'", '"', chr(92)):
         out = out.replace(_c, "")
-    return out.rsplit("/", 1)[-1]
+    return out
 
 
 def _cmd_spellings(input_data) -> tuple:
@@ -1937,7 +1950,13 @@ def _int_word(base):
     if base in _INTERPRETERS:
         return base
     v = base
-    while v and v[-1] in ".0123456789":
+    # [issue #40] `t`/`d` join the class: they are the free-threaded and
+    # debug ABI tags, so `python3.13t` reduces to `python3` exactly as
+    # `python3.12` does. Stripping only digits and dots left the tag glued
+    # on, the reduction never reached a member, and the stage classified as
+    # unmodellable while the trigger (whose suffix DOES admit the tag)
+    # matched - two spellings of one question. Shell parity.
+    while v and v[-1] in ".0123456789td":
         v = v[:-1]
         if v in _INTERPRETERS:
             return v
@@ -2024,6 +2043,62 @@ def _stage_head(toks):
     # produce one (`||` is not split, by design), and classifying it would
     # deny an ordinary fallback.
     return ""
+
+
+def _install_head_split(seg):
+    """The LEFTMOST install invocation in `seg`, as `(head, rest)`.
+
+    Returns `(None, "")` when the segment holds no install invocation.
+
+    [issue #39 / X-36c] THIS IS A LEFTMOST-SHORTEST SEARCH, and matching the
+    anchor once against the whole segment is what it replaces. bash matches
+    leftmost-LONGEST and Python's greedy run behaves the same way here, and
+    the anchor's wrapper arm consumes flags AND positionals without bound -
+    so on `sudo pip install evil npx` the run could eat `pip install evil`
+    and let the anchor match the TRAILING `npx`. The match then covered the
+    whole segment, `rest` came back empty, and an install verb with no
+    arguments is a lockfile restore, so NOTHING was inspected and the
+    command installed `evil`. rc=0 on both substrates at v2.7.0.
+
+    The shape is "the segment ENDS on an install phrase": one more token and
+    it denies again (`sudo pip install evil npx more` was rc=2) because the
+    extra token becomes the argument list. It denied for the wrong reason,
+    which is why a corpus that only compares rc values could not see this.
+
+    Growing the candidate one token at a time and taking the FIRST prefix
+    that matches answers the question the gate actually means - *which
+    invocation is at command position, and what are ITS arguments* - rather
+    than "what is the longest thing that looks like an install". Everything
+    after the matched verb is that invocation's arguments, which is why
+    `npx` is now read as a package name (it is one) instead of as a second
+    invocation.
+
+    IT IS NOT A NARROWING OF THE PREFIX RUN, deliberately. The run allows
+    positionals because `timeout 5 pip install evil` and `sudo -u root pip
+    install evil` need them, and cmdpos.py's ARITY section records the
+    16-of-27 regression measured when an arity table replaced them. Those
+    stay unbounded; only the CHOICE of match changes. Shell parity
+    (`_install_head_split` in the emitted hook).
+
+    [issue #41 / X-36e] The candidate is built from `_unquote_word(tok)` -
+    the word bash will resolve - not from the raw token. bash removes quote
+    characters and backslashes before resolving a word, so `pi\\\\p` names pip.
+    This substrate already denied those spellings because `_flatten_seg`
+    drops backslashes upstream; reading through the reduction here is what
+    makes that a PROPERTY of the anchor rather than a side effect of another
+    pass, so the two substrates agree by construction. Shell parity (`_uqw`).
+
+    Only the MATCH reads the reduced word; `rest` keeps the ORIGINAL tokens,
+    so package names are judged exactly as before.
+    """
+    toks = seg.split()
+    cand = ""
+    for i, tok in enumerate(toks):
+        red = _unquote_word(tok)
+        cand = red if not cand else cand + " " + red
+        if _INSTALL_HEAD.match(cand):
+            return cand, " ".join(toks[i + 1:])
+    return None, ""
 
 
 def _scan_install_line(line, approved):
@@ -2127,11 +2202,10 @@ def _scan_install_line(line, approved):
             return ("Dependency gate: 'uv run --with' installs a package for "
                     "the run.\\nApprove it in .claude/steering/deps.md and "
                     "install it explicitly.", "")
-        m = _INSTALL_HEAD.match(seg)
-        if not m:
+        head_txt, rest = _install_head_split(seg)
+        if head_txt is None:
             continue
-        rest = seg[m.end():]
-        if _INDEX_OVERRIDE.search(m.group(0)):
+        if _INDEX_OVERRIDE.search(head_txt):
             return ("Dependency gate: a package-index override is not "
                     "verifiable.\\nIt redirects even an APPROVED package to "
                     "another server. Remove it,\\nor set the index in the "

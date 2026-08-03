@@ -897,7 +897,7 @@ _cs_isinv(){
   done
 }
 _cs_scan(){
-  local _s _pre _q _rest _run _pd _ps _tok _rem
+  local _s _pre _q _rest _run _pd _ps _tok _rem _spl
   _s="$1"
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
   # operators in the UNQUOTED stretches only. Run-at-a-time, not
@@ -947,6 +947,25 @@ _cs_scan(){
       case "$_tok" in
         *$_CS_ESP*)
           _cs_esc_restore "$_tok"
+          _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R" ;;
+      esac
+      # [issue #41] ADJACENT QUOTED RUNS ARE ONE WORD. bash concatenates
+      # them before it resolves anything, so `sh -c 'pi''px install evil'`
+      # runs `pipx install evil` - but the loop above pushes each RUN as its
+      # own segment, so this arrived as `pi` and `px install evil` and
+      # matched no installer. rc=0 here while the SDK denied.
+      #
+      # The token buffer has already spliced the runs (that is why top-level
+      # `p''ip install evil` denies); what was missing is handing the
+      # SPLICED word to the invoker rule. A quoted run holding whitespace is
+      # a command line by definition here - we only reach this inside an
+      # invoker's argument - so restoring the sentinel and pushing it is the
+      # same additive move the escaped-space arm above makes. Additive: the
+      # per-run segments are still pushed, so this can only ADD denies.
+      case "$_tok" in
+        *$_CS_WS*)
+          _spl="${_tok//$_CS_WS/ }"
+          _cs_esc_restore "$_spl"
           _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R" ;;
       esac
       _rem="${_rem#"$_tok"}"
@@ -2886,7 +2905,15 @@ _xp_stage_kind(){{
       *) _iv="$_ib"
          while : ; do
            case "$_iv" in
-             *[0-9.]) _iv="${{_iv%?}}" ;;
+             # [issue #40] `t`/`d` join the class: they are the
+             # free-threaded and debug ABI tags, so `python3.13t` reduces
+             # to `python3` exactly as `python3.12` does. Stripping only
+             # digits and dots left the tag glued on, the reduction never
+             # reached a member, and the stage classified as unmodellable
+             # while the trigger (whose suffix DOES admit the tag) matched
+             # - two spellings of one question, which is the defect this
+             # reduction exists to avoid.
+             *[0-9.td]) _iv="${{_iv%?}}" ;;
              *) _iv=""; break ;;
            esac
            if [ -z "$_iv" ]; then break; fi
@@ -3544,11 +3571,66 @@ while IFS= read -r nseg; do
     echo "Approve it in .claude/steering/deps.md and install it explicitly." >&2
     exit 2
   fi
-  [[ "$nseg" =~ $HEAD ]] || continue
   # Arguments belonging to THIS segment's verb, and nothing else. Pure bash
   # (the previous `sed -E` was a third external-binary fail-open path).
-  head_txt="${{BASH_REMATCH[0]}}"
-  rest="${{nseg#"$head_txt"}}"
+  #
+  # [issue #39 / X-36c] THE LEFTMOST INSTALL PHRASE, NOT THE LONGEST MATCH.
+  # This used to be a single `[[ "$nseg" =~ $HEAD ]]` with
+  # `head_txt="${{BASH_REMATCH[0]}}"`. bash matches leftmost-LONGEST and the
+  # anchor's wrapper arm consumes flags AND positionals without bound, so on
+  # `sudo pip install evil npx` the run ate `pip install evil` and the anchor
+  # matched the TRAILING `npx`. head_txt then covered the whole segment,
+  # `rest` was empty, and a verb with no arguments is a lockfile restore - so
+  # NOTHING was inspected and the command installed `evil`. rc=0 on both
+  # substrates at v2.7.0.
+  #
+  # The shape is "the segment ENDS on an install phrase": one more token and
+  # it denied again (`... npx more` was rc=2, blaming `more`), which is why a
+  # corpus comparing only rc values could not see it.
+  #
+  # Growing the candidate ONE TOKEN AT A TIME and taking the FIRST prefix
+  # that matches answers what the gate means - which invocation is at
+  # command position, and what are ITS arguments. The prefix run is NOT
+  # narrowed: it allows positionals because `timeout 5 pip install evil` and
+  # `sudo -u root pip install evil` need them, and cmdpos.py's ARITY section
+  # records the 16-of-27 regression an arity table caused. Only the CHOICE
+  # of match changes. SDK parity (_install_head_split).
+  set -f
+  read -ra _NTOKS <<< "$nseg"
+  set +f
+  head_txt=""
+  rest=""
+  _hfound=0
+  _cand=""
+  # [issue #41 / X-36e] THE CANDIDATE IS BUILT FROM THE WORD BASH WILL
+  # RESOLVE, not from the raw token. bash removes quote characters and
+  # backslashes before it resolves a word, so `pi\\p` names pip - and this
+  # hook's cmd_segments RESTORES escapes, so the anchor (a regex over that
+  # text) saw no installer and `pi\\p install evil` was rc=0 here while the
+  # SDK, whose _flatten_seg drops backslashes, denied. `_uqw` is
+  # cmdpos.unquote_word: the quote-removal half of cmd_word, WITHOUT the
+  # basename step, because the anchor has its own path arm.
+  #
+  # Only the MATCH reads the reduced word. `rest` keeps the ORIGINAL tokens,
+  # so package names are judged exactly as before - the allow-list posture
+  # (cmdpos "THE FOLD IS DENY-ONLY") is deliberately untouched here.
+  for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
+    _uqw="${{_NTOKS[$_hi]}}"
+    _uqw="${{_uqw//\\'/}}"
+    _uqw="${{_uqw//\\\"/}}"
+    _uqw="${{_uqw//\\\\/}}"
+    if [ -z "$_cand" ]; then _cand="$_uqw"
+    else _cand="$_cand $_uqw"; fi
+    if [[ "$_cand" =~ $HEAD ]]; then
+      head_txt="$_cand"
+      for ((_hj=_hi+1; _hj<${{#_NTOKS[@]}}; _hj++)); do
+        rest="$rest ${{_NTOKS[$_hj]}}"
+      done
+      _hfound=1
+      break
+    fi
+  done
+  [ "$_hfound" = "1" ] || continue
   if [[ "$head_txt" =~ $_IDX_RE ]]; then
     echo "Dependency gate: a package-index override is not verifiable." >&2
     echo "It redirects even an APPROVED package to another server. Remove it," >&2
