@@ -2886,7 +2886,15 @@ _xp_stage_kind(){{
       *) _iv="$_ib"
          while : ; do
            case "$_iv" in
-             *[0-9.]) _iv="${{_iv%?}}" ;;
+             # [issue #40] `t`/`d` join the class: they are the
+             # free-threaded and debug ABI tags, so `python3.13t` reduces
+             # to `python3` exactly as `python3.12` does. Stripping only
+             # digits and dots left the tag glued on, the reduction never
+             # reached a member, and the stage classified as unmodellable
+             # while the trigger (whose suffix DOES admit the tag) matched
+             # - two spellings of one question, which is the defect this
+             # reduction exists to avoid.
+             *[0-9.td]) _iv="${{_iv%?}}" ;;
              *) _iv=""; break ;;
            esac
            if [ -z "$_iv" ]; then break; fi

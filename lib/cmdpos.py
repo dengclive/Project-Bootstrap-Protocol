@@ -196,8 +196,36 @@ DOWNLOADERS = (
 # stdin becomes DATA once a program flag is present?". With that exemption
 # removed nothing asks the question, so the split is gone. Content and order
 # are unchanged, which is what keeps pipe_to_shell_regex byte-identical.
-INTERPRETERS = INVOKERS + ("python", "python2", "python3", "perl", "ruby",
-                           "node", "php", "Rscript")
+# [issue #40 / X-36d] THE PYTHON FAMILY, NAMED ONCE. These are the
+# interpreters that take `-m <module>`, so they are what the install anchor
+# must treat as transparent, AND they are interpreters, so they are what the
+# pipe trigger must refuse. Before this set those were TWO private spellings
+# - `alt(INTERPRETERS) + "[.0-9]*"` here and `python[0-9.]*` in
+# install_head_tail - and both missed the same two real binaries:
+#
+#     curl u | pypy3            allow/allow   REMOTE EXECUTION of fetched bytes
+#     curl u | python3.13t      allow/allow   same
+#     pypy3 -m pip install evil allow/allow   approved-list bypass
+#
+# `pypy3` is the stock PyPy binary and `python3.13t` is CPython 3.13's
+# FREE-THREADED build, which ships under exactly that name - neither is an
+# exotic spelling, and the second is what a 3.13t user types every day.
+# A third private copy is the D3 shape; there is now one set with two
+# consumers, and adding a name reaches both.
+PY_INTERPRETERS = ("python", "python2", "python3", "pypy", "pypy3")
+
+INTERPRETERS = INVOKERS + PY_INTERPRETERS + ("perl", "ruby",
+                                             "node", "php", "Rscript")
+
+# [issue #40] The suffix a CPython-family binary carries after its name: a
+# version (`python3.12`, `pypy3.10`) and/or an ABI tag. `t` is the
+# free-threaded build and `d` the debug build, and they COMBINE
+# (`python3.13td`), so the class repeats rather than being optional-once.
+#
+# Over-match here is the DENY direction and the trailing context fences it:
+# `nodet` reduces to `node`+`t` but the interpreter word still requires
+# whitespace or a terminator next, so `nodetool` matches nothing.
+INTERP_SUFFIX = "[.0-9]*[td]*"
 
 # ---- [round-4 P1/P3] the four word sets the D20 walks were missing -------- #
 #
@@ -516,7 +544,7 @@ def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
     shorter, and `curl u | ${SHELL}` stays the 0 -> 2 improvement over 2.6.1
     that it became.
     """
-    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")[.0-9]*"
+    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")" + INTERP_SUFFIX
             + "(" + ws + "|$|[;)])"
             + "|" + nonspace + "*[$`]" + nonspace + "*"
             + "(" + ws + "|$|[;)])"
@@ -637,13 +665,13 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
     merely takes those words as argv, the run cannot start on `script.py`,
     and it stays ALLOW.
 
-    NOT CLOSED HERE, and pinned as X-36b rather than half-fixed: the
-    interpreter word is spelled `python[0-9.]*`, so `pypy3 -m pip install
-    evil` and `python3.13t -m pipx install evil` (CPython's free-threaded
-    binary) are still allow/allow. Widening it belongs with the SAME miss in
-    `interpreter_word()`/INTERPRETERS - where it is a live remote-execution
-    hole, `curl u | pypy3` being allow/allow today - and that is a change to
-    the pipe trigger owed its own measurement, not a rider on this one.
+    [issue #40 / X-36d, CLOSED] The interpreter word was once spelled
+    `python[0-9.]*` HERE and `alt(INTERPRETERS) + "[.0-9]*"` in
+    `interpreter_word()` - two private copies, both missing `pypy3` and
+    `python3.13t`. Both now read PY_INTERPRETERS + INTERP_SUFFIX, so the
+    anchor and the pipe trigger cannot disagree about what an interpreter
+    is. (An earlier revision of this docstring deferred that fix and cited
+    it as "X-36b", which was the wrong row - it was X-36d.)
 
     Consistency with issue #32's finding that `-m` is NOT a program flag
     for the pipe rule: both say THE MODULE IS WHAT RUNS. For the pipe rule
@@ -675,7 +703,8 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
     parity change owed its own measurement, not a rider on #36.
     """
     return (
-        "((" + nonspace + "*/)?python[0-9.]*"
+        "((" + nonspace + "*/)?(" + alt(PY_INTERPRETERS) + ")"
+        + INTERP_SUFFIX
         + "(" + space + "-" + nonspace + "*(" + space + "[^- ]" + nonspace
         + "*)?)*" + space + "-m" + space0 + ")?"
         + "((" + nonspace + "*/)?uv" + space + "pip" + space + "install"

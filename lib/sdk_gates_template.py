@@ -1937,7 +1937,13 @@ def _int_word(base):
     if base in _INTERPRETERS:
         return base
     v = base
-    while v and v[-1] in ".0123456789":
+    # [issue #40] `t`/`d` join the class: they are the free-threaded and
+    # debug ABI tags, so `python3.13t` reduces to `python3` exactly as
+    # `python3.12` does. Stripping only digits and dots left the tag glued
+    # on, the reduction never reached a member, and the stage classified as
+    # unmodellable while the trigger (whose suffix DOES admit the tag)
+    # matched - two spellings of one question. Shell parity.
+    while v and v[-1] in ".0123456789td":
         v = v[:-1]
         if v in _INTERPRETERS:
             return v

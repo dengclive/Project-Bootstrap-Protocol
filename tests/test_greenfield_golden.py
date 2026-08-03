@@ -1029,6 +1029,26 @@ EXPECTED_DIGESTS = {
     # rendered into. Nothing else moves: no wrapper, skill, command, agent,
     # steering or settings body, and secrets-gate.sh is byte-identical
     # (checked against an install built from 8276300, the 2.7.0 commit).
+    #
+    # [freeze-exception no. 36, 2026-08-04] ISSUE #40 / X-36d: ONE interpreter
+    # set for the pipe trigger AND the install anchor. They were two private
+    # spellings - `alt(INTERPRETERS) + "[.0-9]*"` and `python[0-9.]*` - and
+    # both missed `pypy3` (the stock PyPy binary) and `python3.13t` (CPython
+    # 3.13's FREE-THREADED build). The pipe half was REMOTE EXECUTION:
+    # `curl u | pypy3` ran the fetched bytes, allow/allow at v2.7.0. Both
+    # now read cmdpos.PY_INTERPRETERS + INTERP_SUFFIX; the `t`/`d` ABI tags
+    # join the basename reduction on both substrates so the stage classifier
+    # and the trigger answer the same question the same way.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed, exactly TWO bodies move per fixture -
+    # dependency-gate.sh and sdk_gates/gates.py.
+    # ACCEPTANCE (KB §7): 431 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 28 verdicts move
+    # allow -> deny and the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
+    # Widening INTERPRETERS also moves pypy stages from "unmodellable" to
+    # "interpreter" in the D20 classifier, which is the ALLOW direction -
+    # that is exactly what the empty set above rules out, and it holds
+    # because the pipe trigger fires before the D20 correlation is reached.
     # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
     # substrates, run against a pristine 8276300 baseline and against this
     # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
@@ -1200,7 +1220,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "a7aa2200510def2e5bbee449cd9cb2af68ab2b58bfe19dddfe2b176b37479fae",
+        "6ce1bf3074742175e6832e2f2fb1ea45d7e0470a5b581fac4ab08f8b19fb6c1b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1314,7 +1334,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "d2979bcb720c8a01042d125b45feb9b93ee80689c4725317c17400c530aa934b",
+        "2fec644e577d22abcfb35107003c4e10896f2c00d29ddc676454a19be626fb00",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1386,7 +1406,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "8a6ba1a3c92a24111c22d127932224931b3894cea7e7b26259a2b3ffcca3665b",
+        "f3b142597a1276e254c3bc4e83be34b19dbf2f231594afdfd685e9ba515d67c5",
 }
 
 EXPECTED_ACTION_COUNTS = {
