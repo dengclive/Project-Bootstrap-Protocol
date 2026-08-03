@@ -2032,6 +2032,50 @@ def _stage_head(toks):
     return ""
 
 
+def _install_head_split(seg):
+    """The LEFTMOST install invocation in `seg`, as `(head, rest)`.
+
+    Returns `(None, "")` when the segment holds no install invocation.
+
+    [issue #39 / X-36c] THIS IS A LEFTMOST-SHORTEST SEARCH, and matching the
+    anchor once against the whole segment is what it replaces. bash matches
+    leftmost-LONGEST and Python's greedy run behaves the same way here, and
+    the anchor's wrapper arm consumes flags AND positionals without bound -
+    so on `sudo pip install evil npx` the run could eat `pip install evil`
+    and let the anchor match the TRAILING `npx`. The match then covered the
+    whole segment, `rest` came back empty, and an install verb with no
+    arguments is a lockfile restore, so NOTHING was inspected and the
+    command installed `evil`. rc=0 on both substrates at v2.7.0.
+
+    The shape is "the segment ENDS on an install phrase": one more token and
+    it denies again (`sudo pip install evil npx more` was rc=2) because the
+    extra token becomes the argument list. It denied for the wrong reason,
+    which is why a corpus that only compares rc values could not see this.
+
+    Growing the candidate one token at a time and taking the FIRST prefix
+    that matches answers the question the gate actually means - *which
+    invocation is at command position, and what are ITS arguments* - rather
+    than "what is the longest thing that looks like an install". Everything
+    after the matched verb is that invocation's arguments, which is why
+    `npx` is now read as a package name (it is one) instead of as a second
+    invocation.
+
+    IT IS NOT A NARROWING OF THE PREFIX RUN, deliberately. The run allows
+    positionals because `timeout 5 pip install evil` and `sudo -u root pip
+    install evil` need them, and cmdpos.py's ARITY section records the
+    16-of-27 regression measured when an arity table replaced them. Those
+    stay unbounded; only the CHOICE of match changes. Shell parity
+    (`_install_head_split` in the emitted hook).
+    """
+    toks = seg.split()
+    cand = ""
+    for i, tok in enumerate(toks):
+        cand = tok if not cand else cand + " " + tok
+        if _INSTALL_HEAD.match(cand):
+            return cand, " ".join(toks[i + 1:])
+    return None, ""
+
+
 def _scan_install_line(line, approved):
     # Returns (reason, names): `reason` is a complete refusal message for
     # the three cases that are NOT about the approved list (and stops the
@@ -2133,11 +2177,10 @@ def _scan_install_line(line, approved):
             return ("Dependency gate: 'uv run --with' installs a package for "
                     "the run.\\nApprove it in .claude/steering/deps.md and "
                     "install it explicitly.", "")
-        m = _INSTALL_HEAD.match(seg)
-        if not m:
+        head_txt, rest = _install_head_split(seg)
+        if head_txt is None:
             continue
-        rest = seg[m.end():]
-        if _INDEX_OVERRIDE.search(m.group(0)):
+        if _INDEX_OVERRIDE.search(head_txt):
             return ("Dependency gate: a package-index override is not "
                     "verifiable.\\nIt redirects even an APPROVED package to "
                     "another server. Remove it,\\nor set the index in the "

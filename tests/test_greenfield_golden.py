@@ -1049,6 +1049,27 @@ EXPECTED_DIGESTS = {
     # "interpreter" in the D20 classifier, which is the ALLOW direction -
     # that is exactly what the empty set above rules out, and it holds
     # because the pipe trigger fires before the D20 correlation is reached.
+    #
+    # [freeze-exception no. 37, 2026-08-04] ISSUE #39 / X-36c: the install
+    # scanner takes the LEFTMOST install phrase, not the LONGEST match.
+    # bash matches leftmost-LONGEST and the anchor's wrapper arm consumes
+    # flags AND positionals without bound, so on `sudo pip install evil npx`
+    # the run ate `pip install evil`, the anchor matched the trailing `npx`,
+    # the match covered the whole segment, the argument list came back EMPTY,
+    # and a verb with no arguments reads as a lockfile restore - nothing was
+    # inspected and the command installs `evil`. rc=0 both substrates at
+    # v2.7.0. Both substrates now grow a candidate one token at a time and
+    # take the FIRST prefix the anchor matches (_install_head_split). The
+    # prefix run is NOT narrowed - positionals stay unbounded, because
+    # `timeout 5 pip install evil` needs them and cmdpos's ARITY section
+    # records the 16-of-27 regression an arity table caused; only the CHOICE
+    # of match changes.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59,
+    # 0 added, 0 removed, exactly TWO bodies move per fixture.
+    # ACCEPTANCE (KB §7): 447 distinct commands x 2 substrates against a
+    # pristine install built from the v2.7.0 TAG - 40 verdicts move
+    # allow -> deny (this and no. 36 together) and the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
     # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
     # substrates, run against a pristine 8276300 baseline and against this
     # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
@@ -1220,7 +1241,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "6ce1bf3074742175e6832e2f2fb1ea45d7e0470a5b581fac4ab08f8b19fb6c1b",
+        "50687e9c07a1cea98922ba37d6871470dbd601623578a278db2b38f65b669502",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1334,7 +1355,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "2fec644e577d22abcfb35107003c4e10896f2c00d29ddc676454a19be626fb00",
+        "a7927f41c99057b1f1b3d58871661a27f3bf99bd3738447c9b6290a7ac818760",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1406,7 +1427,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "f3b142597a1276e254c3bc4e83be34b19dbf2f231594afdfd685e9ba515d67c5",
+        "fa900b46bb336a2215c682fcd20dc9746b20d3950b87e58585346be6da4a53ca",
 }
 
 EXPECTED_ACTION_COUNTS = {

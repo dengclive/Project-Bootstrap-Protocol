@@ -3552,11 +3552,50 @@ while IFS= read -r nseg; do
     echo "Approve it in .claude/steering/deps.md and install it explicitly." >&2
     exit 2
   fi
-  [[ "$nseg" =~ $HEAD ]] || continue
   # Arguments belonging to THIS segment's verb, and nothing else. Pure bash
   # (the previous `sed -E` was a third external-binary fail-open path).
-  head_txt="${{BASH_REMATCH[0]}}"
-  rest="${{nseg#"$head_txt"}}"
+  #
+  # [issue #39 / X-36c] THE LEFTMOST INSTALL PHRASE, NOT THE LONGEST MATCH.
+  # This used to be a single `[[ "$nseg" =~ $HEAD ]]` with
+  # `head_txt="${{BASH_REMATCH[0]}}"`. bash matches leftmost-LONGEST and the
+  # anchor's wrapper arm consumes flags AND positionals without bound, so on
+  # `sudo pip install evil npx` the run ate `pip install evil` and the anchor
+  # matched the TRAILING `npx`. head_txt then covered the whole segment,
+  # `rest` was empty, and a verb with no arguments is a lockfile restore - so
+  # NOTHING was inspected and the command installed `evil`. rc=0 on both
+  # substrates at v2.7.0.
+  #
+  # The shape is "the segment ENDS on an install phrase": one more token and
+  # it denied again (`... npx more` was rc=2, blaming `more`), which is why a
+  # corpus comparing only rc values could not see it.
+  #
+  # Growing the candidate ONE TOKEN AT A TIME and taking the FIRST prefix
+  # that matches answers what the gate means - which invocation is at
+  # command position, and what are ITS arguments. The prefix run is NOT
+  # narrowed: it allows positionals because `timeout 5 pip install evil` and
+  # `sudo -u root pip install evil` need them, and cmdpos.py's ARITY section
+  # records the 16-of-27 regression an arity table caused. Only the CHOICE
+  # of match changes. SDK parity (_install_head_split).
+  set -f
+  read -ra _NTOKS <<< "$nseg"
+  set +f
+  head_txt=""
+  rest=""
+  _hfound=0
+  _cand=""
+  for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
+    if [ -z "$_cand" ]; then _cand="${{_NTOKS[$_hi]}}"
+    else _cand="$_cand ${{_NTOKS[$_hi]}}"; fi
+    if [[ "$_cand" =~ $HEAD ]]; then
+      head_txt="$_cand"
+      for ((_hj=_hi+1; _hj<${{#_NTOKS[@]}}; _hj++)); do
+        rest="$rest ${{_NTOKS[$_hj]}}"
+      done
+      _hfound=1
+      break
+    fi
+  done
+  [ "$_hfound" = "1" ] || continue
   if [[ "$head_txt" =~ $_IDX_RE ]]; then
     echo "Dependency gate: a package-index override is not verifiable." >&2
     echo "It redirects even an APPROVED package to another server. Remove it," >&2

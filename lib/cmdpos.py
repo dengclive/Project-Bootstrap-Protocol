@@ -78,10 +78,10 @@ has that hole and a new coreutils flag reopens it silently.
     They get flags AND positionals after a wrapper word - also unbounded, for
     the same reason the walkers are.
 
-    Unbounded consumption cannot fail open HERE, and the reason is worth
-    stating because it is not obvious: regex matching answers "does there
-    EXIST a parse", so a greedy prefix that swallows the command word simply
-    backtracks. Verified:
+    Unbounded consumption cannot make the MATCH fail open, and the reason is
+    worth stating because it is not obvious: regex matching answers "does
+    there EXIST a parse", so a greedy prefix that swallows the command word
+    simply backtracks. Verified:
 
         sudo -i pip install evil            MATCH  (-i takes no value; the
                                                     engine backtracks and
@@ -92,9 +92,28 @@ has that hole and a new coreutils flag reopens it silently.
                                                    wrapper, so the prefix run
                                                    never starts
 
-    The last line is the whole safety argument: the positional allowance is
-    gated on a wrapper word, so an ordinary command cannot drift into command
-    position.
+    The last line is the whole safety argument for MATCHING: the positional
+    allowance is gated on a wrapper word, so an ordinary command cannot drift
+    into command position.
+
+    ...AND THE ARGUMENT STOPS THERE. [issue #39 / X-36c] It says nothing
+    about WHICH parse the engine returns, and that is a second question with
+    a different answer. bash matches leftmost-LONGEST, so when several parses
+    exist the engine hands back the longest - and `BASH_REMATCH[0]` /
+    `m.end()` is what the install scanner slices to decide which tokens are
+    the invocation's ARGUMENTS. On `sudo pip install evil npx` the run ate
+    `pip install evil`, the anchor matched the trailing `npx`, the match
+    covered the whole segment, the argument list came back EMPTY, and an
+    install verb with no arguments reads as a lockfile restore. rc=0 on both
+    substrates, and the command installs `evil`.
+
+    So: unbounded consumption is safe for "is there an install here", and
+    unsafe for "where does it start". The scanner no longer asks the second
+    question of the match - it grows a candidate one token at a time and
+    takes the FIRST prefix the anchor matches (`_install_head_split` on both
+    substrates), which is leftmost-SHORTEST and is what "the invocation at
+    command position" always meant. The arity rules above are unchanged;
+    only the choice of match is.
 """
 
 from __future__ import annotations
