@@ -989,6 +989,30 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 34, 2026-08-03] THE PROTOCOL_VERSION BUMP,
+    # 2.6.1 -> 2.7.0, all three fixtures. Classified MINOR on BOTH counts:
+    # two configuration keys exist that did not (commands.execute_in_cwd,
+    # workflow.implementer_isolation, from issue #29), AND the emitted gates
+    # change BEHAVIOR - measured against a pristine v2.6.1 install over 2,950
+    # payloads x 2 substrates, 240/270 dependency-gate and 21/20 secrets-gate
+    # payloads that 2.6.1 ALLOWED now deny, five of them live RCEs.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: action counts stable at
+    # 57 / 69 / 59, 0 added, 0 removed, and EXACTLY ONE body moves per fixture
+    # - .claude/settings.json - whose ONLY differing line is
+    #   "bootstrap-installer (protocol 2.6.1)" -> "(protocol 2.7.0)"
+    # (diffed key-by-key against an install from the v2.6.1 tag: 2 lines, one
+    # - and one +). No hook, wrapper, skill, command, agent, steering or
+    # sdk_gates body moves; the batch's behavioural changes all landed in
+    # no. 33 and this exception adds nothing but the stamp.
+    # plugin/plugin.json's version AND the version string inside its
+    # description prose track the constant and were bumped with it - that file
+    # is the one release-identity surface no test read until AC-A0-1 was
+    # extended, and it was missed twice historically.
+    # The protocol document keeps its `v2-6-0` filename: the filename tracks
+    # DOC FOLDS, not code releases. 2.1.0 was likewise a code MINOR served by
+    # the v2-0-0 document. Its `**Version:**` header and version-history block
+    # are updated in place, exactly as the 2.6.1 release did.
+    #
     # [freeze-exception no. 33, 2026-08-03] X-30..X-33 — the four issues filed
     # against 2.6.1 alongside #29 (GitHub #30-#33). All three fixtures, and
     # emphatically NOT comment-only.
@@ -1138,7 +1162,7 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "bb66d4564e9833448cdaa02335663a3ab221b93bdeeb08f4239d648d8a74d67b",
+        "14900a223ceb7a58fd24cc5e8549a7a7e1e4ecd5b7e2a4dc42f1001230ea6793",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1251,7 +1275,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "e64b16a1a047ab1d4d6712eb05609e605969186e68242730a93ad8a99e8133bf",
+        "3c9998a4f022721245dd7a985462d8fc18c802e5471601b87ece190bc1070332",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1322,7 +1346,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "d0235191f8c5f0bd72c201c075abf317f974f896ad6c45ca9c4809ed2ca8fe4f",
+        "a4dddc397ebc522a714c8aa6e7c68d71585252002335d46f45027d89e316a98c",
 }
 
 EXPECTED_ACTION_COUNTS = {

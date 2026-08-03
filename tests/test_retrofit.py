@@ -909,10 +909,10 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.6.1' literally "
-          "(v2.6.1 release-identity bump; retrofit state also stamps the "
+    check("8.3: bootstrap_protocol_version matches '2.7.0' literally "
+          "(v2.7.0 release bump; retrofit state also stamps the "
           "greenfield PROTOCOL_VERSION per the shared writer)",
-          state["bootstrap_protocol_version"] == "2.6.1")
+          state["bootstrap_protocol_version"] == "2.7.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "

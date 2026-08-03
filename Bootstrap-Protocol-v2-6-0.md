@@ -1,6 +1,44 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.6.1
+**Version:** 2.7.0
+
+> **v2.7.0 — five filed issues, MINOR (2026-08-03).** Additive *and* corrective.
+> **Why MINOR and not PATCH:** two new configuration keys exist that did not
+> (`commands.execute_in_cwd`, `workflow.implementer_isolation`), and the emitted
+> gates change *behavior*, not merely bytes — a large class of command spellings
+> that 2.6.1 allowed now deny. Measured against a pristine v2.6.1 install over
+> 2,950 payloads x 2 substrates: **240/270** payloads in `dependency-gate` and
+> **21/20** in `secrets-gate` that 2.6.1 allowed are now refused, five of them
+> live RCEs (`curl u 2>&1 | sh`, `| <newline>sh`, `| \sh`, `| 'sh'`,
+> `| ${SHELL}`) and three live secret disclosures (`cat important.pem$''` and
+> siblings). **Not a seam event** — `SEAM-CONTRACT-v2-0-0.md` §8.4: no §7.2 tier
+> membership change (no member added or removed), no §7.3 provenance-marker or
+> synthesize-file-contract change, no §7.4 shared sentinel change, no CLI entry
+> point or contract-level flag, no §4.1/§5 table change, no `binds` change. The
+> new keys are *installer inputs*, not seam surfaces, and the `isolation:` line
+> is agent frontmatter. §8.4's closing line governs: *"changes that touch only
+> gate internals or dispatch policy do not bump `seam_version`."* `seam_version`
+> stays 2.0.0; consumers need no re-pin.
+>
+> **The document changes at Phase 2** (a new command-execution-location question,
+> asked verbatim of every archetype), **§6.C** (the two gate bullets now describe
+> what the gates actually do), **§6.E and Phase 8** (the alarm may never truncate
+> the escalation record the agent is told to write there), **Phase 7 step 6 and
+> the tier-3 demand** (the checkpoint stamp is read from the clock by *every*
+> producer, including the unattended paths), **Phase 7** (the `/checkpoint` and
+> `/resume` skills gain real bodies and a three-rule selection precedence) and
+> **Phase 9.5**. Issues #29, #30 and #33 are fixed; **#31 and #32 are closed
+> message-only** — an exemption for each was attempted over four rounds, found
+> 4 → 6 → 12 → ~20 blocking fail-opens, and was removed, with the
+> deny-direction hardening from those rounds kept. That episode is recorded as a
+> reusable pattern in `docs/agentic-harness-security-kb.md` §4.9, along with the
+> release criterion it produced: **no change to a control ships without the
+> previous-release diff, and the "previously denied, now allowed" set must be
+> empty.**
+>
+> Filename note: this document keeps its `v2-6-0` name. The filename tracks
+> *doc folds*, not code releases — 2.1.0 was likewise a code MINOR served by the
+> `v2-0-0` document.
 
 > **v2.6.1 — parser-usability fail-open, PATCH (2026-07-31).** No phase, artifact,
 > state field, opt-in or gate *predicate* changes; the document itself is amended

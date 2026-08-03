@@ -111,8 +111,8 @@ try:
                                         ".bootstrap-state.json")))
     check('AC-9-2: state records gate_substrate "sdk-callable"',
           state.get("gate_substrate") == "sdk-callable")
-    check("AC-9-5: state records protocol 2.6.1",
-          state.get("bootstrap_protocol_version") == "2.6.1")
+    check("AC-9-5: state records protocol 2.7.0",
+          state.get("bootstrap_protocol_version") == "2.7.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -215,10 +215,10 @@ check("AC-9-4: undetectable CLI warns loudly (never silent)",
 import installer   # noqa: E402
 import templates   # noqa: E402
 
-check("AC-9-5: installer PROTOCOL_VERSION is 2.6.1",
-      installer.PROTOCOL_VERSION == "2.6.1")
-check("AC-9-5: templates PROTOCOL_VERSION is 2.6.1",
-      templates.PROTOCOL_VERSION == "2.6.1")
+check("AC-9-5: installer PROTOCOL_VERSION is 2.7.0",
+      installer.PROTOCOL_VERSION == "2.7.0")
+check("AC-9-5: templates PROTOCOL_VERSION is 2.7.0",
+      templates.PROTOCOL_VERSION == "2.7.0")
 check("AC-9-5: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       installer.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 check("AC-9-5: seam runtime floor constant is 2.1.210",
