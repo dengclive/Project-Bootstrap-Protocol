@@ -1,5 +1,77 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.6.1 → 2.7.0 — release identity for the five-issue batch (2026-08-03)
+
+**MINOR.** `PROTOCOL_VERSION` 2.6.1 → 2.7.0 in `lib/installer.py` and
+`lib/templates.py`, `plugin/plugin.json`'s version **and the version string in
+its description prose** with it, and the protocol document's `**Version:**`
+header and version-history block.
+
+**Why MINOR and not PATCH — it qualifies on both counts,** where 2.6.0
+qualified on one:
+
+1. **Two configuration keys exist that did not.** `commands.execute_in_cwd`
+   and `workflow.implementer_isolation` (issue #29). New operator-facing
+   surface is additive, not corrective.
+2. **The emitted gates change behavior, not merely bytes.** Measured against a
+   pristine v2.6.1 install over 2,950 payloads × 2 substrates: **240/270**
+   `dependency-gate` and **21/20** `secrets-gate` payloads that 2.6.1 *allowed*
+   now deny. Five were live RCEs (`curl u 2>&1 | sh`, `| <newline>sh`,
+   `| \sh`, `| 'sh'`, `| ${SHELL}`); three were live secret disclosures.
+
+**Not a seam event.** `SEAM-CONTRACT-v2-0-0.md` §8.4 lists seven triggers and
+none fire: no §7.2 tier membership change (no member added or removed), no §7.3
+provenance-marker or synthesize-file-contract change, no §7.4 shared sentinel
+change, no CLI entry point or contract-level flag, no §4.1/§5 table change, no
+`binds` change. The two new keys are **installer inputs**, not seam surfaces,
+and `isolation:` is agent frontmatter. §8.4's closing line governs: *"changes
+that touch only gate internals or dispatch policy do not bump `seam_version`."*
+`seam_version` stays 2.0.0; consumers need no re-pin.
+
+**What 2.7.0 contains** — everything merged since the `v2.6.1` tag, i.e. PRs
+**#34** and **#35**: issue #29 (worktree isolation vs. container-run commands),
+#30 (the alarm truncating the escalation record it documents), #33 (the
+checkpoint stamp and the `/resume` selection rule), and #31/#32 **closed
+message-only** after four rounds of attempted gate exemptions were removed and
+their deny-direction hardening kept. Plus the `SyntaxWarning` CI fix and its
+guard.
+
+**The protocol document keeps its `v2-6-0` filename.** The filename tracks
+**doc folds**, not code releases — 2.1.0 was likewise a code MINOR served by
+the `v2-0-0` document, and 2.6.1 amended `v2-6-0` in place. Its header and
+history block are updated; the content changes for this batch (Phase 2, §6.C,
+§6.E, Phase 7 step 6 and the tier-3 demand, Phase 7, Phase 8, Phase 9.5) landed
+with the batch itself.
+
+**Golden re-baseline: freeze-exception no. 34**, all three fixtures, verified
+per-file first. Action counts stable at **57 / 69 / 59**, 0 added, 0 removed,
+and **exactly one** body moves per fixture — `.claude/settings.json` — whose
+only differing line, diffed key-by-key against an install built from the
+`v2.6.1` tag, is
+
+```
+- "_generatedBy": "bootstrap-installer (protocol 2.6.1)",
++ "_generatedBy": "bootstrap-installer (protocol 2.7.0)",
+```
+
+No hook, wrapper, skill, command, agent, steering or `sdk_gates` body moves;
+the batch's behavioural changes all landed under no. 33 and this exception adds
+nothing but the stamp.
+
+**Version surface swept, not assumed.** Beyond the two constants and
+`plugin.json`, the release re-pins version assertions in `test_installer.py`
+(AC-A0-1/2/3), `test_ic_gate.py` (AC-9-5), `test_gate_substrate.py` and
+`test_retrofit.py`. Prose references to v2.6.1 as a *measurement baseline* were
+deliberately left alone — they describe what was measured against that release
+and are still true.
+
+Also filed from this batch's residue: **issue #36** — `python -m <tool>
+install` bypasses the approved list for every tool except `pip` (`pipx`,
+`poetry`, `pipenv`, `uv` all deny when invoked directly and allow via `-m`,
+both spellings, both substrates, identical at 2.6.1).
+
+Suite: 23 suites / 7082 checks / 0 failed.
+
 ## 2.6.1 in-version fixes — four issues, and two over-refusals that could not be safely relaxed (2026-08-03)
 
 GitHub issues **#30, #31, #32, #33**, filed against 2.6.1 alongside #29.

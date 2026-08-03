@@ -1288,7 +1288,15 @@ finally:
 # [upstream fixes, 2.6.0] re-pinned 2.5.0 -> 2.6.0. Classified MINOR, not
 # PATCH: the emitted gates change BEHAVIOR, not just bytes - test-gate and
 # ci-mirror were async and therefore could not block at all, and now do; a
-# parser outage now fails closed where it used to allow. Not a seam event by
+# parser outage now fails closed where it used to allow.
+# [issues #29-#33, 2.7.0] re-pinned 2.6.1 -> 2.7.0. MINOR on BOTH counts this
+# time: two config keys exist that did not (commands.execute_in_cwd,
+# workflow.implementer_isolation), AND the emitted gates change behavior -
+# measured against a pristine v2.6.1 install, 240/270 dependency-gate and
+# 21/20 secrets-gate payloads that 2.6.1 ALLOWED now deny, five of them live
+# RCEs. The protocol document keeps its v2-6-0 filename: the filename tracks
+# doc folds, not code releases (2.1.0 was likewise a code MINOR served by the
+# v2-0-0 document). Not a seam event by
 # SEAM-CONTRACT §8.4 ("changes that touch only gate internals or dispatch
 # policy do not bump seam_version"): no §7.2 tier membership, §7.4 sentinel,
 # CLI flag, result/stream table, or `binds` entry moved.
@@ -1300,10 +1308,10 @@ finally:
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.6.1",
-      _installer_mod.PROTOCOL_VERSION == "2.6.1")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.6.1",
-      _templates_mod.PROTOCOL_VERSION == "2.6.1")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.7.0",
+      _installer_mod.PROTOCOL_VERSION == "2.7.0")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.7.0",
+      _templates_mod.PROTOCOL_VERSION == "2.7.0")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 # The two constants are declared independently in installer.py and
@@ -1334,16 +1342,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.6.1",
-          state.get("bootstrap_protocol_version") == "2.6.1")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.7.0",
+          state.get("bootstrap_protocol_version") == "2.7.0")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.6.1",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.7.0",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.6.1)")
+          == "bootstrap-installer (protocol 2.7.0)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.6.1",
-          manifest.get("protocol_version") == "2.6.1")
+    check("AC-A0-3: manifest records protocol_version 2.7.0",
+          manifest.get("protocol_version") == "2.7.0")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
