@@ -989,6 +989,37 @@ EXPECTED_DIGESTS = {
     # through absence - P0-3b closed "no parser at all" and this is "a parser
     # that does not work", which a presence test reports as success.
     #
+    # [freeze-exception no. 32, 2026-07-31] W-1 — worktree isolation vs. where
+    # the gate commands execute (issue #29). All three fixtures, and NOT
+    # comment-only: the emitted `implementer` agent's `isolation:` line stops
+    # being hardcoded and becomes conditional on the new
+    # `commands.execute_in_cwd` (Phase 2) / `workflow.implementer_isolation`
+    # (auto|worktree|none) keys. The defect: worktree isolation and the Phase 2
+    # command contract do not compose under FIXED-MOUNT INDIRECTION. `docker
+    # compose exec -T app pytest` lands in a container whose bind mount points
+    # at the main checkout, so an implementer working in .claude/worktrees/<n>/
+    # has its gate compile and test the MAIN tree - the gate passes and what
+    # the agent wrote was never built. A fail-open in a verification control.
+    # Plain commands (`pytest -q`) DO follow cwd into the worktree and were
+    # never affected, so no gate hook body changes here: running the command
+    # bare is the correct design, and the fix sits upstream of the gate.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING (dump-digests run against the
+    # pre-change tree): action counts stable at 57 / 69 / 59, 0 added,
+    # 0 removed, and the moving bodies are exactly
+    #   default:         .claude/steering/tech.md + .claude/agents/implementer.md
+    #   full_autonomous: the above + .claude/loop.sh, .claude/goal-loop.sh
+    #   design_steering: the same two as default
+    # tech.md gains an "Execution location" line under the command table;
+    # implementer.md gains the paragraph stating the requirement the isolation
+    # rests on (emitted in BOTH directions, so a later reader can tell a
+    # deliberate absence from an oversight); the two wrappers gain the [W-1]
+    # paragraph warning that --worktree moves the working directory but not a
+    # command that ignores it. All three fixtures leave execute_in_cwd at its
+    # default true, so every `isolation: worktree` line and both
+    # `max_concurrent_tasks: 2` values are UNCHANGED - the OFF path is covered
+    # behaviorally by tests/test_worktree_command_compat.py, not by a golden.
+    # No hook, skill, command, settings or sdk_gates body moves.
+    #
     # [freeze-exception no. 31, 2026-07-31] THE PROTOCOL_VERSION BUMP,
     # 2.6.0 -> 2.6.1, all three fixtures. This pays the debt recorded by
     # exceptions no. 18, 20, 21, 23 and 25, each of which declined to bump on
@@ -1069,7 +1100,7 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     "default":
-        "511ec0cd94c4d3f6b47617328c5ecc3f6379ab548e3d9cf6efada5991c8fde96",
+        "e781052311aaa441269ad0504478f750f16208a01ba8ac45b6ed4b0e0281db29",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1182,7 +1213,7 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     "full_autonomous":
-        "1f9f12dc7fd6dbb2c88e1f9cef917643d39377365f7278162f2c7b065815f653",
+        "2be8569b4e77d63b85f04a6c7dd2e86a4f29ff259e7a7e6594b817553d77e0d1",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1253,7 +1284,7 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     "design_steering":
-        "7e0872e972b13884443222eccffbd8a556319020cebea994db88925d6d8793c2",
+        "9e7e87eb6e3cd93079157ac99fd1ea6528b557423bd4b8ef800a457c1f675163",
 }
 
 EXPECTED_ACTION_COUNTS = {

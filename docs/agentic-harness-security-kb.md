@@ -9,6 +9,13 @@ that the test suite written to close P0-3b could not see — and it yields a six
 cross-cutting pattern. Post-tag material is marked **`[+2026-07-31]`** so the
 v2.5.0 → v2.6.0 delta this was compiled from stays legible as a delta.
 
+**Amended again 2026-07-31**, from issue #29 (W-1) against 2.6.1: a **seventh**
+pattern, §4.7 — two individually-correct features composing into a fail-open,
+with no owner of the pair. It is a new *class*, not a new member of the delta;
+the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
+and describe v2.5.0 → v2.6.0 only. So §4 now carries **seven** patterns: five
+compiled from the delta, two added post-tag.
+
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
 v2.5.0 → v2.6.0 delta closed fourteen defects, four of them fail-open security
@@ -769,8 +776,10 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Fourteen defects, six recurring shapes — five from the v2.5.0 → v2.6.0 delta and
-one added post-tag. If this document is read for one section, this is it.
+Fourteen defects, seven recurring shapes — five from the v2.5.0 → v2.6.0 delta
+and two added post-tag (§4.6 from P0-3d, §4.7 from W-1, which is a class the
+delta contains no member of). If this document is read for one section, this is
+it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
 
@@ -881,6 +890,69 @@ a dependency tests absence only. Present-and-broken is a different substrate and
 needs its own — see the recipes in §0 note 4. Whenever a control has a
 degradation path, ask what the *set* of ways to degrade is, and be suspicious of
 any answer with one element.
+
+### 4.7 Two safe features can compose into an unsafe one, and nobody owns the pair `[+2026-07-31]`
+
+W-1 (issue #29). **Not part of the v2.5.0 → v2.6.0 delta this document was
+compiled from** — it was reported against 2.6.1 and is recorded here because the
+class is new, not because the count moved. The delta above remains fourteen
+defects.
+
+Two features, each correct in isolation, each reviewed in isolation:
+
+- **Worktree isolation.** `isolation: worktree` gives the implementer subagent
+  its own checkout. Correct, and the documented drift-prevention mechanism.
+- **The command contract.** The gate runs the operator's configured command
+  **bare** — no `cd`, no `$CLAUDE_PROJECT_DIR`. Also correct: that is precisely
+  what lets a plain `pytest -q` inherit the hook's cwd and follow the agent into
+  its worktree.
+
+Compose them under a containerized dev environment and the pair fails open.
+`docker compose exec -T app pytest` enters a container whose bind mount points
+at the main checkout, so cwd is irrelevant — the gate compiles and tests the
+main tree while the agent works in `.claude/worktrees/<n>/`. **The gate passes.
+The code it approved was never built.** Same shape for `kubectl exec`, `ssh`,
+`vagrant ssh`, devcontainer CLIs. (`docker run -v "$(pwd)":/app` follows cwd and
+is fine — it is the *fixed* mount that breaks it.)
+
+Reach is wider than P0-3d, which needed a broken `jq`. This needs only a
+container, which the protocol's own Phase 2 invited with no caveat: one `docker`
+mention in a 352 KB protocol document, at line 924, saying only "don't wrap it
+in an MCP."
+
+**Why no review caught it.** Every technique in §5 examines *a* control. This is
+a property of a **pair**, and the pair had no owner: the worktree text lived in
+Phase 6.5/7, the command text in Phase 2, and no document referenced the other.
+A per-feature review is structurally blind to it — both features pass their own
+review, because both are individually right.
+
+| the safe-in-isolation claim | what the pair actually does |
+|---|---|
+| "worktrees isolate the agent's edits" | isolates the *directory*; not a command that ignores directories |
+| "the gate runs your real command" | runs it wherever *its* transport lands, not where the agent worked |
+| "parallel tasks can't collide" | true — and the verification of each is pointed at neither |
+
+**Rule:** for any two features that touch the same execution, write down the
+requirement each places on the other, in a place both are read from — or make
+one of them refuse to switch on when the other's precondition is unstated. W-1's
+fix does the latter: `commands.execute_in_cwd` names the precondition, and
+`isolation: worktree` is emitted only when it holds.
+
+**Corollary — the honest one.** Config-level derivation closes the *path into*
+the fail-open; it does not *detect* the fail-open. An operator who answers the
+question wrong is back where they started. The mechanical check that would have
+caught this without anyone reasoning about mounts is a gate that compares its own
+`pwd` against the tree it was invoked for and says so. That is not built
+(backlog W-1c), and saying "we asked the operator" is not the same as saying
+"we verified it."
+
+**Second corollary — trading a silent failure for a loud one is a legitimate
+fix.** Dropping the isolation costs parallelism and is *visible* when it bites:
+two implementers in one tree collide where someone can see it. Keeping it costs
+a green gate on uncompiled code and is *silent*. When both options are bad,
+prefer the one that announces itself — and pay the cost explicitly rather than
+declaring it (here: `max_concurrent_tasks` drops to 1 in the emitted queue
+config, with the reason in-file, instead of a doc note nobody reads).
 
 ---
 
@@ -1172,6 +1244,8 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] A suite that cannot run on this host reports **SKIPPED**, distinctly from one that ran and passed — `0 passed, 0 failed` + exit 0 must never render as `ok`. `[+2026-07-31]`
 - [ ] String assertions on emitted code anchor on the **executable** form, not a token a neighbouring comment also contains. `[+2026-07-31]`
 - [ ] Mutation is re-run against a **repaired check**, not only against repaired code — a fix to a test can reproduce the defect it was fixing. `[+2026-07-31]`
+- [ ] A verification control is proven to run against **the tree the work happened in**. Anything reaching its code through a fixed mount or a remote shell (`docker compose exec`, `kubectl exec`, `ssh`) ignores the caller's directory, so a control paired with per-task worktrees can verify a tree nobody edited. Probe it (`… exec -T <svc> pwd` from inside the worktree) rather than assuming. `[+2026-07-31]`
+- [ ] For any two features touching the same execution, the requirement each places on the other is written where **both** are read from — or the dependent feature refuses to switch on while the precondition is unstated. Per-feature review cannot see a pair. `[+2026-07-31]`
 
 **Fail-closed**
 - [ ] Every dispatch has an explicit deny arm; no `case` falls through to allow.

@@ -19,6 +19,46 @@ PROTOCOL_VERSION = "2.6.1"
 
 
 # --------------------------------------------------------------------------- #
+# [W-1] Worktree isolation vs. where the gate commands execute
+# --------------------------------------------------------------------------- #
+# resolve_config derives cfg["_implementer_isolation"] from
+# commands.execute_in_cwd + workflow.implementer_isolation. Templates read it
+# through these two helpers so the fallback is defined once: a cfg that never
+# went through resolve_config (a hand-built test fixture) behaves as the
+# pre-W-1 protocol did rather than KeyError-ing.
+def _isolation(cfg):
+    return cfg.get("_implementer_isolation", "worktree")
+
+
+def _worktrees_on(cfg):
+    return _isolation(cfg) == "worktree"
+
+
+# The single statement of the compatibility requirement. Every emitted surface
+# that mentions worktrees quotes THIS, so the protocol has one wording of it.
+_CWD_CONTRACT = (
+    "Worktree isolation only holds when the gate commands honor the directory "
+    "they are invoked from. The gates run the configured command bare — no "
+    "`cd`, no `$CLAUDE_PROJECT_DIR` — so a plain `pytest -q` inherits the "
+    "hook's cwd, which inside a worktree IS the worktree. Fixed-mount "
+    "indirection breaks it: `docker compose exec`, `kubectl exec`, `ssh`, "
+    "`vagrant ssh` and devcontainer CLIs land in a tree the mount chose, so "
+    "the gate would build and test the MAIN checkout while the agent worked "
+    "in the worktree — green on code that was never compiled."
+)
+
+# The one-command probe. An operator can settle this for their own environment
+# in seconds, which is worth more than any assertion this protocol could make
+# about their setup.
+_CWD_PROBE = (
+    "Probe it: run your test command's transport with `pwd` substituted "
+    "(e.g. `docker compose exec -T <svc> pwd`) from inside "
+    "`.claude/worktrees/<n>/`. If the path printed is not the worktree, the "
+    "commands do not honor cwd — set `commands.execute_in_cwd: false`."
+)
+
+
+# --------------------------------------------------------------------------- #
 # Steering docs
 # --------------------------------------------------------------------------- #
 def _product(cfg):
@@ -45,6 +85,28 @@ See `{p['prd_path']}`. Update this file when the product thesis changes.
 """
 
 
+def _execution_location(cfg):
+    """[W-1] The tech.md line recording where the commands run, and what the
+    installer did about it. Emitted either way: an operator reading tech.md
+    should be able to tell "asked and answered yes" from "never asked"."""
+    honors = cfg["commands"].get("execute_in_cwd", True)
+    where = ("run in the directory they are invoked from" if honors else
+             "do NOT follow the invoking directory")
+    if _worktrees_on(cfg):
+        consequence = ("Worktree isolation therefore composes with them, and "
+                       "the implementer agent is emitted with "
+                       "`isolation: worktree`.")
+    else:
+        consequence = ("The implementer agent is therefore emitted WITHOUT "
+                       "`isolation: worktree`: a gate that runs somewhere "
+                       "other than the agent worked would report green on "
+                       "code it never built. Parallel tasks share one tree, "
+                       "so keep `max_concurrent_tasks` at 1.")
+    return (f"**Execution location:** `commands.execute_in_cwd: "
+            f"{str(honors).lower()}` — these commands {where}. "
+            f"{consequence}\n")
+
+
 def _tech(cfg):
     p = cfg["project"]
     c = cfg["commands"]
@@ -65,7 +127,8 @@ def _tech(cfg):
 
 These commands are the contract the hooks enforce. If a cell says TODO the
 corresponding gate will fail loudly until it is filled.
-"""
+
+{_execution_location(cfg)}"""
 
 
 def _deps(cfg):
@@ -2912,12 +2975,47 @@ def _commands(cfg):
     return out
 
 
+def _isolation_frontmatter(cfg):
+    """[W-1] The `isolation:` frontmatter line, or nothing."""
+    return "isolation: worktree\n" if _worktrees_on(cfg) else ""
+
+
+def _isolation_note(cfg):
+    """[W-1] The body paragraph that explains the isolation decision.
+
+    Emitted in BOTH directions on purpose. When worktrees are on it states the
+    requirement the setting silently depends on; when they are off it records
+    WHY the line is absent, so the next operator does not read the omission as
+    an oversight and 'fix' it back into a fail-open.
+    """
+    if _worktrees_on(cfg):
+        return (f"\n## Worktree isolation — the requirement it rests on\n\n"
+                f"This agent runs with `isolation: worktree`: each invocation "
+                f"gets its own checkout under `.claude/worktrees/<n>/`. "
+                f"{_CWD_CONTRACT}\n\n"
+                f"`commands.execute_in_cwd` is `true` for this project, which "
+                f"is the declaration that they do. {_CWD_PROBE}\n")
+    return (f"\n## Worktree isolation is OFF — deliberately\n\n"
+            f"There is no `isolation: worktree` line in this agent's "
+            f"frontmatter, and that absence is a decision, not an oversight: "
+            f"`workflow.implementer_isolation` resolved to `none`. "
+            f"{_CWD_CONTRACT}\n\n"
+            f"So this agent works directly in the main checkout, where the "
+            f"gates can see what it wrote. **One task at a time** — without "
+            f"per-invocation checkouts, two concurrent implementers edit one "
+            f"tree. Re-enable via `bootstrap.config.yaml` "
+            f"(`workflow.implementer_isolation: worktree`) once each worktree "
+            f"gets its own mount; never by hand-editing this file, which "
+            f"trips the installer's digest guard and freezes it against every "
+            f"upstream fix.\n")
+
+
 def _agents(cfg):
     w = cfg["workflow"]
     return {
         "implementer": (
             f"---\nname: implementer\nmodel: {w['implementer_model']}\n"
-            f"isolation: worktree\n"
+            f"{_isolation_frontmatter(cfg)}"
             f"description: Use when an approved spec task is ready for "
             f"implementation. Reads .claude/specs/<slug>/tasks/<id>.md.\n"
             f"---\n\n# implementer\n\nSelf-contained: subagents do not "
@@ -2927,7 +3025,8 @@ def _agents(cfg):
             f"the task's `.claude/specs/<slug>/progress.md` **Failed "
             f"approaches** section and never re-attempt an approach flagged "
             f"do-not-retry. Its canonical shape is in `.claude/specs/"
-            f"progress-template.md`.\n"),
+            f"progress-template.md`.\n"
+            f"{_isolation_note(cfg)}"),
         "reviewer": (
             f"---\nname: reviewer\nmodel: {w['reviewer_model']}\n"
             f"effort: high\ntools: Read, Grep, Glob, Bash\n"
@@ -2940,23 +3039,46 @@ def _agents(cfg):
             f"description: Use when two implementer worktrees produced "
             f"conflicting changes to overlapping files.\n"
             f"---\n\n# integrator\n\nResolve merge conflicts between parallel "
-            f"task worktrees.\n"),
+            f"task worktrees.\n"
+            + ("" if _worktrees_on(cfg) else
+               "\n> **Not reachable in this project's configuration.** The "
+               "implementer runs without `isolation: worktree`, so parallel "
+               "task worktrees are never created and there is nothing for "
+               "this agent to reconcile. It is emitted so the roster stays "
+               "constant across configurations; it becomes live if "
+               "`workflow.implementer_isolation` is set back to `worktree`. "
+               "See `implementer.md` for why the isolation is off.\n")),
     }
 
 
 # --------------------------------------------------------------------------- #
 # Queue scaffolding (Phase 9.7)
 # --------------------------------------------------------------------------- #
+def _concurrency_default(cfg):
+    """[W-1] The starting max_concurrent_tasks, and the reason for it.
+
+    Turning worktree isolation off must not silently trade one failure for
+    another: with every implementer in the main checkout, a cap of 2 means two
+    agents editing one tree. So the cap follows the isolation.
+    """
+    if _worktrees_on(cfg):
+        return "max_concurrent_tasks: 2\n"
+    return ("# [W-1] 1, not the usual 2: the implementer runs WITHOUT\n"
+            "# `isolation: worktree` (see .claude/agents/implementer.md), so\n"
+            "# concurrent tasks would edit the same working tree. Raise this\n"
+            "# only after restoring per-task isolation.\n"
+            "max_concurrent_tasks: 1\n")
+
+
 def _backlog(cfg):
-    return """# Project backlog
+    return f"""# Project backlog
 
 <!-- Ready to run / Operator-only / Deferred are populated by spec-decompose.
      In flight / Completed / Halted are populated and reset by the runner. -->
 
 ## Queue policy
 
-max_concurrent_tasks: 2
-consecutive_halt_threshold: 3
+{_concurrency_default(cfg)}consecutive_halt_threshold: 3
 pause_on_max_iterations: false
 pause_on_goal_condition_suspect: true
 
@@ -2975,7 +3097,7 @@ pause_on_goal_condition_suspect: true
 
 
 def _auto_config(cfg):
-    return """# auto-config.md
+    return f"""# auto-config.md
 
 # --- Non-configurable invariants (stated, not set) ---
 #  * Operator-only tasks are always skipped by the runner.
@@ -2983,8 +3105,7 @@ def _auto_config(cfg):
 #    unblock remaining work.
 #  * Urgent escalations always halt the queue.
 
-max_concurrent_tasks: 2
-consecutive_halt_threshold: 3
+{_concurrency_default(cfg)}consecutive_halt_threshold: 3
 time_budget_minutes: 0          # 0 = unlimited
 token_budget: 0                 # 0 = unlimited
 task_budget: 0                  # 0 = unlimited
@@ -3278,10 +3399,11 @@ exit 1
 '''
 
 
-def _per_task_wrapper(kind: str) -> str:
+def _per_task_wrapper(kind: str, cfg) -> str:
     """Shared skeleton for the two per-task wrappers (loop.sh, goal-loop.sh).
 
-    `kind` is "loop" or "goal". These are GUARDED SKELETONS, exactly like
+    `kind` is "loop" or "goal". `cfg` supplies the [W-1] worktree-routing
+    decision. These are GUARDED SKELETONS, exactly like
     auto.sh: they perform the race-safe claim sequence Bootstrap-Protocol-v2-2-0.md Phase 9.5
     step 2 mandates (O_CREAT|O_EXCL active sentinel, flock on the state file,
     tmpfile-then-rename state write) and the eligibility/`.halt` guards, then
@@ -3314,21 +3436,7 @@ def _per_task_wrapper(kind: str) -> str:
 # operator completes and smoke-tests per the trust ramp. Until then this
 # script refuses to dispatch any unattended work.
 #
-# [IC-6] Worktree routing is NATIVE. The operator-completed loop dispatches
-#   claude -p --worktree "wt-$TASK_ID" --output-format stream-json --verbose ...
-# and Claude Code creates/reuses .claude/worktrees/wt-<task-id>/ itself.
-# (The --output-format stream-json --verbose flags are required by the
-#  usage-limit handling block below, which tails that NDJSON event stream.)
-# Never hand-roll `git worktree add` in this wrapper - the native mechanism
-# covers worktree creation, entry, and clean-worktree auto-cleanup (the
-# seam runtime floor >= 2.1.210 subsumes native worktree support). A
-# worktree is a drift-prevention boundary, NOT a security boundary.
-# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: append
-# `.claude/worktrees/` to .git/info/exclude (local, per-clone). One-liner:
-#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
-# Do NOT add it to a COMMITTED .gitignore: the native mechanism refuses to
-# create a worktree inside an ignored directory, so committing that rule
-# breaks worktree creation for every clone (Claude Code issue #57512).
+{worktree_routing}
 #
 # [Trajectory retention - GR2-02, Bootstrap-Protocol-v2-4-0.md Phase 9.5
 #  "Deliverable contract for the wrappers" item 4 - the single normative home
@@ -3555,9 +3663,7 @@ flock -u 9
 log "{self} claimed task=$TASK_ID (skeleton: agent loop not implemented)"
 echo "{title} skeleton: task '$TASK_ID' claimed and guarded. Implement the" >&2
 echo "claude -p iteration loop per Bootstrap-Protocol-v2-2-0.md Phase {phase} before any" >&2
-echo "unattended use (dispatch with native routing + NDJSON stream: claude -p" >&2
-echo "--worktree \\"wt-$TASK_ID\\" --output-format stream-json --verbose - see the" >&2
-echo "[IC-6] and usage-limit headers). No agent work was dispatched." >&2
+{dispatch_hint}
 # A WRAPPER THAT DISPATCHED NOTHING MUST NOT REPORT SUCCESS. This used to set
 # EXIT_REASON="max-iterations" and exit 0 - i.e. "the loop ran and hit its
 # cap", a healthy terminal state - for a skeleton that never iterated once.
@@ -3573,7 +3679,77 @@ exit 1
            elig=elig, kind=kind,
            judge_resolution=(_JUDGE_RESOLUTION if kind == "goal" else ""),
            judge_parity_comment=(_JUDGE_PARITY_COMMENT if kind == "goal"
-                                 else ""))
+                                 else ""),
+           worktree_routing=(_WORKTREE_ROUTING_ON if _worktrees_on(cfg)
+                             else _WORKTREE_ROUTING_OFF),
+           dispatch_hint=(_DISPATCH_HINT_ON if _worktrees_on(cfg)
+                          else _DISPATCH_HINT_OFF))
+
+
+# [W-1] The worktree-routing header, injected as a .format() VALUE (not
+# re-scanned for braces). Two variants, because the dispatch line the operator
+# is told to write differs by whether worktree isolation is on at all — and a
+# wrapper that told an operator to add `--worktree` in a project whose gates
+# cannot see inside a worktree would be handing them the fail-open.
+_WORKTREE_ROUTING_ON = '''\
+# [IC-6] Worktree routing is NATIVE. The operator-completed loop dispatches
+#   claude -p --worktree "wt-$TASK_ID" --output-format stream-json --verbose ...
+# and Claude Code creates/reuses .claude/worktrees/wt-<task-id>/ itself.
+# (The --output-format stream-json --verbose flags are required by the
+#  usage-limit handling block below, which tails that NDJSON event stream.)
+# Never hand-roll `git worktree add` in this wrapper - the native mechanism
+# covers worktree creation, entry, and clean-worktree auto-cleanup (the
+# seam runtime floor >= 2.1.210 subsumes native worktree support). A
+# worktree is a drift-prevention boundary, NOT a security boundary.
+# IGNORE THE WORKTREE DIR LOCALLY, and do it the RIGHT way: append
+# `.claude/worktrees/` to .git/info/exclude (local, per-clone). One-liner:
+#   grep -qxF '.claude/worktrees/' "$PROJ/.git/info/exclude" 2>/dev/null || echo '.claude/worktrees/' >> "$PROJ/.git/info/exclude"
+# Do NOT add it to a COMMITTED .gitignore: the native mechanism refuses to
+# create a worktree inside an ignored directory, so committing that rule
+# breaks worktree creation for every clone (Claude Code issue #57512).
+#
+# [W-1] THE ROUTING ABOVE ASSUMES THE GATE COMMANDS FOLLOW cwd. --worktree
+# moves the working directory; it does not move a command that ignores the
+# working directory. `docker compose exec`, `kubectl exec`, `ssh`,
+# `vagrant ssh` and devcontainer CLIs land wherever their mount points, so
+# an iteration would edit .claude/worktrees/wt-$TASK_ID/ while its test gate
+# compiled the main checkout - the gate passes, and nothing it approved was
+# ever built. This project declared commands.execute_in_cwd: true. If that
+# stops being true, set it false in bootstrap.config.yaml and re-run the
+# installer; do not just drop the flag here.'''
+
+_WORKTREE_ROUTING_OFF = '''\
+# [IC-6 / W-1] Worktree routing is DISABLED for this project. Dispatch
+# WITHOUT --worktree:
+#   claude -p --output-format stream-json --verbose ...
+# (The --output-format stream-json --verbose flags are still required by the
+#  usage-limit handling block below, which tails that NDJSON event stream.)
+# Do not add --worktree back, and never hand-roll `git worktree add` here.
+# Reason: commands.execute_in_cwd is false - this project's test/lint
+# commands reach their tree through a fixed mount (docker compose exec,
+# kubectl exec, ssh, or similar) rather than through the working directory.
+# An iteration inside .claude/worktrees/wt-$TASK_ID/ would therefore have its
+# gates compile and test the MAIN checkout: the gate reports green on code it
+# never built, unattended, with no operator watching. Running in the main
+# checkout keeps the gates pointed at the code the agent actually wrote.
+# The cost is real and is why max_concurrent_tasks starts at 1 in
+# auto-config.md: concurrent iterations now share one working tree.
+# To restore isolation, give each worktree its own mount (e.g. a per-worktree
+# compose project), then set workflow.implementer_isolation: worktree in
+# bootstrap.config.yaml and re-run the installer.'''
+
+
+# [W-1] The skeleton's stderr dispatch hint. Matched to the routing header
+# above so the two can never tell the operator different things.
+_DISPATCH_HINT_ON = r'''
+echo "unattended use (dispatch with native routing + NDJSON stream: claude -p" >&2
+echo "--worktree \"wt-$TASK_ID\" --output-format stream-json --verbose - see the" >&2
+echo "[IC-6] and usage-limit headers). No agent work was dispatched." >&2'''.lstrip("\n")
+
+_DISPATCH_HINT_OFF = r'''
+echo "unattended use (dispatch WITHOUT --worktree, commands.execute_in_cwd is" >&2
+echo "false: claude -p --output-format stream-json --verbose - see the [IC-6 /" >&2
+echo "W-1] and usage-limit headers). No agent work was dispatched." >&2'''.lstrip("\n")
 
 
 # goal-loop.sh judge-parity clause (R4), injected as a .format() VALUE so it
@@ -3642,11 +3818,11 @@ log "goal-loop.sh evaluator_model=$EVALUATOR_MODEL (task=$TASK_ID)"
 
 
 def _loop_sh(cfg):
-    return _per_task_wrapper("loop")
+    return _per_task_wrapper("loop", cfg)
 
 
 def _goal_loop_sh(cfg):
-    return _per_task_wrapper("goal")
+    return _per_task_wrapper("goal", cfg)
 
 
 def _loop_config(cfg):
@@ -4832,7 +5008,7 @@ def _retrofit_implementer_agent(cfg):
             f"acknowledgment.\n")
 
     return (f"---\nname: implementer\nmodel: {w['implementer_model']}\n"
-            f"isolation: worktree\n"
+            f"{_isolation_frontmatter(cfg)}"
             f"description: Use when an approved spec task is ready for "
             f"implementation. Reads .claude/specs/<slug>/tasks/<id>.md. "
             f"Retrofit-flavor: honors pin-first discipline (G6) on "
@@ -4867,8 +5043,19 @@ def _retrofit_implementer_agent(cfg):
             f"4. **Worktree budget (G16):** consult "
             f"`.claude/hooks/worktree-budget.md` (if present). For "
             f"codebases over 5GB, prefer sequential to parallel "
-            f"worktrees.\n"
-            f"{autonomous_section}")
+            f"worktrees."
+            # [W-1] Without isolation there are no per-task worktrees for the
+            # budget to be spent on, and leaving item 4 unqualified would have
+            # this file contradict its own closing section.
+            + ("" if _worktrees_on(cfg) else
+               " **Moot in this configuration** — worktree isolation is off "
+               "(see below), so no per-task worktrees are created.")
+            + f"\n"
+            # The isolation note goes AFTER the autonomous section, not
+            # between them: it is an `##` heading, and dropping a heading
+            # between numbered items 4 and 5 breaks the list.
+            f"{autonomous_section}"
+            f"{_isolation_note(cfg)}")
 
 
 def _retrofit_reviewer_agent(cfg):
