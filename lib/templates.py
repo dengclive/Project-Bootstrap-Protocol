@@ -2650,6 +2650,24 @@ _xp_key(){{
 # different: bash removes it wherever it appears outside single quotes, so
 # deleting it can only produce a word bash would really resolve. Reference:
 # cmdpos.strip_escapes.
+# [#45 review, D1 round 2] The completer KEY: basename, with any leading GLUE
+# run removed. Two `*`-quantified spaces let a completer share a token with
+# what precedes it - the install tail's `space0` (`-mnpx`) and the prefix run's
+# `[({{] *` arm (`{{npx`). Enumerating those spellings closed the first and left
+# the second open; reducing the token covers both. Reference:
+# cmdpos.completer_key.
+_CKEY=""
+_ckey(){{
+  local _t="${{1##*/}}"
+  while : ; do
+    case "$_t" in
+      "("*|"{{"*|":"*|"?"*) _t="${{_t#?}}" ;;
+      *) break ;;
+    esac
+  done
+  case "$_t" in -m*) _t="${{_t#-m}}" ;; esac
+  _CKEY="$_t"
+}}
 _UQB=""
 _uqb(){{
   local _t="${{1-}}"
@@ -3707,13 +3725,17 @@ while IFS= read -r nseg; do
   # FAILING match on a `WRAPPER NAME=VALUE ...` line is already expensive and
   # running it per token multiplied that. The tail always ENDS on a verb or
   # runner word, so a match anywhere else cannot succeed. The unguarded
-  # second pass below is the correctness guarantee: an error in the derived
-  # completer list costs a slow path, never a verdict.
+  # second pass below is NOT the correctness guarantee - it runs only when the
+  # guard finds NO match, and a wrong completer key makes the guard find a
+  # LATER one, returning an emptied argument list. The guarantee is the census
+  # test in tests/test_issue_fixes.py, which requires every match to end on a
+  # token whose key is a completer.
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
     if [ -z "$_cand" ]; then _cand="$_UQW"
     else _cand="$_cand $_UQW"; fi
-    case "${{_UQW##*/}}" in
+    _ckey "$_UQW"
+    case "$_CKEY" in
       @@COMPLETER_CASE@@)
         if [[ "$_cand" =~ $HEAD ]]; then
           head_txt="$_cand"

@@ -743,6 +743,15 @@ for cmd, want in (
         # A bare runner names no package, exactly as `npx` alone does.
         ("python3 -mnpx", "allow"),
         ("npx", "allow"),
+        # [#45 review, round 2] `-m` was not the only glue site: prefix_run's
+        # `[({] *` arm has the same shape, so the leftmost match can end on
+        # `{npx`. Enumerating a second glue spelling would have been the same
+        # mistake, so the guard now REDUCES the token (cmdpos.completer_key).
+        # deny at v2.7.0, allow with the first cut of the guard.
+        ("{npx evil install", "deny"),
+        ("{bunx evil install", "deny"),
+        ("{npx evil", "deny"),
+        ("{ npx evil", "deny"),
         # [#45 review, D2] The SEGMENT reduction is backslashes ONLY. Deleting
         # quotes from a whole segment manufactures phrases that were never
         # there - these run `git`/`echo`, and nothing named deno or uv

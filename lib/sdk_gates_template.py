@@ -217,6 +217,21 @@ def _cmd_word(tok):
     return _unquote_word(tok).rsplit("/", 1)[-1]
 
 
+def _completer_key(tok):
+    """The word a token must END on for the install anchor to finish there:
+    basename, with any leading GLUE run removed. Reference:
+    cmdpos.completer_key.
+
+    Two `*`-quantified spaces let a completer share a token with what precedes
+    it - `space0` in the install tail (`-mnpx`) and the prefix run's `[({] *`
+    arm (`{npx`). Enumerating those spellings into the table closed the first
+    and left the second open; reducing the token covers both and anything that
+    goes through the same quantifiers.
+    """
+    base = tok.rsplit("/", 1)[-1].lstrip(_COMPLETER_GLUE)
+    return base[2:] if base.startswith("-m") else base
+
+
 def _unquote_word(tok):
     """[issue #41 / X-36e] The quote-removal half of `_cmd_word`, WITHOUT the
     basename step. Reference: cmdpos.unquote_word.
@@ -2146,7 +2161,7 @@ def _install_head_split(seg):
     cand = ""
     for i, r in enumerate(red):
         cand = r if not cand else cand + " " + r
-        if (r.rsplit("/", 1)[-1] in _INSTALL_COMPLETERS
+        if (_completer_key(r) in _INSTALL_COMPLETERS
                 and _INSTALL_HEAD.match(cand)):
             return cand, " ".join(toks[i + 1:])
     # `cand` is now the whole reduced segment; one match decides whether the
@@ -2735,9 +2750,12 @@ def sdk_gates_module(cfg: dict) -> str:
         "_INSTALL_TAIL = %r\n"
         "# [#43 review] The words an install tail can END on, derived\n"
         "# from the same tables the tail is built from. A performance\n"
-        "# guard only - _install_head_split keeps an unguarded second\n"
-        "# pass, so an error here costs a slow path, never a verdict.\n"
+        "# guard only. The unguarded second pass is NOT the guarantee -\n"
+        "# it covers a MISSING match, not a LATER one. The guarantee is\n"
+        "# the census test: every match must end on a token whose key\n"
+        "# is a completer (cmdpos.completer_key).\n"
         "_INSTALL_COMPLETERS = frozenset(%r)\n"
+        "_COMPLETER_GLUE = %r\n"
         "# [round-4 D20] The two channels that need a DISTINGUISHING token.\n"
         "# `deno run main.ts` and `uv run python` are ordinary; blocking them\n"
         "# is the unactionable-refusal shape this suite has shipped twice.\n"
@@ -2756,7 +2774,7 @@ def sdk_gates_module(cfg: dict) -> str:
                                           ws=r"\s")),
            _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
                                         space0=r"\s*", wsp=r"\s")),
-           sorted(cmdpos.install_completers()),
+           sorted(cmdpos.install_completers()), cmdpos.COMPLETER_GLUE,
            r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
            r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
     )

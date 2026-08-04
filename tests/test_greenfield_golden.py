@@ -1089,8 +1089,23 @@ EXPECTED_DIGESTS = {
     #     now reduce BACKSLASHES only (cmdpos.strip_escapes); bash removes a
     #     backslash anywhere, so that can only produce a word it would
     #     really resolve.
+    #   [#45 REVIEW ROUND 2, same exception] The completer guard shipped a
+    #     THIRD defect and the fix for it is a rule rather than a list. `-m`
+    #     was not the only glue site: prefix_run's `[({] *` arm has the
+    #     identical shape, so `{npx evil install` (deny at v2.7.0) was ALLOW
+    #     with the guard, on both substrates. Adding `{`+word would have been
+    #     the same mistake a third time, so the token is now REDUCED to a key
+    #     (cmdpos.completer_key: basename, minus a leading glue run, minus a
+    #     leading `-m`) and the reduction is derived from the two `*`-spaced
+    #     quantifiers rather than from observed spellings. The corpus-equality
+    #     test could not see this - no row carried a brace-glued runner - so
+    #     it is joined by a CENSUS over a vocabulary of glue forms that
+    #     requires every match to end on a token whose key is a completer.
+    #     The emitted copies of "an error costs a slow path, never a verdict"
+    #     are corrected too: that claim reached installed projects while the
+    #     defect it denied was live.
     # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59.
-    # ACCEPTANCE (KB §7): 482 distinct commands x 2 substrates against a
+    # ACCEPTANCE (KB §7): 486 distinct commands x 2 substrates against a
     # pristine v2.7.0 install - 58 verdicts move allow -> deny and the
     # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY, now WITH the F1/F2
     # spellings in the corpus, which is what no. 36 lacked.
@@ -1317,7 +1332,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "4cd5ee0cd4189f0f4227cb750d39ad7532c64a7dcb2fae5622a18f65f45b8c49",
+        "2435fa606cf6dba0050849cf513e4775c07e0180864cb268d70ea72feb80cdb7",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1431,7 +1446,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "26168a313b242b2d4b342da846eddd05c585db8c85814dafc5da5faa10d82fa3",
+        "fb1e5a8f7aec5b250228f8bbd24b14816b1b72cb6ba6c9e02c83cc1d49131b94",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1503,7 +1518,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "60ed21680ac46a0e2a2af7f3873581973b6a25eda7ddba5a439f2b1f75845451",
+        "434b68781f3c7fffb67af0347bfc3eeac89f63bbecaa4a11593876d2761c1265",
 }
 
 EXPECTED_ACTION_COUNTS = {

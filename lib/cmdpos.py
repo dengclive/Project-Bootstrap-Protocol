@@ -677,21 +677,40 @@ def install_completers() -> tuple:
         out.update(verbs)
     for phrase in RUNNER_PHRASES:
         out.add(phrase[-1])
-    # [#45 review, D1] ...AND THE ATTACHED `-m` SPELLING OF EACH, because the
-    # tail can end on ONE token. `space0` admits `-mnpx`, so in
-    # `python3 -mnpx npm install` the anchor's leftmost match ends at the
-    # token `-mnpx` - whose basename is not `npx`. The first cut of this table
-    # held only the bare words, so the guard skipped that match, found a LATER
-    # one at `install`, and returned a longer head with an EMPTY argument list
-    # - which reads as a lockfile restore. Measured deny -> allow on both
-    # substrates over 84 corpus rows, i.e. this guard re-broke the
-    # leftmost-match property #39 exists to establish.
-    #
-    # Only RUNNER_SOLO can actually glue (a tool word still needs its verb in
-    # a separate token), but every member gets the `-m` form because deriving
-    # it is free and a narrower rule would be a second thing to keep true.
-    out.update("-m" + w for w in tuple(out))
     return tuple(sorted(out))
+
+
+# The characters that can sit between a token's start and a completer word
+# INSIDE THE SAME TOKEN. Both come from a `*`-quantified space in the regex:
+# `install_head_tail`'s `space0` (so `-mnpx` is one token) and `prefix_run`'s
+# `[({] *` brace/subshell arm (so `{npx` is one token). `:` and `?` are here
+# for the SDK only, where `_py`'s `(` -> `(?:` rewrite corrupts that bracket
+# expression into `[(?:{]` - recorded as X-36j; stripping them costs nothing
+# and keeps the guard ahead of that bug rather than behind it.
+COMPLETER_GLUE = "({:?"
+
+
+def completer_key(tok: str) -> str:
+    """The word a token must END on for the install anchor to be able to
+    finish there: the basename, with any leading GLUE run removed.
+
+    [#45 review, D1 - SECOND ROUND] The first fix for this enumerated ONE glue
+    site, adding `-m`+word entries to the table. That closed `-mnpx` and left
+    `{npx` open, because `prefix_run`'s `[({] *` arm has the identical shape:
+    `{npx evil install` is deny at v2.7.0 and ALLOW with the guard, on both
+    substrates, since the leftmost match ends on `{npx` and the guard skips it
+    for a later completer - returning an emptied argument list. Adding `{`+word
+    would have been the same mistake a third time.
+
+    So the token is REDUCED to a key instead, and the reduction is derived from
+    the two places the regex allows zero-width spacing rather than from a list
+    of observed spellings. Every future glue site is covered iff it goes
+    through those same `*` quantifiers, which is what makes this a rule rather
+    than a patch.
+    """
+    base = tok.rsplit("/", 1)[-1]
+    return base[2:] if (base := base.lstrip(COMPLETER_GLUE)).startswith("-m") \
+        else base
 
 
 def strip_escapes(s: str) -> str:
@@ -709,10 +728,18 @@ def strip_escapes(s: str) -> str:
     direction the contract forbids.
 
     A BACKSLASH is different: bash removes it wherever it appears outside
-    single quotes, so deleting it can only produce a word bash would really
+    single quotes, so deleting it usually produces a word bash would really
     resolve. That is what closes `den\\o run <url>` (argv
     `[deno][run][<url>]` - genuinely executable) without inventing
     `deno` out of `d"eno`.
+
+    [#45 review] "USUALLY", not "only", and the caveat is load-bearing: an
+    ESCAPED SPACE is removed by bash too, but it JOINS two words rather than
+    renaming one. `git commit -m deno\\ run\\ <url>` is argv
+    `[git][commit][-m][deno run <url>]` - one operand, nothing named deno
+    runs - and deleting the backslashes makes it read as a remote run. That
+    over-refusal is PRE-EXISTING here (v2.7.0 denies it too, by a different
+    route) and is recorded as X-36k rather than claimed absent.
     """
     return s.replace("\\", "")
 

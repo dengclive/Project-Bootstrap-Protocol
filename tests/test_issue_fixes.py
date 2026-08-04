@@ -2471,14 +2471,49 @@ for _c in _corpus:
                                _unguarded_split(_seg)))
 check(f"#45 D1: guarded == unguarded on every segment of {len(_corpus)} "
       f"corpus commands", not _split_bad, repr(_split_bad[:3]))
-# ...and on the exact shapes that broke it, in case the corpus loses them.
-for _c in ("python3 -mnpx npm install", "python3 -mnpx uvx",
-           "sudo pypy3 -muvx npm install", "python3 -mbunx npm install requests",
-           "python3 -m npx npm install", "env pip install evil npx"):
-    if _gm._install_head_split(_c) != _unguarded_split(_c):
-        _split_bad.append((_c,))
-check("#45 D1: ...and on the glued `-m` shapes specifically", not _split_bad,
-      repr(_split_bad[:3]))
+
+# ...AND A CENSUS, which is the part that does not depend on the corpus.
+#
+# [#45 review, round 2] The corpus-equality check above passed while
+# `{npx evil install` was deny at v2.7.0 and ALLOW with the guard, because no
+# corpus row carried a brace-glued runner. An equality assertion over a fixed
+# corpus can only see spellings someone already thought of - which is the same
+# weakness as the argument it replaced.
+#
+# So: enumerate segments over a vocabulary that includes every GLUE form, take
+# the token each unguarded match ENDS on, and require the guard's predicate to
+# hold for it. That is the property the guard needs - "a match can only end on
+# a token whose key is a completer" - asserted directly instead of sampled.
+_VOCAB_HEAD = ["", "sudo ", "env ", "{ ", "( ", "sudo -u root ", "timeout 5 ",
+               "python3 -m ", "python3 -m", "pypy3 -m", "{", "((", "FOO=1 "]
+_VOCAB_TAIL = ["npx", "uvx", "bunx", "pip install", "npm i", "npm dlx",
+               "uv pip install", "uv tool run", "pipx run", "poetry add",
+               "mix deps.get", "rebar3 get-deps", "go get", "yarn create",
+               "bun x", "npm init"]
+_census, _census_bad = 0, []
+for _h in _VOCAB_HEAD:
+    for _t in _VOCAB_TAIL:
+        for _args in ("", " evil", " evil more", " requests"):
+            _seg = _h + _t + _args
+            _hd, _ = _unguarded_split(_seg)
+            if _hd is None:
+                continue
+            _census += 1
+            _last = _hd.split()[-1]
+            if _cmdpos.completer_key(_last) not in _cmdpos.install_completers():
+                _census_bad.append((_seg, _last,
+                                    _cmdpos.completer_key(_last)))
+check(f"#45 D1 CENSUS: every one of {_census} matches ends on a token whose "
+      f"key is a completer", not _census_bad, repr(_census_bad[:5]))
+check("#45 D1 CENSUS: the census actually exercised the glue forms",
+      _census > 200, f"only {_census} matches - the vocabulary stopped working")
+# The two glue sites that each cost a round, named so a regression is legible.
+for _t, _want in (("-mnpx", "npx"), ("{npx", "npx"), ("((npx", "npx"),
+                  ("{-mnpx", "npx"), ("/usr/bin/npx", "npx"),
+                  ("-minstall", "install"), ("evil", "evil")):
+    check(f"#45 D1: completer_key({_t!r}) == {_want!r}",
+          _cmdpos.completer_key(_t) == _want,
+          repr(_cmdpos.completer_key(_t)))
 
 print("\n-- #45 D1: the glued `-m` runner denies again --")
 dep_both("python3 -mnpx npm install", 2, "#45 D1: -mnpx must not swallow args")
