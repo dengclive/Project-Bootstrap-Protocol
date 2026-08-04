@@ -2641,6 +2641,20 @@ _xp_key(){{
 # reduction - the D3 shape that same change called out for interpreters. There
 # is now one shell definition, and tests/test_substrate_differential.py drives
 # it against cmdpos.unquote_word.
+# [#45 review, D2] THE SEGMENT-LEVEL REDUCTION, as against _uqw's word-level
+# one. Removing quotes from a whole SEGMENT splices unrelated words into
+# phrases that were never there - `git commit -m \\"deno run <url>\\"` runs
+# `git`, but with the quotes deleted the segment reads `... deno run <url>`
+# and the remote-run pattern fires. That was 57 over-refusals, shell-only, so
+# also a parity break in the direction the contract forbids. A BACKSLASH is
+# different: bash removes it wherever it appears outside single quotes, so
+# deleting it can only produce a word bash would really resolve. Reference:
+# cmdpos.strip_escapes.
+_UQB=""
+_uqb(){{
+  local _t="${{1-}}"
+  _UQB="${{_t//\\\\/}}"
+}}
 _UQW=""
 _uqw(){{
   local _t="${{1-}}"
@@ -3625,9 +3639,15 @@ while IFS= read -r nseg; do
   # `uv ru\\n --with`, `uv run --wi\\th`.
   #
   # Testing BOTH the raw and the reduced segment is additive - the reduction
-  # only deletes characters, so a raw match cannot be lost - which keeps this
-  # in the deny direction by construction rather than by measurement.
-  _uqw "$nseg"; _useg="$_UQW"
+  # only deletes characters, so a raw match cannot be lost.
+  #
+  # [#45 review, D2] The reduction here is _uqb (BACKSLASHES only), not _uqw.
+  # Deleting quote characters from a whole SEGMENT manufactures phrases that
+  # were never there: `git commit -m \\"deno run <url>\\"` runs `git`, and
+  # quote-stripping made it read as a remote run - 57 such over-refusals,
+  # shell-only, hence also a parity break in the forbidden direction. A
+  # backslash is safe to delete anywhere because bash removes it anywhere.
+  _uqb "$nseg"; _useg="$_UQB"
   if [[ "$nseg" =~ $_REMOTE_RUN ]] || [[ "$_useg" =~ $_REMOTE_RUN ]]; then
     echo "Dependency gate: running a remote script is not verifiable." >&2
     echo "Vendor it, review it, then run it explicitly." >&2

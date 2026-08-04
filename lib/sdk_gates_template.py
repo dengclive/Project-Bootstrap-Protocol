@@ -2130,10 +2130,16 @@ def _install_head_split(seg):
 
     The tail always ENDS on a verb or runner word (cmdpos.install_completers,
     derived from the same tables the tail is built from), so a match at any
-    other token cannot succeed. THE SECOND PASS IS THE CORRECTNESS
-    GUARANTEE: if the guard matched nothing but the anchor matches the whole
-    reduced segment, the unguarded scan runs. An error in the table
-    therefore costs a slow path, never a verdict.
+    other token cannot succeed.
+
+    [#45 review] THE SECOND PASS IS NOT THE CORRECTNESS GUARANTEE, and an
+    earlier revision of this note said it was. It runs only when the guard
+    found NO match, so it does not cover the guard finding a LATER one - and
+    a missing table entry does exactly that, returning a longer head with an
+    emptied argument list, which reads as a lockfile restore. The guarantee
+    is the equivalence test in tests/test_issue_fixes.py, which drives the
+    guarded and unguarded scans over the whole corpus and requires identical
+    results.
     """
     toks = seg.split()
     red = [_unquote_word(t) for t in toks]

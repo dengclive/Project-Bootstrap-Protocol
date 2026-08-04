@@ -1072,9 +1072,26 @@ EXPECTED_DIGESTS = {
     #   F5: no. 38's splice arm re-pushed segments the loop had already
     #     pushed (~3.5x on invoker commands); now guarded on the splice
     #     actually differing.
+    #   [#45 REVIEW, folded into this same exception] The completer guard
+    #     above shipped TWO defects of its own, both caught before merge:
+    #     D1, the table held only the BARE completer words while `space0`
+    #     lets a tail end on the glued token `-mnpx`, so the guard skipped
+    #     the leftmost match, matched later, and returned an EMPTIED
+    #     argument list - deny -> allow on 84 corpus rows. The `-m` forms
+    #     are now derived into the table, and the real guarantee is an
+    #     EQUIVALENCE TEST driving the guarded and unguarded scans over the
+    #     whole corpus, because the "the fallback makes errors harmless"
+    #     argument was FALSE: the fallback covers "no match", not "a later
+    #     match". D2, the raw+reduced channel test used the WORD-level
+    #     reduction on a whole SEGMENT, manufacturing `deno run <url>` out
+    #     of `git commit -m \\"deno run <url>\\"` - 57 over-refusals, shell
+    #     only, hence a parity break in the forbidden direction. Segments
+    #     now reduce BACKSLASHES only (cmdpos.strip_escapes); bash removes a
+    #     backslash anywhere, so that can only produce a word it would
+    #     really resolve.
     # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59.
-    # ACCEPTANCE (KB §7): 472 distinct commands x 2 substrates against a
-    # pristine v2.7.0 install - 55 verdicts move allow -> deny and the
+    # ACCEPTANCE (KB §7): 482 distinct commands x 2 substrates against a
+    # pristine v2.7.0 install - 58 verdicts move allow -> deny and the
     # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY, now WITH the F1/F2
     # spellings in the corpus, which is what no. 36 lacked.
     # [freeze-exception no. 36, 2026-08-04] ISSUE #40 / X-36d: ONE interpreter
@@ -1300,7 +1317,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "1fa8915591d3d68e3d3f8f02b89e3d1665c2333debe56f3a4887d355d1d8c2bb",
+        "4cd5ee0cd4189f0f4227cb750d39ad7532c64a7dcb2fae5622a18f65f45b8c49",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1414,7 +1431,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "d6ed4bdff70bc38eb2981a0d2c91bd2a6f35c66586df259543df17abba68cec2",
+        "26168a313b242b2d4b342da846eddd05c585db8c85814dafc5da5faa10d82fa3",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1486,7 +1503,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "8620ab4357d8f6e3fd267b181927d8d435e21bdbdeef3d8207357783217c8b5c",
+        "60ed21680ac46a0e2a2af7f3873581973b6a25eda7ddba5a439f2b1f75845451",
 }
 
 EXPECTED_ACTION_COUNTS = {
