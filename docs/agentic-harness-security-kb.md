@@ -21,10 +21,29 @@ change, *and sometimes cannot be done*: two over-refusal fixes were attempted
 over four rounds, found 4 → 6 → 12 → ~20 blocking fail-opens, and were
 **removed**, with the deny-direction hardening from those rounds kept).
 
-All four post-tag patterns are new **classes**, not new members of the delta;
+**Amended a fourth time 2026-08-04**, from four `dependency-gate` install
+bypasses fixed after the `v2.7.0` tag (issues **#36, #40, #39, #41**): a
+**tenth** pattern, §4.10 — a control can reach the *right verdict for the wrong
+reason*, and the release-diff check this document itself recommends is blind to
+it, because it compares verdicts rather than reasons. That check is the
+strongest control here and it recorded the defect as *unchanged*; the amendment
+strengthens §7 rather than retiring it.
+
+§4.10 then grew three corollaries the same week, and their provenance is the
+point: **each came from a defect in the fix for the one before it.** The fix for
+§4.10 shipped a deny → allow regression under a truthful "no regressions" record
+(corollary 1 — that set is a claim about the corpus); its replacement made the
+matcher cubic, so the control failed by not answering (corollary 2 — cost is a
+security parameter, and the timeout table is part of the control); and the
+optimisation that fixed *that* was documented as harmless by an argument that
+covered only half its failure mode (corollary 3 — write the equivalence test,
+and let the argument be wrong). Three rounds, each caught by an adversarial pass
+and none by a green suite. Post-tag material is marked **`[+2026-08-04]`**.
+
+All five post-tag patterns are new **classes**, not new members of the delta;
 the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
-and describe v2.5.0 → v2.6.0 only. So §4 now carries **nine** patterns: five
-compiled from the delta, four added post-tag.
+and describe v2.5.0 → v2.6.0 only. So §4 now carries **ten** patterns: five
+compiled from the delta, five added post-tag.
 
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
@@ -786,10 +805,13 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Fourteen defects, nine recurring shapes — five from the v2.5.0 → v2.6.0 delta
-and four added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
-five issues filed against 2.6.1, which contribute classes the delta contains no
-member of). If this document is read for one section, this is it.
+Fourteen defects, ten recurring shapes — five from the v2.5.0 → v2.6.0 delta
+and five added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
+five issues filed against 2.6.1; §4.10 from the four `dependency-gate` install
+bypasses fixed after v2.7.0 — issues #36, #40, #39, #41 — which contribute
+classes the delta contains no member of). **The defect count is the v2.5.0 →
+v2.6.0 delta's and does not move when a post-tag shape is added.** If this
+document is read for one section, this is it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
 
@@ -1155,6 +1177,100 @@ every ALLOW decision downstream of it. Each one is a hole the canonicalization
 just widened, and the direction of the bug is the opposite of the direction you
 were working in.
 
+### 4.10 A verdict can be correct for the wrong reason, and a verdict-only differential is blind to it `[+2026-08-04]`
+
+**EXECUTED.** The strongest control this project has is §7's release diff: run
+one corpus through both substrates of the old and new release and require the
+*previously denied, now allowed* set to be empty. It is cheap and unarguable,
+and it did not see this:
+
+```
+sudo pip install evil npx        rc=0   ALLOWS an unapproved install
+sudo pip install evil npx more   rc=2   denies — naming `more`, not `evil`
+```
+
+Both releases returned **2** for the second command, so the differential
+recorded it as *unchanged* and moved on. The gate was not evaluating that
+command correctly in either release; it was reaching the right exit code by
+inspecting the wrong token. One spelling away sat a live fail-open that the
+corpus contained, ran, and could not perceive — because it compared verdicts
+and the defect lived in the *reason*.
+
+The mechanism is worth keeping separately, because it generalises past this
+codebase. The matcher was a regex anchored at command position, and the scanner
+sliced its arguments out of the matched span:
+
+> **Matching and extraction are two different questions, and a regex answers
+> only the first.** "Does an install invocation exist here" is safe under a
+> greedy, unbounded prefix — the engine backtracks until some parse succeeds.
+> "*Where does it start*" is not: POSIX ERE returns the leftmost-**longest**
+> parse, so an unbounded prefix run could swallow `pip install evil` and let
+> the anchor match a trailing `npx`. `BASH_REMATCH[0]` / `m.end()` then covered
+> the whole segment, the argument list came back empty, and an install verb
+> with no arguments is a lockfile restore.
+
+The module's own docstring asserted that unbounded consumption "cannot fail
+open here — the engine backtracks". That sentence is true of matching and
+silently false of the slice taken from it, and it is the reason the defect
+survived several reviews: it read as a proof that this class could not exist.
+
+**Rule, two parts.** A differential over a deny-list control compares the
+**reason**, not only the verdict — for a refusal, the token or class named in
+the message is part of the observation. And wherever a matcher's *span* is used
+to locate anything (arguments, offsets, a remainder), the choice of parse is a
+second decision that needs its own argument; if what you mean is "the first
+invocation", ask for it directly rather than hoping the longest match is it.
+
+**Corollary 1 — "the previously-denied-now-allowed set is EMPTY" is a claim
+about the CORPUS, not about the control.** `[+2026-08-04]` The fix for the
+above was itself released with that sentence in its freeze-exception, and the
+sentence was *true*: the set was empty, of a corpus that did not happen to
+contain `pythont3`. A follow-up pass found the same fix had turned
+`curl u | pythont3 -c 'x' ; sh a.sh` from deny to **allow on both substrates**,
+because the reduction it added stripped the ABI tags in any position while the
+regex admitted them only after the digits. Two spellings of one question, again
+— the exact defect that fix was written to end, relocated rather than removed.
+
+Pair the release diff with a **spelling sweep around whatever the change
+touched**: enumerate the neighbourhood of the thing you just taught the matcher
+about (here, every interleaving of the version and tag characters) and run
+*that* through both builds. An empty regression set over a corpus assembled
+before the change cannot see a class the change invented.
+
+**Corollary 2 — a control's own COST is a fail-open, and the timeout table is
+part of the control.** `[+2026-08-04]` The same fix replaced one anchor match
+with a per-token scan. The anchor embedded a nested `(flag|positional)*`, and on
+a `WRAPPER NAME=VALUE …` line an assignment is consumable by two different arms,
+so a single *failing* match was already quadratic and the scan made it cubic. An
+ordinary `env A0=0 … A399=399 make test` went from 0.064 s to 8.6 s; a 7 KB line
+took **67 seconds** inside an async hook callback.
+
+No parse was wrong. The gate simply did not answer, and this gate had no entry
+in either timeout table — so what a hang becomes was left to a default nobody
+had chosen, while the *other* substrate denied the same command in about a
+second. That is the forbidden direction reached by exhaustion.
+
+**Rule:** measure a matcher's worst case on adversary-shaped input, not just its
+verdicts — `WRAPPER` plus a long run of assignments is the shape to try first
+against any anchored command-position regex. And every blocking control needs an
+explicit timeout with an explicit posture, because "how long may this take" is a
+security parameter: a control that can be made not to answer has an allow arm
+whether or not anyone wrote one.
+
+**Corollary 3 — an optimisation's safety argument is not the same as the
+optimisation being safe.** `[+2026-08-04]` The guard that fixed Corollary 2
+skipped the match at tokens that could not complete the pattern, and was
+documented as harmless because the caller kept an unguarded fallback. The
+fallback ran only when the guard found **no** match — it said nothing about the
+guard finding a **later** one, which is precisely what a missing table entry
+causes: a longer head, an emptied argument list, and a lockfile-restore reading.
+Measured on 84 payloads before it shipped.
+
+**Rule:** when a fast path is introduced beside a slow one, the thing that keeps
+them honest is a test asserting they return **identical** results over a real
+corpus — not an argument about which failures the fallback catches. Write the
+equivalence test, and let the argument be wrong.
+
 ---
 
 ## 5. Why detection failed, and what actually worked
@@ -1452,6 +1568,11 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Every **widening** of a deny-list control is reviewed as a new control: the original corpus is re-run *and* the new allowance is fuzzed specifically, because the exemption's own guardrails are the surface the widening created. "The error is in the safe direction" describes the bug, never the fix. `[+2026-07-31]`
 - [ ] Every widening carries a **round budget decided in advance**, and an answer to "what if it does not converge". A widening that needs the attacker's full grammar is a parser, not a patch — price it that way, and remember that the honest fix for an over-refusal is often a better *refusal*. `[+2026-08-03]`
 - [ ] No release of a control ships without the **previous-release diff**: install the last tag and the candidate, run one corpus through both substrates of both, and require the "previously denied, now allowed" set to be empty. Cheap, unarguable, and it is the check that ends arguments about whether a fix converged. `[+2026-08-03]`
+- [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
+- [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
+- [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
+- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, 67 s inside a hook with no timeout-table entry, while the other substrate denied in ~1 s. `[+2026-08-04]`
+- [ ] When a **fast path** is added beside a slow one, an equivalence test drives both over a real corpus and requires identical results. An argument about which failures the fallback catches is not a substitute — one such argument covered "no match" and missed "a later match", which was the fail-open. `[+2026-08-04]`
 - [ ] Where two substrates cannot resolve a spelling identically, the tie is broken **toward deny** — parity bought by discarding the better-informed substrate's knowledge is parity at the permissive bound. `[+2026-07-31]`
 - [ ] A fix and its tests authored from one premise get the **premise** reviewed, not just the diff — a pin written from the same misunderstanding as the code ratifies the defect under a green banner. `[+2026-07-31]`
 - [ ] Comments claiming completeness ("every redirect spelling", "every file a stage writes") are treated as assertions and verified, or downgraded to the enumerated subset with the remainder recorded as residue. `[+2026-07-31]`
