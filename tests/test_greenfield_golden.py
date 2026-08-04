@@ -1029,7 +1029,86 @@ EXPECTED_DIGESTS = {
     # rendered into. Nothing else moves: no wrapper, skill, command, agent,
     # steering or settings body, and secrets-gate.sh is byte-identical
     # (checked against an install built from 8276300, the 2.7.0 commit).
+    # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
+    # substrates, run against a pristine 8276300 baseline and against this
+    # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
+    # substrates) and the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
+    # The interpreter word carries a BOUNDED flag run (a flag with at most
+    # one operand): without it `python3 -E -s -m pipx install evil` kept the
+    # whole bypass alive, and with prefix_run's UNBOUNDED (flag|positional)*
+    # it would fail open the other way - bash matches leftmost-LONGEST, so a
+    # positional arm reaches a second `-m` and ends the match on a trailing
+    # bare verb the gate reads as a lockfile restore.
+    # dependency-gate.sh additionally moves for a COMMENT-ONLY correction
+    # found by the adversarial pass on this change: the "KNOWN AND ACCEPTED"
+    # note claimed `git commit -m "fix; npm install evil"` BLOCKS, which has
+    # been false since cmd_segments became quote-aware [F-435] - measured
+    # rc=0 both here and at 8276300. Zero behaviour change; the corpus
+    # verdicts above are unaffected by it.
     #
+    #
+    # [freeze-exception no. 39, 2026-08-04] PR #43 REVIEW FOLLOW-UP. Two
+    # adversarial passes on no. 36/37/38 found a REGRESSION those exceptions
+    # shipped and a live bypass two statements from the fix meant to close
+    # that class. 12/12/16 bodies move (the shared _HOOK_HEADER again).
+    #   F1 REGRESSION: the #40 basename reduction stripped `[.0-9td]` in ANY
+    #     position while INTERP_SUFFIX admits the tags only AFTER the digits,
+    #     so `pythont3` reduced to `python`, matched the trigger nowhere, and
+    #     the D20 stage went `x` -> `i`, dropping the launder-then-run deny.
+    #     Measured deny -> allow on both substrates. The runs are now ORDERED,
+    #     mirroring the regex. THIS FALSIFIED no. 36's own "EMPTY" claim; the
+    #     corpus simply did not contain the spelling.
+    #   F1 PERFORMANCE: no. 37's per-token scan re-ran an anchor whose failing
+    #     match is quadratic on `WRAPPER NAME=VALUE ...`, making it CUBIC -
+    #     0.064s -> 8.6s on an ORDINARY `env A0=0 ... make test`, 67s at 7 KB
+    #     inside an async callback, with dependency-gate in no timeout table.
+    #     The match is now attempted only at tokens that can END a tail
+    #     (cmdpos.install_completers, DERIVED from the tail's own tables),
+    #     with an unguarded second pass so a table error costs speed, never a
+    #     verdict. Pinned by a wall-clock bound with 28x headroom.
+    #   F2: no. 38's reduction reached the install anchor only; the remote-run
+    #     and `uv run --with` walks in the same loop still read raw text, so
+    #     `den\\o run <url>` was live remote execution on the shell.
+    #   F5: no. 38's splice arm re-pushed segments the loop had already
+    #     pushed (~3.5x on invoker commands); now guarded on the splice
+    #     actually differing.
+    #   [#45 REVIEW, folded into this same exception] The completer guard
+    #     above shipped TWO defects of its own, both caught before merge:
+    #     D1, the table held only the BARE completer words while `space0`
+    #     lets a tail end on the glued token `-mnpx`, so the guard skipped
+    #     the leftmost match, matched later, and returned an EMPTIED
+    #     argument list - deny -> allow on 84 corpus rows. The `-m` forms
+    #     are now derived into the table, and the real guarantee is an
+    #     EQUIVALENCE TEST driving the guarded and unguarded scans over the
+    #     whole corpus, because the "the fallback makes errors harmless"
+    #     argument was FALSE: the fallback covers "no match", not "a later
+    #     match". D2, the raw+reduced channel test used the WORD-level
+    #     reduction on a whole SEGMENT, manufacturing `deno run <url>` out
+    #     of `git commit -m \\"deno run <url>\\"` - 57 over-refusals, shell
+    #     only, hence a parity break in the forbidden direction. Segments
+    #     now reduce BACKSLASHES only (cmdpos.strip_escapes); bash removes a
+    #     backslash anywhere, so that can only produce a word it would
+    #     really resolve.
+    #   [#45 REVIEW ROUND 2, same exception] The completer guard shipped a
+    #     THIRD defect and the fix for it is a rule rather than a list. `-m`
+    #     was not the only glue site: prefix_run's `[({] *` arm has the
+    #     identical shape, so `{npx evil install` (deny at v2.7.0) was ALLOW
+    #     with the guard, on both substrates. Adding `{`+word would have been
+    #     the same mistake a third time, so the token is now REDUCED to a key
+    #     (cmdpos.completer_key: basename, minus a leading glue run, minus a
+    #     leading `-m`) and the reduction is derived from the two `*`-spaced
+    #     quantifiers rather than from observed spellings. The corpus-equality
+    #     test could not see this - no row carried a brace-glued runner - so
+    #     it is joined by a CENSUS over a vocabulary of glue forms that
+    #     requires every match to end on a token whose key is a completer.
+    #     The emitted copies of "an error costs a slow path, never a verdict"
+    #     are corrected too: that claim reached installed projects while the
+    #     defect it denied was live.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59.
+    # ACCEPTANCE (KB §7): 486 distinct commands x 2 substrates against a
+    # pristine v2.7.0 install - 58 verdicts move allow -> deny and the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY, now WITH the F1/F2
+    # spellings in the corpus, which is what no. 36 lacked.
     # [freeze-exception no. 36, 2026-08-04] ISSUE #40 / X-36d: ONE interpreter
     # set for the pipe trigger AND the install anchor. They were two private
     # spellings - `alt(INTERPRETERS) + "[.0-9]*"` and `python[0-9.]*` - and
@@ -1098,22 +1177,6 @@ EXPECTED_DIGESTS = {
     # pristine install built from the v2.7.0 TAG - 49 verdicts move
     # allow -> deny across no. 36/37/38 together, and the
     # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
-    # ACCEPTANCE (KB §7): the differential corpus, 411 distinct commands x 2
-    # substrates, run against a pristine 8276300 baseline and against this
-    # tree - 40 verdicts move allow -> deny (the twenty #36 spellings on both
-    # substrates) and the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
-    # The interpreter word carries a BOUNDED flag run (a flag with at most
-    # one operand): without it `python3 -E -s -m pipx install evil` kept the
-    # whole bypass alive, and with prefix_run's UNBOUNDED (flag|positional)*
-    # it would fail open the other way - bash matches leftmost-LONGEST, so a
-    # positional arm reaches a second `-m` and ends the match on a trailing
-    # bare verb the gate reads as a lockfile restore.
-    # dependency-gate.sh additionally moves for a COMMENT-ONLY correction
-    # found by the adversarial pass on this change: the "KNOWN AND ACCEPTED"
-    # note claimed `git commit -m "fix; npm install evil"` BLOCKS, which has
-    # been false since cmd_segments became quote-aware [F-435] - measured
-    # rc=0 both here and at 8276300. Zero behaviour change; the corpus
-    # verdicts above are unaffected by it.
     # The protocol document keeps its `v2-6-0` filename: the filename tracks
     # DOC FOLDS, not code releases. 2.1.0 was likewise a code MINOR served by
     # the v2-0-0 document. Its `**Version:**` header and version-history block
@@ -1269,7 +1332,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "2b384f477c0ede42d78f097324829f949ec73abf05cbb734ee104395959721db",
+        "975435318ba4509660ffd6fca6ca3e26162479ba1d4011e4b37c059c36526fab",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1383,7 +1446,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "fba95a4469a540a4225ed08ea551fbfd332105c8f2bff8e65921cc1db3a9a8d1",
+        "afa8ee6a503293c30233502810cf7b064d4426a7948027828e5b11e2085e75e9",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1455,7 +1518,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "228d4c1d1efe160caf6134ebd28f2268af3f7e99f38aa9d5c73748c1a5fa287a",
+        "3f31a3bd850eb53db4d9b88a0a19381794da6f585f432ea16f46b5304e074d58",
 }
 
 EXPECTED_ACTION_COUNTS = {
