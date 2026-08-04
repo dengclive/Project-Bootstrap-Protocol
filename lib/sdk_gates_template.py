@@ -2613,8 +2613,15 @@ _GATE_EXTRA_MATCHERS = {
 # lands near 100,000 lines), which is the point: an unreachable bound costs
 # nothing and a missing one has to be rediscovered by whoever next compares
 # the two files.
+# [X-36l] dependency-gate joins the table. It matches every Bash call, shares
+# secrets-gate's superlinear tokenizer, and carries an install anchor with
+# nested quantifiers on top - and it had no ceiling on EITHER substrate, which
+# is what let a cubic scan run ~66 s here while the shell denied the same
+# command in ~1.2 s. A PreToolUse timeout fails CLOSED at the seam's runtime
+# floor, so the bound refuses a pathological command rather than allowing one.
+# Shell parity (templates.TIMEOUTS).
 _GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0,
-                  "secrets-gate": 60.0}
+                  "secrets-gate": 60.0, "dependency-gate": 60.0}
 
 
 # Canonical order of the SDK-carried gate universe (insertion order of
@@ -2677,8 +2684,41 @@ def _py(ere: str) -> str:
     own group where a stray capture would renumber `m.group(0)`'s siblings.
     One textual substitution, applied in one place, so the two dialects cannot
     drift the way the two hand-written copies did.
+
+    [X-36j] ...EXCEPT THAT THE BLANKET `str.replace` DID EXACTLY THAT. A `(`
+    inside a BRACKET EXPRESSION is a literal character, not a group opener, so
+    rewriting it corrupted `prefix_run`'s brace/subshell arm `[({]` into the
+    class `[(?:{]` - which additionally accepts `?` and `:`. The SDK's prefix
+    run therefore skipped glue the shell's did not, which is the source of
+    every shell/SDK parity split a 1500-command fuzz found, and it shipped in
+    v2.7.0. The one function whose whole purpose is to stop the dialects
+    drifting was the thing drifting them.
+
+    So the scan is bracket-aware: `[` opens a bracket expression and the next
+    `]` closes it (POSIX puts a literal `]` first, which this handles by not
+    treating position 0 as a close). Inside one, nothing is rewritten. This is
+    a parser rather than a substitution because the alternative - a rule that
+    no cmdpos regex may put `(` inside `[...]` - is unwritten, unenforced, and
+    was already violated.
     """
-    return ere.replace("(", "(?:").replace("(?:?:", "(?:")
+    out = []
+    i, n_ere, in_class = 0, len(ere), False
+    while i < n_ere:
+        c = ere[i]
+        if in_class:
+            # A `]` immediately after `[` (or `[^`) is a LITERAL, per POSIX.
+            if c == "]" and not (out and out[-1] in ("[", "^")):
+                in_class = False
+            out.append(c)
+        elif c == "[":
+            in_class = True
+            out.append(c)
+        elif c == "(":
+            out.append("(?:")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out).replace("(?:?:", "(?:")
 
 
 def sdk_gates_module(cfg: dict) -> str:

@@ -15,7 +15,7 @@ import cmdpos                                    # round-4: THE command-position
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 
-PROTOCOL_VERSION = "2.7.0"
+PROTOCOL_VERSION = "2.7.1"
 
 
 # --------------------------------------------------------------------------- #
@@ -1121,6 +1121,15 @@ _SHELL_SUBST = {
     # the dependency gate's HEAD and the SDK's _INSTALL_HEAD are one
     # rendering. This replaced RUNNERS_ERE, whose only consumer was the
     # old HEAD's runner arm; runners_regex still feeds this tail.
+    # [X-36h] Nothing here needs shell-escaping. The install tail's
+    # unresolvable-word arm is scoped to `$'` and carries no backtick, and a
+    # `$` inside the double-quoted HEAD assignment begins no valid expansion.
+    # An earlier cut keyed the arm on a backtick too, which DID need escaping
+    # - a backtick in a double-quoted string opens command substitution, and
+    # the unescaped first attempt emitted a hook that died on a syntax error
+    # and fail-closed `echo hello`. That arm is gone, and so is the escape
+    # plus the claim it carried about the class admitting a backslash, which
+    # a review showed was false of the emitted bytes.
     "@@INSTALL_TAIL_ERE@@": cmdpos.install_head_tail(),
     # [#43 review] The words an install tail can END on, derived from the same
     # tables the tail is built from. A performance guard only - the scan keeps
@@ -4369,6 +4378,23 @@ TIMEOUTS = {
     # safe direction: a pathological command is refused, never allowed.
     # 60 s is far above any real command and far below a stalled session.
     "secrets-gate": 60,
+    # [X-36l] ...AND THE SAME ARGUMENT APPLIES TO dependency-gate, which went
+    # four releases without anyone making it. It matches every Bash call and
+    # shares this tokenizer byte-for-byte (the two hooks are identical through
+    # line 717, covering norm_cmd / _cs_scan / cmd_segments), and it
+    # additionally carries an install anchor with NESTED quantifiers, so it is
+    # the slower of the pair on the same input: measured on the emitted hook,
+    # 0.9 s / 3.6 s / 14.6 s / 56 s at 1000 / 2000 / 4000 / 8000 assignment
+    # tokens - quadratic, ~4x per doubling.
+    #
+    # It is LESS hot than secrets-gate, which registers on six file tools as
+    # well as Bash; that changes how often the bound is reached, not whether
+    # it is needed. What made it urgent is that the SDK twin had no ceiling
+    # either, and a cubic scan there ran ~66 s on a 7 KB command while this
+    # substrate denied the same command in ~1.2 s - the SDK reaching
+    # more-permissive by EXHAUSTION rather than by a parsing hole. The scan is
+    # fixed; the missing ceiling was the other half.
+    "dependency-gate": 60,
     # PostToolUse and advisory, so async was defensible - except async also
     # suppresses stderr, which IS this hook's entire output. Synchronous with
     # a short timeout is what makes its feedback reach the model at all.

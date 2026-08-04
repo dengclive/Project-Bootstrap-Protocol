@@ -752,6 +752,26 @@ for cmd, want in (
         ("{bunx evil install", "deny"),
         ("{npx evil", "deny"),
         ("{ npx evil", "deny"),
+        # [X-36h] STILL OPEN - the attempted fix was reverted. bash resolves
+        # all six of these to `pip`; the gate does not. The obvious arm
+        # (interpreter_word()'s "$ or backtick is unresolvable") refused 14 of
+        # 40 ORDINARY commands when moved to a general command position, and
+        # narrowing to ANSI-C quoting failed because unquote_word strips the
+        # `'` before the anchor sees the token. Pinned as `allow` so the gap
+        # is legible; see backlog X-36h.
+        (r"$'\x70ip' install evil", "allow"),
+        (r"$'\160ip' install evil", "allow"),
+        (r"p$'\151'p install evil", "allow"),
+        ("pi${x:-p} install evil", "allow"),
+        ("$(echo pip) install evil", "allow"),
+        ("`echo pip` install evil", "allow"),
+        # ...and the ordinary commands that attempt would have refused.
+        ("$KUBECTL get pods", "allow"),
+        ("$GIT add src/", "allow"),
+        ("$HELM install myrelease ./chart", "allow"),
+        ("sudo make -C $BUILD install DESTDIR=/tmp/stage", "allow"),
+        ("echo $(date)", "allow"),
+        ("${PIP} install requests", "allow"),
         # [#45 review, D2] The SEGMENT reduction is backslashes ONLY. Deleting
         # quotes from a whole segment manufactures phrases that were never
         # there - these run `git`/`echo`, and nothing named deno or uv

@@ -1,5 +1,107 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.7.0 → 2.7.1 — the ceiling, the converter, and the word bash resolves (2026-08-04)
+
+**PATCH.** No configuration key exists that did not, and the emitted gates only
+got **stricter**. `PROTOCOL_VERSION` in `lib/installer.py` and
+`lib/templates.py`, `plugin/plugin.json`'s version and its description prose,
+and the version assertions in four suites.
+
+Everything since the `v2.7.0` tag: the `python -m` install bypass and its three
+follow-ups (#36, #40, #39, #41), the three defects those fixes shipped, and the
+three backlog rows below. **Twenty-plus commits of gate behaviour, none of it
+reachable from the newest tag until now** — which is the reason this release
+exists rather than waiting.
+
+### X-36l — `dependency-gate` finally has a ceiling
+
+The PRD has stated this rule since 2.6.0, for `secrets-gate`: it matches every
+`Bash` call, its pure-bash tokenizer is superlinear, *"an unusually large
+command had no ceiling at all"*, and a `PreToolUse` timeout **fails closed** at
+the runtime floor, so the bound refuses rather than allows.
+
+Every clause that bears on the bound applies to `dependency-gate` too — same
+`Bash` surface, the two hooks byte-identical through line 717, plus an install
+anchor with **nested quantifiers** on top. Measured on the emitted hook: **0.9 /
+3.6 / 14.6 / 56 s** at 1,000 / 2,000 / 4,000 / 8,000 assignment tokens, ~4× per
+doubling. It went four releases without the bound the document already argued
+for. It is now **60 s** in both tables.
+
+**The threshold it introduces is measured, not assumed.** A large heredoc write
+reaches it first: `cat > src/app.py <<'EOF' … EOF` with a 1,141-line body
+(≈47 KB) takes **73 s** and now fails closed where `main` allowed it — and
+`secrets-gate`'s existing 60 s ceiling would *not* have caught it (17.8 s on the
+same input), because this gate is the slower of the pair. Realistic commands are
+nowhere near: a 200-package `pip install` is 0.16 s, an 8 KB `git commit -m`
+0.25 s. The bound is still right — the alternative is the no-ceiling state that
+was the security finding — but unlike `secrets-gate`'s note, this one does not
+claim to be "far above any real command", because at ~46 KB it is not.
+
+This is the half that made the cubic scan a *security* finding: with no ceiling
+on either substrate, the SDK ran ~66 s on a 7 KB command while the shell denied
+the same command in ~1.2 s — more-permissive reached by **exhaustion** rather
+than by a parsing hole.
+
+### X-36j — the converter whose job is to stop the dialects drifting was drifting them
+
+`_py()` rewrote every `(` into `(?:` with a blanket `str.replace`. A `(` inside
+a **bracket expression** is a literal, so `prefix_run`'s `[({]` became the class
+`[(?:{]` in the emitted SDK — which additionally accepts `?` and `:`. That is
+the source of every shell/SDK parity split a 1500-command fuzz found, and it
+shipped in v2.7.0.
+
+It is now a small parser that tracks `[...]` and rewrites only outside one.
+Written that way deliberately: the alternative — a rule that no `cmdpos` regex
+may put `(` inside brackets — is unwritten, unenforced, and had already been
+violated.
+
+### X-36h — attempted, measured, reverted; still open
+
+**Not in this release**, and the reason is worth more than the fix would have
+been. The obvious approach is to copy `interpreter_word()`'s arm — *a word
+carrying `$` or a backtick is an expansion, and an expansion is not a word this
+model can resolve.* It works at the **pipe's** command position because a
+downloader upstream has already narrowed the context. At a general command
+position it does not. Measured: **14 of 40 ordinary commands** newly refused, on
+both substrates, each with the unactionable message X-36b is filed for —
+
+```
+$KUBECTL get pods                              -> "not in deps.md approved list: pods"
+$GIT add src/                                  -> "... : src/"
+$HELM install myrelease ./chart                -> "... : myrelease"
+sudo make -C $BUILD install DESTDIR=/tmp/stage -> "... : DESTDIR"
+```
+
+`$VAR` at command position is ordinary, and `get`/`add`/`i` are ordinary verbs;
+the pair is evidence of nothing.
+
+Narrowing to ANSI-C quoting alone failed for a second, separate reason:
+`unquote_word` strips `'` before the anchor sees the token, so `$'\x70ip'`
+reduces to `$x70ip` and the `$'` signal is destroyed. Any fix keyed on that
+construct must inspect the **raw** token rather than the reduced candidate.
+
+Both facts are recorded on X-36h so the next attempt starts from them instead of
+from the pipe rule. The six bypass shapes are pinned as `allow` in the
+differential corpus, so the gap is legible rather than silent.
+
+### Measured
+
+**Acceptance (KB §7):** the differential corpus × 2 substrates against a
+pristine `v2.7.0` install — the *previously denied, now allowed* set is
+**empty**. Golden re-baseline: **freeze-exception no. 40**, verified per-file
+first; counts stable at **57 / 69 / 59**, and exactly three bodies move —
+`dependency-gate.sh`, `sdk_gates/gates.py` and `settings.json`, the last
+carrying both the new timeout and the `_generatedBy` stamp.
+
+Suite: **23 suites / 7480 checks / 0 failed.**
+
+**Still open**, recorded rather than claimed closed: X-36a (whitespace class,
+safe direction), X-36b (`--python 3.12` names the wrong token), X-36f
+(`requests[socks]` refused though approved), X-36g (an escaped package name
+splits the substrates), X-36h's substitution half, X-36i (distro ABI spellings
+`python3-dbg`/`python3.6m`, and `INSTALL_TOOLS` still spelling the pip family
+separately), X-36k (an escaped space joins two words).
+
 ## Post-2.7.0 — the three X-36 bypasses, closed (2026-08-04)
 
 Issues **#40, #39, #41**, fixed in that order — remote execution first. All
