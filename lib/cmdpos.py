@@ -663,11 +663,16 @@ def install_completers() -> tuple:
     lockfile-restore reading. Measured on 84 corpus rows before the `-m`
     forms were added.
 
-    So the guarantee is a TEST, not an argument: tests/test_issue_fixes.py
-    drives the guarded and unguarded scans over the whole differential corpus
-    and requires IDENTICAL results. That is what makes a table error loud,
-    and it is the difference between this and the enumerations KB §4.9 is
-    about - not the fallback, which only ever covered half the failure.
+    So the guarantee is a TEST, not an argument - and not the corpus-equality
+    test this note first named, either. That one drove the guarded and
+    unguarded scans over the differential corpus, which contained no
+    brace-glued runner, so `{npx evil install` diverged silently through it.
+    The guarantee is the CENSUS in tests/test_issue_fixes.py: it requires
+    every match to end on a token whose `completer_key` is a completer, over
+    a vocabulary carrying every member of COMPLETER_GLUE. An equality
+    assertion sees the spellings someone listed; the census asserts the
+    property. Mutation-checked - shrinking COMPLETER_GLUE by any one
+    character fails it.
     """
     out = set()
     for v in INSTALL_VERBS:

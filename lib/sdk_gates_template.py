@@ -2150,11 +2150,12 @@ def _install_head_split(seg):
     [#45 review] THE SECOND PASS IS NOT THE CORRECTNESS GUARANTEE, and an
     earlier revision of this note said it was. It runs only when the guard
     found NO match, so it does not cover the guard finding a LATER one - and
-    a missing table entry does exactly that, returning a longer head with an
+    a wrong completer key does exactly that, returning a longer head with an
     emptied argument list, which reads as a lockfile restore. The guarantee
-    is the equivalence test in tests/test_issue_fixes.py, which drives the
-    guarded and unguarded scans over the whole corpus and requires identical
-    results.
+    is the CENSUS in tests/test_issue_fixes.py - every match must end on a
+    token whose key is a completer - and NOT the corpus-equality check that
+    sentence first named, which passed while `{npx evil install` diverged
+    because no corpus row carried a brace-glued runner.
     """
     toks = seg.split()
     red = [_unquote_word(t) for t in toks]

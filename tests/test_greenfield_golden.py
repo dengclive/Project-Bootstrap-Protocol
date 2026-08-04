@@ -1332,7 +1332,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "2435fa606cf6dba0050849cf513e4775c07e0180864cb268d70ea72feb80cdb7",
+        "975435318ba4509660ffd6fca6ca3e26162479ba1d4011e4b37c059c36526fab",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1446,7 +1446,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "fb1e5a8f7aec5b250228f8bbd24b14816b1b72cb6ba6c9e02c83cc1d49131b94",
+        "afa8ee6a503293c30233502810cf7b064d4426a7948027828e5b11e2085e75e9",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1518,7 +1518,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "434b68781f3c7fffb67af0347bfc3eeac89f63bbecaa4a11593876d2761c1265",
+        "3f31a3bd850eb53db4d9b88a0a19381794da6f585f432ea16f46b5304e074d58",
 }
 
 EXPECTED_ACTION_COUNTS = {

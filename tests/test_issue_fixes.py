@@ -2484,8 +2484,16 @@ check(f"#45 D1: guarded == unguarded on every segment of {len(_corpus)} "
 # the token each unguarded match ENDS on, and require the guard's predicate to
 # hold for it. That is the property the guard needs - "a match can only end on
 # a token whose key is a completer" - asserted directly instead of sampled.
+# EVERY member of cmdpos.COMPLETER_GLUE appears here. It did not at first, and
+# a mutation test proved the cost: `COMPLETER_GLUE = "({"` passed all 1902
+# checks - census included - while `:npx evil install` was a live SDK
+# fail-open, because the `:`/`?` glue exists for the SDK's corrupted
+# `[(?:{]` class (X-36j) and no vocabulary row carried it. The glue the guard
+# added specifically to stay AHEAD of that bug was the half the test was blind
+# to, which is the same shape of gap this census was written to close.
 _VOCAB_HEAD = ["", "sudo ", "env ", "{ ", "( ", "sudo -u root ", "timeout 5 ",
-               "python3 -m ", "python3 -m", "pypy3 -m", "{", "((", "FOO=1 "]
+               "python3 -m ", "python3 -m", "pypy3 -m", "{", "((", "FOO=1 ",
+               ":", "?", "{:", ":?(", "-m"]
 _VOCAB_TAIL = ["npx", "uvx", "bunx", "pip install", "npm i", "npm dlx",
                "uv pip install", "uv tool run", "pipx run", "poetry add",
                "mix deps.get", "rebar3 get-deps", "go get", "yarn create",
@@ -2510,10 +2518,16 @@ check("#45 D1 CENSUS: the census actually exercised the glue forms",
 # The two glue sites that each cost a round, named so a regression is legible.
 for _t, _want in (("-mnpx", "npx"), ("{npx", "npx"), ("((npx", "npx"),
                   ("{-mnpx", "npx"), ("/usr/bin/npx", "npx"),
+                  (":npx", "npx"), ("?npx", "npx"), (":?({npx", "npx"),
                   ("-minstall", "install"), ("evil", "evil")):
     check(f"#45 D1: completer_key({_t!r}) == {_want!r}",
           _cmdpos.completer_key(_t) == _want,
           repr(_cmdpos.completer_key(_t)))
+
+check("#45 D1: every COMPLETER_GLUE character is exercised by the census",
+      all(any(_c in _h for _h in _VOCAB_HEAD)
+          for _c in _cmdpos.COMPLETER_GLUE),
+      f"glue={_cmdpos.COMPLETER_GLUE!r} vocabulary={_VOCAB_HEAD!r}")
 
 print("\n-- #45 D1: the glued `-m` runner denies again --")
 dep_both("python3 -mnpx npm install", 2, "#45 D1: -mnpx must not swallow args")
