@@ -2589,6 +2589,50 @@ if _muq:
     check("#43 F4: shell _uqw matches cmdpos.unquote_word", not _ubad,
           repr(_ubad[:4]))
 
+# ========================================================================= #
+# X-36h / X-36j / X-36l - the three rows fixed for this release.
+# ========================================================================= #
+print("\n== X-36h: an unresolvable command word is not a free pass ==")
+dep_both(r"$'\x70ip' install evil", 2, "X-36h: ANSI-C hex escape resolves to pip")
+dep_both(r"$'\160ip' install evil", 2, "X-36h: octal escape")
+dep_both(r"p$'\151'p install evil", 2, "X-36h: escape in the middle")
+dep_both("pi${x:-p} install evil", 2, "X-36h: parameter expansion")
+dep_both("pi${x:-p} install requests", 0,
+         "X-36h: NOT a blanket refusal - approved packages still pass")
+dep_both("${PIP} install requests", 0, "X-36h: the ordinary indirection case")
+dep_both("echo $(date)", 0, "X-36h control: a substitution in an ARGUMENT")
+dep_both("echo hello", 0, "X-36h control: the hook still parses at all")
+# Recorded residue, pinned so it cannot quietly change either way.
+dep_both("$(echo pip) install evil", 0,
+         "X-36h RESIDUE: the segmenter splits `$(`, so this is still missed")
+dep_both("`echo pip` install evil", 0,
+         "X-36h RESIDUE: verb not adjacent to the unresolvable word")
+
+print("\n== X-36j: _py() no longer corrupts a bracket expression ==")
+_pfx_py = gates_mod._CMD_PFX_RE
+check("X-36j: the emitted SDK prefix run keeps `[({]`",
+      "[({]" in _pfx_py, "the brace/subshell arm")
+check("X-36j: ...and does NOT carry the corrupted `[(?:{]`",
+      "[(?:{]" not in _pfx_py,
+      "`_py`'s blanket ( -> (?: rewrote a literal inside a bracket expression")
+# The parity split it caused: shell allowed, SDK denied.
+dep_both(":npx evil install", 0, "X-36j: `:` is not prefix glue on EITHER side")
+dep_both("?npx evil install", 0, "X-36j: nor is `?`")
+dep_both("{npx evil install", 2, "X-36j control: `{` still is, on both")
+
+print("\n== X-36l: dependency-gate has a fail-closed ceiling ==")
+check("X-36l: the SDK gate carries a timeout",
+      gates_mod._GATE_TIMEOUTS.get("dependency-gate") == 60.0,
+      repr(gates_mod._GATE_TIMEOUTS))
+_settings = json.load(open(os.path.join(PROJ, ".claude", "settings.json"),
+                           encoding="utf-8"))
+_dep_to = [h.get("timeout")
+           for grp in _settings["hooks"].get("PreToolUse", [])
+           for h in grp.get("hooks", [])
+           if "dependency-gate" in h.get("command", "")]
+check("X-36l: the emitted settings.json carries it too",
+      _dep_to and all(t == 60 for t in _dep_to), repr(_dep_to))
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

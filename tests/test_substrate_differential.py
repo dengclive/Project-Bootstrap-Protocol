@@ -752,6 +752,27 @@ for cmd, want in (
         ("{bunx evil install", "deny"),
         ("{npx evil", "deny"),
         ("{ npx evil", "deny"),
+        # [X-36h] AN UNRESOLVABLE COMMAND WORD followed by an install verb.
+        # bash resolves all four of these to `pip`; the gate saw no installer
+        # and allowed them on both substrates. `interpreter_word()` has
+        # carried this arm at the pipe's command position since round 5.
+        (r"$'\x70ip' install evil", "deny"),
+        (r"$'\160ip' install evil", "deny"),
+        (r"p$'\151'p install evil", "deny"),
+        ("pi${x:-p} install evil", "deny"),
+        # It is NOT a blanket refusal - the arm makes the scanner INSPECT the
+        # packages, so an approved one still passes.
+        ("pi${x:-p} install requests", "allow"),
+        ("${PIP} install requests", "allow"),
+        ("echo $(date)", "allow"),
+        # RESIDUE, pinned as ALLOW so the gap is legible rather than silent:
+        # a MULTI-TOKEN command substitution is still missed. `$(echo pip)`
+        # is split by the segmenter (which breaks on `()`), and in
+        # `` `echo pip` install evil `` the verb is not adjacent to the
+        # unresolvable word. Closing these needs the segmenter to treat a
+        # substitution as one unit - a change to every gate, not this anchor.
+        ("$(echo pip) install evil", "allow"),
+        ("`echo pip` install evil", "allow"),
         # [#45 review, D2] The SEGMENT reduction is backslashes ONLY. Deleting
         # quotes from a whole segment manufactures phrases that were never
         # there - these run `git`/`echo`, and nothing named deno or uv

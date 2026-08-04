@@ -1,5 +1,99 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.7.0 → 2.7.1 — the ceiling, the converter, and the word bash resolves (2026-08-04)
+
+**PATCH.** No configuration key exists that did not, and the emitted gates only
+got **stricter**. `PROTOCOL_VERSION` in `lib/installer.py` and
+`lib/templates.py`, `plugin/plugin.json`'s version and its description prose,
+and the version assertions in four suites.
+
+Everything since the `v2.7.0` tag: the `python -m` install bypass and its three
+follow-ups (#36, #40, #39, #41), the three defects those fixes shipped, and the
+three backlog rows below. **Twenty-plus commits of gate behaviour, none of it
+reachable from the newest tag until now** — which is the reason this release
+exists rather than waiting.
+
+### X-36l — `dependency-gate` finally has a ceiling
+
+The PRD has stated this rule since 2.6.0, for `secrets-gate`: it matches every
+`Bash` call, its pure-bash tokenizer is superlinear, *"an unusually large
+command had no ceiling at all"*, and a `PreToolUse` timeout **fails closed** at
+the runtime floor, so the bound refuses rather than allows.
+
+Every clause that bears on the bound applies to `dependency-gate` too — same
+`Bash` surface, the two hooks byte-identical through line 717, plus an install
+anchor with **nested quantifiers** on top. Measured on the emitted hook: **0.9 /
+3.6 / 14.6 / 56 s** at 1,000 / 2,000 / 4,000 / 8,000 assignment tokens, ~4× per
+doubling. It went four releases without the bound the document already argued
+for. It is now **60 s** in both tables.
+
+This is the half that made the cubic scan a *security* finding: with no ceiling
+on either substrate, the SDK ran ~66 s on a 7 KB command while the shell denied
+the same command in ~1.2 s — more-permissive reached by **exhaustion** rather
+than by a parsing hole.
+
+### X-36j — the converter whose job is to stop the dialects drifting was drifting them
+
+`_py()` rewrote every `(` into `(?:` with a blanket `str.replace`. A `(` inside
+a **bracket expression** is a literal, so `prefix_run`'s `[({]` became the class
+`[(?:{]` in the emitted SDK — which additionally accepts `?` and `:`. That is
+the source of every shell/SDK parity split a 1500-command fuzz found, and it
+shipped in v2.7.0.
+
+It is now a small parser that tracks `[...]` and rewrites only outside one.
+Written that way deliberately: the alternative — a rule that no `cmdpos` regex
+may put `(` inside brackets — is unwritten, unenforced, and had already been
+violated.
+
+### X-36h — an unresolvable command word is no longer a free pass (partial)
+
+`interpreter_word()` has carried the right model since round 5: *a word carrying
+`$` or a backtick is an expansion, and an expansion is not a word this model can
+resolve.* The install anchor never adopted it, so bash resolved these to `pip`
+while the gate saw no installer — allow on both substrates:
+
+```
+$'\x70ip' install evil     p$'\151'p install evil
+$'\160ip' install evil     pi${x:-p} install evil
+```
+
+All four now deny. Note the near-miss that shows the shape: `$'pip' install
+evil` **already denied**, because the `$''` fold leaves an ordinary quoted run —
+it is only once the body carries a numeric **escape** that the fold yields
+`$x70ip` and nothing matches. The `$'…'` spellings are caught through the **raw**
+pass, since `normalize_command` rewrites `$'` to `'` and the folded text carries
+no `$` at all; cmdpos's "a gate consulting an allow list judges BOTH spellings"
+is what makes that work.
+
+**It is not a blanket refusal, which is why it costs nothing.** The arm makes
+the scanner treat the invocation as an install and *inspect its packages* —
+`${PIP} install requests` still allows.
+
+**Two shapes remain open and are pinned as `allow` in the corpus** so the gap is
+legible rather than silent: `$(echo pip) install evil` and `` `echo pip` install
+evil ``. The segmenter splits on `()`, so the first never reaches the anchor as
+one segment; in the second the verb is not adjacent to the unresolvable word.
+Closing them needs the segmenter to treat a substitution as one unit — a change
+to every gate sharing the header, not to this anchor.
+
+### Measured
+
+**Acceptance (KB §7):** the differential corpus × 2 substrates against a
+pristine `v2.7.0` install — the *previously denied, now allowed* set is
+**empty**. Golden re-baseline: **freeze-exception no. 40**, verified per-file
+first; counts stable at **57 / 69 / 59**, and exactly three bodies move —
+`dependency-gate.sh`, `sdk_gates/gates.py` and `settings.json`, the last
+carrying both the new timeout and the `_generatedBy` stamp.
+
+Suite: **23 suites / 7480 checks / 0 failed.**
+
+**Still open**, recorded rather than claimed closed: X-36a (whitespace class,
+safe direction), X-36b (`--python 3.12` names the wrong token), X-36f
+(`requests[socks]` refused though approved), X-36g (an escaped package name
+splits the substrates), X-36h's substitution half, X-36i (distro ABI spellings
+`python3-dbg`/`python3.6m`, and `INSTALL_TOOLS` still spelling the pip family
+separately), X-36k (an escaped space joins two words).
+
 ## Post-2.7.0 — the three X-36 bypasses, closed (2026-08-04)
 
 Issues **#40, #39, #41**, fixed in that order — remote execution first. All
