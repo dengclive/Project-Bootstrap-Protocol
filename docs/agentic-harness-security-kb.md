@@ -1181,10 +1181,21 @@ were working in.
 
 ### 4.10 A verdict can be correct for the wrong reason, and a verdict-only differential is blind to it `[+2026-08-04]`
 
-**EXECUTED.** Every figure in this section and its corollaries was re-run here
-against the build named, per §0 — several were first reported by an adversarial
-review and are labelled only after reproduction, because "a finding that has not
-been executed has not been found" applies to a *number* as much as to a defect. The strongest control this project has is §7's release diff: run
+**EXECUTED, with one deviation from §0 stated up front.** §0 defines EXECUTED
+as "reproduced against both tags", and this section cannot honour that: the
+defects it describes were introduced and fixed *between* releases, so its
+figures come from intermediate commits. Those are now named, because a label
+nobody can reproduce is decoration:
+
+| build | commit | what it is |
+|---|---|---|
+| v2.7.0 | `bf3a303` | the release these defects shipped in or against |
+| pre-fix | `0d932b7` | PR #43 merged — the regression and the cubic scan live |
+| current | `main` | after PR #45 |
+
+Several figures below were first reported by an adversarial review and are
+labelled only after reproduction here, because "a finding that has not been
+executed has not been found" applies to a *number* as much as to a defect. The strongest control this project has is §7's release diff: run
 one corpus through both substrates of the old and new release and require the
 *previously denied, now allowed* set to be empty. It is cheap and unarguable,
 and it did not see this:
@@ -1248,9 +1259,13 @@ with a per-token scan. The anchor embedded a nested `(flag|positional)*`, and on
 a `WRAPPER NAME=VALUE …` line an assignment is consumable by two different arms,
 so a single *failing* match was already quadratic and the scan made it cubic. An
 ordinary `env A0=0 … A399=399 make test` went from 0.064 s to 8.6 s; a 7 KB line
-took **69.1 s** inside an async hook callback (re-measured against the
-pre-fix build for this entry; an earlier revision said 67 s, taken from a
-review report rather than run here).
+took **~66 s** inside an async hook callback — steady state over repeated
+runs; a cold first run measured 69.6 s. An earlier revision of this entry
+said 67 s, and a later one replaced it with 69.1 s as though that were a
+correction. It was not: the spread is run-to-run variance of a few
+percent, and the original figure was already right. **Re-measuring a
+number does not entitle you to a new decimal** — if the second reading
+does not distinguish a different claim, say the same number.
 
 No parse was wrong. The gate simply did not answer, and this gate had no entry
 in either timeout table — so what a hang becomes was left to a default nobody
@@ -1588,7 +1603,7 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
 - [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
-- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, 69.1 s inside a hook with no timeout-table entry, while the other substrate denied in ~1 s. `[+2026-08-04]`
+- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook with no timeout-table entry, while the other substrate denied in ~1.2 s. `[+2026-08-04]`
 - [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`
 - [ ] **A document that makes checkable claims gets a verification pass, not just CI.** CI runs the suite; it cannot tell whether a sentence is true. Measured in this repo: a docs-only, CI-green change shipped guidance into this very file that a later round disproved, and a backlog row restated a PRE-FIX timing as present-tense. Prose asserting a number, a set membership, or "X does not appear in Y" is a claim to re-run, and the labels in §0 exist so a reader can tell which claims were. `[+2026-08-04]`
 - [ ] **Mutation-test the CONSTANT, not only the code.** A character set, word list or threshold the control keys on is shrunk deliberately and the suite must fail. Measured: removing two characters from such a set passed **1902 of 1902** checks with a live fail-open behind it. `[+2026-08-04]`
