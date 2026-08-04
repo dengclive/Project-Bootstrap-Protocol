@@ -1181,7 +1181,10 @@ were working in.
 
 ### 4.10 A verdict can be correct for the wrong reason, and a verdict-only differential is blind to it `[+2026-08-04]`
 
-**EXECUTED.** The strongest control this project has is §7's release diff: run
+**EXECUTED.** Every figure in this section and its corollaries was re-run here
+against the build named, per §0 — several were first reported by an adversarial
+review and are labelled only after reproduction, because "a finding that has not
+been executed has not been found" applies to a *number* as much as to a defect. The strongest control this project has is §7's release diff: run
 one corpus through both substrates of the old and new release and require the
 *previously denied, now allowed* set to be empty. It is cheap and unarguable,
 and it did not see this:
@@ -1224,7 +1227,7 @@ second decision that needs its own argument; if what you mean is "the first
 invocation", ask for it directly rather than hoping the longest match is it.
 
 **Corollary 1 — "the previously-denied-now-allowed set is EMPTY" is a claim
-about the CORPUS, not about the control.** `[+2026-08-04]` The fix for the
+about the CORPUS, not about the control.** **EXECUTED.** `[+2026-08-04]` The fix for the
 above was itself released with that sentence in its freeze-exception, and the
 sentence was *true*: the set was empty, of a corpus that did not happen to
 contain `pythont3`. A follow-up pass found the same fix had turned
@@ -1240,12 +1243,14 @@ about (here, every interleaving of the version and tag characters) and run
 before the change cannot see a class the change invented.
 
 **Corollary 2 — a control's own COST is a fail-open, and the timeout table is
-part of the control.** `[+2026-08-04]` The same fix replaced one anchor match
+part of the control.** **EXECUTED.** `[+2026-08-04]` The same fix replaced one anchor match
 with a per-token scan. The anchor embedded a nested `(flag|positional)*`, and on
 a `WRAPPER NAME=VALUE …` line an assignment is consumable by two different arms,
 so a single *failing* match was already quadratic and the scan made it cubic. An
 ordinary `env A0=0 … A399=399 make test` went from 0.064 s to 8.6 s; a 7 KB line
-took **67 seconds** inside an async hook callback.
+took **69.1 s** inside an async hook callback (re-measured against the
+pre-fix build for this entry; an earlier revision said 67 s, taken from a
+review report rather than run here).
 
 No parse was wrong. The gate simply did not answer, and this gate had no entry
 in either timeout table — so what a hang becomes was left to a default nobody
@@ -1260,7 +1265,7 @@ security parameter: a control that can be made not to answer has an allow arm
 whether or not anyone wrote one.
 
 **Corollary 3 — an optimisation's safety argument is not the same as the
-optimisation being safe.** `[+2026-08-04]` The guard that fixed Corollary 2
+optimisation being safe.** **EXECUTED.** `[+2026-08-04]` The guard that fixed Corollary 2
 skipped the match at tokens that could not complete the pattern, and was
 documented as harmless because the caller kept an unguarded fallback. The
 fallback ran only when the guard found **no** match — it said nothing about the
@@ -1583,8 +1588,9 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
 - [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
-- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, 67 s inside a hook with no timeout-table entry, while the other substrate denied in ~1 s. `[+2026-08-04]`
+- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, 69.1 s inside a hook with no timeout-table entry, while the other substrate denied in ~1 s. `[+2026-08-04]`
 - [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`
+- [ ] **A document that makes checkable claims gets a verification pass, not just CI.** CI runs the suite; it cannot tell whether a sentence is true. Measured in this repo: a docs-only, CI-green change shipped guidance into this very file that a later round disproved, and a backlog row restated a PRE-FIX timing as present-tense. Prose asserting a number, a set membership, or "X does not appear in Y" is a claim to re-run, and the labels in §0 exist so a reader can tell which claims were. `[+2026-08-04]`
 - [ ] **Mutation-test the CONSTANT, not only the code.** A character set, word list or threshold the control keys on is shrunk deliberately and the suite must fail. Measured: removing two characters from such a set passed **1902 of 1902** checks with a live fail-open behind it. `[+2026-08-04]`
 - [ ] Where two substrates cannot resolve a spelling identically, the tie is broken **toward deny** — parity bought by discarding the better-informed substrate's knowledge is parity at the permissive bound. `[+2026-07-31]`
 - [ ] A fix and its tests authored from one premise get the **premise** reviewed, not just the diff — a pin written from the same misunderstanding as the code ratifies the defect under a green banner. `[+2026-07-31]`
