@@ -21,10 +21,19 @@ change, *and sometimes cannot be done*: two over-refusal fixes were attempted
 over four rounds, found 4 → 6 → 12 → ~20 blocking fail-opens, and were
 **removed**, with the deny-direction hardening from those rounds kept).
 
-All four post-tag patterns are new **classes**, not new members of the delta;
+**Amended a fourth time 2026-08-04**, from four `dependency-gate` install
+bypasses fixed after the `v2.7.0` tag (issues **#36, #40, #39, #41**): a
+**tenth** pattern, §4.10 — a control can reach the *right verdict for the wrong
+reason*, and the release-diff check this document itself recommends is blind to
+it, because it compares verdicts rather than reasons. That check is the
+strongest control here and it recorded the defect as *unchanged*; the amendment
+strengthens §7 rather than retiring it. Post-tag material is marked
+**`[+2026-08-04]`**.
+
+All five post-tag patterns are new **classes**, not new members of the delta;
 the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
-and describe v2.5.0 → v2.6.0 only. So §4 now carries **nine** patterns: five
-compiled from the delta, four added post-tag.
+and describe v2.5.0 → v2.6.0 only. So §4 now carries **ten** patterns: five
+compiled from the delta, five added post-tag.
 
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
@@ -786,10 +795,13 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Fourteen defects, nine recurring shapes — five from the v2.5.0 → v2.6.0 delta
-and four added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
-five issues filed against 2.6.1, which contribute classes the delta contains no
-member of). If this document is read for one section, this is it.
+Fourteen defects, ten recurring shapes — five from the v2.5.0 → v2.6.0 delta
+and five added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
+five issues filed against 2.6.1; §4.10 from the four `dependency-gate` install
+bypasses fixed after v2.7.0 — issues #36, #40, #39, #41 — which contribute
+classes the delta contains no member of). **The defect count is the v2.5.0 →
+v2.6.0 delta's and does not move when a post-tag shape is added.** If this
+document is read for one section, this is it.
 
 ### 4.1 The agent's write primitive is an unprivileged input channel into privileged code
 
@@ -1155,6 +1167,50 @@ every ALLOW decision downstream of it. Each one is a hole the canonicalization
 just widened, and the direction of the bug is the opposite of the direction you
 were working in.
 
+### 4.10 A verdict can be correct for the wrong reason, and a verdict-only differential is blind to it `[+2026-08-04]`
+
+**EXECUTED.** The strongest control this project has is §7's release diff: run
+one corpus through both substrates of the old and new release and require the
+*previously denied, now allowed* set to be empty. It is cheap and unarguable,
+and it did not see this:
+
+```
+sudo pip install evil npx        rc=0   ALLOWS an unapproved install
+sudo pip install evil npx more   rc=2   denies — naming `more`, not `evil`
+```
+
+Both releases returned **2** for the second command, so the differential
+recorded it as *unchanged* and moved on. The gate was not evaluating that
+command correctly in either release; it was reaching the right exit code by
+inspecting the wrong token. One spelling away sat a live fail-open that the
+corpus contained, ran, and could not perceive — because it compared verdicts
+and the defect lived in the *reason*.
+
+The mechanism is worth keeping separately, because it generalises past this
+codebase. The matcher was a regex anchored at command position, and the scanner
+sliced its arguments out of the matched span:
+
+> **Matching and extraction are two different questions, and a regex answers
+> only the first.** "Does an install invocation exist here" is safe under a
+> greedy, unbounded prefix — the engine backtracks until some parse succeeds.
+> "*Where does it start*" is not: POSIX ERE returns the leftmost-**longest**
+> parse, so an unbounded prefix run could swallow `pip install evil` and let
+> the anchor match a trailing `npx`. `BASH_REMATCH[0]` / `m.end()` then covered
+> the whole segment, the argument list came back empty, and an install verb
+> with no arguments is a lockfile restore.
+
+The module's own docstring asserted that unbounded consumption "cannot fail
+open here — the engine backtracks". That sentence is true of matching and
+silently false of the slice taken from it, and it is the reason the defect
+survived several reviews: it read as a proof that this class could not exist.
+
+**Rule, two parts.** A differential over a deny-list control compares the
+**reason**, not only the verdict — for a refusal, the token or class named in
+the message is part of the observation. And wherever a matcher's *span* is used
+to locate anything (arguments, offsets, a remainder), the choice of parse is a
+second decision that needs its own argument; if what you mean is "the first
+invocation", ask for it directly rather than hoping the longest match is it.
+
 ---
 
 ## 5. Why detection failed, and what actually worked
@@ -1452,6 +1508,8 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Every **widening** of a deny-list control is reviewed as a new control: the original corpus is re-run *and* the new allowance is fuzzed specifically, because the exemption's own guardrails are the surface the widening created. "The error is in the safe direction" describes the bug, never the fix. `[+2026-07-31]`
 - [ ] Every widening carries a **round budget decided in advance**, and an answer to "what if it does not converge". A widening that needs the attacker's full grammar is a parser, not a patch — price it that way, and remember that the honest fix for an over-refusal is often a better *refusal*. `[+2026-08-03]`
 - [ ] No release of a control ships without the **previous-release diff**: install the last tag and the candidate, run one corpus through both substrates of both, and require the "previously denied, now allowed" set to be empty. Cheap, unarguable, and it is the check that ends arguments about whether a fix converged. `[+2026-08-03]`
+- [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
+- [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] Where two substrates cannot resolve a spelling identically, the tie is broken **toward deny** — parity bought by discarding the better-informed substrate's knowledge is parity at the permissive bound. `[+2026-07-31]`
 - [ ] A fix and its tests authored from one premise get the **premise** reviewed, not just the diff — a pin written from the same misunderstanding as the code ratifies the defect under a green banner. `[+2026-07-31]`
 - [ ] Comments claiming completeness ("every redirect spelling", "every file a stage writes") are treated as assertions and verified, or downgraded to the enumerated subset with the remainder recorded as residue. `[+2026-07-31]`
