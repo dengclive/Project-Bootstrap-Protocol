@@ -36,8 +36,10 @@ point: **each came from a defect in the fix for the one before it.** The fix for
 matcher cubic, so the control failed by not answering (corollary 2 — cost is a
 security parameter, and the timeout table is part of the control); and the
 optimisation that fixed *that* was documented as harmless by an argument that
-covered only half its failure mode (corollary 3 — write the equivalence test,
-and let the argument be wrong). Three rounds, each caught by an adversarial pass
+covered only half its failure mode — and the equivalence test written to
+replace the argument then passed over the *next* fail-open (corollary 3 —
+assert the property, not equality against a corpus, and mutation-test the
+constant). Three rounds, each caught by an adversarial pass
 and none by a green suite. Post-tag material is marked **`[+2026-08-04]`**.
 
 All five post-tag patterns are new **classes**, not new members of the delta;
@@ -1266,10 +1268,20 @@ guard finding a **later** one, which is precisely what a missing table entry
 causes: a longer head, an emptied argument list, and a lockfile-restore reading.
 Measured on 84 payloads before it shipped.
 
-**Rule:** when a fast path is introduced beside a slow one, the thing that keeps
-them honest is a test asserting they return **identical** results over a real
-corpus — not an argument about which failures the fallback catches. Write the
-equivalence test, and let the argument be wrong.
+**Rule, and it took one more round to get right.** The first fix was an
+equivalence test: drive the fast and slow paths over a real corpus, require
+identical results. **That test then passed over the next fail-open** — a
+brace-glued spelling the corpus did not contain, because a corpus only holds
+spellings someone already listed. What works is asserting the fast path's
+**precondition as a property**, over a vocabulary that spans the dimension it
+keys on: *every* match must end on a token the guard would have stopped at.
+Then **mutation-test the constant, not just the code** — shrinking the
+character set the guard keys on passed 1902 of 1902 checks while a live
+fail-open sat behind it, which is how the gap was found at all.
+
+So: an equivalence test is the floor, not the ceiling. Prefer a census over an
+equality assertion, and prove the census bites by breaking the thing it
+guards.
 
 ---
 
@@ -1572,7 +1584,8 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
 - [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, 67 s inside a hook with no timeout-table entry, while the other substrate denied in ~1 s. `[+2026-08-04]`
-- [ ] When a **fast path** is added beside a slow one, an equivalence test drives both over a real corpus and requires identical results. An argument about which failures the fallback catches is not a substitute — one such argument covered "no match" and missed "a later match", which was the fail-open. `[+2026-08-04]`
+- [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`
+- [ ] **Mutation-test the CONSTANT, not only the code.** A character set, word list or threshold the control keys on is shrunk deliberately and the suite must fail. Measured: removing two characters from such a set passed **1902 of 1902** checks with a live fail-open behind it. `[+2026-08-04]`
 - [ ] Where two substrates cannot resolve a spelling identically, the tie is broken **toward deny** — parity bought by discarding the better-informed substrate's knowledge is parity at the permissive bound. `[+2026-07-31]`
 - [ ] A fix and its tests authored from one premise get the **premise** reviewed, not just the diff — a pin written from the same misunderstanding as the code ratifies the defect under a green banner. `[+2026-07-31]`
 - [ ] Comments claiming completeness ("every redirect spelling", "every file a stage writes") are treated as assertions and verified, or downgraded to the enumerated subset with the remainder recorded as residue. `[+2026-07-31]`
