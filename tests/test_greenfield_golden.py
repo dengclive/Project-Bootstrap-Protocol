@@ -1110,35 +1110,36 @@ EXPECTED_DIGESTS = {
     # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY, now WITH the F1/F2
     # spellings in the corpus, which is what no. 36 lacked.
     #
-    # [freeze-exception no. 40, 2026-08-04] RELEASE 2.7.1 + three backlog rows.
+    #
+    # [freeze-exception no. 40, 2026-08-04] RELEASE 2.7.1 + two backlog rows.
     # PROTOCOL_VERSION 2.7.0 -> 2.7.1, PATCH: no configuration key exists that
-    # did not, and the emitted gates only got STRICTER. THREE bodies move per
-    # fixture - dependency-gate.sh, sdk_gates/gates.py and settings.json - and
-    # settings.json carries both the new timeout AND the `_generatedBy` stamp,
+    # did not. TWO bodies move per fixture - sdk_gates/gates.py and
+    # settings.json. dependency-gate.sh does NOT move: the timeout is a
+    # settings.json entry and X-36j is SDK-only, so no shell body changes.
+    # settings.json carries both the new timeout and the `_generatedBy` stamp,
     # which is why the version bump adds no file of its own.
     #   X-36l  dependency-gate joins BOTH timeout tables at 60 s. It matches
     #     every Bash call, shares secrets-gate's superlinear tokenizer
     #     byte-for-byte, and carries an anchor with nested quantifiers on top
     #     (0.9 / 3.6 / 14.6 / 56 s at 1k / 2k / 4k / 8k assignment tokens). A
     #     PreToolUse timeout fails CLOSED at the runtime floor, so the bound
-    #     refuses a pathological command rather than allowing one. This is the
-    #     rule the PRD already states for secrets-gate in §6.C.
+    #     refuses a pathological command rather than allowing one - the rule
+    #     the PRD already states for secrets-gate in §6.C. MEASURED COST: a
+    #     ~47 KB heredoc write takes 73 s and now fails closed, where
+    #     secrets-gate's own 60 s ceiling would not have caught it (17.8 s).
     #   X-36j  `_py` is bracket-aware, so `prefix_run`'s `[({]` no longer
-    #     becomes the class `[(?:{]` in the emitted SDK. That corruption is
-    #     behind every shell/SDK parity split a 1500-command fuzz found.
-    #   X-36h  PARTIAL, and the residue is pinned rather than papered over.
-    #     The anchor gains the unresolvable-word arm interpreter_word() has
-    #     carried since round 5, closing `$'\\x70ip' install evil`,
-    #     `$'\\160ip'`, `p$'\\151'p` and `pi${x:-p}` - all of which bash
-    #     resolves to `pip`. NOT a blanket refusal: the arm makes the scanner
-    #     INSPECT packages, so `${PIP} install requests` still allows. STILL
-    #     OPEN and pinned as `allow` in the corpus: `$(echo pip) install evil`
-    #     and `` `echo pip` install evil ``, because the segmenter splits on
-    #     `()` and the backtick form puts the verb out of reach. Closing those
-    #     is a segmenter change affecting every gate.
+    #     becomes the class `[(?:{]` in the emitted SDK. NOTE THE DIRECTION:
+    #     this is a LOOSENING on the SDK - `:npx evil install` was SDK-deny
+    #     and is now allow on both substrates, which is correct (bash gives
+    #     [:npx][evil][install]; no such command) and is what parity means.
+    #     So "the previously-denied-now-allowed set is EMPTY" is NOT claimed
+    #     for this exception; the moves are audited individually instead.
+    #   X-36h  ATTEMPTED AND REVERTED, not shipped. The obvious arm refused
+    #     14 of 40 ORDINARY commands (`$KUBECTL get pods` -> "approve pods");
+    #     narrowing to `$'` failed because unquote_word strips the quote
+    #     before the anchor sees it. Both facts are on the backlog row and the
+    #     six bypass shapes are pinned as `allow` so the gap is legible.
     # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57/69/59.
-    # ACCEPTANCE (KB §7): the differential corpus x 2 substrates against a
-    # pristine v2.7.0 install - the PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY.
     # [freeze-exception no. 36, 2026-08-04] ISSUE #40 / X-36d: ONE interpreter
     # set for the pipe trigger AND the install anchor. They were two private
     # spellings - `alt(INTERPRETERS) + "[.0-9]*"` and `python[0-9.]*` - and
@@ -1362,7 +1363,7 @@ EXPECTED_DIGESTS = {
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
     "default":
-        "651016101bc0bb98450b5060279fd8380566d6c6815c5ac24da068793f79b49f",
+        "3b16ea31935843cb251794b39c8523174a42cb9601808467f56b814ef0f6d757",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1476,7 +1477,7 @@ EXPECTED_DIGESTS = {
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
     "full_autonomous":
-        "22a0d58d09d6dce83f971d42205497aec2fa0a8e1110203a5c9e59e4cd60a13e",
+        "d5fd88de5c65005c245a385f0bf398fd48f63489a9525296c6a16e8b3e922c57",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1548,7 +1549,7 @@ EXPECTED_DIGESTS = {
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
     "design_steering":
-        "8f784ee284f3ad7b6e47d0a6f0b21168a3afd6aa12b1fb4bf3dd6ba2cfcd8876",
+        "566430e33d8968571212616ebb3a147584dd06e32c9237025c27e34c349d258c",
 }
 
 EXPECTED_ACTION_COUNTS = {

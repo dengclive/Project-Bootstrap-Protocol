@@ -27,6 +27,16 @@ anchor with **nested quantifiers** on top. Measured on the emitted hook: **0.9 /
 doubling. It went four releases without the bound the document already argued
 for. It is now **60 s** in both tables.
 
+**The threshold it introduces is measured, not assumed.** A large heredoc write
+reaches it first: `cat > src/app.py <<'EOF' … EOF` with a 1,141-line body
+(≈47 KB) takes **73 s** and now fails closed where `main` allowed it — and
+`secrets-gate`'s existing 60 s ceiling would *not* have caught it (17.8 s on the
+same input), because this gate is the slower of the pair. Realistic commands are
+nowhere near: a 200-package `pip install` is 0.16 s, an 8 KB `git commit -m`
+0.25 s. The bound is still right — the alternative is the no-ceiling state that
+was the security finding — but unlike `secrets-gate`'s note, this one does not
+claim to be "far above any real command", because at ~46 KB it is not.
+
 This is the half that made the cubic scan a *security* finding: with no ceiling
 on either substrate, the SDK ran ~66 s on a 7 KB command while the shell denied
 the same command in ~1.2 s — more-permissive reached by **exhaustion** rather
@@ -45,36 +55,34 @@ Written that way deliberately: the alternative — a rule that no `cmdpos` regex
 may put `(` inside brackets — is unwritten, unenforced, and had already been
 violated.
 
-### X-36h — an unresolvable command word is no longer a free pass (partial)
+### X-36h — attempted, measured, reverted; still open
 
-`interpreter_word()` has carried the right model since round 5: *a word carrying
-`$` or a backtick is an expansion, and an expansion is not a word this model can
-resolve.* The install anchor never adopted it, so bash resolved these to `pip`
-while the gate saw no installer — allow on both substrates:
+**Not in this release**, and the reason is worth more than the fix would have
+been. The obvious approach is to copy `interpreter_word()`'s arm — *a word
+carrying `$` or a backtick is an expansion, and an expansion is not a word this
+model can resolve.* It works at the **pipe's** command position because a
+downloader upstream has already narrowed the context. At a general command
+position it does not. Measured: **14 of 40 ordinary commands** newly refused, on
+both substrates, each with the unactionable message X-36b is filed for —
 
 ```
-$'\x70ip' install evil     p$'\151'p install evil
-$'\160ip' install evil     pi${x:-p} install evil
+$KUBECTL get pods                              -> "not in deps.md approved list: pods"
+$GIT add src/                                  -> "... : src/"
+$HELM install myrelease ./chart                -> "... : myrelease"
+sudo make -C $BUILD install DESTDIR=/tmp/stage -> "... : DESTDIR"
 ```
 
-All four now deny. Note the near-miss that shows the shape: `$'pip' install
-evil` **already denied**, because the `$''` fold leaves an ordinary quoted run —
-it is only once the body carries a numeric **escape** that the fold yields
-`$x70ip` and nothing matches. The `$'…'` spellings are caught through the **raw**
-pass, since `normalize_command` rewrites `$'` to `'` and the folded text carries
-no `$` at all; cmdpos's "a gate consulting an allow list judges BOTH spellings"
-is what makes that work.
+`$VAR` at command position is ordinary, and `get`/`add`/`i` are ordinary verbs;
+the pair is evidence of nothing.
 
-**It is not a blanket refusal, which is why it costs nothing.** The arm makes
-the scanner treat the invocation as an install and *inspect its packages* —
-`${PIP} install requests` still allows.
+Narrowing to ANSI-C quoting alone failed for a second, separate reason:
+`unquote_word` strips `'` before the anchor sees the token, so `$'\x70ip'`
+reduces to `$x70ip` and the `$'` signal is destroyed. Any fix keyed on that
+construct must inspect the **raw** token rather than the reduced candidate.
 
-**Two shapes remain open and are pinned as `allow` in the corpus** so the gap is
-legible rather than silent: `$(echo pip) install evil` and `` `echo pip` install
-evil ``. The segmenter splits on `()`, so the first never reaches the anchor as
-one segment; in the second the verb is not adjacent to the unresolvable word.
-Closing them needs the segmenter to treat a substitution as one unit — a change
-to every gate sharing the header, not to this anchor.
+Both facts are recorded on X-36h so the next attempt starts from them instead of
+from the pipe rule. The six bypass shapes are pinned as `allow` in the
+differential corpus, so the gap is legible rather than silent.
 
 ### Measured
 

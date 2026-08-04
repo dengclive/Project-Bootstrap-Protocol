@@ -2592,21 +2592,23 @@ if _muq:
 # ========================================================================= #
 # X-36h / X-36j / X-36l - the three rows fixed for this release.
 # ========================================================================= #
-print("\n== X-36h: an unresolvable command word is not a free pass ==")
-dep_both(r"$'\x70ip' install evil", 2, "X-36h: ANSI-C hex escape resolves to pip")
-dep_both(r"$'\160ip' install evil", 2, "X-36h: octal escape")
-dep_both(r"p$'\151'p install evil", 2, "X-36h: escape in the middle")
-dep_both("pi${x:-p} install evil", 2, "X-36h: parameter expansion")
-dep_both("pi${x:-p} install requests", 0,
-         "X-36h: NOT a blanket refusal - approved packages still pass")
-dep_both("${PIP} install requests", 0, "X-36h: the ordinary indirection case")
-dep_both("echo $(date)", 0, "X-36h control: a substitution in an ARGUMENT")
-dep_both("echo hello", 0, "X-36h control: the hook still parses at all")
-# Recorded residue, pinned so it cannot quietly change either way.
-dep_both("$(echo pip) install evil", 0,
-         "X-36h RESIDUE: the segmenter splits `$(`, so this is still missed")
-dep_both("`echo pip` install evil", 0,
-         "X-36h RESIDUE: verb not adjacent to the unresolvable word")
+print("\n== X-36h: the attempted fix was REVERTED - these still allow ==")
+# The obvious fix (interpreter_word()'s "$ or backtick means unresolvable" arm)
+# does NOT transfer to a general command position: measured, 14 of 40 ordinary
+# commands were newly refused, e.g. `$KUBECTL get pods` -> "not in deps.md
+# approved list: pods". Narrowing to ANSI-C quoting failed separately, because
+# unquote_word strips `'` before the anchor sees the token. Both facts are on
+# backlog X-36h. These rows pin the CURRENT state so the gap is not silent.
+for _c in (r"$'\x70ip' install evil", r"$'\160ip' install evil",
+           r"p$'\151'p install evil", "pi${x:-p} install evil",
+           "$(echo pip) install evil", "`echo pip` install evil"):
+    dep_both(_c, 0, "X-36h OPEN: bash resolves this to pip and the gate does not")
+# ...and the ordinary commands the attempted fix would have refused MUST allow.
+for _c in ("$KUBECTL get pods", "$GIT add src/",
+           "$HELM install myrelease ./chart",
+           "sudo make -C $BUILD install DESTDIR=/tmp/stage",
+           "timeout 300 $HOME/bin/deploy add prod", "$TF get -update modules/"):
+    dep_both(_c, 0, "X-36h: an ordinary command with $ near command position")
 
 print("\n== X-36j: _py() no longer corrupts a bracket expression ==")
 _pfx_py = gates_mod._CMD_PFX_RE

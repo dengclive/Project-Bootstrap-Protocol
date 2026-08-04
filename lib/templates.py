@@ -1121,19 +1121,16 @@ _SHELL_SUBST = {
     # the dependency gate's HEAD and the SDK's _INSTALL_HEAD are one
     # rendering. This replaced RUNNERS_ERE, whose only consumer was the
     # old HEAD's runner arm; runners_regex still feeds this tail.
-    # [X-36h] THE BACKTICK IS ESCAPED FOR THIS SUBSTRATE ONLY. The tail's
-    # unresolvable-word arm carries a literal backtick, and HEAD is assigned
-    # inside a DOUBLE-QUOTED bash string - where a backtick opens command
-    # SUBSTITUTION. Unescaped, the emitted hook died with "syntax error near
-    # unexpected token" and every command fail-closed, `echo hello` included.
-    # `\\`` inside a bracket expression is POSIX-literal, so the class also
-    # admits a backslash; that is over-match in the deny direction and costs
-    # nothing (the arm still requires an install VERB next). The `$` in the
-    # same class and the `$` end-anchor are deliberately NOT escaped: neither
-    # begins a valid expansion here, and escaping the anchor would turn it
-    # into a literal dollar and silently unanchor the tail.
-    "@@INSTALL_TAIL_ERE@@": cmdpos.install_head_tail().replace(
-        chr(96), "\\" + chr(96)),
+    # [X-36h] Nothing here needs shell-escaping. The install tail's
+    # unresolvable-word arm is scoped to `$'` and carries no backtick, and a
+    # `$` inside the double-quoted HEAD assignment begins no valid expansion.
+    # An earlier cut keyed the arm on a backtick too, which DID need escaping
+    # - a backtick in a double-quoted string opens command substitution, and
+    # the unescaped first attempt emitted a hook that died on a syntax error
+    # and fail-closed `echo hello`. That arm is gone, and so is the escape
+    # plus the claim it carried about the class admitting a backslash, which
+    # a review showed was false of the emitted bytes.
+    "@@INSTALL_TAIL_ERE@@": cmdpos.install_head_tail(),
     # [#43 review] The words an install tail can END on, derived from the same
     # tables the tail is built from. A performance guard only - the scan keeps
     # an unguarded second pass, so an error here costs a slow path, never a

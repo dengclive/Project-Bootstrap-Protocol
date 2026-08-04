@@ -859,31 +859,6 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
         + "((" + nonspace + "*/)?uv" + space + "pip" + space + "install"
         + "|(" + runners_regex(space, nonspace) + ")"
         + "|(" + nonspace + "*/)?(" + alt(INSTALL_TOOLS) + ")"
-        + space + "(" + alt(INSTALL_VERBS) + ")"
-        # [X-36h] AN UNRESOLVABLE COMMAND WORD FOLLOWED BY AN INSTALL VERB.
-        # `interpreter_word()` has carried exactly this arm at the pipe's
-        # command position since round 5 - "a word carrying `$` or a backtick
-        # is an EXPANSION, and an expansion is not a word this model can
-        # resolve" - and the install anchor never adopted it. So bash
-        # resolved these to `pip` while the gate saw no installer:
-        #   $'\x70ip' install evil      p$'\151'p install evil
-        #   $'\160ip' install evil      pi${x:-p} install evil
-        # allow/allow on both substrates. Note the near-miss that shows the
-        # shape: `$'pip' install evil` DENIED, because the `$''` fold leaves
-        # an ordinary quoted run - it is only once the body carries a numeric
-        # ESCAPE that the fold yields `$x70ip` and nothing matches.
-        #
-        # THIS IS NOT A BLANKET REFUSAL, which is why it costs nothing: the
-        # arm makes the scanner treat the invocation as an install and INSPECT
-        # its packages. `${PIP} install requests` still ALLOWS (requests is
-        # approved); `${PIP} install evil` denies, naming `evil`.
-        #
-        # The `$'...'` spellings are reached through the RAW pass, not the
-        # folded one - `normalize_command` rewrites `$'` to `'`, so the folded
-        # text carries no `$` at all. cmdpos's "A GATE THAT CONSULTS AN ALLOW
-        # LIST JUDGES BOTH SPELLINGS" is what makes that work, and it is why
-        # this arm belongs here rather than in the normalizer.
-        + "|(" + nonspace + "*[$" + chr(96) + "]" + nonspace + "*)"
         + space + "(" + alt(INSTALL_VERBS) + "))"
         + "(" + wsp + "|$)"
     )
