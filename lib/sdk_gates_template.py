@@ -223,9 +223,17 @@ def _unquote_word(tok):
 
     Split out because the install anchor needs the reduction but must KEEP
     the path - it carries its own path arm, so a basename would lose
-    the distinction. The anchor was the one deny-granting consumer that had
-    never adopted this reduction, and on the shell substrate that left
-    `pi\\\\p install evil` allowed while this module denied it.
+    the distinction. On the shell substrate the anchor's not having adopted
+    it left `pi\\\\p install evil` allowed while this module denied it.
+
+    [#43 review, F2] AN EARLIER REVISION OF THIS NOTE CALLED THE ANCHOR "the
+    one deny-granting consumer that had never adopted this reduction". That
+    was false when written: the two arrival-channel walks in the same
+    per-segment loop - the remote-run and `uv run --with` regexes - also read
+    raw text, and `den\\\\o run <url>` was live remote-script execution on the
+    shell for exactly that reason. They now judge both spellings too. The
+    claim is recorded rather than deleted because "I fixed the last one" is
+    the shape that let it ship.
     """
     out = tok
     for _c in ("'", '"', chr(92)):
@@ -1028,7 +1036,8 @@ _PREFIX = _CMD_PFX_RE
 # literals HERE plus a second set in the shell body: the D3 two-copies
 # shape, and the reason a one-substrate fix could silently miss. Shell
 # parity (HEAD) is now BY CONSTRUCTION - the two anchors are one rendering.
-# [issue #36] `python[0-9.]*\\s+-m\\s*` is a transparent COMMAND-POSITION
+# [issue #36, spelling updated by #40] The interpreter word followed by
+# `-m` is a transparent COMMAND-POSITION
 # PREFIX inside that tail - the treatment sudo/env/timeout get - so
 # `-m pipx install`, `-m poetry add`, `-m pipenv install` and `-m uv pip
 # install` are re-judged by the arms that already refuse their direct
@@ -1950,13 +1959,29 @@ def _int_word(base):
     if base in _INTERPRETERS:
         return base
     v = base
-    # [issue #40] `t`/`d` join the class: they are the free-threaded and
+    # [issue #40] `t`/`d` join the reduction: they are the free-threaded and
     # debug ABI tags, so `python3.13t` reduces to `python3` exactly as
     # `python3.12` does. Stripping only digits and dots left the tag glued
     # on, the reduction never reached a member, and the stage classified as
     # unmodellable while the trigger (whose suffix DOES admit the tag)
     # matched - two spellings of one question. Shell parity.
-    while v and v[-1] in ".0123456789td":
+    #
+    # [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40
+    # was not - it stripped `[.0-9td]` in ANY position, while INTERP_SUFFIX
+    # admits the tags only AFTER the digits (`[.0-9]*[td]*`). So the two
+    # spellings STILL disagreed, just on a different set: `pythont3`
+    # reduced to `python` here and matched the trigger NOWHERE, moving the
+    # D20 stage from `x` (unmodellable) to `i` (modellable) - the ALLOW
+    # direction. Measured deny -> allow on BOTH substrates for
+    # `curl u | pythont3 -c 'x' ; sh a.sh`, i.e. a regression shipped by
+    # the very change that was meant to end this disagreement. Mirroring
+    # the regex's structure - tag run, THEN version run - is what makes
+    # "one question, one spelling" true rather than merely intended.
+    while v and v[-1] in "td":
+        v = v[:-1]
+        if v in _INTERPRETERS:
+            return v
+    while v and v[-1] in ".0123456789":
         v = v[:-1]
         if v in _INTERPRETERS:
             return v
@@ -2090,12 +2115,41 @@ def _install_head_split(seg):
 
     Only the MATCH reads the reduced word; `rest` keeps the ORIGINAL tokens,
     so package names are judged exactly as before.
+
+    [#43 review, F1] THE MATCH IS ATTEMPTED ONLY WHERE IT CAN SUCCEED. The
+    anchor embeds `prefix_run`'s nested `(flag|positional)*`, and on a
+    `WRAPPER NAME=VALUE ...` line an assignment is consumable by both the
+    wrapper arm's positional branch and the outer assignment arm - so one
+    FAILING match is already quadratic in Python's backtracking engine, and
+    running it per token made this scan CUBIC. Measured on the emitted
+    module: `env A0=0 ... A399=399 make test`, an ordinary command, went
+    0.064 s -> 8.6 s, and a 7 KB line took 67 s inside an async hook
+    callback. `dependency-gate` is in no timeout table, so that surfaces as
+    whatever the harness default does while the shell substrate denies in
+    about a second - the SDK-more-permissive direction.
+
+    The tail always ENDS on a verb or runner word (cmdpos.install_completers,
+    derived from the same tables the tail is built from), so a match at any
+    other token cannot succeed. THE SECOND PASS IS THE CORRECTNESS
+    GUARANTEE: if the guard matched nothing but the anchor matches the whole
+    reduced segment, the unguarded scan runs. An error in the table
+    therefore costs a slow path, never a verdict.
     """
     toks = seg.split()
+    red = [_unquote_word(t) for t in toks]
     cand = ""
-    for i, tok in enumerate(toks):
-        red = _unquote_word(tok)
-        cand = red if not cand else cand + " " + red
+    for i, r in enumerate(red):
+        cand = r if not cand else cand + " " + r
+        if (r.rsplit("/", 1)[-1] in _INSTALL_COMPLETERS
+                and _INSTALL_HEAD.match(cand)):
+            return cand, " ".join(toks[i + 1:])
+    # `cand` is now the whole reduced segment; one match decides whether the
+    # guard could have missed anything at all.
+    if not _INSTALL_HEAD.match(cand):
+        return None, ""
+    cand = ""
+    for i, r in enumerate(red):
+        cand = r if not cand else cand + " " + r
         if _INSTALL_HEAD.match(cand):
             return cand, " ".join(toks[i + 1:])
     return None, ""
@@ -2673,6 +2727,11 @@ def sdk_gates_module(cfg: dict) -> str:
         "# tools, verbs, runner channels and the `python -m` transparent\n"
         "# prefix - ONE rendering with the shell gate's HEAD.\n"
         "_INSTALL_TAIL = %r\n"
+        "# [#43 review] The words an install tail can END on, derived\n"
+        "# from the same tables the tail is built from. A performance\n"
+        "# guard only - _install_head_split keeps an unguarded second\n"
+        "# pass, so an error here costs a slow path, never a verdict.\n"
+        "_INSTALL_COMPLETERS = frozenset(%r)\n"
         "# [round-4 D20] The two channels that need a DISTINGUISHING token.\n"
         "# `deno run main.ts` and `uv run python` are ordinary; blocking them\n"
         "# is the unactionable-refusal shape this suite has shipped twice.\n"
@@ -2691,6 +2750,7 @@ def sdk_gates_module(cfg: dict) -> str:
                                           ws=r"\s")),
            _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
                                         space0=r"\s*", wsp=r"\s")),
+           sorted(cmdpos.install_completers()),
            r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
            r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
     )

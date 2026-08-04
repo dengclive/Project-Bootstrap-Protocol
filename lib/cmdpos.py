@@ -213,8 +213,13 @@ DOWNLOADERS = (
 # [batch 30-33] This was briefly SPLIT into INVOKERS + STDIN_DATA_INTERPRETERS
 # so the X-32 data-pipe exemption could ask "is this interpreter one whose
 # stdin becomes DATA once a program flag is present?". With that exemption
-# removed nothing asks the question, so the split is gone. Content and order
-# are unchanged, which is what keeps pipe_to_shell_regex byte-identical.
+# removed nothing asks the question, so the split is gone.
+#
+# [issue #40] This note used to end "Content and order are unchanged, which is
+# what keeps pipe_to_shell_regex byte-identical." BOTH halves are now false and
+# the sentence is retired rather than left to mislead: PY_INTERPRETERS is
+# spliced in here, which changes the content AND the order, and the trigger
+# regex moved with it on purpose.
 # [issue #40 / X-36d] THE PYTHON FAMILY, NAMED ONCE. These are the
 # interpreters that take `-m <module>`, so they are what the install anchor
 # must treat as transparent, AND they are interpreters, so they are what the
@@ -617,6 +622,49 @@ INSTALL_TOOLS = ("npm", "pnpm", "yarn", "bun", "pip[0-9.]*", "pipx",
                  "mix", "rebar3", "gleam", "go", "deno")
 INSTALL_VERBS = ("install", "i", "add", "get", "require", "get-deps",
                  "deps[.]get")
+
+
+def install_completers() -> tuple:
+    """The words that can be the LAST token of an install tail.
+
+    [#43 review, F1/F6] A PERFORMANCE GUARD WITH A CORRECTNESS FALLBACK, and
+    the fallback is why this table is allowed to exist at all.
+
+    `_install_head_split` grows a candidate one token at a time and matches
+    the anchor at each step. The anchor embeds `prefix_run`'s nested
+    `(flag|positional)*`, and on a `WRAPPER NAME=VALUE ...` line an
+    assignment is consumable by BOTH the wrapper arm's positional branch and
+    the outer assignment arm - so a single FAILING match is already
+    quadratic in Python's backtracking engine, and running it per token made
+    the scan cubic. Measured on the emitted SDK module: `env A0=0 ...
+    A399=399 make test`, an ordinary command, went 0.064 s -> 8.6 s, and at
+    n=800 a 7 KB line took 67 s inside an async hook callback. That is a
+    denial of service on the pre-tool-call path, and because
+    `dependency-gate` carries no entry in the timeout tables it would
+    surface as whatever the harness default does - with the shell substrate
+    denying in about a second, which is the SDK-more-permissive direction.
+
+    The anchor's tail always ENDS on a verb or a runner word, so attempting
+    the match at any other token cannot succeed. Guarding on that collapses
+    the scan to one match on the ordinary line.
+
+    THE TABLE IS DERIVED, not typed: every member comes from INSTALL_VERBS,
+    RUNNER_SOLO, RUNNER_VERBS and RUNNER_PHRASES - the same tables the tail
+    is built from - so it cannot drift from the regex the way a hand-written
+    list would. AND the caller keeps an unguarded second pass that runs
+    whenever the guard matched nothing but the anchor matches the whole
+    segment, so an error here costs a slow path, never a verdict. That is
+    the difference between this and the enumerations KB §4.9 is about.
+    """
+    out = set()
+    for v in INSTALL_VERBS:
+        out.add(v.replace("[.]", "."))
+    out.update(RUNNER_SOLO)
+    for _tool, verbs in RUNNER_VERBS:
+        out.update(verbs)
+    for phrase in RUNNER_PHRASES:
+        out.add(phrase[-1])
+    return tuple(sorted(out))
 
 
 def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
