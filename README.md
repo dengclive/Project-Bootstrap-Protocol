@@ -1,18 +1,25 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-> **Current release: v2.6.0.** `PROTOCOL_VERSION = 2.6.0`; the normative spec
-> is `Bootstrap-Protocol-v2-6-0.md` + `Bootstrap-Protocol-Companion-v2-6-0.md`
-> (older PRD/Companion pairs are retained as historical record — with one
-> exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
-> corrections applied *in place* on 2026-07-28, each marked at its edit site,
-> made before a 2.6.0 document existed to hold them. They are native text in
-> the v2-6-0 pair now). **External consumers pin the annotated git tag
-> `v2.6.0`** — pinning a moving `main` is pinning a branch, not a release.
-> Release record: `docs/changelog.md` "2.5.0 → 2.6.0". Known deferrals:
-> `docs/deferred-backlog.md` (clusters **J**, **K** and **L** are the v2.6.0
-> upstream-fix and review residue; cluster I is the v2.5.0 release-review set).
+> **Current release: v2.7.2.** `PROTOCOL_VERSION = 2.7.2`. **External consumers
+> pin the annotated git tag `v2.7.2`** — pinning a moving `main` is pinning a
+> branch, not a release. This line was stale at `v2.6.0` through three releases
+> (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
 >
-> **2.6.0 is corrective, not additive — it changes what the emitted gates do.**
+> The normative spec is still `Bootstrap-Protocol-v2-6-0.md` +
+> `Bootstrap-Protocol-Companion-v2-6-0.md`: **2.6.1 through 2.7.2 are gate
+> corrections, and none of them adds operator-facing surface a PRD would
+> describe.** Older PRD/Companion pairs are retained as historical record — with
+> one exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
+> corrections applied *in place* on 2026-07-28, each marked at its edit site,
+> made before a 2.6.0 document existed to hold them. They are native text in the
+> v2-6-0 pair now.
+>
+> Release record: `docs/changelog.md` (newest entry first). Known deferrals:
+> `docs/deferred-backlog.md` — cluster **X-36** is the live one (rows `a`–`t`);
+> clusters **J**, **K** and **L** are the v2.6.0 upstream-fix and review residue;
+> cluster I is the v2.5.0 release-review set.
+>
+> **2.6.0 was corrective, not additive — and every release since has been too.**
 > Every 2.x release before it was an opt-in flag defaulting to `false`, so an
 > operator who left it alone saw nothing change. This one has no such flag:
 > gates that were silently inert begin to block, `dependency-gate` starts catching

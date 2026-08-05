@@ -149,6 +149,24 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
+    # [freeze-exception no. 44, 2026-08-05] RELEASE 2.7.2 — VERSION STAMP ONLY.
+    # PROTOCOL_VERSION 2.7.1 -> 2.7.2. PATCH on this repo's stated criterion:
+    # no configuration key exists that did not, and across both merged PRs
+    # (#49, #52) 0 verdicts moved deny -> allow on either substrate.
+    # EXACTLY ONE plan-hashed body moves per fixture: `.claude/settings.json`,
+    # which carries the `_generatedBy (protocol 2.7.2)` stamp. NO hook body and
+    # NOT `sdk_gates/gates.py` move — no code changed in this commit, only the
+    # version literals, the four suites' version assertions, the README pin
+    # target and the changelog.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING, not assumed: an install from the
+    # merged `main` (45484e5) and one from this tree were compared body-by-body
+    # across both fixtures — 61 -> 61 and 70 -> 70 files, 0 added, 0 removed,
+    # and the only differences outside settings.json are `.bootstrap-state.json`
+    # and `.installer-manifest.json`, which are written OUTSIDE the plan and are
+    # therefore NOT hashed by these digests (the error freeze-exception no. 17
+    # made — it counted the installed tree, not the plan actions).
+    # Counts stable at 57 / 69 / 59.
+
     # [2.0.0 R-0 freeze-exception] Re-baselined from the 1.9.0 digests for
     # exactly two byte classes (verified by HEAD-vs-worktree plan diff):
     #   1. settings.json `_generatedBy`: "protocol 1.9.0" -> "protocol 2.0.0"
@@ -2384,7 +2402,7 @@ EXPECTED_DIGESTS = {
     # SPLITS in test_issue_fixes.py section (j) - `dep_both` cannot express
     # them, which is precisely why they had gone unrecorded.
     "default":
-        "90c6848abb834a370914fd8bee884249c8efb6f4594c0c3ac5b36e0195389718",
+        "c40da1ade2204840e59fab677bb126f60759869ac04b3610a639025079813d8e",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2534,7 +2552,7 @@ EXPECTED_DIGESTS = {
     # the point, and it is the per-file check that establishes it. 0 added, 0
     # removed, count still 69.
     "full_autonomous":
-        "9d3b501902d0188c59152083abd2aa0c4bcd8d66badce81f22e7a994b45ac71a",
+        "a9e825dfdfad1aaaf1f730fee28f5e3d1439c7407052357bcf08e64fc45f596f",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2628,7 +2646,7 @@ EXPECTED_DIGESTS = {
         # (.claude/steering/design.md and the design-review skill and command)
         # are UNCHANGED - verified per-file, not assumed. 0 added, 0 removed,
         # count still 59.
-        "b08f1bc769c190c720add1aed317dbc1783700f6a8f7f6b7471605c67f227ed2",
+        "e29406c9feff6918002ade8eacc300de4ddf590a7dcdd5a4c1002e85594a1e2d",
 }
 
 EXPECTED_ACTION_COUNTS = {
