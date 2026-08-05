@@ -439,7 +439,7 @@ _DOTENV_TEMPLATES = frozenset({
 # denied there. Interpolation is what makes the claim structural.
 #
 # Defined in the emitted prelude (see sdk_gates_module):
-#   _SHELL_INVOKERS   _CMD_PREFIXES   _CMD_PFX_RE
+#   _SHELL_INVOKERS   _CMD_PREFIXES   _CMD_PFX_RE   _INT_INVOKERS
 
 
 # Two operator sets, mirroring the two the shell carries, because the two
@@ -1614,6 +1614,12 @@ def _xp_run_scan(toks, written, opaque=False):
     # `sudo -u a.sh cat`, where the FLAG'S OPERAND is the fetched file.
     pfx = fwd = False
     cw, i = "", 0
+    # [issue #50] The TENTATIVE command word: what the ordinary-word branch
+    # below resolves by reducing a version suffix. It is held aside rather
+    # than assigned to `cw` because it must not end this walk - it is applied
+    # only after phase 2 has failed to find anything, so resolving a word here
+    # can never cost the deeper invoker the walk would otherwise have reached.
+    cw0, i0 = "", 0
     while i < len(toks):
         t = toks[i]
         # [round-5 P1] _cmd_word, not a raw basename. bash removes quote
@@ -1630,6 +1636,43 @@ def _xp_run_scan(toks, written, opaque=False):
         # in the forward scan below: they are builtins no wrapper can exec, so
         # honouring them deeper would resolve `env jq . x.json` to `.` and
         # deny an ordinary jq invocation.
+        #
+        # [issue #50] THIS ARM IS DELIBERATELY UNTOUCHED - no version
+        # reduction, no `hit(t)`, no opaque path-form test. It is the FIRST
+        # test in phase 1, ahead of the assignment, prefix, compound-head and
+        # flag arms, so a token reaching it has NOT yet been shown to be a
+        # command word. It fires on genuine ones - `sh a.sh` at a segment head
+        # is the common case - but `A=/x/python3.12` and
+        # `-X/usr/bin/python3.12` are tested HERE too, before the arm that
+        # would have recognised either for what it is. Reducing here therefore
+        # resolves an interpreter out of an ASSIGNMENT VALUE, an ATTACHED FLAG
+        # VALUE or a WRAPPER OPERAND:
+        # `A=/x/python3.12 sh -c "$(cat b.sh)"` would stop at the assignment
+        # and never walk on to `sh`, and `A=/x/python3.12` is an inert
+        # assignment naming no real file - a one-token, attacker-chosen
+        # disarm prependable to any laundered payload. MEASURED, by building
+        # that variant and diffing it against this tree: on a 240-row disarm
+        # matrix (3 downloads x 16 disarms x 5 invokers) it goes deny -> allow
+        # on 120 rows here, 168 in the planning phase and 180 for an
+        # adversarial reviewer who built his own matrix - against 0 for this
+        # tree on all three. THE COUNT IS CORPUS-SENSITIVE AND DOES NOT
+        # TRAVEL; the DISARM LIST does, and every member of it opens the
+        # payload: `A=/x/python3.12`, `PYTHONPATH=/opt/python3.12`,
+        # `sudo -X/usr/bin/python3.12`, `env -u/x/python3.12`,
+        # `timeout 5 /opt/perl5`. Compensating with guards here is worse
+        # still: this arm fires on EXACT members too, so `hit(t)` and the
+        # opaque test would fire on every ordinary `/bin/bash -l` after a
+        # download - the planning phase measured that variant at 83 of 112
+        # realistic fetch-then-use commands refused, and that figure is
+        # carried from it, not re-run here. The reduction is read in
+        # the ordinary-word branch below instead, where both tests already
+        # apply and no token that is not a command word can reach it.
+        #
+        # The `break` before `hit(t)` also makes the EXACT member spelling
+        # more permissive than the versioned one (`curl -o python3 u ;
+        # ./python3 app.py` is allow/allow while its `python3.12` twin is
+        # deny/deny), which is a PRE-EXISTING defect, not issue #50's, and is
+        # backlogged with its measured fix rather than smuggled in here.
         if base in _FILE_RUNNERS:
             cw, i = base, i + 1
             break
@@ -1666,6 +1709,29 @@ def _xp_run_scan(toks, written, opaque=False):
         # FILE_RUNNER and so never sets `cw` below.
         if opaque and "/" in t:
             return True
+        # [issue #50] `curl -o a.sh u ; python3.12 a.sh` ran a file this same
+        # command had just fetched while `python3 a.sh` denied: the run side
+        # tested EXACT membership where the pipe side has applied
+        # cmdpos.INTERP_SUFFIX since finding 9. It was never python-specific -
+        # `perl5.36`, `ruby3.2`, `node20`, `php8.2`, `bash5`, path-qualified
+        # `/usr/bin/python3.12` and quoted/escaped `'python3.12'`,
+        # `pyth\\on3.12` all walked through, 16 real spellings in all, and
+        # `env python3.12 a.sh` already DENIED because the wrapper branch
+        # reaches the suffix-aware answer. Joining the run side to the
+        # EXISTING reduction is the whole fix; INTERP_SUFFIX itself is
+        # untouched (widening it is X-36i, blocked behind X-36a).
+        #
+        # THE POSITION IS THE DESIGN. This is the branch a token reaches only
+        # after the assignment, prefix, compound-head and flag arms have all
+        # declined it, so it can only ever see a word that IS in command
+        # position - which is why the reduction can be read here and not at
+        # the _FILE_RUNNERS arm above (see the note there for the 120-of-240
+        # deny -> allow measurement). It is also why no guard is needed:
+        # `hit(t)` and the opaque path-form test are the two statements
+        # immediately above, so a reduced word is already subject to both.
+        # Nothing moves OFF a test it was taking; the reduction only supplies
+        # a command word where this walk had none.
+        cw0, i0 = _int_word(base), i + 1
         fwd, i = pfx, i + 1
         break
     # Phase 2 - the UNBOUNDED forward scan, opened ONLY by a prefix run. With
@@ -1691,7 +1757,41 @@ def _xp_run_scan(toks, written, opaque=False):
             if base in _INTERPRETERS:
                 cw, i = base, i + 1
                 break
+            # [issue #50] The same exact-membership gap, one phase deeper:
+            # `sudo -u x bash5.2 -c "$(cat b.sh)"` is a versioned INVOKER
+            # behind a wrapper, and phase 1 alone leaves it open.
+            #
+            # `_INT_INVOKERS`, NOT `_SHELL_INVOKERS`: this arm asks "is the
+            # reduced word one of the SHELLS WITHIN _INTERPRETERS", which is
+            # cmdpos.INVOKERS - the one definition the shell twin's
+            # `@@SHELL_INT_CASE@@` is rendered from, so the two arms are one
+            # spelling. Spelling it `_SHELL_INVOKERS` (= ALL_INVOKERS) would
+            # have named the three DUAL words too, and a set the arm cannot
+            # reach is how the substrates drift without a verdict moving.
+            # tests/test_issue_fixes.py pins the two arms' word sets equal.
+            run = _int_word(base)
+            if run in _INT_INVOKERS:
+                cw, i = run, i + 1
+                break
+            # A reduced NON-invoker is REMEMBERED, not taken. Stopping the
+            # scan on it would drop a deeper invoker the base walk reached -
+            # `sudo x /opt/perl5 sh -c "$(cat b.sh)"` must still resolve to
+            # `sh`, not to `perl`. It is applied below only if the scan
+            # exhausts, which is exactly the state in which the base walk had
+            # no command word at all.
+            if run and not cw0:
+                cw0, i0 = run, i + 1
             i += 1
+    # [issue #50] The tentative applies ONLY if nothing deeper was found, so
+    # this arm is reachable only where the base walk fell out of both phases
+    # with `cw` empty and therefore returned False outright. That is what
+    # makes the join CONVERGENT rather than a re-routing: it adds a phase 3
+    # where there was none, and never replaces one. Measured 0 deny -> allow
+    # over 338,688 generated commands on this substrate, exhaustively, and
+    # over a 6,000-row sample on the shell (see the freeze exception for the
+    # corpus definition - the number means nothing without it).
+    if not cw and cw0:
+        cw, i = cw0, i0
     # Phase 3 - what the resolved command word does with the rest.
     if not cw:
         return False
@@ -2113,21 +2213,37 @@ def _xp_stage_writes(toks):
 
 def _int_word(base):
     """[round-4 P1, finding 9] Interpreter membership on a basename, with a
-    trailing version suffix reduced one character at a time and only as far as
-    a spelling that IS an interpreter: `python3.12` -> `python3`, `python3`
-    untouched. -> "" when the word is not an interpreter. Shell parity.
+    trailing cmdpos.INTERP_SUFFIX reduced only as far as a spelling that IS an
+    interpreter: `python3.12` -> `python3`, `python3` untouched. -> "" when the
+    word is not an interpreter. Shell parity (`_xp_iw`).
 
     `curl u | python3.12` was rc=0 on BOTH substrates - a complete bypass
     spelled with two characters. cmdpos.interpreter_word's `[.0-9]*` makes the
     trigger see it; this reduction is what keeps `python3.12 -c 'x'` an
     ordinary data pipeline instead of collateral over-refusal.
+
+    [issue #50] The reduction now has THREE consumers - the stage classifier,
+    run phase 1 and run phase 2 - of AT LEAST FIVE that ask this question.
+    `_invoker_at` and its shell twin `_cs_isinv`, plus the secrets gate's
+    `_SG_INVOKER`, still test exact membership: measured over 10 invokers x 4
+    version suffixes, ALL 40 versioned spellings leak an approved-list bypass
+    (`bash5.2 -c "pip install evil"`, `ksh93 -c ...` are allow/allow at
+    v2.7.1 AND after this change) while all 10 unversioned twins deny. That is filed as X-36q and left OPEN here
+    on blast radius, not on merit: joining it moves `@@INV_CASE@@`, which is a
+    _HEADER_PLACEHOLDERS member, so all 13 hooks move - a different change
+    from this one, which moves exactly one hook. Do not read "three
+    consumers" as "closed".
+
+    _INTERPRETERS-SCOPED ON PURPOSE; never re-scope to _FILE_RUNNERS. `..`
+    would reduce to `.` and `sourced` to `source`, and a `.` resolved into a
+    command-word slot denies an ordinary `env jq . x.json` - the exact
+    over-refusal finding 19 added `.`/`source` to FILE_RUNNERS to avoid.
     """
     if base in _INTERPRETERS:
         return base
-    v = base
-    # [issue #40] `t`/`d` join the reduction: they are the free-threaded and
+    # [issue #40] `t`/`d` are in the suffix: they are the free-threaded and
     # debug ABI tags, so `python3.13t` reduces to `python3` exactly as
-    # `python3.12` does. Stripping only digits and dots left the tag glued
+    # `python3.12` does. Admitting only digits and dots left the tag glued
     # on, the reduction never reached a member, and the stage classified as
     # unmodellable while the trigger (whose suffix DOES admit the tag)
     # matched - two spellings of one question. Shell parity.
@@ -2140,17 +2256,53 @@ def _int_word(base):
     # D20 stage from `x` (unmodellable) to `i` (modellable) - the ALLOW
     # direction. Measured deny -> allow on BOTH substrates for
     # `curl u | pythont3 -c 'x' ; sh a.sh`, i.e. a regression shipped by
-    # the very change that was meant to end this disagreement. Mirroring
-    # the regex's structure - tag run, THEN version run - is what makes
-    # "one question, one spelling" true rather than merely intended.
-    while v and v[-1] in "td":
-        v = v[:-1]
-        if v in _INTERPRETERS:
-            return v
-    while v and v[-1] in ".0123456789":
-        v = v[:-1]
-        if v in _INTERPRETERS:
-            return v
+    # the very change that was meant to end this disagreement.
+    #
+    # [issue #50] That ordering is no longer RE-SPELLED here: this consumes
+    # `cmdpos.INTERP_SUFFIX` (`[.0-9]*[td]*`) as a compiled regex, so there
+    # is one definition to get right rather than a hand-written mirror of it
+    # per site. A mirror is what #40 and #43-F1 each were.
+    #
+    # BOUNDED, because this gate is FAIL-CLOSED behind a 60 s ceiling and the
+    # run side calls the reduction once per scanned token. The old form
+    # stripped ONE character at a time with a membership test after each
+    # strip, so its cost grew with the WORD, not with the word set: measured
+    # here on a long command word, 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB
+    # unbounded against 0.005 / 0.011 / 0.021 s bounded - quadratic against
+    # flat. An interpreter is a PREFIX of the word and at most _INT_MAXLEN
+    # characters long, so only that many prefixes can ever match and the
+    # whole remainder must be INTERP_SUFFIX. Longest prefix first, which is
+    # the order the character-at-a-time loop found members in.
+    #
+    # HONEST SCOPE OF THAT NUMBER: on the SHELL no payload was found that
+    # drives this reduction with a pathological token at all - the tokenizer
+    # dominates every long-word shape tried. So the bound is measured where
+    # it is reachable and DEFENSIVE where it is not. End to end, base to head
+    # is 0.74x-1.15x over six shapes at 5-80 KB, and head is FASTER on the
+    # reducible-word shapes; but the prefixed-run shape is a constant +4-5%,
+    # and near 100 KB of single-token command word that constant puts a ~4%
+    # length band on the far side of the 60 s fail-closed ceiling (measured:
+    # base 59.2 s allow, head 61.8 s). So "nothing the base allowed is pushed
+    # into the ceiling" is NOT claimed - it is false in that band. Nothing
+    # realistic reaches it, and the cost there is the tokenizer's
+    # pre-existing quadratic, not this reduction.
+    n = len(base)
+    if n > _INT_MAXLEN:
+        n = _INT_MAXLEN
+    while n > 0:
+        head = base[:n]
+        # `.fullmatch(base, n)` in its POS form, never `base[n:]`: slicing
+        # would copy the tail once per prefix and put the O(len^2) straight
+        # back. `fullmatch` anchors both ends by itself, so THIS pattern needs
+        # no end-of-string escape and therefore carries no backslash. Read
+        # that narrowly: _STATIC_BODY carries backslashes in dozens of places
+        # (the `pyth\\on3.12` spelling in the run-scan note above is one), and
+        # the claim is only that adding one HERE would be an invalid escape in
+        # a plain, non-raw string - a SyntaxError in the emitted module that
+        # breaks every install. That trap fired once during this change.
+        if head in _INTERPRETERS and _INT_SUFFIX_RE.fullmatch(base, n):
+            return head
+        n -= 1
     return ""
 
 
@@ -2935,6 +3087,24 @@ def sdk_gates_module(cfg: dict) -> str:
         "_RESOLVED_MAX = %d\n\n"
         "_DOWNLOADERS = frozenset(%r)\n"
         "_INTERPRETERS = frozenset(%r)\n"
+        "# [issue #50] The two bounds `_int_word` searches within: the\n"
+        "# suffix itself and the longest member name (7, `Rscript`). Both\n"
+        "# are rendered from the same cmdpos definitions the shell hook's\n"
+        "# `_xp_iw` is rendered from, so the bound cannot drift between\n"
+        "# the substrates - and adding an interpreter re-derives it rather\n"
+        "# than silently truncating the search.\n"
+        "_INT_SUFFIX_RE = re.compile(%r)\n"
+        "_INT_MAXLEN = max(len(_w) for _w in _INTERPRETERS)\n"
+        "# [issue #50] THE SHELLS WITHIN _INTERPRETERS - cmdpos.INVOKERS,\n"
+        "# the same definition the shell hook's `@@SHELL_INT_CASE@@` is\n"
+        "# rendered from, so the two substrates' phase-2 arms are ONE\n"
+        "# spelling of one word set. NOT `_SHELL_INVOKERS`, which is\n"
+        "# ALL_INVOKERS and carries the three DUAL words (`ssh`, `watch`,\n"
+        "# `xargs`): those are wrapper words, never interpreters, so a\n"
+        "# reduced word cannot be one and naming them here would state a\n"
+        "# set wider than the arm can ever see - which is exactly how the\n"
+        "# two substrates drift apart silently (round-4 D3).\n"
+        "_INT_INVOKERS = frozenset(%r)\n"
         "# [round-4 P1/P3] The four word sets the D20 walks were missing.\n"
         "# FILE_RUNNERS adds `.`/`source` to INTERPRETERS (finding 19);\n"
         "# COMPOUND_HEADS and INERT_FILTERS are the P3 classification\n"
@@ -2981,6 +3151,7 @@ def sdk_gates_module(cfg: dict) -> str:
            cmdpos.ANSIC_RE_SRC, cmdpos.ANSIC_SAFE,
            cmdpos.PARAM_DEFAULT_RE_SRC, cmdpos.RESOLVED_SPELLING_MAX,
            sorted(cmdpos.DOWNLOADERS), sorted(cmdpos.INTERPRETERS),
+           cmdpos.INTERP_SUFFIX, sorted(cmdpos.INVOKERS),
            sorted(cmdpos.FILE_RUNNERS), sorted(cmdpos.COMPOUND_HEADS),
            sorted(cmdpos.INERT_FILTERS), sorted(cmdpos.WRITER_WORDS),
            sorted(cmdpos.WRITER_FLAGS),
