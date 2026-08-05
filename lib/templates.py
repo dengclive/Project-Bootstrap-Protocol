@@ -688,6 +688,268 @@ _join_cont(){
 # spelling, so the commands that carry no continuation and no ANSI-C quote -
 # which is nearly all of them - pay nothing, and this gate's 60 s fail-CLOSED
 # budget does not move.
+#
+# [X-36h] THIRD GLOBAL, `_CMD_RESOLVED`: WHAT THE *DECIDABLE* EXPANSIONS
+# RESOLVE TO, and EMPTY whenever there are none - which is every command that
+# carries no `$'` and no `${x:-word}`. The five functions below are the shell
+# transcription of cmdpos.ansic_decode / param_default / resolved_spelling;
+# tests/test_substrate_differential.py extracts each ONE AT A TIME from the
+# emitted hook, runs it in a bare bash and byte-compares against the reference
+# and the SDK over cmdpos.RESOLVED_VECTORS - a verdict-level differential
+# cannot see two copies computing different STRINGS.
+#
+# Each is written to be extractable that way: name at column 0, closing brace
+# at column 0, no dependency on file-scope state.
+_ANSIC_B=""
+_ansic_safe(){
+  # WHAT A DECODED ESCAPE MAY BECOME: printable ASCII 0x21-0x7e, and not a
+  # quote, a `$`, a backtick or a backslash. The exclusions are the safety
+  # argument - the decode cannot forge a quoting construct, an expansion, an
+  # escape, or (whitespace being outside the range) a SECOND WORD.
+  case "${1-}" in
+    ''|*[!!-~]*) return 1 ;;
+    "'"|'"'|'$'|'\\'|'`') return 1 ;;
+    *) return 0 ;;
+  esac
+}
+_ansic_body(){
+  # Decode \\xHH / \\uHHHH / \\UHHHHHHHH / \\NNN inside ONE $'...' body.
+  # Verified against bash 5.3: two hex digits max, three octal digits max.
+  # The `printf` decode is FORMAT-SIDE (`printf -v _c "\\x$_h"`); the
+  # argument-side spelling `printf -v _c '\\x%s' "$_h"` emits literal text.
+  # THE TWO SPELLINGS BELOW ARE DELIBERATELY ASYMMETRIC and both are
+  # correct: inside double quotes bash keeps the backslash in `\\x` (x is
+  # not a quoting metacharacter) but EATS it in `\\$` (it is), so the octal
+  # arm needs `\\\\$_oct` to hand printf a real backslash while the hex arm
+  # needs only `\\x$_hex`. Writing `\\$_oct` yields the literal text `$_oct`.
+  # THE DEFAULT ARM TAKES A WHOLE RUN, not one character. Consuming one
+  # character at a time made this O(n^2) in bash's string slicing, and a
+  # 10 KB PLAIN body inside `$'...'` - an ordinary long commit message or
+  # printf format - went 0.39 s to 7.17 s, which walks a command that used
+  # to pass toward the 60 s fail-CLOSED ceiling. Chunking makes the
+  # escape-free body a single pass. Measured after: 1.0x.
+  local _b="${1-}" _out="" _hex _oct _ch _v _chunk
+  while [ -n "$_b" ]; do
+    case "$_b" in
+      '\\'*) ;;
+      *) _chunk="${_b%%'\\'*}"
+         _out="$_out$_chunk"; _b="${_b:${#_chunk}}"; continue ;;
+    esac
+    case "$_b" in
+      '\\x'[0-9A-Fa-f]*)
+        _hex="${_b:2:2}"
+        case "$_hex" in
+          [0-9A-Fa-f][0-9A-Fa-f]) ;;
+          *) _hex="${_b:2:1}" ;;
+        esac
+        printf -v _ch "\\x$_hex"
+        if _ansic_safe "$_ch"; then
+          _out="$_out$_ch"; _b="${_b:$((2+${#_hex}))}"; continue
+        fi
+        _out="$_out${_b:0:1}"; _b="${_b:1}" ;;
+      '\\u'[0-9A-Fa-f]*|'\\U'[0-9A-Fa-f]*)
+        case "${_b:1:1}" in u) _hex="${_b:2:4}" ;; *) _hex="${_b:2:8}" ;; esac
+        while [ -n "$_hex" ]; do
+          case "$_hex" in *[!0-9A-Fa-f]*) _hex="${_hex%?}" ;; *) break ;; esac
+        done
+        _v=$((16#$_hex)); _ch=""
+        if [ "$_v" -ge 33 ] && [ "$_v" -le 126 ]; then
+          printf -v _ch "%x" "$_v"; printf -v _ch "\\x$_ch"
+        fi
+        if _ansic_safe "$_ch"; then
+          _out="$_out$_ch"; _b="${_b:$((2+${#_hex}))}"; continue
+        fi
+        _out="$_out${_b:0:1}"; _b="${_b:1}" ;;
+      '\\'[0-7]*)
+        _oct="${_b:1:3}"
+        while [ -n "$_oct" ]; do
+          case "$_oct" in *[!0-7]*) _oct="${_oct%?}" ;; *) break ;; esac
+        done
+        printf -v _ch "\\\\$_oct"
+        if _ansic_safe "$_ch"; then
+          _out="$_out$_ch"; _b="${_b:$((1+${#_oct}))}"; continue
+        fi
+        _out="$_out${_b:0:1}"; _b="${_b:1}" ;;
+      '\\'?*) _out="$_out${_b:0:2}"; _b="${_b:2}" ;;
+      # only a LONE TRAILING backslash reaches this arm now.
+      *) _out="$_out${_b:0:1}"; _b="${_b:1}" ;;
+    esac
+  done
+  _ANSIC_B="$_out"
+}
+_ANSIC_R=""
+_ansic_decode(){
+  # RE-EMIT EACH RUN STILL QUOTED. Emitting the decoded body bare would turn
+  # `git commit -m $'pip install evil'` into three words and manufacture the
+  # X-36k over-refusal. An UNTERMINATED run stays unterminated - no closing
+  # quote is invented, because bash will not parse that command either.
+  local _s="${1-}" _out="" _pre _rest _body _closed _chunk
+  local _aq=$'$\\'' _sq="'"
+  case "$_s" in *"$_aq"*) ;; *) _ANSIC_R="$_s"; return 0 ;; esac
+  _rest="$_s"
+  while : ; do
+    case "$_rest" in
+      *"$_aq"*) _pre="${_rest%%"$_aq"*}"; _rest="${_rest#*"$_aq"}" ;;
+      *) _out="$_out$_rest"; break ;;
+    esac
+    _out="$_out$_pre$_aq"
+    _body=""; _closed=0
+    while : ; do
+      case "$_rest" in
+        '\\'?*) _body="$_body${_rest:0:2}"; _rest="${_rest:2}" ;;
+        "$_sq"*) _closed=1; break ;;
+        '') break ;;
+        # ...and here too: everything up to the next backslash or `'`, in
+        # one step. Same O(n^2) otherwise, same 10 KB payload.
+        *) _chunk="${_rest%%'\\'*}"
+           case "$_chunk" in *"$_sq"*) _chunk="${_chunk%%"$_sq"*}" ;; esac
+           [ -n "$_chunk" ] || _chunk="${_rest:0:1}"
+           _body="$_body$_chunk"; _rest="${_rest:${#_chunk}}" ;;
+      esac
+    done
+    _ansic_body "$_body"; _out="$_out$_ANSIC_B"
+    if [ "$_closed" = 1 ]; then _out="$_out$_sq"; _rest="${_rest:1}"; fi
+  done
+  _ANSIC_R="$_out"
+}
+_PD_R=""
+_param_default(){
+  # `${NAME:-WORD}` and its five siblings -> WORD, when WORD is a LITERAL.
+  # `${NAME}` and `$NAME` carry no literal branch and produce NOTHING, which
+  # is the whole reason a bare `$KUBECTL` cannot reach the install anchor
+  # through this spelling. On a REJECT the walk rescans from just after the
+  # `${` rather than skipping to `}`, so a rejected outer expansion cannot
+  # hide an acceptable inner one - that is what makes it agree with the
+  # reference's leftmost-match `re.sub`.
+  #
+  # THE WALK RUNS OVER A WINDOW, NOT OVER THE WHOLE COMMAND. Every bash string
+  # operation below costs O(length of the string it names) - including
+  # `case "$_rest" in ...`, because expanding `"$_rest"` into a word copies it
+  # - so a walk that keeps the whole command in `_rest` pays O(n) per `${` and
+  # is O(n^2) overall. Measured on the emitted hook: 8000 `${aN:-vN}` tokens
+  # (126 KB) spent 47.7 s in THIS FUNCTION, which carried a command that
+  # PASSED at v2.7.1 in 29.8 s over the 60 s fail-CLOSED PreToolUse timeout at
+  # 86.3 s - an allowed command turned into an unactionable timeout refusal,
+  # the same failure the ANSI-C walk was chunked for one fix earlier. Slicing
+  # a bounded window off the front and walking THAT makes every inner
+  # operation O(window): 47.7 s -> 0.87 s. `_out` is appended with `+=` for
+  # the same reason - `_out="$_out$_word"` re-copies the whole accumulator
+  # every time (8000 appends: 2.06 s vs 0.03 s).
+  #
+  # WHERE A WINDOW MAY END, AND WHY THE ANSWER IS THE SAME STRING EITHER WAY.
+  # An expansion this walk ACCEPTS holds only `[A-Za-z0-9._/+:@=-]` between
+  # its `${` and its `}` - `_name`, the operator and `_word` are all inside
+  # that set - so a cut is SAFE when every `${` left of it either finds its
+  # `}` left of the cut too, or meets a character that set forbids on the way.
+  # Then the whole-command walk and the windowed walk both REJECT it and both
+  # emit a literal `${`, and a reject leaves the cursor just after the `${` in
+  # both. Three cuts satisfy that, and one of them always exists:
+  #   * just after the LAST `}` in the window - every `${` in the window then
+  #     has a `}` after it and still inside it;
+  #   * else just before the LAST `${` in the window - any earlier `${` runs
+  #     into that `$`, which the alphabet forbids;
+  #   * else the window holds no `${` at all, so nothing can straddle - minus
+  #     a trailing `$`, so a cut can never fall BETWEEN a `$` and a `{`.
+  # The one shape left over is a lone `${` at the window head; that extends
+  # the window to the first `}` in the command (or to the end when there is
+  # none), which is the whole expansion and cannot be split further. Each arm
+  # also leaves a last character that is not `$`, so no cut splits a `${`.
+  local _s="${1-}" _out="" _pre _rest _inner _name _word _w _cand
+  local _pdw=@@PD_WINDOW@@
+  case "$_s" in *'${'*) ;; *) _PD_R="$_s"; return 0 ;; esac
+  _rest="$_s"
+  while [ -n "$_rest" ]; do
+    if [ "${#_rest}" -gt "$_pdw" ]; then
+      _w="${_rest:0:$_pdw}"
+      case "$_w" in
+        *'}'*) _w="${_w%'}'*}"'}' ;;
+        *'${'*)
+          _cand="${_w%'${'*}"
+          if [ -n "$_cand" ]; then _w="$_cand"
+          else
+            case "$_rest" in
+              *'}'*) _w="${_rest%%'}'*}"'}' ;;
+              *) _w="$_rest" ;;
+            esac
+          fi ;;
+        *) _w="${_w%'$'}" ;;
+      esac
+      _rest="${_rest:${#_w}}"
+    else
+      _w="$_rest"; _rest=""
+    fi
+    while : ; do
+      case "$_w" in
+        *'${'*) _pre="${_w%%'${'*}"; _w="${_w#*'${'}" ;;
+        *) _out+="$_w"; break ;;
+      esac
+      _out+="$_pre"
+      case "$_w" in
+        *'}'*) _inner="${_w%%'}'*}" ;;
+        *) _out+='${'; continue ;;
+      esac
+      case "$_inner" in
+        *[-=+]*) ;;
+        *) _out+='${'; continue ;;
+      esac
+      _name="${_inner%%[-=+]*}"; _name="${_name%:}"
+      _word="${_inner#*[-=+]}"
+      case "$_name" in
+        ''|*[!A-Za-z0-9_]*|[0-9]*) _out+='${'; continue ;;
+      esac
+      case "$_word" in
+        *[!A-Za-z0-9._/+:@=-]*) _out+='${'; continue ;;
+      esac
+      _out+="$_word"
+      _w="${_w#*'}'}"
+    done
+  done
+  _PD_R="$_out"
+}
+_BLEN=0
+_blen(){
+  # THE BUDGET'S UNIT, PINNED. `${#var}` is NOT a byte count and it is not a
+  # character count either - it is whichever the AMBIENT LOCALE says, bytes
+  # under LC_ALL=C and characters under a UTF-8 locale. The SDK half of this
+  # pair counts with Python, so leaving the locale to the environment put a
+  # substrate SPLIT behind an environment variable: the same command padded
+  # with 8000 copies of one 3-byte character (8,023 characters, 24,023 bytes)
+  # was deny/deny under en_US.UTF-8 and shell=ALLOW / SDK=DENY under LC_ALL=C,
+  # because bash skipped the third spelling and Python computed it.
+  #
+  # `local LC_ALL=C` is scoped to THIS function and restored on return, so
+  # nothing else in the hook - no `case` glob, no bracket range - changes
+  # behaviour. BYTES rather than characters because the C locale is the one
+  # locale guaranteed to exist, because every string operation in this file
+  # costs O(bytes it copies) so bytes is what the budget was measured in, and
+  # because bytes >= characters means the change can only SKIP the spelling
+  # more often, which restores the v2.7.1 verdict and never adds a deny.
+  local _bl="${1-}"
+  local LC_ALL=C
+  _BLEN=${#_bl}
+  return 0
+}
+_CMD_RESOLVED=""
+_resolved_spelling(){
+  # THE LENGTH BUDGET, rendered from cmdpos.RESOLVED_SPELLING_MAX so this
+  # substrate, the SDK's `_RESOLVED_MAX` and the reference are ONE number - and
+  # measured through `_blen` so they are one number in ONE UNIT, UTF-8 bytes.
+  # The full argument is on the constant: this gate's PreToolUse timeout is
+  # 60 s and a PreToolUse timeout fails CLOSED, so a rewrite that only ever
+  # ADDS denies must not be able to push a command that PASSED at v2.7.1 past
+  # the ceiling and turn its ALLOW into a timeout refusal. Skipping the third
+  # spelling restores the v2.7.1 verdict exactly - the spelling is deny-only -
+  # so this can never open anything, and it makes "an oversized command is
+  # never SLOWER than v2.7.1" true by construction rather than by timing.
+  local _rs="${1-}"
+  _blen "$_rs"
+  if [ "$_BLEN" -gt @@RESOLVED_MAX@@ ]; then _CMD_RESOLVED=""; return 0; fi
+  _ansic_decode "$_rs"
+  _param_default "$_ANSIC_R"
+  if [ "$_PD_R" = "$_rs" ]; then _CMD_RESOLVED=""
+  else _CMD_RESOLVED="$_PD_R"; fi
+  return 0
+}
 _CMD_UNFOLDED=""
 _read_cmd(){
   local _rc_raw
@@ -695,6 +957,20 @@ _read_cmd(){
   _join_cont "$_rc_raw"
   if [ "$_rc_raw" = "$_CMD_R" ]; then _CMD_UNFOLDED=""
   else _CMD_UNFOLDED="$_rc_raw"; fi
+  # [X-36h] The third spelling is FOLDED like the first. Without this fold the
+  # shell keeps the token `$'pip'`, `_uqw` reduces it to `$pip`, no anchor
+  # matches, and the shell ALLOWS while the SDK - whose reference folds -
+  # DENIES. That is the forbidden direction, and it is the one wiring mistake
+  # this fix made and measured.
+  _resolved_spelling "$_rc_raw"
+  if [ -n "$_CMD_RESOLVED" ]; then
+    local _rc_folded="$_CMD_R"
+    _join_cont "$_CMD_RESOLVED"
+    _CMD_RESOLVED="$_CMD_R"
+    _CMD_R="$_rc_folded"
+    if [ "$_CMD_RESOLVED" = "$_rc_folded" ] || [ "$_CMD_RESOLVED" = "$_rc_raw" ]
+    then _CMD_RESOLVED=""; fi
+  fi
   return 0
 }
 
@@ -1169,13 +1445,26 @@ _SHELL_SUBST = {
     # of WRITER_FLAGS knew, so `sort -oa.sh` laundered a fetch past the write
     # capture and was then run.
     "@@WRITER_ATT_ARMS@@": _writer_attached_arms("    "),
+    # [X-36h perf] How many UTF-8 BYTES a command may be before
+    # `_resolved_spelling` skips the third spelling. HEADER placeholder: the
+    # budget lives beside the walk it bounds. Rendered from cmdpos so the
+    # shell, the SDK prelude (`_RESOLVED_MAX`) and the reference cannot drift
+    # to three numbers - and compared through `_blen`, which pins LC_ALL=C so
+    # they cannot drift to three UNITS either.
+    "@@RESOLVED_MAX@@": str(cmdpos.RESOLVED_SPELLING_MAX),
+    # [X-36h perf] How much of the command `_param_default` walks at once.
+    # Rendered from cmdpos too - not because the reference needs a window
+    # (`re.sub` does not) but so cmdpos.PARAM_WINDOW_VECTORS, whose entire
+    # job is to land ON this boundary, are derived from the same number.
+    "@@PD_WINDOW@@": str(cmdpos.PARAM_DEFAULT_WINDOW),
 }
 # The header carries the command-position model; the gate BODIES carry the
 # arrival-channel patterns. Both are filled from _SHELL_SUBST - the split is
 # only about which string each placeholder appears in - and each is asserted
 # present where it belongs, so a renamed placeholder fails the import instead
 # of silently emitting `@@PIPE_ERE@@` into a live hook.
-_HEADER_PLACEHOLDERS = ("@@INV_CASE@@", "@@PFX_CASE@@", "@@ANCHOR_ERE@@")
+_HEADER_PLACEHOLDERS = ("@@INV_CASE@@", "@@PFX_CASE@@", "@@ANCHOR_ERE@@",
+                        "@@RESOLVED_MAX@@", "@@PD_WINDOW@@")
 for _k in _HEADER_PLACEHOLDERS:
     if _k not in _HOOK_HEADER:
         raise AssertionError(f"hook-header placeholder {_k} not found")
@@ -2038,6 +2327,13 @@ _sg_pass "$_CMD_R"
 # The spelling the operator typed, EMPTY when the fold changed nothing - so
 # the overwhelmingly common command pays for exactly one pass.
 _sg_pass "$_CMD_UNFOLDED"
+# [X-36h] ...and what the DECIDABLE expansions resolve to, also EMPTY on the
+# ordinary command. THIS LINE IS NOT OPTIONAL AND IT IS NOT THIS ROW'S GATE:
+# `cat $'\\x2e\\x65nv'` reads a protected path and was allow/allow here at
+# v2.7.1 - the residue lib/cmdpos.py records under normalization step 5.
+# Wiring only the SDK half leaves it shell=allow / SDK=deny, which is the
+# tolerated direction but still a divergence that would ship silently.
+_sg_pass "$_CMD_RESOLVED"
 if [ "${{#CANDIDATES[@]}}" -eq 0 ] && [ "${{#PAT_CANDIDATES[@]}}" -eq 0 ] \
    && [ "${{#CMD_CANDIDATES[@]}}" -eq 0 ]; then
   log "secrets-gate: no path"; exit 0
@@ -3874,8 +4170,15 @@ while IFS= read -r nseg; do
 # loop does across segments of one spelling. `_CMD_UNFOLDED` is EMPTY when the
 # fold changed nothing, and `cmd_segments ""` emits nothing, so the ordinary
 # command is scanned exactly once.
+#
+# [X-36h] A THIRD spelling joins the stream on the same terms: what the
+# DECIDABLE expansions resolve to, EMPTY unless the command actually carries
+# a `$'...'` run or a literal `${{x:-word}}` branch. A bare `$KUBECTL` yields
+# nothing, which is why this cannot reproduce the ordinary-command refusals
+# that got two deny-arm attempts reverted (the second at 62de545).
 done < <(cmd_segments "$CMD"
-         if [ -n "$_CMD_UNFOLDED" ]; then cmd_segments "$_CMD_UNFOLDED"; fi)
+         if [ -n "$_CMD_UNFOLDED" ]; then cmd_segments "$_CMD_UNFOLDED"; fi
+         if [ -n "$_CMD_RESOLVED" ]; then cmd_segments "$_CMD_RESOLVED"; fi)
 if [ -n "$blocked" ]; then
   echo "Dependency gate: not in deps.md approved list:$blocked" >&2
   echo "Approve in-session and update .claude/steering/deps.md." >&2
