@@ -149,6 +149,26 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
+    # [freeze-exception no. 46, 2026-08-06] RELEASE 2.7.3 — VERSION STAMP ONLY.
+    # PROTOCOL_VERSION 2.7.2 -> 2.7.3. PATCH on this repo's stated criterion:
+    # `INVOKER_WORD_MAX` is an INTERNAL constant, not operator-facing surface, so
+    # no configuration key exists that did not; and across PR #55 the gates only
+    # got stricter — 0 verdicts moved deny -> allow over ~426,000 evaluations
+    # plus an independent 70-row differential.
+    # EXACTLY ONE plan-hashed body moves per fixture: `.claude/settings.json`,
+    # carrying the `_generatedBy (protocol 2.7.3)` stamp. NO hook body and NOT
+    # `sdk_gates/gates.py` move — no code changed in the release commit, only the
+    # version literals, four suites' version assertions AND THEIR CHECK LABELS,
+    # the README pin target and the changelog.
+    # VERIFIED PER-FILE BEFORE RE-BASELINING, not assumed: an install from the
+    # merged `main` (cec8046) compared body-by-body against one from this tree,
+    # both fixtures — 61 -> 61 and 70 -> 70 files, 0 added, 0 removed. The only
+    # other differences are `.bootstrap-state.json` and
+    # `.installer-manifest.json`, written OUTSIDE the plan and therefore NOT
+    # hashed by these digests (the error no. 17 made by counting the installed
+    # tree instead of the plan actions).
+    # Counts stable at 57 / 69 / 59.
+
     # [freeze-exception no. 45, 2026-08-06] issue #54 / X-36q — A VERSIONED
     # SHELL INVOKER IS AN INVOKER. `bash5.2 -c "pip install evil"` and
     # `ksh93 -c "cat a.pem extra"` were allow/allow on BOTH substrates at
@@ -2525,7 +2545,7 @@ EXPECTED_DIGESTS = {
     # so every hook moves - which is exactly the blast radius #50 deferred it
     # on, now measured rather than estimated.
     "default":
-        "1424553e1c94c906a6d573c18833a3b18b023760100bede871fc466b6061de19",
+        "a5927ca8fe390fd3da4f9d1ad74aa7cfcc5357feafb15d1c684834c7ccc417e0",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2680,7 +2700,7 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "cb36e6b1d73c0efc65ffab492f04ff6d08c3b69e042aa0ca55e84b718af0c414",
+        "2965889e6a18e644bcffcaaf3ff7f9e737ccffe620613ad1914d5280b6d23824",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2780,7 +2800,7 @@ EXPECTED_DIGESTS = {
         # design-steering artifacts (.claude/steering/design.md, the
         # design-review skill and the design-review command) are UNCHANGED,
         # verified per-file rather than assumed.
-        "99b8ce9b0dfc5fb37ca3e908622b43ac320456b4653138a901789095c4fcd8e1",
+        "fa96d1b337789da0eba6d8589f42beb0b34ddcd1452c147d0099e25811398372",
 }
 
 EXPECTED_ACTION_COUNTS = {
