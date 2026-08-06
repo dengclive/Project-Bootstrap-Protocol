@@ -1207,6 +1207,82 @@ _PARAM_DEFAULT_RE = None
 # `$(echo pip)` still is under X-36h part 2.
 RESOLVED_SPELLING_MAX = 16384
 
+# [issue #54 / X-36q] The longest BASENAME the invoker reduction is asked
+# about. POSIX NAME_MAX: a path component longer than this cannot be created on
+# any POSIX filesystem, so such a word can never name an executable, and asking
+# whether it reduces to an invoker is dead weight. Verified on this machine:
+# `open()` of a 255-byte basename succeeds and of a 256-byte basename raises
+# ENAMETOOLONG on both tmpfs and btrfs, and `getconf NAME_MAX` is 255 for /tmp,
+# /home and the repository itself.
+#
+# A SEMANTIC bound, NOT a performance fence, and the distinction is the whole
+# justification. A LENGTH fence inside a security fix is a fail-OPEN guard: it
+# skips a check a reachable payload could have failed. This skips the reduction
+# only for words that cannot name a program at all, so it restores no reachable
+# spelling.
+#
+# THE EVIDENCE FOR THAT, STATED SO IT IS NOT MISTAKEN FOR MORE THAN IT IS: the
+# boundary was measured on BOTH substrates and is symmetric - a 255-byte
+# reducible basename denies on both, a 256-byte one allows on both - so the
+# bound opens no SPLIT, which is the failure mode that would matter most here.
+# It is NOT evidence that the bound is unreachable, and "the corpus verdicts do
+# not move" would be a vacuous claim: the longest token in the 11,508-row
+# hostile-head corpus is 21 bytes, so the guard cannot fire there at all. The
+# real argument is the filesystem one above, not a corpus measurement.
+#
+# IT REMOVES ONE 60 s CEILING BAND OF TWO. An earlier draft of this comment
+# said "the one length band"; that was measurably false and is corrected here
+# rather than deleted [code-review 2, F1 / code-review 1, F2], because the
+# false sentence is the one the criterion-9 freeze exception rests on.
+#
+# THE BAND IT REMOVES - dependency-gate on a SINGLE all-reducible command
+# word, re-derived three ways on this tree (base = v2.7.2; "unbounded" = this
+# same tree with INVOKER_WORD_MAX raised to 10**9 and nothing else changed):
+#     120 KB   base 57.94 s ALLOW / bounded 58.17 s (1.00x) / UNBOUNDED
+#              101.26 s - past a 60 s timeout, i.e. a fail-closed refusal of a
+#              command v2.7.2 permitted
+#     100 KB   base 41.50 s ALLOW / bounded 40.68 s (0.98x) / UNBOUNDED
+#              71.26 s
+# That is a CONSEQUENCE of the bound, not its reason; were it only a perf
+# argument the right answer would be to disclose the band, as `_xp_iw`'s own
+# comment does for the shape it cannot fence.
+#
+# THE BAND THAT REMAINS, AND WHY THIS CONSTANT CANNOT REACH IT. The second
+# band is driven by the NUMBER of recognised invoker tokens; this caps ONE
+# WORD'S LENGTH. dependency-gate, the command being N repetitions of
+# `bash5.2`:
+#     40 KB /  5,120 tokens   base  4.48 s -> 20.51 s   4.58x
+#     64 KB /  8,192 tokens   base 10.92 s -> 51.98 s   4.76x
+#     72 KB /  9,216 tokens   base 13.91 s ALLOW -> 65.40 s   PAST THE CEILING
+# eval-gate declares no timeout at all and falls to the platform default 60 s:
+# 40 KB 0.57 -> 8.53 s (14.96x), 80 KB 1.92 -> 33.47, 100 KB 2.94 -> 52.82
+# (17.95x) - still UNDER on the machine measured, so its crossing sits just
+# past 100 KB. Both crossings are machine-dependent and are stated as BANDS,
+# not constants. That this bound is irrelevant to the shape is measured, not
+# argued: at 40 KB on dependency-gate, words of 7 characters are 4.56x, of
+# exactly 255 characters 1.72x, of 256 characters (the guard fires) 1.06x.
+#
+# ATTRIBUTION, WHICH IS WHY THE ANSWER IS DISCLOSURE AND NOT A SECOND BUDGET.
+# The cost is the invoker machinery, not this reduction: `_cs_isinv` now
+# returns true for a versioned head, which turns on `_cs_scan`'s pre-existing
+# post-loop token walk that the base skipped for such a head. At the same
+# 80 KB, base with `bash` x 16,384 = 123.76 s - v2.7.2 was ALREADY twice past
+# the ceiling on the UNVERSIONED spelling - against this tree with `bash5.2`
+# x 10,240 = 81.68 s: 7.55 vs 7.98 ms per recognised invoker token. The
+# versioned spelling now costs what its twin always cost, which is the
+# CONVERGENCE claim the rest of the change makes. A count fence would be a NEW
+# mechanism with its own fail-open risk, guarding an inherited cost. Direction
+# is fail-CLOSED, and no realistic shape moves: `git add` of 4,000 paths
+# 1.01x, `grep -l` over 5,000 paths 1.00x. "Nothing the base allowed is pushed
+# into the ceiling" is therefore NOT claimed. See backlog X-36y.
+#
+# Placed on the BASENAME (`_b`, already `${_w##*/}`), never on the path: a long
+# directory prefix is bounded by PATH_MAX (4096), not NAME_MAX, and is not what
+# this reduction reads. Rendered into both substrates from this one number, the
+# way RESOLVED_SPELLING_MAX above is, so the shell hook and the SDK prelude
+# cannot drift to two budgets.
+INVOKER_WORD_MAX = 255
+
 
 def budget_len(s: str) -> int:
     """The length `RESOLVED_SPELLING_MAX` is measured in: UTF-8 BYTES.

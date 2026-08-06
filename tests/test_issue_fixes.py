@@ -3440,18 +3440,540 @@ for _c in ("curl %s | python3-dbg" % _U50,
            "curl -o a.sh %s ; python3.6m a.sh" % _U50):
     dep_both(_c, 0, "#50 scope: X-36i's class is untouched, still open")
 
+print("\n== issue #54 / X-36q: the versioned shell invoker, CLOSED ==")
+# WAS section (j), "what is NOT fixed": at v2.7.2 these four rows asserted
+# rc=0. The reduction now has all five of its consumers, so they assert rc=2
+# and the grid around them is the evidence that the closure is complete rather
+# than anecdotal. `ksh93` is the real AT&T ksh binary name and `bash5`/`zsh5`
+# are real distro binaries, so none of this grid is exotic.
+_Q_INV = ("sh", "bash", "zsh", "dash", "ksh", "ash", "busybox", "eval", "su",
+          "script")
+_Q_SUF = ("5.2", "93", "5", "4")
+
+print("\n-- (q1) all 40 versioned spellings deny on BOTH substrates --")
+for _iv in _Q_INV:
+    for _sf in _Q_SUF:
+        dep_both('%s%s -c "pip install evil"' % (_iv, _sf), 2,
+                 "#54 X-36q: a VERSIONED invoker is an invoker")
+    # ...and the UNVERSIONED twin as the control that says the grid above is a
+    # closure and not a new policy: it denied at v2.7.2 and still denies.
+    dep_both('%s -c "pip install evil"' % _iv, 2,
+             "#54 X-36q control: the unversioned twin is UNCHANGED")
+
+print("\n-- (q2) secrets-gate: the same grid, on payloads whose deny can ONLY "
+      "come from the invoker walk --")
+# CONSTRUCTIVE, by two independent isolations. `secrets/prod.yaml` is
+# DIRECTORY-anchored and `a.pem`/`tls.key` are END-anchored, so in both shapes
+# the pattern is out of reach of everything except a walk that re-scans the
+# `-c` argument as a command line. See (q3) for the control that proves this
+# is necessary.
+for _pay in ('cat secrets/prod.yaml', "cat 'secrets/prod.yaml'",
+             'cat a.pem extra', 'cp tls.key /tmp/x'):
+    for _iv in ("sh", "bash", "ksh", "busybox", "script"):
+        for _sf in _Q_SUF:
+            both('%s%s -c "%s"' % (_iv, _sf, _pay), 2,
+                 "#54 X-36q: never_read_paths reached through a VERSIONED "
+                 "invoker")
+        both('%s -c "%s"' % (_iv, _pay), 2,
+             "#54 X-36q control: the unversioned twin is UNCHANGED")
+
+print("\n-- (q3) the secrets CONTROL that cannot distinguish, labelled so it "
+      "is never re-used as evidence --")
+# `.env` is SUBSTRING-matched, so it fires on the raw command text with no
+# invoker walk at all. This row is green at v2.7.2 AND after, for a reason
+# that has nothing to do with this change; the two rows under it are the proof
+# of that. Anyone citing `cat .env` as evidence that the invoker walk works is
+# measuring the substring matcher.
+both('bash5.2 -c "cat .env"', 2,
+     "#54 X-36q CONTROL, PROVES NOTHING: `.env` is a substring match")
+both('echo "cat .env"', 2,
+     "#54 X-36q: ...it denies with NO INVOKER ANYWHERE, which is why")
+both('echo "cat secrets/prod.yaml"', 0,
+     "#54 X-36q: ...whereas the directory-anchored payload does NOT, so a "
+     "deny on it isolates the walk")
+both('frobnicate -c "cat secrets/prod.yaml"', 0,
+     "#54 X-36q: ...and a NON-invoker head does not open it either")
+
+print("\n-- (q4) composed shapes: wrappers, paths, nesting, escaped space --")
+for _c, _rc in (
+        ('sudo bash5.2 -c "pip install evil"', 2),
+        ('timeout -k 1 -s KILL 5 ksh93 -c "pip install evil"', 2),
+        ('env A=1 B=2 zsh5 -c "pip install evil"', 2),
+        ('nohup dash4 -c "pip install evil"', 2),
+        ('/usr/bin/bash5.2 -c "pip install evil"', 2),
+        ('./bash5.2 -c "pip install evil"', 2),
+        (r'bash5.2 -c pip\ install\ evil', 2),
+        ('bash5.2 -c "sh -c \'pip install evil\'"', 2),
+        ('true; bash5.2 -c "pip install evil"', 2),
+        ('busybox5 sh -c "pip install evil"', 2),
+        # [code-review 1, F1] THE QUOTED WRAPPER. The first cut of this change
+        # normalised `_invoker_at`'s two INVOKER arms and left the
+        # PREFIX/ASSIGNMENT arm reading a raw basename, so a quote character
+        # on the WRAPPER hid the invoker behind it from the SDK while
+        # `_cs_isinv` - which hands every arm the same quote-stripped `_b` -
+        # saw it. 5,520 shell-DENY / SDK-ALLOW rows on a 6,480-row matrix
+        # (20 prefixes x 4 quoted forms x 40 versioned heads x 2 payloads,
+        # plus 2 quoted assignments x 40), 0 after. Worse than the residue
+        # this change discloses, because bash EXECUTES these: with fakes on
+        # PATH, `"sudo" bash5.2 -c "pip install evil"` really runs sudo.
+        ('"sudo" bash5.2 -c "pip install evil"', 2),
+        ("'sudo' bash5.2 -c \"pip install evil\"", 2),
+        ('s"udo" bash5.2 -c "pip install evil"', 2),
+        ('"/usr/bin/sudo" bash5.2 -c "pip install evil"', 2),
+        ('"env" bash5.2 -c "pip install evil"', 2),
+        ("'nice' -n 10 bash5.2 -c \"pip install evil\"", 2),
+        ('"timeout" 5 ksh93 -c "pip install evil"', 2),
+        ('"timeout" -k 1 -s KILL 5 zsh5 -c "pip install evil"', 2),
+        ('"A=1" bash5.2 -c "pip install evil"', 2),
+        ("'A=1' 'B=2' dash4 -c \"pip install evil\"", 2),
+        # ...and the quoted FLAG at the head, which the shell's `-*)` arm
+        # walked past on its stripped `_b` while the SDK's `startswith` did
+        # not. Bounded (bash cannot execute a leading `-x`) but the same class.
+        ('"-x" bash5.2 -c "pip install evil"', 2),
+        # The UNVERSIONED twin of the same wrapper spelling: shell-deny /
+        # SDK-ALLOW at v2.7.2 already, so this row is a CLOSURE of a
+        # pre-existing split rather than a new policy.
+        ('"sudo" bash -c "pip install evil"', 2)):
+    dep_both(_c, _rc, "#54 X-36q: the walk reaches a versioned invoker "
+                      "through wrappers, paths and nesting")
+
+print("\n-- (q5) THE FENCE: near-misses that must NOT become invokers --")
+# The reduction is INTERPRETERS-scoped, so `sshd` does not reduce to `ssh`
+# (`ssh` is a DUAL word and not an interpreter); `sudo` does not reduce to
+# `su` because `o` is in neither the version class nor the tag class; and the
+# ordered-runs rule rejects a tag character before a digit, which is what
+# `basht5` and `shd5` are here to hold.
+for _w in ("sshd", "sushi", "sudo", "sudoedit", "sulogin", "shellcheck",
+           "bashate", "script-runner", "scriptreplay", "scriptlive", "shred",
+           "shuf", "shasum", "watchexec", "basht5", "shd5", "sut3",
+           "scriptd2", "zsht1", "kshtd2", "dashboard", "scripts", "zshdb",
+           "sshfs", "sshpass", "screen", "subversion", "suexec"):
+    dep_both('%s -c "pip install evil"' % _w, 0,
+             "#54 X-36q fence: a near-miss must not reduce to an invoker")
+# `sshd -t` gets its own row and its own reason: `ssh` IS in ALL_INVOKERS, so
+# the fence here is the INTERPRETERS scoping of the REDUCTION, not the word
+# list. This is the row that would fail if a future change re-scoped the
+# reduction to ALL_INVOKERS.
+dep_both("sshd -t", 0,
+         "#54 X-36q fence: `sshd` survives because the REDUCTION is "
+         "INTERPRETERS-scoped and `ssh` (DUAL) is not an interpreter")
+dep_both("sudo sshd -T -f /etc/ssh/sshd_config", 0,
+         "#54 X-36q fence: ...including behind a wrapper")
+# The DUAL words themselves: their VERSIONED spellings stay ALLOW, for the
+# same scoping reason. Pinned as a deliberate limit, not an oversight.
+for _c in ('ssh4 host "pip install evil"', 'watch5 "pip install evil"',
+           'xargs93 pip install evil'):
+    dep_both(_c, 0,
+             "#54 X-36q limit: a versioned DUAL word is NOT reduced - DUAL "
+             "is not in INTERPRETERS, and admitting it would admit `sshd`")
+
+print("\n-- (q6) the DISCLOSED over-match, pinned as intended behaviour --")
+# The suffix admits an EMPTY version run, so an invoker plus a bare tag run is
+# admitted. That is the deny direction for a deny-list, none of these is a
+# real binary name (census: 2959 executables in /usr/bin, /bin, /usr/sbin,
+# /sbin, /usr/local/{bin,sbin} on the machine this was measured on, ZERO of
+# which the reduction newly admits), and the alternative - forbidding an empty
+# version run - would also reject `python3t`, which is real.
+for _w in ("shd", "sud", "sut", "asht", "bashd", "evald", "scriptd",
+           "busyboxd", "zshd", "kshd"):
+    dep_both('%s -c "pip install evil"' % _w, 2,
+             "#54 X-36q DISCLOSED over-match: invoker + bare tag run is "
+             "admitted on purpose")
+
+print("\n-- (q7) negative pins: the word as DATA is never a command --")
+for _c in ("grep -r bash5.2 .", "FOO=bash5.2 make", "env -u bash5.2 make",
+           "nice -n bash5.2 make", "cat --shell=bash5.2 f", "cat -obash5.2 f",
+           "echo 'run bash5.2 -c pip install evil'",
+           "git commit -m 'bash5.2 -c pip install evil'",
+           "git commit -m 'bump bash5.2 in the CI matrix'",
+           "ls bash5.2", "bash5.2 --version", "bash5.2 script.sh",
+           "basename /usr/bin/bash5.2", "echo \"we run bash5.2 in prod\""):
+    dep_both(_c, 0,
+             "#54 X-36q: a versioned invoker as DATA, a flag value or a file "
+             "operand is not a command position")
+
+print("\n-- (q8) the NAME_MAX bound: SEMANTIC, and symmetric across the two "
+      "substrates --")
+# cmdpos.INVOKER_WORD_MAX is POSIX NAME_MAX. A basename longer than it cannot
+# exist on any POSIX filesystem, so it cannot name an executable and the
+# reduction on it is dead weight rather than a skipped check. What must hold
+# is that the boundary is in the SAME PLACE on both substrates - a bound that
+# fell on one side only would be a split, which is the forbidden direction.
+check("#54 X-36q: cmdpos.INVOKER_WORD_MAX is POSIX NAME_MAX",
+      _cmdpos.INVOKER_WORD_MAX == 255, repr(_cmdpos.INVOKER_WORD_MAX))
+for _n, _rc in ((255, 2), (256, 0)):
+    dep_both('%s -c "pip install evil"' % ("bash" + "5" * (_n - 4)), _rc,
+             "#54 X-36q NAME_MAX bound at len=%d: the SAME answer on both "
+             "substrates, so the bound opens no split" % _n)
+
+print("\n-- (q9) THE FOUR HOOKS A `true`-COMMANDS FIXTURE CANNOT PIN --")
+# THIS BLOCK EXISTS BECAUSE ITS ABSENCE MISLED FOUR SEPARATE ANALYSES.
+# `test-gate`, `spec-gate-commit`, `ci-mirror` and `eval-gate` reach this
+# reduction through `cmd_segments` -> `cmd_has_verb` -> `git_verb`, so they
+# move on the same 40-row grid as the two obvious gates. The fixture at the
+# top of this file CANNOT show it: with `commands.test`/`ci_local` = `true`
+# and no git repository, those four hooks deny NOTHING for ANY input, so
+# every versioned row and every unversioned control reads rc=0 and the grid
+# looks like a no-op. Three independent designs and a judge all measured on
+# such a config and all four concluded "bytes only, 2 of 13 hooks".
+#
+# So this block builds its OWN install: failing project commands, a git repo
+# with two commits, and a STAGED file under an enforced prefix. Deny
+# capability is then VERIFIED at the top rather than assumed - a fixture in
+# which these hooks cannot deny cannot pin them, and asserting rc=2 in one
+# would silently be asserting nothing.
+_F1_CONFIG = (CONFIG.replace('test: "true"', 'test: "false"')
+                    .replace('lint: "true"', 'lint: "false"')
+                    .replace('format: "true"', 'format: "false"')
+                    .replace('ci_local: "true"', 'ci_local: "false"'))
+_F1_TMP = tempfile.mkdtemp(prefix="issue54-denycapable-")
+_F1_PROJ = os.path.join(_F1_TMP, "proj")
+os.makedirs(_F1_PROJ)
+_F1_CFG = os.path.join(_F1_TMP, "config.yaml")
+with open(_F1_CFG, "w", encoding="utf-8") as _fh:
+    _fh.write(_F1_CONFIG)
+_F1_R = subprocess.run([sys.executable, INSTALL, "-c", _F1_CFG, "-C",
+                        _F1_PROJ], capture_output=True, text=True)
+check("#54 X-36q (q9): the deny-capable fixture installs",
+      _F1_R.returncode == 0, _F1_R.stderr[-400:])
+
+
+def _f1_sh(cmd, *a):
+    subprocess.run(cmd, shell=True, cwd=_F1_PROJ, capture_output=True,
+                   text=True)
+
+
+_f1_sh("git init -q . && git config user.email a@b.c && git config user.name a")
+os.makedirs(os.path.join(_F1_PROJ, "src"), exist_ok=True)
+os.makedirs(os.path.join(_F1_PROJ, "prompts"), exist_ok=True)
+with open(os.path.join(_F1_PROJ, "README.md"), "a", encoding="utf-8") as _fh:
+    _fh.write("# r\n")
+_f1_sh("git add -A && git commit -q -m init")
+with open(os.path.join(_F1_PROJ, "prompts", "a.md"), "w",
+          encoding="utf-8") as _fh:
+    _fh.write("# prompt\n")
+with open(os.path.join(_F1_PROJ, "src", "app.py"), "w",
+          encoding="utf-8") as _fh:
+    _fh.write("x = 1\n")
+_f1_sh("git add -A && git commit -q -m second")
+with open(os.path.join(_F1_PROJ, "src", "app.py"), "a",
+          encoding="utf-8") as _fh:
+    _fh.write("y = 2\n")
+_f1_sh("git add src/app.py")
+
+
+def _f1_run(hook, cmd):
+    e = dict(os.environ)
+    e["CLAUDE_PROJECT_DIR"] = _F1_PROJ
+    p = subprocess.run([BASH, os.path.join(_F1_PROJ, ".claude", "hooks",
+                                           f"{hook}.sh")],
+                       input=json.dumps(bash_payload(cmd)),
+                       capture_output=True, text=True, env=e, cwd=_F1_PROJ)
+    return p.returncode
+
+
+_F1 = (("test-gate", "git commit -m x"), ("spec-gate-commit", "git commit -m x"),
+       ("ci-mirror", "git push"), ("eval-gate", "git push"))
+# The verification that makes every assertion below meaningful.
+for _h, _v in _F1:
+    check(f"#54 X-36q (q9) DENY CAPABILITY: {_h} denies the bare {_v!r} in "
+          "this fixture, so a versioned row asserting rc=2 asserts something",
+          _f1_run(_h, _v) == 2, f"rc={_f1_run(_h, _v)}")
+for _h, _v in _F1:
+    for _iv in _Q_INV:
+        for _sf in _Q_SUF:
+            _rcq = _f1_run(_h, '%s%s -c "%s"' % (_iv, _sf, _v))
+            check(f"[shell] #54 X-36q: {_h} denies a VERSIONED invoker "
+                  f"wrapping {_v!r}: {_iv}{_sf} -> rc=2", _rcq == 2,
+                  f"rc={_rcq}")
+        _rcq = _f1_run(_h, '%s -c "%s"' % (_iv, _v))
+        check(f"[shell] #54 X-36q control: {_h} on the UNVERSIONED twin "
+              f"{_iv} is unchanged -> rc=2", _rcq == 2, f"rc={_rcq}")
+# ...and the ordinary developer commands these four hooks must still allow,
+# in the SAME fixture, so "nothing is newly refused" is measured where the
+# deny path is live rather than where it is dead.
+for _h, _ in _F1:
+    for _c in ("git status", "git diff --cached", "ls -la", "echo hello",
+               "grep -r bash5.2 .", "git log --oneline -5",
+               "echo 'we run bash5.2 in prod'", "bash5.2 --version"):
+        _rcq = _f1_run(_h, _c)
+        check(f"[shell] #54 X-36q: {_h} still allows the ordinary {_c!r}",
+              _rcq == 0, f"rc={_rcq}")
+
+print("\n-- (q10) STRUCTURAL PIN: the two substrates accept the same word "
+      "set, over QUOTED and ESCAPED spellings, against BOTH shell readings --")
+# A pin whose word set is {invoker} x {suffix} certifies a parity that does
+# not hold for the walker it does not model. Driven over bare words only this
+# comparison reports 0 mismatches for THREE of the four token spellings that
+# were considered for `_invoker_at`, including two that leak. The extension -
+# quoted, part-quoted, unbalanced-quote, escape-prefixed, double-escaped,
+# mid-word-escape, path and quoted-path spellings - is the entire point.
+#
+# TWO SHELL READINGS, because there are two callers and they do not agree on
+# how to spell a token: `_cs_isinv` drops quote characters and keeps escapes,
+# `_sg_push` keeps quote characters and strips escapes. The FORBIDDEN
+# direction is "a shell walker sees an invoker and the SDK does not", because
+# that is shell-deny / SDK-allow: the SDK-more-permissive split this module's
+# contract rules out. It must be ZERO against BOTH readings.
+_Q_BS = chr(92)
+_Q_DQ = chr(34)
+# Extracted from a hook that is NOT dependency-gate: the predicate is shared
+# header text now, and reading it out of the gate that also defines the run
+# scan would not show that.
+_Q_HOOK = open(os.path.join(HOOKS, "secrets-gate.sh"), encoding="utf-8").read()
+
+
+def _q_grab(name):
+    _i = _Q_HOOK.index("\n%s(){" % name)
+    return _Q_HOOK[_i:_Q_HOOK.index("\n}\n", _i) + 3]
+
+
+_Q_SNIP = _q_grab("_xp_iw") + _q_grab("_cs_inv_word")
+_Q_BASE = list(gates_mod._SHELL_INVOKERS) + [
+    "python3", "perl", "node", "sshd", "sushi", "sudo", "sulogin",
+    "shellcheck", "bashate", "scriptreplay", "watchexec", "shred", "shuf",
+    "frobnicate", "git", "ls"]
+_Q_SUF2 = ["", "5.2", "93", "5", "4", "3.13t", "t", "d", "2.7", "-dbg", ".0"]
+_Q_FORMS = [
+    lambda w: w,                            # bare
+    lambda w: "/usr/bin/" + w,              # path
+    lambda w: "./" + w,                     # dot-slash
+    lambda w: _Q_DQ + w + _Q_DQ,            # double-quoted
+    lambda w: "'" + w + "'",                # single-quoted
+    lambda w: w[:1] + _Q_DQ + w[1:] + _Q_DQ,   # part-quoted
+    lambda w: w + "''",                     # empty-quote tail
+    lambda w: w + "'",                      # unbalanced quote, tail
+    lambda w: w + _Q_DQ,                    # unbalanced dquote, tail
+    lambda w: "'" + w,                      # unbalanced quote, head
+    lambda w: _Q_BS + w,                    # escape-prefixed
+    lambda w: _Q_BS + _Q_BS + w,            # double escape
+    lambda w: w[:1] + _Q_BS + w[1:],        # mid-word escape
+    lambda w: _Q_DQ + "/usr/bin/" + w + _Q_DQ,   # quoted path
+    lambda w: w + _Q_BS,                    # trailing escape
+    lambda w: _Q_DQ + w,                    # unbalanced dquote, head
+]
+_Q_WORDS = list(dict.fromkeys(
+    _f(_b + _s) for _b in _Q_BASE for _s in _Q_SUF2 for _f in _Q_FORMS))
+
+
+def _q_sdk(tok):
+    """The SDK's head predicate, exactly as `_invoker_at` spells it."""
+    _ws = gates_mod._tok_words(tok)
+    return (any(_w in gates_mod._SHELL_INVOKERS for _w in _ws)
+            or any(len(_w) <= gates_mod._INV_WORD_MAX
+                   and gates_mod._int_word(_w) in gates_mod._INT_INVOKERS
+                   for _w in _ws))
+
+
+def _q_shell(words):
+    """`_cs_inv_word` over a batch of already-reduced basenames."""
+    _p = subprocess.run(
+        [BASH, "-c", "set -u\n" + _Q_SNIP
+         + '\nwhile IFS= read -r L; do if _cs_inv_word "$L"; then echo 1; '
+           'else echo 0; fi; done\n'],
+        input="\n".join(words) + "\n", capture_output=True, text=True)
+    return _p.returncode, [_x == "1" for _x in _p.stdout.split()]
+
+
+for _lbl, _rd in (
+        ("_cs_isinv reading (quote chars dropped, escape KEPT)",
+         lambda t: t.replace("'", "").replace(_Q_DQ, "").rsplit("/", 1)[-1]),
+        ("_sg_push reading (quote chars KEPT, escape stripped)",
+         lambda t: t.replace(_Q_BS, "").rsplit("/", 1)[-1])):
+    _reads = [_rd(_w) for _w in _Q_WORDS]
+    _rcq, _shv = _q_shell(_reads)
+    check(f"#54 X-36q structural pin: the shell predicate drives clean under "
+          f"bash over {len(_Q_WORDS)} words ({_lbl})",
+          _rcq == 0 and len(_shv) == len(_Q_WORDS),
+          f"rc={_rcq} got={len(_shv)}")
+    if len(_shv) == len(_Q_WORDS):
+        _forb = [(_Q_WORDS[_i], _reads[_i]) for _i in range(len(_Q_WORDS))
+                 if _shv[_i] and not _q_sdk(_Q_WORDS[_i])]
+        check(f"#54 X-36q structural pin: ZERO forbidden-direction mismatches "
+              f"(shell says invoker, SDK does not) over {len(_Q_WORDS)} "
+              f"quoted/escaped spellings, {_lbl}",
+              not _forb, repr(_forb[:6]))
+
+print("\n-- (q10b) THE WRAPPER ARM, pinned over the WHOLE prefix set --")
+# [code-review 1, F1] (q4) spells out ten wrapper rows and each costs two
+# subprocesses; this pin is exhaustive and costs none. The defect it holds
+# shut: `_invoker_at` normalised its two INVOKER arms and left the
+# PREFIX/ASSIGNMENT/FLAG arms reading the raw token, so ANY quote character on
+# the wrapper hid the invoker behind it from the SDK while `_cs_isinv` - which
+# gives every arm the same quote-stripped `_b` - saw it. The direction is the
+# forbidden one and, unlike the residue this change discloses, bash EXECUTES
+# the string.
+_Q_PFX_FORMS = (
+    ("bare", lambda w: w),
+    ("double-quoted", lambda w: _Q_DQ + w + _Q_DQ),
+    ("single-quoted", lambda w: "'" + w + "'"),
+    ("part-quoted", lambda w: w[:1] + _Q_DQ + w[1:] + _Q_DQ),
+    ("quoted path", lambda w: _Q_DQ + "/usr/bin/" + w + _Q_DQ),
+    ("escape-prefixed", lambda w: _Q_BS + w),
+    ("double-escaped", lambda w: _Q_BS + _Q_BS + w),
+)
+_Q_MISS = []
+for _w in sorted(_cmdpos.ALL_PREFIXES):
+    for _fn, _ff in _Q_PFX_FORMS:
+        for _head in ("bash5.2", "ksh93", "zsh5"):
+            if gates_mod._invoker_at([_ff(_w), _head, "-c",
+                                      "pip install evil"]) is None:
+                _Q_MISS.append((_w, _fn, _head))
+check("#54 X-36q wrapper arm: every ALL_PREFIXES member, in every quoted and "
+      f"escaped spelling, still leaves the versioned invoker behind it "
+      f"findable ({len(_cmdpos.ALL_PREFIXES)} x {len(_Q_PFX_FORMS)} x 3 = "
+      f"{len(_cmdpos.ALL_PREFIXES) * len(_Q_PFX_FORMS) * 3} spellings)",
+      not _Q_MISS, repr(_Q_MISS[:8]))
+# The same for the assignment and flag spellings of that one arm - AND FOR
+# THE ONES WHOSE VALUE CARRIES A SLASH, which is the row that matters most
+# here. Feeding these two arms the BASENAMED spelling set narrows them: the
+# basename of `FOO=/usr/lib/x` is `x`, which is neither an assignment nor a
+# flag, so the walk stops and the payload behind the wrapper is ALLOWED. That
+# is a deny -> allow, it was measured at five rows on a deny-capable fixture,
+# and it was introduced by the edit that closed the quoted-wrapper split - so
+# it is pinned at the arm rather than only at the verdict.
+#
+# The "quoted path" FORM is excluded here and only here: gluing `/usr/bin/` in
+# front of `FOO=/usr/lib/x` does not spell the same token, it spells a PATH,
+# and neither substrate reads a path as an assignment (verified against
+# v2.7.2: `_invoker_at` returns None there too, so excluding it is not hiding
+# a regression). The other six forms all preserve what the token IS.
+_Q_TOK_FORMS = [_f for _f in _Q_PFX_FORMS if _f[0] != "quoted path"]
+_Q_MISS2 = [(_t, _fn) for _t in ("A=1", "FOO_BAR=/x/y", "FOO=/usr/lib/x",
+                                 "PATH=/usr/bin:/bin", "-x", "--flag",
+                                 "-o/x/y", "--file=/x/y")
+            for _fn, _ff in _Q_TOK_FORMS
+            if gates_mod._invoker_at([_ff(_t), "bash5.2", "-c",
+                                      "pip install evil"]) is None]
+check("#54 X-36q wrapper arm: quoted ASSIGNMENTS and quoted FLAGS are walked "
+      "past too, INCLUDING the ones whose value carries a slash - the arm "
+      "reads _tok_forms UNION _tok_words, never the basenames alone",
+      not _Q_MISS2, repr(_Q_MISS2[:8]))
+# THE FENCE FOR THE SAME ARM, which is the thing a widened `saw_prefix` is
+# most likely to break: an ORDINARY head in any of those spellings must still
+# stop the walk dead, or `grep -r sh f` starts skipping.
+_Q_OVER = [(_w, _fn) for _w in ("grep", "ls", "cat", "git", "frobnicate",
+                                "make", "docker", "kubectl", "sshd")
+           for _fn, _ff in _Q_PFX_FORMS
+           if gates_mod._invoker_at([_ff(_w), "bash5.2", "-c",
+                                     "pip install evil"]) is not None]
+check("#54 X-36q wrapper arm FENCE: an ordinary command word in any of those "
+      "spellings still returns None, so the unbounded skip never starts",
+      not _Q_OVER, repr(_Q_OVER[:8]))
+
+print("\n-- (q11) EMISSION GUARDS: the traps that fired during this change --")
+_Q_HOOK_FILES = sorted(_f for _f in os.listdir(HOOKS) if _f.endswith(".sh"))
+check("#54 X-36q: all 13 hooks are emitted", len(_Q_HOOK_FILES) == 13,
+      repr(_Q_HOOK_FILES))
+for _hf in _Q_HOOK_FILES:
+    _hp = os.path.join(HOOKS, _hf)
+    _src = open(_hp, encoding="utf-8").read()
+    _pn = subprocess.run([BASH, "-n", _hp], capture_output=True, text=True)
+    check(f"#54 X-36q emission: {_hf} parses (bash -n)", _pn.returncode == 0,
+          _pn.stderr[:200])
+    # `bash_case_alt` renders a BACKSLASH-NEWLINE continuation, so a
+    # placeholder left inside a `#` comment walks out of the comment and takes
+    # the next line of code with it - failing every hook closed. A surviving
+    # placeholder anywhere is the same class of defect.
+    _left = sorted(set(_re.findall(r"@@[A-Z_]+@@", _src)))
+    check(f"#54 X-36q emission: {_hf} carries no unsubstituted placeholder",
+          not _left, repr(_left))
+    # The reduction moved into the shared header. Exactly one definition per
+    # hook - a second copy beside the first is precisely what issue #40 and
+    # #43-F1 each were.
+    check(f"#54 X-36q emission: {_hf} defines _xp_iw and _cs_inv_word exactly "
+          "once each", _src.count("_xp_iw(){") == 1
+          and _src.count("_cs_inv_word(){") == 1,
+          f"_xp_iw={_src.count('_xp_iw(){')} "
+          f"_cs_inv_word={_src.count('_cs_inv_word(){')}")
+check("#54 X-36q emission: the SDK prelude renders INVOKER_WORD_MAX from the "
+      "same cmdpos number as the shell guard",
+      gates_mod._INV_WORD_MAX == _cmdpos.INVOKER_WORD_MAX,
+      f"{gates_mod._INV_WORD_MAX} vs {_cmdpos.INVOKER_WORD_MAX}")
+_Q_GSRC = open(GATES_PY, encoding="utf-8").read()
+check("#54 X-36q emission: `_INV_WORD_MAX` appears in the emitted gates.py "
+      "as a rendered integer, not a format placeholder",
+      _re.search(r"^_INV_WORD_MAX = 255$", _Q_GSRC, _re.M) is not None)
+
+print("\n-- (q12) X-36x KNOWN RESIDUE, pinned per (GATE, CARRIER) --")
+# [code-review 2, F2] The backlog called this class "1 row of 6,000", on
+# "dependency-gate", with "a `<<<` here-string". Re-derived from the
+# MECHANISM on a 31,250-row grid: 2,040 new forbidden rows, 0 deny->allow,
+# across FOUR PreToolUse Bash gates, with `-c \"...\"` (768) the largest
+# carrier and `<<<` (408) not even second. One pinned instance cannot catch a
+# widening; the CARRIER dimension is pinned in
+# tests/test_substrate_differential.py and the GATE dimension is pinned here,
+# because three of these four gates DENY NOTHING in that suite's fixture and
+# a pin against a gate that cannot deny asserts nothing at all.
+#
+# This block reuses (q9)'s deny-capable install and adds its SDK half. The
+# SDK half needs `CLAUDE_PROJECT_DIR` pointed at THAT project: gates.py's
+# `_proj()` reads it, and with it left pointing elsewhere `eval-gate` and
+# `spec-gate-commit` find no repo, deny nothing, and report every shell deny
+# as a phantom split. That is the same defect as (q9)'s, one substrate over.
+_F1_GATES_PY = os.path.join(_F1_PROJ, ".claude", "sdk_gates", "gates.py")
+_f1_spec = importlib.util.spec_from_file_location("emitted_gates_f1",
+                                                  _F1_GATES_PY)
+_F1_GATES = importlib.util.module_from_spec(_f1_spec)
+_f1_spec.loader.exec_module(_F1_GATES)
+
+
+def _f1_sdk(gate, cmd):
+    """The (q9) fixture's SDK half -> 'deny' | 'allow'."""
+    _keep = os.environ.get("CLAUDE_PROJECT_DIR")
+    os.environ["CLAUDE_PROJECT_DIR"] = _F1_PROJ
+    try:
+        _fact = _F1_GATES._GATE_FACTORIES[gate]
+        _res = asyncio.run(_fact(_F1_GATES.RESOLVED_CONFIG)(
+            bash_payload(cmd), "tu-q12", None))
+    finally:
+        if _keep is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        else:
+            os.environ["CLAUDE_PROJECT_DIR"] = _keep
+    _hso = (_res or {}).get("hookSpecificOutput") or {}
+    return "deny" if _hso.get("permissionDecision") == "deny" else "allow"
+
+
+_Q12_BASE = {"dependency-gate": "pip install evil",
+             "test-gate": "git commit -m x",
+             "spec-gate-commit": "git commit -m x",
+             "eval-gate": "git push"}
+# DENY CAPABILITY FIRST, on the SDK side too, or every row below is vacuous.
+for _g12, _v12 in _Q12_BASE.items():
+    check(f"#54 X-36q (q12) SDK DENY CAPABILITY: {_g12} denies the bare "
+          f"{_v12!r} in the (q9) fixture", _f1_sdk(_g12, _v12) == "deny",
+          f"got {_f1_sdk(_g12, _v12)}")
+_Q12_ROWS = [
+    ("<<<", "%s <<< \"%s\""),
+    ('-c "..."', '%s -c "%s"'),
+    ("-c '...'", "%s -c '%s'"),
+    ('-lc "..."', '%s -lc "%s"'),
+    ('-c \\"...\\"', '%s -c ' + _Q_BS + _Q_DQ + '%s' + _Q_BS + _Q_DQ),
+]
+for _g12, _v12 in _Q12_BASE.items():
+    for _cn12, _cf12 in _Q12_ROWS:
+        # `zsh4"` for the single-quoted carrier so the payload's own quotes
+        # do not close the head's; `zsh4'` everywhere else. Both are the same
+        # mechanism - an unbalanced quote glued to the invoker head.
+        _head12 = 'zsh4' + (_Q_DQ if _cn12 == "-c '...'" else "'")
+        _cmd12 = "xargs -I{} " + (_cf12 % (_head12, _v12))
+        _sh12 = _f1_run(_g12, _cmd12)
+        _sd12 = _f1_sdk(_g12, _cmd12)
+        check(f"#54 X-36x KNOWN SPLIT [{_g12}] carrier {_cn12}: shell=deny / "
+              f"SDK=allow, bounded because bash -n REFUSES the string",
+              (_sh12, _sd12) == (2, "allow"),
+              f"observed shell rc={_sh12} sdk={_sd12} on {_cmd12!r}; a change "
+              f"here is a fix (delete the row) or a regression (do not "
+              f"re-point it)")
+        _bn12 = subprocess.run([BASH, "-n", "-c", _cmd12],
+                               capture_output=True, text=True)
+        check(f"#54 X-36x bound [{_g12}] carrier {_cn12}: bash refuses to "
+              "parse it, so the over-refusing substrate refuses nothing real",
+              _bn12.returncode != 0, f"bash -n rc={_bn12.returncode}")
+
 print("\n-- (j) what is NOT fixed, pinned so it is not mistaken for a "
       "regression --")
-# X-36q, the FOURTH consumer: `_invoker_at` / `_cs_isinv` / `_SG_INVOKER`
-# answer the same question and still test EXACT membership: measured over 10
-# invokers x 4 version suffixes, ALL 40 versioned spellings leak an
-# approved-list bypass while all 10 unversioned twins deny. Left open on
-# BLAST RADIUS, not merit: joining it moves `@@INV_CASE@@`, a
-# _HEADER_PLACEHOLDERS member, so all 13 hooks move - a different change
-# from this one, which moves exactly one hook.
-for _c in ('bash5.2 -c "pip install evil"', 'ksh93 -c "pip install evil"'):
-    dep_both(_c, 0, "#50 backlog X-36q: a versioned INVOKER still bypasses "
-                    "the approved list (allow/allow at v2.7.1 too)")
 # The exact-member INVERSE asymmetry, PRE-EXISTING and not issue #50's: the
 # FILE_RUNNERS arm breaks before the hit test, so the UNVERSIONED spelling is
 # more permissive than the versioned one. A measured zero-collateral fix

@@ -510,6 +510,122 @@ def _quoted_runs(cmd):
     return runs
 
 
+def _tok_words(tok):
+    r"""EVERY basename spelling of `tok` a shell walker can see, deduplicated.
+
+    FOUR, not one, because there are THREE shell readings of one token and this
+    function feeds walks that mirror all of them:
+
+      `_cs_isinv`  (all 13 hooks, via `_CS_BUF`)  quotes DROPPED, escape kept
+      `_sg_push`   (secrets-gate)                 quotes KEPT, escape STRIPPED
+      raw text                                    neither
+
+    `_invoker_at` feeds BOTH the dependency walk and the secrets walk, so no
+    single spelling can match both shell walkers, and any spelling a shell
+    walker sees and this one does not is an SDK-MORE-PERMISSIVE split - the one
+    direction this module's contract forbids. So read all of them and OR the
+    answers.
+
+    THE COST OF EACH REJECTED ALTERNATIVE. Read the four figures below as what
+    they are: the measurement that CHOSE this spelling, taken with only
+    `_invoker_at`'s two INVOKER arms reading it and the prefix/assignment/flag
+    arm still raw. They are not a description of the residue this tree ships -
+    that arm reads the union too now (code-review 1, F1), and the residue is
+    re-derived at the bottom of this docstring. Measured on one corpus of
+    11,508 (command, gate) rows: 6,300 from 14 hostile head forms (bare, path,
+    dot-slash, double-quoted, single-quoted, part-quoted, empty-quote-tail,
+    unbalanced quote in three positions, single and double escape-prefixed,
+    mid-word escape, quoted path) x 10 invokers x 5 suffixes x 9 payloads,
+    plus 5,208 more putting the same heads behind wrappers (`sudo`, `env A=1`,
+    `nice -n 10`, `timeout -k 1 -s KILL 5`, `nohup`). Every candidate was
+    driven against the IDENTICAL shell half:
+
+      raw token only                   1926 new SDK-more-permissive rows
+      quote-stripped, refuse on an
+        odd quote count                 721
+      quote-and-escape-stripped only    440
+      THE UNION, as written here        440
+
+    The quote-stripped spelling's extra 281 rows over the union are exactly the
+    double-escape head class, which it cannot see because `_sg_push` strips
+    escapes and it keeps them. Its "refuse rather than strip on an odd quote
+    count" rule is also what made a shell walker resolve a head this one
+    returned nothing for, so it is dropped: refusing to answer is not the safe
+    direction when the other substrate answers.
+
+    NOT A NEW CONVENTION. `_segment_candidates`'s unbalanced-quote fallback
+    already emits exactly these four twins for exactly this reason - "THREE
+    twins, not two ... Additive and deduplicated, so the raw token stays a
+    candidate (deny-list bias is over-match)". The head scan now uses the rule
+    the candidate walk has used all along.
+
+    THE RESIDUE ON THE TREE THAT SHIPS, re-derived after the last edit, base
+    (v2.7.2) vs this tree, on a deny-capable fixture (project commands
+    failing, a git repo with two commits and a staged file under an enforced
+    prefix; `CLAUDE_PROJECT_DIR` set for BOTH substrates, without which
+    eval-gate and spec-gate-commit are not deny-capable at all and every one
+    of their shell denies is reported as a phantom split):
+      6,480-row wrapper matrix   0 new SDK-more-permissive, 0 deny->allow
+      6,480-row narrowing sweep  assignment and flag tokens whose value
+                                 carries a slash / colon / `=`, quoted and
+                                 escaped, versioned and not: 0 either way -
+                                 the sweep that catches `_tok_forms` being
+                                 collapsed back into `_tok_words`
+      9,100 shell + 4,900 SDK    350 payloads x 13 hooks and x 7 gates x 2
+                                 installs: 0 deny->allow, 6 hooks and 5 gates
+                                 move, 7 hooks bytes-only
+      4,000-row hostile-head     0 new SDK-more-permissive, 0 deny->allow;
+                                 200 pre-existing forbidden rows CLOSED,
+                                 1,000 new tolerated (800 versioned, 200 not)
+      31,250-row mechanism grid  2,040 new forbidden, 0 deny->allow - the
+                                 X-36x class, every row refused by `bash -n`
+                                 (0 of 31,250 parse), every twin pre-split
+      2,959-name PATH census     0 moved bare; 7 moved double-quoted, all 7
+                                 exact ALL_INVOKERS members closing a
+                                 pre-existing split
+      2,250 ordinary rows        0 moved, over quoted/escaped/part-quoted
+                                 heads on five gate pairs
+    """
+    out = []
+    for _w in _tok_forms(tok):
+        _w = _w.rsplit("/", 1)[-1]
+        if _w and _w not in out:
+            out.append(_w)
+    return out
+
+
+def _tok_forms(tok):
+    r"""The same four spellings, WITHOUT the basename step.
+
+    THE BASENAME IS NOT PART OF EVERY QUESTION, and conflating the two cost a
+    measured deny -> allow. `_tok_words` exists for questions about a PROGRAM,
+    where `/usr/bin/bash` and `bash` are the same answer; `_invoker_at` also
+    asks two questions about a TOKEN - is it an assignment, is it a flag - and
+    a basename is the wrong reading for both, because the thing after the `=`
+    or the `-` may itself contain a slash:
+
+        FOO=/usr/lib/x bash -c "pip install evil"
+
+    `_ASSIGN` matches that token and `_invoker_at` walks past it to `bash`.
+    Basename it first and you get `x`, which is neither an assignment nor a
+    flag, so the walk stops dead and the payload is ALLOWED. Measured on a
+    deny-capable fixture, five such rows went SDK-deny -> SDK-allow when this
+    distinction was missing - the one direction this module's contract rules
+    out, introduced by the very edit that closed a different split. The rule
+    that keeps it from happening again: every arm must read a SUPERSET of what
+    it read before, so the assignment and flag arms read `_tok_forms` UNION
+    `_tok_words` (the shell basenames its `_b`, so its reading has to stay in
+    the set too) and never `_tok_words` alone.
+    """
+    stripped = tok.replace("'", "").replace(chr(34), "")
+    out = []
+    for _w in (tok, stripped, tok.replace(chr(92), ""),
+               stripped.replace(chr(92), "")):
+        if _w and _w not in out:
+            out.append(_w)
+    return out
+
+
 def _invoker_at(toks):
     r"""Index of the shell invoker at the head of `toks`, or None.
 
@@ -532,16 +648,76 @@ def _invoker_at(toks):
     """
     saw_prefix = False
     for i, tok in enumerate(toks):
-        base = tok.rsplit("/", 1)[-1]
+        # [issue #54 / X-36q, code-review 1 F1] Computed ONCE and read by
+        # EVERY arm. The first cut normalised the two invoker arms and left
+        # the prefix/assignment arm on a raw `tok.rsplit("/", 1)[-1]`, which
+        # is the same "one question, N token spellings" defect this function
+        # was rewritten to close, one arm over - and measurably worse than the
+        # residue that WAS disclosed, because bash EXECUTES it (verified with
+        # fakes on PATH: `"sudo" bash5.2 -c "pip install evil"` really runs
+        # sudo). 5,520 rows of a 6,480-row quoted-wrapper matrix were
+        # shell-DENY / SDK-ALLOW on dependency-gate; 0 after. The shell has no
+        # such split to mirror: `_cs_isinv` hands every arm the same
+        # quote-stripped `_b` and `_sg_push` the same escape-stripped one, so
+        # ONE `words` for the whole cascade is the parity, not an optimisation.
+        #
+        # TWO READINGS, NOT ONE, and the second is not tidiness: `words` is
+        # basenamed and `forms` is not. An arm asking "is this a PROGRAM"
+        # wants the basename; the assignment and flag arms ask about the WHOLE
+        # TOKEN, whose right-hand side can carry a slash of its own
+        # (`FOO=/usr/lib/x`, `--file=/x/y`, `-o/x/y`). Feeding those two arms
+        # `words` alone basenames the value away, the walk stops, and the
+        # payload behind the wrapper is allowed - five measured SDK
+        # deny -> allow rows. Both arms therefore read `forms + words`, which
+        # is a strict superset of the raw token they read before AND of the
+        # shell's basenamed `_b`.
+        words = _tok_words(tok)
+        forms = _tok_forms(tok) + words
         # An invoker is tested FIRST so a DUAL word (watch/xargs/ssh, both a
         # transparent prefix and a thing whose argument is a command line)
         # reports here rather than being skipped past.
-        if base in _SHELL_INVOKERS:
+        # [issue #54 / X-36q] ONE question, so ONE spelling set, in BOTH arms.
+        # Left raw, this arm is SDK-more-permissive on every quoted or
+        # escape-prefixed spelling of a DUAL word: `"ssh" h "pip install evil"`
+        # is shell-deny / SDK-allow at v2.7.2, and bash really does EXECUTE ssh
+        # for that spelling. Normalising here closes those rows and takes the
+        # structural pin to zero mismatches against both shell readings.
+        # EXACT membership, no reduction: `sshd` normalises to `sshd`, which is
+        # in no set, so the objection that killed an ALL_INVOKERS-scoped
+        # REDUCTION does not apply to an ALL_INVOKERS-scoped normalisation.
+        if any(_w in _SHELL_INVOKERS for _w in words):
             return i
-        if base in _CMD_PREFIXES or _ASSIGN.match(tok):
+        # `_INT_INVOKERS` (cmdpos.INVOKERS), NOT `_SHELL_INVOKERS`: `_int_word`
+        # returns only INTERPRETERS members and the DUAL words are not among
+        # them, so this is the exact set this arm can ever see - naming the
+        # wider one would be round-4 D3. `_INV_WORD_MAX` is the shell twin's
+        # NAME_MAX bound, rendered from the same cmdpos number so the two
+        # substrates cannot disagree about which words are too long to be
+        # programs. Shell parity: `_cs_inv_word`.
+        if any(len(_w) <= _INV_WORD_MAX and _int_word(_w) in _INT_INVOKERS
+               for _w in words):
+            return i
+        # DENY-ONLY, by the same argument as the two arms above and stated
+        # here because this arm WIDENS a skip rather than adding a return:
+        # `saw_prefix` only continues a walk that would otherwise
+        # `return None`, and every caller consumes `toks[idx+1:]`, so a wider
+        # skip can turn None into an index and can never turn one index into
+        # a later one. Fence unaffected - `grep -r sh f`, `"grep" -r sh f`,
+        # `ls bash5.2` and `frobnicate bash5.2 -c x` all still return None,
+        # because `grep`/`ls`/`frobnicate` are in no spelling of _CMD_PREFIXES.
+        if (any(_w in _CMD_PREFIXES for _w in words)
+                or any(_ASSIGN.match(_w) for _w in forms)):
             saw_prefix = True
             continue
-        if tok.startswith("-"):
+        # ...and the flag arm reads the same union, for the same reason: the
+        # shell tests `-*` against its ONE stripped `_b`, so `"-x" bash5.2 -c
+        # ...` walks past the flag there and stopped dead here. Bounded on
+        # that spelling (a leading `-x` is not a program, so bash executes
+        # nothing) but it is the same class, it costs one `any()`, and the
+        # direction is identical: a flag `continue`s without setting
+        # `saw_prefix`, so the walk still ends in `return None` unless a real
+        # invoker turns up.
+        if any(_w.startswith("-") for _w in forms):
             continue                       # a flag is never the command word
         if saw_prefix:
             continue                       # a wrapper's own operand
@@ -2222,17 +2398,54 @@ def _int_word(base):
     trigger see it; this reduction is what keeps `python3.12 -c 'x'` an
     ordinary data pipeline instead of collateral over-refusal.
 
-    [issue #50] The reduction now has THREE consumers - the stage classifier,
-    run phase 1 and run phase 2 - of AT LEAST FIVE that ask this question.
-    `_invoker_at` and its shell twin `_cs_isinv`, plus the secrets gate's
-    `_SG_INVOKER`, still test exact membership: measured over 10 invokers x 4
-    version suffixes, ALL 40 versioned spellings leak an approved-list bypass
-    (`bash5.2 -c "pip install evil"`, `ksh93 -c ...` are allow/allow at
-    v2.7.1 AND after this change) while all 10 unversioned twins deny. That is filed as X-36q and left OPEN here
-    on blast radius, not on merit: joining it moves `@@INV_CASE@@`, which is a
-    _HEADER_PLACEHOLDERS member, so all 13 hooks move - a different change
-    from this one, which moves exactly one hook. Do not read "three
-    consumers" as "closed".
+    [issue #50 -> issue #54 / X-36q, CLOSED] The reduction has FIVE consumers
+    and all five now ask it: the stage classifier, run phase 1, run phase 2,
+    `_invoker_at` here, and the shell's `_cs_isinv` plus secrets-gate's
+    `_SG_INVOKER` (one shared `_cs_inv_word` rather than the two hand-written
+    copies they were). #50 left the last three testing EXACT membership and
+    recorded the cost: over 10 invokers x 4 version suffixes, all 40 versioned
+    spellings leaked. That understated it. Re-measured at v2.7.2, the leak was
+    an approved-list bypass AND a `secrets.never_read_paths` bypass, on both
+    substrates, on five payload shapes - `bash5.2 -c "cat a.pem extra"` read a
+    private key allow/allow - while all 10 unversioned twins denied.
+
+    #50 deferred this on BLAST RADIUS, and that estimate was wrong in the
+    reassuring direction. It was "all 13 hooks move bytes, one moves
+    behaviour". Measured on a fixture built so that the deny paths ARE
+    reachable (project commands failing, a git repo with two commits and a
+    staged file under an enforced prefix), it is SIX of 13 that move
+    behaviour - dependency-gate, secrets-gate, test-gate, spec-gate-commit,
+    ci-mirror and eval-gate, exactly the six wired to PreToolUse Bash - and
+    seven that move bytes only. The four beyond the obvious two arrive through
+    `cmd_segments` -> `cmd_has_verb` -> `git_verb`. A probe config whose test
+    and CI commands are `true` and which has no git repo shows ZERO of that,
+    because in it those four hooks deny nothing for any input; three
+    independent designs and a judge all measured on such a config and all four
+    concluded "bytes only".
+
+    SCOPE THAT CLAIM HONESTLY. Deny capability was verified PER HOOK at the
+    base rather than assumed, and only seven of the thirteen have it even in
+    that fixture: the six above plus `tdd-gate`, which denies `Write src/new.py`
+    and still moves 0 rows - a stronger statement than "cannot deny". The
+    remaining six (cost-log, decision-required-alarm, drift-detector,
+    format-lint-gate, spec-gate-entry, task-done-alarm) are not wired to
+    PreToolUse Bash at all, so they never receive a command to walk; for them
+    "bytes only" rests on that wiring plus 324 Bash payloads fed to them
+    DIRECTLY and 117 non-Bash rows, all unmoved - not on a reachable deny path.
+
+    THE PREDICATE IS ONE, BUT THE TOKEN SPELLING FEEDING IT IS THREE - see
+    `_tok_words`. `_cs_isinv` reads a quote-stripped word, `_sg_push` an
+    escape-stripped one, and this module a raw token; unifying the question
+    without unifying the spelling would have left the same class of split one
+    layer down, which is why `_invoker_at` reads a union rather than a choice.
+
+    A NOTE ON EVIDENCE, because the obvious secrets probe cannot see any of
+    this: `bash5.2 -c "cat .env"` denies at v2.7.2 and denies after, so it
+    proves nothing. `.env` is SUBSTRING-matched and fires on the raw text with
+    no invoker walk at all - `echo "cat .env"` denies too. The payloads that
+    isolate the walk are the directory-anchored and END-anchored ones
+    (`secrets/prod.yaml`, `*.pem`, `*.key`), where one trailing token puts the
+    secret out of reach of everything but the walk.
 
     _INTERPRETERS-SCOPED ON PURPOSE; never re-scope to _FILE_RUNNERS. `..`
     would reduce to `.` and `sourced` to `source`, and a `.` resolved into a
@@ -3105,6 +3318,12 @@ def sdk_gates_module(cfg: dict) -> str:
         "# set wider than the arm can ever see - which is exactly how the\n"
         "# two substrates drift apart silently (round-4 D3).\n"
         "_INT_INVOKERS = frozenset(%r)\n"
+        "# [issue #54 / X-36q] cmdpos.INVOKER_WORD_MAX, POSIX NAME_MAX: the\n"
+        "# longest basename the invoker reduction is asked about. Rendered\n"
+        "# from the same number as the shell hook's guard, so the two\n"
+        "# substrates cannot disagree about which words are too long to name\n"
+        "# a program. SEMANTIC, not a perf fence - see the shell twin.\n"
+        "_INV_WORD_MAX = %d\n"
         "# [round-4 P1/P3] The four word sets the D20 walks were missing.\n"
         "# FILE_RUNNERS adds `.`/`source` to INTERPRETERS (finding 19);\n"
         "# COMPOUND_HEADS and INERT_FILTERS are the P3 classification\n"
@@ -3152,6 +3371,7 @@ def sdk_gates_module(cfg: dict) -> str:
            cmdpos.PARAM_DEFAULT_RE_SRC, cmdpos.RESOLVED_SPELLING_MAX,
            sorted(cmdpos.DOWNLOADERS), sorted(cmdpos.INTERPRETERS),
            cmdpos.INTERP_SUFFIX, sorted(cmdpos.INVOKERS),
+           cmdpos.INVOKER_WORD_MAX,
            sorted(cmdpos.FILE_RUNNERS), sorted(cmdpos.COMPOUND_HEADS),
            sorted(cmdpos.INERT_FILTERS), sorted(cmdpos.WRITER_WORDS),
            sorted(cmdpos.WRITER_FLAGS),

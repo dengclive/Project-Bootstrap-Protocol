@@ -1451,6 +1451,202 @@ for fp, want in (("docs/readme.md", "allow"),
                  repr(fp))
 
 # --------------------------------------------------------------------------- #
+# issue #54 / X-36q -- the VERSIONED shell invoker, and the head SPELLINGS
+# that decide whether the two substrates agree about one.
+#
+# This suite passed 3778 checks at v2.7.2 while all 40 versioned spellings
+# walked past deps.approved AND secrets.never_read_paths on BOTH substrates.
+# It could not see them because agreement was total: both walkers were wrong
+# in the same way, and a differential suite is blind to a defect both
+# substrates share. The grid below therefore asserts the VERDICT, not just
+# the agreement.
+#
+# The quoted and escaped head forms are the second half, and they are the
+# half that would have caught the three token spellings this change rejected:
+# a raw-token SDK head scan leaks them, and so does a quote-stripped one that
+# refuses to answer on an odd quote count. Neither is visible on a bare word.
+# --------------------------------------------------------------------------- #
+print("\n== issue #54 / X-36q: versioned invokers, and quoted/escaped heads ==")
+
+_54_INV = ("sh", "bash", "zsh", "dash", "ksh", "ash", "busybox", "eval", "su",
+           "script")
+_54_SUF = ("5.2", "93", "5", "4")
+for _iv in _54_INV:
+    for _sf in _54_SUF:
+        differential("dependency-gate",
+                     bash('%s%s -c "pip install evil"' % (_iv, _sf)), "deny",
+                     "#54 X-36q: versioned invoker, approved-list bypass")
+    differential("dependency-gate", bash('%s -c "pip install evil"' % _iv),
+                 "deny", "#54 X-36q control: the unversioned twin")
+for _iv in ("sh", "bash", "ksh", "busybox"):
+    for _sf in _54_SUF:
+        differential("secrets-gate",
+                     bash('%s%s -c "cat a.pem extra"' % (_iv, _sf)), "deny",
+                     "#54 X-36q: versioned invoker, END-ANCHORED secret - the "
+                     "trailing token puts `*.pem` out of reach of everything "
+                     "but the invoker walk")
+        differential("secrets-gate",
+                     bash('%s%s -c "cat secrets/prod.yaml"' % (_iv, _sf)),
+                     "deny",
+                     "#54 X-36q: versioned invoker, DIRECTORY-anchored secret")
+
+_54_BS = chr(92)
+_54_DQ = chr(34)
+# The head SPELLINGS. Every row here is deny/deny; at v2.7.2 the first three
+# were allow/allow and the fourth was deny/ALLOW - a live SDK-more-permissive
+# split on a spelling bash really executes.
+for _c, _g, _why in (
+        ('%sbash5.2%s -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "double-quoted versioned head"),
+        ("'ksh93' -c \"pip install evil\"",
+         "dependency-gate", "single-quoted versioned head"),
+        ('%s%sbash5.2 -c "cat secrets/prod.yaml"' % (_54_BS, _54_BS),
+         "secrets-gate", "DOUBLE-escaped versioned head - the class a "
+         "quote-stripping SDK spelling cannot see, because the shell walker "
+         "that matters strips escapes and it keeps them"),
+        ('%sssh%s host "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "quoted DUAL word: shell-deny / SDK-ALLOW at "
+         "v2.7.2, and bash EXECUTES ssh for this spelling - a live fail-open "
+         "closed by normalising the FIRST arm of _invoker_at as well")):
+    differential(_g, bash(_c), "deny", "#54 X-36q: %s" % _why)
+
+# THE QUOTED WRAPPER [code-review 1, F1]. The first cut of this change
+# normalised _invoker_at's two INVOKER arms and left the PREFIX/ASSIGNMENT arm
+# reading a raw `tok.rsplit("/", 1)[-1]`, so a quote character on the WRAPPER
+# hid the versioned invoker behind it from the SDK while `_cs_isinv` - which
+# hands every arm the same quote-stripped `_b` - saw it: 5,520 shell-DENY /
+# SDK-ALLOW rows on a 6,480-row wrapper matrix, 0 after.
+#
+# THESE ROWS EARN THEIR PLACE BY EXECUTING. Unlike the residue pinned below,
+# bash does not refuse this: with fakes on PATH,
+# `bash -c '"sudo" bash5.2 -c "pip install evil"'` really runs
+# `sudo bash5.2 -c pip install evil`. A row that only the SDK misses, on a
+# string bash runs, is the fail-open shape this suite exists for.
+for _c, _g, _why in (
+        ('%ssudo%s bash5.2 -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "double-quoted WRAPPER, versioned invoker behind"),
+        ("'sudo' bash5.2 -c \"pip install evil\"",
+         "dependency-gate", "single-quoted wrapper"),
+        ('s%sudo%s bash5.2 -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "PART-quoted wrapper - a quote character inside "
+         "the word, which no `startswith` reading can see"),
+        ('%s/usr/bin/sudo%s bash5.2 -c "pip install evil"'
+         % (_54_DQ, _54_DQ),
+         "dependency-gate", "quoted PATH-qualified wrapper: the basename is "
+         "taken AFTER the quotes come off, not before"),
+        ("'nice' -n 10 bash5.2 -c \"pip install evil\"",
+         "dependency-gate", "quoted wrapper carrying its OWN operand - the "
+         "invoker is at index 3, which is the round-4 D1/D2/D7 unbounded skip "
+         "reached through a quoted head"),
+        ('%stimeout%s 5 ksh93 -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "quoted wrapper with an operand, second spelling"),
+        ('%sA=1%s bash5.2 -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "quoted ASSIGNMENT - the other half of the same "
+         "arm, and `_ASSIGN` was matching the raw token too"),
+        ('%s-x%s bash5.2 -c "pip install evil"' % (_54_DQ, _54_DQ),
+         "dependency-gate", "quoted FLAG at the head: the shell's `-*)` arm "
+         "tests its stripped `_b` and walked past it, the SDK's `startswith` "
+         "did not. Bounded (a leading `-x` is not a program) but the same "
+         "class, so the flag arm reads the union too"),
+        ('%senv%s bash5.2 -c "cat secrets/prod.yaml"' % (_54_DQ, _54_DQ),
+         "secrets-gate", "quoted wrapper on the OTHER walker - secrets-gate "
+         "reaches this through `_sg_push`, whose `_b` strips escapes rather "
+         "than quotes, so it must be pinned separately from dependency-gate"),
+        ('%ssudo%s bash5.2 -c "cat a.pem extra"' % (_54_DQ, _54_DQ),
+         "secrets-gate", "quoted wrapper, END-anchored secret")):
+    differential(_g, bash(_c), "deny", "#54 X-36q quoted wrapper: %s" % _why)
+
+# --------------------------------------------------------------------------- #
+# KNOWN RESIDUE, pinned so a later reader does not mistake it for a
+# regression of this change. Each row is a SPLIT: the two substrates
+# disagree. The check name carries the EXECUTED-bash bound, because the
+# question that decides whether a split matters is not which substrate is
+# stricter but whether the string does anything.
+# --------------------------------------------------------------------------- #
+for _c, _g, _wsh, _wsd, _lbl in (
+        ('sh5.2 -lc %s"cat tls.key%s"' % (_54_BS, _54_BS), "secrets-gate",
+         "deny", "allow",
+         "X-36u: an ESCAPED double quote in an invoker argument plus an "
+         "END-ANCHORED secret pattern. FORBIDDEN direction, and this change "
+         "routes the versioned spellings onto it - but the UNVERSIONED twin "
+         "`sh -lc ...` is ALREADY deny/allow at v2.7.2, and real bash answers "
+         "`unexpected EOF while looking for matching` and reads NOTHING, so "
+         "the substrate that denies is the one over-refusing"),
+        # X-36x, ONE ROW PER CARRIER [code-review 2, F2]. This was a single
+        # `<<<` row, and the backlog called the class "1 row of 6,000" on
+        # "dependency-gate" with "a `<<<` here-string" - all three were corpus
+        # artifacts. Re-derived from the MECHANISM on a 31,250-row grid: 2,040
+        # new forbidden rows, 0 deny->allow, on FOUR PreToolUse Bash gates,
+        # with `-c \"…\"` (768) outnumbering `<<<` (408). One instance pinned
+        # cannot catch a widening in the dimension the record got wrong, so
+        # the carrier dimension is pinned here and the GATE dimension in
+        # tests/test_issue_fixes.py (q12), which has a deny-capable fixture.
+        ("setsid zsh4' <<< \"pip install evil\"", "dependency-gate",
+         "deny", "allow",
+         "X-36x carrier `<<<`: an UNBALANCED quote on the invoker head. "
+         "FORBIDDEN direction; twin `setsid zsh' <<< ...` is already "
+         "deny/allow at v2.7.2, and bash refuses to parse it (`bash -n` rc=2 "
+         "on all 31,250 grid rows, so nothing in the class executes)"),
+        ("xargs -I{} zsh4' -c \"pip install evil\"", "dependency-gate",
+         "deny", "allow",
+         "X-36x carrier `-c \"…\"`: the here-string is NOT the mechanism"),
+        ("xargs -I{} zsh4\" -c 'pip install evil'", "dependency-gate",
+         "deny", "allow",
+         "X-36x carrier `-c '…'`, and an unbalanced DOUBLE quote: the quote "
+         "character is not the mechanism either"),
+        ("xargs -I{} zsh4' -lc \"pip install evil\"", "dependency-gate",
+         "deny", "allow",
+         "X-36x carrier `-lc \"…\"`"),
+        ('xargs -I{} zsh4\' -c %s"pip install evil%s"' % (_54_BS, _54_BS),
+         "dependency-gate", "deny", "allow",
+         "X-36x carrier `-c \\\"…\\\"`: the LARGEST carrier in the class "
+         "(768 of 2,040), and the one the record never named"),
+        # THE ARM-NARROWING REGRESSION, pinned at the VERDICT so a future
+        # "tidy `_invoker_at` to one spelling set" cannot reintroduce it.
+        # These rows are shell-allow / SDK-deny at v2.7.2 AND here. The SDK
+        # reaches the invoker because `_ASSIGN` / the flag test read the WHOLE
+        # token; the shell does not, because `_cs_isinv` basenames its `_b`
+        # first and `x` is neither an assignment nor a flag. Feeding the
+        # SDK's two arms the basenamed spelling set makes it agree with the
+        # shell - and that agreement is a deny -> ALLOW, five measured rows,
+        # the one direction this module's contract forbids.
+        ("FOO=/usr/lib/x bash -c \"pip install evil\"", "dependency-gate",
+         "allow", "deny",
+         "the SDK walks past an ASSIGNMENT whose value carries a slash and "
+         "reaches the invoker; the shell basenames it to `x` and stops. "
+         "Pre-existing at v2.7.2 in BOTH directions - do not 'fix' the SDK "
+         "into agreement, that is the deny->allow"),
+        ("-o/x/y bash -c \"pip install evil\"", "dependency-gate",
+         "allow", "deny",
+         "...and the same for an attached FLAG VALUE carrying a slash"),
+        ('%sbash5.2 -c "pip install evil"' % _54_BS, "dependency-gate",
+         "allow", "deny",
+         "X-36w: an ESCAPE-prefixed head. TOLERATED direction (SDK stricter) "
+         "and the SDK is RIGHT - bash executes `\\ssh host x` as ssh - so the "
+         "shell half is the fail-open. Closed on the SDK here as a side "
+         "effect of the union; the shell half stays open because fixing it "
+         "changes what the walked word IS, which changes arms"),
+        ('%ssh -c "pip install evil"' % _54_BS, "dependency-gate",
+         "allow", "deny",
+         "X-36w on the UNVERSIONED spelling. READ THE HALVES SEPARATELY "
+         "[code-review 2, F3]: the SHELL half is pre-existing - allow at "
+         "v2.7.2 and allow here, and bash EXECUTES it, so the shell is the "
+         "fail-open. The SDK DENY IS INTRODUCED BY THIS CHANGE, not "
+         "inherited: this row is allow/ALLOW at v2.7.2. An earlier wording "
+         "of this check said the twin 'behaves identically, which is what "
+         "makes this a pre-existing class' - the class is pre-existing, the "
+         "SDK verdict on this row is not. It is 1 of 200 measured "
+         "unversioned-head rows that newly refuse, of 1,000 new tolerated "
+         "rows on a 4,000-row hostile-head sweep. Tolerated direction, SDK "
+         "correct")):
+    _sh54 = shell_verdict(_g, bash(_c))
+    _sd54 = sdk_verdict(_g, bash(_c))
+    check(f"[{_g}] #54 KNOWN SPLIT shell={_wsh}/sdk={_wsd}: {_lbl}",
+          (_sh54, _sd54) == (_wsh, _wsd),
+          f"observed shell={_sh54} sdk={_sd54}; a change here is either a "
+          f"fix (delete the row) or a regression (do not re-point it)")
+
+# --------------------------------------------------------------------------- #
 # KNOWN-DEFECT LEDGER [round-2 review, 2026-07-28]
 #
 # The round-2 review's findings are OPEN. Batch 1 repairs the guards so this

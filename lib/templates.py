@@ -1126,6 +1126,289 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   _CS_BUF="$_CS_BUF$_t"
   return 0
 }
+# [round-4 P1, finding 9] Interpreter membership on a basename with a trailing
+# cmdpos.INTERP_SUFFIX reduced, or "" when the word is not an interpreter:
+# `python3.12` -> `python3`, `python3` untouched. The SDK twin is `_int_word`,
+# and tests/test_issue_fixes.py pins the two against each other word for word.
+# `curl u | python3.12` was rc=0 on BOTH substrates - a complete bypass spelled
+# with two characters.
+#
+# [issue #40] `t`/`d` are in the suffix: they are the free-threaded and debug
+# ABI tags, so `python3.13t` reduces to `python3` exactly as `python3.12` does.
+# Admitting only digits and dots left the tag glued on, the reduction never
+# reached a member, and the stage classified as unmodellable while the trigger
+# (whose suffix DOES admit the tag) matched - two spellings of one question.
+#
+# [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40 was not:
+# it stripped `[0-9.td]` in ANY position while INTERP_SUFFIX admits the tags
+# only AFTER the digits (`[.0-9]*[td]*`). The two spellings STILL disagreed,
+# just on a different set - `pythont3` reduced to `python` and matched the
+# trigger NOWHERE, moving the D20 stage from `x` (unmodellable) to `i`, which
+# is the ALLOW direction. Measured deny -> allow on BOTH substrates for
+# `curl u | pythont3 -c 'x' ; sh a.sh`: a regression shipped by the change
+# meant to END this disagreement.
+#
+# [issue #50] Lifted out of _xp_stage_kind, where it was inline, because the
+# run scan now asks the same question and a fourth hand-written copy of the
+# suffix is how #40 and #43-F1 each happened. Two lines carry the whole
+# ordering rule and neither is obvious:
+#   * the `[@@INT_TAG_CLASS@@]`/`[@@INT_VER_CLASS@@]` equality IS the
+#     ordered-runs test. Deleting the tag characters and deleting the version
+#     characters and concatenating the two results reproduces the suffix iff
+#     it is a version run followed by a tag run; a foreign character survives
+#     BOTH deletions and so appears twice, and any tag before a digit lands on
+#     the wrong side of the join. This is the same statement as the regex the
+#     SDK compiles, in the only algebra `case`/`${//}` can express.
+#   * `_L=$(( _L - 1 ))` and NOT `(( _L-- ))`: the latter evaluates to the
+#     pre-decrement value, so it returns 1 when _L reaches 0, and this hook
+#     runs under `set -e`.
+# TWO CALLERS NOW, AND THIS BLOCK MOVED TO SIT ABOVE BOTH [issue #54 /
+# X-36q; code-review 1, F4]. It was written when `_xp_iw` lived in
+# dependency-gate's body and had exactly one caller, and its framing was
+# dependency-gate's: "this gate", "the run scan", "a 60 s ceiling". Re-derived
+# on the emitted tree, none of the three generalises to the 13 hooks that now
+# carry it:
+#   * TWO callers. dependency-gate's RUN SCAN calls `_xp_iw` directly (three
+#     body call sites), and it is the only hook that has one. In the other
+#     twelve the only caller is `_cs_inv_word` immediately below, which reaches
+#     `_xp_iw` at most once per HEAD word of a segment, not once per scanned
+#     token, and only after two cheap guards decline (exact membership, then
+#     the NAME_MAX length guard, then a last-character suffix test).
+#   * SEVEN of 13 hooks are `FAIL_CLOSED=1`; six are `FAIL_CLOSED=0`, where a
+#     hook that runs long or dies is an ALLOW, not a refusal.
+#   * EXACTLY TWO of 13 carry a 60 s timeout - dependency-gate and
+#     secrets-gate. test-gate is 600, ci-mirror 900, format-lint-gate 120, and
+#     eval-gate / spec-gate-commit / tdd-gate declare none at all and fall to
+#     the platform default. So "behind a 60 s ceiling" is a statement about
+#     two hooks and the bound below is what keeps the OTHER eleven from
+#     inheriting a cost nobody measured for them.
+# `set -e` is the one part that does generalise: all 13 emitted hooks run
+# under `set -euo pipefail`, so the `_L=$(( _L - 1 ))` note above holds
+# everywhere.
+#
+# BOUNDED for that reason. The old form stripped one character
+# at a time, and `${_iv%?}` is O(len) in bash, so its cost grew with the
+# WORD rather than with the word set. An interpreter is a PREFIX no longer
+# than @@INT_MAXLEN@@ characters, so only that many prefixes can match;
+# longest first, the order the old loop found them in. The quadratic is
+# measured on the SDK twin, where the reduction is directly reachable
+# (0.013 / 0.171 / 0.659 s unbounded at 10 / 40 / 80 KB, against
+# 0.005 / 0.011 / 0.021 s bounded); HERE no payload was found that drives it
+# with a pathological token at all - the tokenizer dominates every long-word
+# shape tried - so on this substrate the bound is DEFENSIVE. End to end, base
+# to head is 0.74x-1.15x over six shapes at 5-80 KB, head being FASTER on the
+# reducible-word shapes; but the prefixed-run shape is a constant +4-5%, and
+# near 100 KB of single-token command word that constant puts a ~4% length
+# band on the far side of the 60 s fail-closed ceiling (measured: base 59.2 s
+# allow, head 61.8 s). "Nothing base allowed is pushed into the ceiling" is
+# therefore NOT claimed; nothing realistic reaches that length, and the cost
+# there is the tokenizer's pre-existing quadratic rather than this reduction.
+_XP_IW=""
+_xp_iw(){
+  local _b="${1-}" _p="" _s="" _L=0
+  _XP_IW=""
+  case "$_b" in @@INT_CASE@@) _XP_IW="$_b"; return 0 ;; esac
+  # Nothing to reduce unless the word ENDS in the suffix class. Cheap, and
+  # unlike the plan's `*[0-9.td])` guard on the whole token it is not inert:
+  # it is the last character, not the trailing run.
+  case "$_b" in *[@@INT_SUF_CLASS@@]) ;; *) return 0 ;; esac
+  _L=${#_b}
+  if [ "$_L" -gt @@INT_MAXLEN@@ ]; then _L=@@INT_MAXLEN@@; fi
+  while [ "$_L" -gt 0 ]; do
+    _p="${_b:0:$_L}"
+    case "$_p" in
+      @@INT_CASE@@)
+        _s="${_b:$_L}"
+        if [ "$_s" = "${_s//[@@INT_TAG_CLASS@@]/}${_s//[@@INT_VER_CLASS@@]/}" ]; then
+          _XP_IW="$_p"; return 0
+        fi ;;
+    esac
+    _L=$(( _L - 1 ))
+  done
+}
+# [issue #54 / X-36q] Does this basename name a shell INVOKER, allowing for a
+# trailing cmdpos.INTERP_SUFFIX?  THE MEASURED HOLE: at v2.7.2 all 40 versioned
+# spellings (10 INVOKERS x the four suffixes `5.2`, `93`, `5`, `4`) walked past
+# BOTH deps.approved and secrets.never_read_paths on BOTH substrates, while all
+# 10 unversioned twins denied.  Five payload shapes, 40/40 leaking before and
+# 40/40 denying after, twins 20/20 both times:
+#
+#   -c "pip install evil"            dependency-gate   (`ksh93` is the real
+#   -c "cat secrets/prod.yaml"       secrets-gate       AT&T ksh binary name;
+#   -c "cat 'secrets/prod.yaml'"     secrets-gate       `bash5` and `zsh5` are
+#   -c "cat a.pem extra"             secrets-gate       real distro binaries -
+#   -c "cp tls.key /tmp/x"           secrets-gate       none of this is exotic)
+#
+# plus `-c "git commit -m x"` on test-gate and spec-gate-commit and
+# `-c "git push"` on ci-mirror and eval-gate, which reach it through
+# cmd_segments.  Issue #54 as filed named only the dependency case; the
+# never_read_paths bypass is the same defect and is worse.
+#
+# WHY IT IS READ HERE AND NOTHING IS DISPLACED - THE ISSUE #50 LESSON.  This is
+# a WIDENING OF THE SET ONE EXISTING ARM ALREADY TESTS MEMBERSHIP IN, not a new
+# read position and not a new pass.  The invoker test is already FIRST in every
+# walk and already reads this same basename; all that changes is that the arm
+# can now answer the question it was being asked.  A token can therefore only
+# change which arm of the cascade it takes if it REDUCES TO AN INVOKER, which is
+# exactly the answer that was missing, and the three arms below it are provably
+# unreachable by such a word:
+#   * the assignment arm - the reduction only ever deletes a TRAILING run drawn
+#     from `.0-9` then `td`, so it can never delete an `=`, and no INVOKERS
+#     member contains one.  Verified: no assignment spelling reduces to an
+#     invoker.
+#   * the flag arm - the reduction never touches a LEADING character, so a word
+#     starting `-` still starts `-` after it, and no INVOKERS member does.
+#   * the prefix arm - verified word for word over every ALL_PREFIXES member:
+#     none of them reduces to an invoker.  `sudo` is the one that looks like it
+#     should (`su` plus a suffix) and does not, because `o` is in neither the
+#     version class nor the tag class, so the reduction never fires on it at
+#     all.  `doas`, `nohup`, `env`, `nice` likewise.
+# So the widening cannot take a word AWAY from a later arm, which is the
+# property that makes "no deny becomes an allow" structural here rather than
+# merely measured.  MEASURED AS WELL, AND RE-DERIVED AFTER THE LAST EDIT
+# rather than carried forward from the draft that first claimed it - the
+# earlier figures were taken before three more arms of `_invoker_at` were
+# joined to the same spelling set, which makes them a measurement of a
+# different tree.  Base(v2.7.2) vs this tree, on a DENY-CAPABLE fixture
+# (project commands failing, a git repo with two commits and a staged file
+# under an enforced prefix), 0 deny -> allow in every one:
+#   9,100 shell rows   350 payloads x 13 hooks x 2 installs.  SIX hooks move
+#                      behaviour (secrets-gate 120, dependency-gate /
+#                      test-gate / spec-gate-commit / ci-mirror / eval-gate 40
+#                      each), SEVEN move bytes only - and `tdd-gate` IS
+#                      deny-capable in this fixture and still moves 0.
+#   4,900 SDK rows     350 payloads x 7 gates x 2 installs.  The same five,
+#                      minus ci-mirror, which has no SDK twin.
+#   6,480 rows         the quoted-WRAPPER matrix: 0 new SDK-more-permissive.
+#   6,480 rows         the NARROWING sweep - assignment and flag tokens whose
+#                      value carries a slash, a colon or an `=`: 0 either way.
+#   4,000 rows         hostile heads x 5 gates: 0 new SDK-more-permissive,
+#                      200 pre-existing forbidden rows closed.
+#  31,250 rows         the unbalanced-quote mechanism grid: 2,040 new
+#                      forbidden rows, all X-36x, all refused by `bash -n`.
+#   5,918 rows         the PATH census, bare and double-quoted.
+#   2,250 rows         ordinary commands with quoted and escaped heads.
+# Deny capability was VERIFIED per hook and per gate at the base before any of
+# this was read: 7 of 13 hooks and 6 of 7 SDK gates can deny at all in that
+# fixture, and a row asserted against one that cannot would assert nothing.
+#
+# ONE PREDICATE, TWO CALLERS, TWO SPELLINGS OF `_b` - ON PURPOSE.  `_cs_isinv`
+# passes the QUOTE-stripped basename (its `_CS_BUF` has already dropped quote
+# characters and kept escapes) and `_sg_push` passes the ESCAPE-stripped one
+# (`${_CUR//.../}`, quotes kept).  Those two readings genuinely differ and both
+# are right for their own walker; what must NOT differ is the QUESTION, and
+# before this there were three hand-written spellings of it.  The SDK twin
+# `_invoker_at` cannot pick one of the two, so it asks about all of them at once
+# - see `_tok_words` there, and `_tok_forms` beside it, which is the same four
+# spellings WITHOUT the basename step.  The distinction is load-bearing: this
+# walker basenames `_b` before every one of its `case` arms, so the SDK's
+# invoker and prefix arms read basenames to match it - but its assignment and
+# flag arms must ALSO keep the un-basenamed token, or `FOO=/usr/lib/x` becomes
+# `x`, stops the SDK walk, and turns an SDK deny into an SDK allow.
+#
+# THE REDUCE ARM NAMES INVOKERS, NOT ALL_INVOKERS, AND THAT IS NOT AN OVERSIGHT.
+# `_xp_iw` returns a member of INTERPRETERS or nothing, and the three DUAL words
+# (`watch`, `xargs`, `ssh`) are not in INTERPRETERS, so a REDUCED word can never
+# be one of them.  Naming the wider set in this arm would state a set the arm
+# can never see, which is round-4 D3 - the way the two substrates drift apart
+# silently.  The EXACT arm above still tests ALL_INVOKERS, so DUAL words keep
+# reporting true on their own spelling exactly as before; only the reduction is
+# INVOKERS-scoped.  This also settles the `sshd` objection: `sshd` does not
+# reduce to `ssh` (the reduction is INTERPRETERS-scoped and `ssh` is not an
+# interpreter), so no reduction admits it.  Verified over a census of 2959
+# distinct executable names in /usr/bin, /bin, /usr/sbin, /sbin and
+# /usr/local/{bin,sbin} on this machine: the reduction newly admits ZERO of
+# them, bare OR double-quoted (the quoted spelling is the one the widened
+# prefix arm newly reads; 7 of the 2959 move, and all 7 are exact
+# ALL_INVOKERS members closing a PRE-EXISTING split - bash, script, sh, ssh,
+# su, watch, xargs).  This count is a SNAPSHOT of one machine's PATH and was
+# re-derived here; an earlier draft said 2963.
+#
+# INTERPRETERS-SCOPED ON PURPOSE; NEVER RE-SCOPE TO FILE_RUNNERS.  FILE_RUNNERS
+# adds `.` and `source`, so `..` would reduce to `.` and `sourced` to `source`,
+# and a `.` resolved into a command-word slot denies an ordinary
+# `env jq . x.json` - the exact over-refusal finding 19 added them to
+# FILE_RUNNERS to avoid.  The SDK twin's docstring carries the same warning.
+#
+# THE DELIBERATE OVER-MATCH, DISCLOSED RATHER THAN DISCOVERED LATER: the suffix
+# admits an empty version run, so `sh` plus a bare tag run is admitted and
+# `shd`, `sud`, `sut`, `asht`, `bashd`, `evald`, `scriptd`, `busyboxd`, `sh.`
+# and `su..` all read as invokers.  That is the DENY direction for a deny-list, none of them is
+# a real binary name (census above), and the alternative - forbidding an empty
+# version run - would also reject `python3t`, which is real.  The near-misses
+# that must NOT match are pinned in tests/test_issue_fixes.py: `sshd`, `sushi`,
+# `sudo`, `sulogin`, `shellcheck`, `bashate`, `script-runner`, `scriptreplay`,
+# `scriptlive`, `shred`, `shuf`, `shasum`, `sudoedit`, `watchexec`, and the
+# tag-ORDER near-misses `basht5` and `shd5`, which the ordered-runs rule in
+# `_xp_iw` rejects because a tag character may not precede a digit.
+#
+# `local _XP_IW` IS LOAD-BEARING, not hygiene.  bash scopes dynamically, so the
+# local declared here is what `_xp_iw` assigns to when this function calls it,
+# and the run scan's global `_XP_IW` - which is live across its own token loop -
+# is left untouched.  Without it this predicate would silently rewrite the
+# caller's state from inside an unrelated walk.
+#
+# THE LENGTH GUARD IS SEMANTIC, NOT A PERFORMANCE FENCE.  It is
+# cmdpos.INVOKER_WORD_MAX, POSIX NAME_MAX: a basename longer than it cannot
+# exist on any POSIX filesystem, so it cannot name an executable, so asking
+# whether it reduces to an invoker is dead weight rather than a skipped check.
+# A LENGTH fence here would be a fail-OPEN guard inside a security fix and would
+# not be acceptable; this one restores no reachable spelling, and the boundary
+# is symmetric across the substrates (255 denies on both, 256 allows on both),
+# so it opens no split either.  It is placed AFTER the exact-membership arm, so
+# an exact invoker is never length-gated, and on `_b`, which is already a
+# basename, so a long PATH is unaffected.
+#
+# WHAT IT DOES AND DOES NOT DO TO THE 60 s CEILING - READ lib/cmdpos.py FIRST.
+# It removes ONE length band, the single all-reducible command word near
+# 120 KB.  A SECOND band remains and this bound cannot reach it, because that
+# one is driven by the NUMBER of recognised invoker tokens and this caps one
+# word's LENGTH.  Re-derived on this tree, dependency-gate on N repetitions of
+# `bash5.2`: 40 KB base 4.48 s -> 20.51 s, 64 KB 10.92 -> 51.98, and at 72 KB
+# / 9,216 tokens base 13.91 s ALLOW -> 65.40 s, PAST the 60 s fail-CLOSED
+# timeout.  eval-gate, which declares no timeout and falls to the platform
+# default 60 s, is 2.94 -> 52.82 s at 100 KB and crosses just past it.  The
+# bound is measurably irrelevant to the shape: at 40 KB, 7-character words are
+# 4.56x, 255-character words 1.72x, 256-character words (guard fires) 1.06x.
+# The cost is `_cs_isinv` returning true where it
+# used to return false, which turns on `_cs_scan`'s pre-existing post-loop
+# token walk - i.e. the versioned spelling now costs what its unversioned twin
+# has always cost, and that is MEASURED rather than asserted: at 80 KB, base
+# with `bash` x 16,384 = 123.76 s (v2.7.2 already TWICE past the ceiling, on
+# the unversioned spelling) against this tree with `bash5.2` x 10,240 =
+# 81.68 s - 7.55 vs 7.98 ms per recognised invoker token.  Direction is
+# fail-CLOSED and no realistic shape is affected (`git add` of 4,000 paths
+# 1.01x, `grep -l` over 5,000 paths 1.00x), but "nothing the base allowed is
+# pushed into the ceiling" is NOT claimed here, exactly as `_xp_iw`'s own
+# comment declines to claim it.  Backlog X-36y.
+#
+# THE UNIT OF `${#_b}` IS THE AMBIENT LOCALE'S, AND THE SDK COMPARES CODE
+# POINTS - latent, not live, and recorded because this file has already
+# shipped one defect of exactly that shape (see `_blen`'s `LC_ALL=C` note:
+# RESOLVED_SPELLING_MAX was deny/deny under en_US.UTF-8 and shell=ALLOW /
+# SDK=DENY under LC_ALL=C).  It cannot bite HERE: a word only matters at this
+# guard if it might go on to reduce, and a word that reduces is ASCII by
+# construction - `_xp_iw` needs an INTERPRETERS member as its prefix and a
+# suffix drawn from `[.0-9]` then `[td]` - so bytes and code points cannot
+# disagree about any word whose answer this guard changes.  If the reduction
+# is ever widened past ASCII, this line needs `_blen`'s treatment.
+_cs_inv_word(){
+  local _b="${1-}" _XP_IW=""
+  case "$_b" in
+    @@INV_CASE@@) return 0 ;;
+  esac
+  if [ "${#_b}" -gt @@INV_WORD_MAX@@ ]; then return 1; fi
+  # Nothing can reduce unless the word ENDS in the suffix class. This pre-test
+  # is EXACT, not an approximation: `_xp_iw` returns an unreduced word only for
+  # a word that is already an INTERPRETERS member, and every INTERPRETERS
+  # member that is an invoker is caught by the exact arm above.
+  case "$_b" in *[@@INT_SUF_CLASS@@]) ;; *) return 1 ;; esac
+  _xp_iw "$_b"
+  case "$_XP_IW" in
+    @@SHELL_INT_CASE@@) return 0 ;;
+  esac
+  return 1
+}
 # Is the segment currently being built headed by a shell INVOKER? Its
 # quoted argument is then a command line, not data, and has to be
 # segmented as one [round-3 lens A, A1]. Mirrors _sg_push's rule in
@@ -1160,9 +1443,11 @@ _cs_isinv(){
     # An invoker is tested FIRST, so a DUAL word (watch/xargs/ssh - both a
     # transparent prefix and a thing whose argument is a command line) reports
     # true here while still leaving the head scannable for the anchor.
-    case "$_b" in
-      @@INV_CASE@@) return 0 ;;
-    esac
+    #
+    # [issue #54 / X-36q] Position UNCHANGED - still first, still this same
+    # `_b`. Only the SET the arm tests membership in got wider; see
+    # `_cs_inv_word` for why no token can change arm.
+    if _cs_inv_word "$_b"; then return 0; fi
     case "$_b" in
       @@PFX_CASE@@) _seen=1 ;;
       [A-Za-z_]*=*) _seen=1 ;;
@@ -1432,19 +1717,33 @@ _SHELL_SUBST = {
     "@@COMPLETER_CASE@@": _bash_case_words(cmdpos.install_completers()),
     "@@DL_CASE@@": cmdpos.bash_case_alt(cmdpos.DOWNLOADERS, "      "),
     "@@INT_CASE@@": cmdpos.alt(cmdpos.INTERPRETERS),
-    # [issue #50] The bounds `_xp_iw` searches within, all four BODY-ONLY: the
-    # longest member name, the version run, the tag run, and the two runs
-    # unioned for the cheap "could this reduce at all" pre-test. Emitted as
-    # `7`, `.0-9`, `td`, `.0-9td` - bracket-expression contents with no
-    # unquoted `(`, which would fail every hook closed.
+    # [issue #50] The bounds `_xp_iw` searches within: the longest member name,
+    # the version run, the tag run, and the two runs unioned for the cheap
+    # "could this reduce at all" pre-test. Emitted as `7`, `.0-9`, `td`,
+    # `.0-9td` - bracket-expression contents with no unquoted `(`, which would
+    # fail every hook closed.
+    #
+    # [issue #54 / X-36q] NO LONGER BODY-ONLY. These were body-only so that the
+    # shared header's bytes would not move and issue #50 could stay a
+    # one-hook change; X-36q is the change that spends exactly that invariant.
+    # `_xp_iw` now lives in `_HOOK_HEADER` because the header's invoker walk
+    # and secrets-gate's `_sg_push` both need the reduction, so all four are
+    # _HEADER_PLACEHOLDERS members and all 13 hooks move bytes. Recorded as
+    # golden freeze exception no. 45.
     "@@INT_MAXLEN@@": _INT_MAXLEN,
     "@@INT_VER_CLASS@@": _INT_VER_CLASS,
     "@@INT_TAG_CLASS@@": _INT_TAG_CLASS,
     "@@INT_SUF_CLASS@@": _INT_VER_CLASS + _INT_TAG_CLASS,
-    # BODY-ONLY on purpose: not in _HEADER_PLACEHOLDERS, so the shared
-    # header's bytes do not move. SHELL_INT_CASE is the shells within
-    # INTERPRETERS; the D20 run scan reads it to tell a terminal shell from
-    # an ordinary interpreter.
+    # SHELL_INT_CASE is the shells within INTERPRETERS; the D20 run scan reads
+    # it to tell a terminal shell from an ordinary interpreter.
+    #
+    # [issue #54 / X-36q] WAS body-only "so the shared header's bytes do not
+    # move"; it is a _HEADER_PLACEHOLDERS member now, because `_cs_inv_word`
+    # reads it as the set a REDUCED word may land in. INVOKERS, not
+    # ALL_INVOKERS, and that is exact rather than conservative: a reduced word
+    # is always an INTERPRETERS member and the three DUAL words are not in
+    # INTERPRETERS, so naming the wider set would state a set the arm can
+    # never see (round-4 D3).
     "@@SHELL_INT_CASE@@": cmdpos.alt(cmdpos.INVOKERS),
     # [X-32 repair F5] The DUAL words, needed as their own alternation: they
     # are in ALL_PREFIXES, so the stage walk skipped them as transparent -
@@ -1479,6 +1778,12 @@ _SHELL_SUBST = {
     # to three numbers - and compared through `_blen`, which pins LC_ALL=C so
     # they cannot drift to three UNITS either.
     "@@RESOLVED_MAX@@": str(cmdpos.RESOLVED_SPELLING_MAX),
+    # [issue #54 / X-36q] POSIX NAME_MAX, the longest basename `_cs_inv_word`
+    # is asked to reduce. A HEADER placeholder, beside the walk it bounds, and
+    # rendered from cmdpos so the shell hook and the SDK prelude's
+    # `_INV_WORD_MAX` cannot drift to two budgets - the same discipline
+    # RESOLVED_MAX above is under. Semantic, not a perf fence: see lib/cmdpos.py.
+    "@@INV_WORD_MAX@@": str(cmdpos.INVOKER_WORD_MAX),
     # [X-36h perf] How much of the command `_param_default` walks at once.
     # Rendered from cmdpos too - not because the reference needs a window
     # (`re.sub` does not) but so cmdpos.PARAM_WINDOW_VECTORS, whose entire
@@ -1491,7 +1796,17 @@ _SHELL_SUBST = {
 # present where it belongs, so a renamed placeholder fails the import instead
 # of silently emitting `@@PIPE_ERE@@` into a live hook.
 _HEADER_PLACEHOLDERS = ("@@INV_CASE@@", "@@PFX_CASE@@", "@@ANCHOR_ERE@@",
-                        "@@RESOLVED_MAX@@", "@@PD_WINDOW@@")
+                        "@@RESOLVED_MAX@@", "@@PD_WINDOW@@",
+                        # [issue #54 / X-36q] These six became HEADER
+                        # placeholders when `_xp_iw` and `_cs_inv_word` moved
+                        # into `_HOOK_HEADER`. Every one renders a bare
+                        # alternation, a bracket-expression body (`7`, `.0-9`,
+                        # `td`, `.0-9td`) or an integer - no line continuation
+                        # and no unquoted `(`, either of which fails all 13
+                        # hooks closed.
+                        "@@INT_CASE@@", "@@INT_MAXLEN@@", "@@INT_VER_CLASS@@",
+                        "@@INT_TAG_CLASS@@", "@@INT_SUF_CLASS@@",
+                        "@@SHELL_INT_CASE@@", "@@INV_WORD_MAX@@")
 for _k in _HEADER_PLACEHOLDERS:
     if _k not in _HOOK_HEADER:
         raise AssertionError(f"hook-header placeholder {_k} not found")
@@ -2037,7 +2352,7 @@ _sg_twins(){{
 #     function, so "contains whitespace" identifies exactly the quoted runs
 #     the re-parse rule is about.
 _sg_push(){{
-  local _lhs _b _w _sgu _sgu_arr=()
+  local _lhs _b _w _sgu _sginv=0 _sgu_arr=()
   if [ -n "$_CUR" ]; then
     # [round-4 D5] Un-park first, so everything below - the candidate, the
     # assignment arm, the command-position `case` and the whitespace test
@@ -2159,9 +2474,16 @@ _sg_push(){{
       #
       # An invoker is tested FIRST so a DUAL word (watch/xargs/ssh) both
       # arms the invoker rule and leaves the head scannable.
-      case "$_b" in
-        @@INV_CASE@@) _SG_INVOKER=1 ;;
-      esac
+      #
+      # [issue #54 / X-36q] secrets-gate does NOT call `_cs_isinv`; it carries
+      # this walk itself. Widening the header's walk alone therefore left THIS
+      # gate leaking all 40 versioned spellings on the never_read_paths
+      # payloads - which is the whole shape of issue #40 and #43-F1 again, and
+      # is why the predicate is shared rather than transcribed a fourth time.
+      # `_b` here is the ESCAPE-stripped basename, not `_cs_isinv`'s
+      # quote-stripped one; the predicate is deliberately spelling-agnostic.
+      _sginv=0
+      if _cs_inv_word "$_b"; then _SG_INVOKER=1; _sginv=1; fi
       case "$_b" in
         @@PFX_CASE@@) _SG_PFXSEEN=1 ;;
         [A-Za-z_]*=*) _SG_PFXSEEN=1 ;;
@@ -2177,11 +2499,17 @@ _sg_push(){{
             _SG_CMDPOS=0
           fi ;;
       esac
-      case "$_b" in
-        @@INV_CASE@@) ;;
-        @@PFX_CASE@@) ;;
-        *) [ "$_SG_INVOKER" = "1" ] && _SG_CMDPOS=0 ;;
-      esac
+      # [issue #54 / X-36q] Reuses the SINGLE call's answer above through
+      # `_sginv` rather than asking the widened question a second time: one
+      # call per token, and no way for the two reads to disagree. The `[ ] &&`
+      # also comes off a last-command-of-a-branch position, where a false test
+      # is the branch's exit status under `set -e`.
+      if [ "$_sginv" = "0" ]; then
+        case "$_b" in
+          @@PFX_CASE@@) ;;
+          *) if [ "$_SG_INVOKER" = "1" ]; then _SG_CMDPOS=0; fi ;;
+        esac
+      fi
     fi
     # Only a QUOTED run can carry whitespace - unquoted whitespace is
     # precisely what splits tokens - so "contains whitespace" identifies
@@ -3017,83 +3345,12 @@ _xp_cw(){{
   _t="${{_t//\\'/}}"; _t="${{_t//\\"/}}"; _t="${{_t//\\\\/}}"
   _XP_CW="${{_t##*/}}"
 }}
-# [round-4 P1, finding 9] Interpreter membership on a basename with a trailing
-# cmdpos.INTERP_SUFFIX reduced, or "" when the word is not an interpreter:
-# `python3.12` -> `python3`, `python3` untouched. The SDK twin is `_int_word`,
-# and tests/test_issue_fixes.py pins the two against each other word for word.
-# `curl u | python3.12` was rc=0 on BOTH substrates - a complete bypass spelled
-# with two characters.
-#
-# [issue #40] `t`/`d` are in the suffix: they are the free-threaded and debug
-# ABI tags, so `python3.13t` reduces to `python3` exactly as `python3.12` does.
-# Admitting only digits and dots left the tag glued on, the reduction never
-# reached a member, and the stage classified as unmodellable while the trigger
-# (whose suffix DOES admit the tag) matched - two spellings of one question.
-#
-# [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40 was not:
-# it stripped `[0-9.td]` in ANY position while INTERP_SUFFIX admits the tags
-# only AFTER the digits (`[.0-9]*[td]*`). The two spellings STILL disagreed,
-# just on a different set - `pythont3` reduced to `python` and matched the
-# trigger NOWHERE, moving the D20 stage from `x` (unmodellable) to `i`, which
-# is the ALLOW direction. Measured deny -> allow on BOTH substrates for
-# `curl u | pythont3 -c 'x' ; sh a.sh`: a regression shipped by the change
-# meant to END this disagreement.
-#
-# [issue #50] Lifted out of _xp_stage_kind, where it was inline, because the
-# run scan now asks the same question and a fourth hand-written copy of the
-# suffix is how #40 and #43-F1 each happened. Two lines carry the whole
-# ordering rule and neither is obvious:
-#   * the `[@@INT_TAG_CLASS@@]`/`[@@INT_VER_CLASS@@]` equality IS the
-#     ordered-runs test. Deleting the tag characters and deleting the version
-#     characters and concatenating the two results reproduces the suffix iff
-#     it is a version run followed by a tag run; a foreign character survives
-#     BOTH deletions and so appears twice, and any tag before a digit lands on
-#     the wrong side of the join. This is the same statement as the regex the
-#     SDK compiles, in the only algebra `case`/`${{//}}` can express.
-#   * `_L=$(( _L - 1 ))` and NOT `(( _L-- ))`: the latter evaluates to the
-#     pre-decrement value, so it returns 1 when _L reaches 0, and this hook
-#     runs under `set -e`.
-# BOUNDED, because this gate is fail-CLOSED behind a 60 s ceiling and the run
-# scan calls this once per scanned token. The old form stripped one character
-# at a time, and `${{_iv%?}}` is O(len) in bash, so its cost grew with the
-# WORD rather than with the word set. An interpreter is a PREFIX no longer
-# than @@INT_MAXLEN@@ characters, so only that many prefixes can match;
-# longest first, the order the old loop found them in. The quadratic is
-# measured on the SDK twin, where the reduction is directly reachable
-# (0.013 / 0.171 / 0.659 s unbounded at 10 / 40 / 80 KB, against
-# 0.005 / 0.011 / 0.021 s bounded); HERE no payload was found that drives it
-# with a pathological token at all - the tokenizer dominates every long-word
-# shape tried - so on this substrate the bound is DEFENSIVE. End to end, base
-# to head is 0.74x-1.15x over six shapes at 5-80 KB, head being FASTER on the
-# reducible-word shapes; but the prefixed-run shape is a constant +4-5%, and
-# near 100 KB of single-token command word that constant puts a ~4% length
-# band on the far side of the 60 s fail-closed ceiling (measured: base 59.2 s
-# allow, head 61.8 s). "Nothing base allowed is pushed into the ceiling" is
-# therefore NOT claimed; nothing realistic reaches that length, and the cost
-# there is the tokenizer's pre-existing quadratic rather than this reduction.
-_XP_IW=""
-_xp_iw(){{
-  local _b="${{1-}}" _p="" _s="" _L=0
-  _XP_IW=""
-  case "$_b" in @@INT_CASE@@) _XP_IW="$_b"; return 0 ;; esac
-  # Nothing to reduce unless the word ENDS in the suffix class. Cheap, and
-  # unlike the plan's `*[0-9.td])` guard on the whole token it is not inert:
-  # it is the last character, not the trailing run.
-  case "$_b" in *[@@INT_SUF_CLASS@@]) ;; *) return 0 ;; esac
-  _L=${{#_b}}
-  if [ "$_L" -gt @@INT_MAXLEN@@ ]; then _L=@@INT_MAXLEN@@; fi
-  while [ "$_L" -gt 0 ]; do
-    _p="${{_b:0:$_L}}"
-    case "$_p" in
-      @@INT_CASE@@)
-        _s="${{_b:$_L}}"
-        if [ "$_s" = "${{_s//[@@INT_TAG_CLASS@@]/}}${{_s//[@@INT_VER_CLASS@@]/}}" ]; then
-          _XP_IW="$_p"; return 0
-        fi ;;
-    esac
-    _L=$(( _L - 1 ))
-  done
-}}
+# [issue #54 / X-36q] `_XP_IW` / `_xp_iw` MOVED TO `_HOOK_HEADER`, above
+# `_cs_inv_word`. The header's invoker walk and secrets-gate's `_sg_push` ask
+# the same reduction, and a second copy beside them is exactly what issue #40
+# and #43-F1 each were. This gate's three call sites are unchanged: same name,
+# same global, defined earlier in the same emitted file.
+# DO NOT re-add a definition here.
 # [round-5 P3] The write target GLUED to a writer flag, or "" for none.
 # cmdpos.WRITER_FLAGS was consulted only in the SEPARATE-token shape (`case
 # "$_prev" in @@WRITER_FLAG_CASE@@`), so `sort -oa.sh` and `sort
