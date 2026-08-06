@@ -1,5 +1,100 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.7.2 → 2.7.3 — the fourth and fifth consumers, and a control that kept agreeing for the wrong reason (2026-08-06)
+
+**PATCH**, on the criterion this file states: no configuration key exists that
+did not (`INVOKER_WORD_MAX` is an internal constant, not operator-facing
+surface), and the emitted gates only got **stricter** — **0 verdicts moved
+deny → allow**, measured across ~426,000 verdict evaluations in the review pass
+and re-confirmed on a 70-row independent differential. `PROTOCOL_VERSION` in
+`lib/installer.py` and `lib/templates.py`, `plugin/plugin.json`'s version and
+description prose, the version assertions **and their check labels** in four
+suites, and the README pin target.
+
+Contains PR **#55** (issue **#54**). Suite 8373 → **9276 checks**, 0 failed.
+Freeze-exceptions **45** and **46**.
+
+### Issue #54 — a versioned shell invoker bypassed the gates
+
+`bash5.2 -c "pip install evil"` walked past the approved list on **both**
+substrates while `bash -c` denied. **40 of 40 versioned spellings leaked; all
+10 unversioned twins denied.** `ksh93` is the real AT&T ksh binary name;
+`bash5`/`zsh5` are real distro binaries.
+
+**It was three times wider than filed, and both corrections came from the same
+failure mode.** `secrets-gate` leaked — `bash5.2 -c "cat a.pem extra"` was
+allow/allow and reads a **private key**. `test-gate` and `ci-mirror` leaked —
+`bash5.2 -c "git commit -m x"` and `-c "git push"` are rc=0 where the twin is
+rc=2, i.e. commit without tests and push without CI.
+
+Cause: a **fourth and fifth consumer** of one reduction. `interpreter_word()`,
+the install anchor and the D20 run walk read `cmdpos.INTERP_SUFFIX`;
+`_invoker_at`, `_cs_isinv` and secrets-gate's own `_sg_push` tested **exact
+membership**. `_int_word`'s docstring said *"three of at least five"* for
+exactly this row.
+
+**The SDK reads FOUR token spellings and ORs them.** There are three shell
+readings of one token — `_cs_isinv` drops quotes and keeps escapes, `_sg_push`
+keeps quotes and strips escapes, raw text does neither — and `_invoker_at` feeds
+both walks. No single spelling can match both, and **any spelling a shell walker
+sees that the SDK does not is an SDK-more-permissive split**, the one direction
+the contract forbids. Not a new convention: `_segment_candidates`' unbalanced-
+quote fallback already emits exactly these twins. Measured on an 11,508-row
+hostile-head corpus — raw token 1,926 new forbidden rows, quote-stripped 721,
+the union **440** while closing **580** pre-existing.
+
+**Every arm, not some.** The prefix and assignment arms were left reading the
+raw token in the first cut: 5,520 new forbidden rows, and unlike the other
+residues **bash executes those**. Repairing that introduced a **deny → allow of
+its own** — basenaming an assignment value hid it from the assignment and flag
+arms — caught only by a pin added in the same change. The invariant is now
+written down: *every arm must read a superset of what it read before.*
+
+`INVOKER_WORD_MAX = 255` is POSIX `NAME_MAX`, a **semantic** bound rather than a
+perf fence: a length fence inside a security fix is a fail-open guard, but a
+basename longer than `NAME_MAX` cannot name a file on any POSIX filesystem. It
+removes the single-long-word ceiling band (120 KB: 101 s unbounded → 58 s,
+matching base). A **second band remains** at ~70 KB driven by the *number* of
+invoker tokens, inherited convergence — v2.7.2 already blew the ceiling for
+`bash bash bash …` at 123 s — disclosed as **X-36y** rather than fenced.
+
+### The methodological lesson, because it is now three-for-three
+
+**A control can agree for the wrong reason**, and checking for it was the single
+most productive review move of this release:
+
+1. `--default-index <url>` (v2.7.2) looked like parity because the URL fell
+   through to the package check; a **local** value exposed the split.
+2. `bash5.2 -c "cat .env"` looked like `secrets-gate` immunity because `.env*`
+   is a **substring** match that fires on raw text with no invoker walk involved
+   — `echo "cat .env"` denies identically. `*.pem`/`*.key` are **end-anchored**,
+   so one trailing token isolated the walk and exposed the key read.
+3. *"11 of 13 hooks change bytes only"* was measured on a config with
+   `commands.test: "true"` and no git repo — in which four of those hooks
+   **deny nothing for any input**. A hook that denies nothing at base cannot
+   demonstrate byte-only-ness. Six hooks actually move.
+
+**How to apply: when a control PASSES, construct a payload whose verdict can
+only come from the arm you claim to be exercising; for a gate, first prove the
+gate can deny at all in the configuration you measured it in.**
+
+Related: **reviewing the plan** blocked this fix twice before a line was
+written, and the code review blocked the implementation once — four independent
+blocks, each catching something the previous stage stated as measured fact,
+including a judge's "decisive table" that re-measured at 721 forbidden-direction
+rows where it claimed 0.
+
+### Backlog
+
+New rows **X-36u/v/w/x/y/z**, each recording its measured count and — the
+distinction that matters — **whether real bash executes it**. Two are live and
+are the next work: `{ bash -c "pip install evil"; }` (X-36v, brace group,
+allow/allow on both substrates, bash runs it, while the subshell twin
+`( … )` denies) and `\sh -c "pip install evil"` (X-36w, shell-allow, bash runs
+it). X-36u and X-36x are bounded by `unexpected EOF` — bash refuses to parse and
+nothing runs; X-36y is fail-closed; X-36z is an inherited `eval-gate` finding.
+
+
 ## 2.7.1 → 2.7.2 — three consumers of one reduction, and a decidability rule (2026-08-05)
 
 **PATCH**, on the criterion this file states: no configuration key exists that
