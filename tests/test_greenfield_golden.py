@@ -149,6 +149,117 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
+    # [freeze-exception no. 45, 2026-08-06] issue #54 / X-36q — A VERSIONED
+    # SHELL INVOKER IS AN INVOKER. `bash5.2 -c "pip install evil"` and
+    # `ksh93 -c "cat a.pem extra"` were allow/allow on BOTH substrates at
+    # v2.7.2: the invoker walk tested EXACT membership, so a version suffix
+    # made the `-c` argument stop being a command line. All 40 versioned
+    # spellings (10 INVOKERS x 4 suffixes) leaked, on five payload shapes,
+    # while all 10 unversioned twins denied. This is the change that spends
+    # the "#50 moved one hook, the shared header did not move" invariant:
+    # `_xp_iw` moves INTO `_HOOK_HEADER` so the header's `_cs_isinv` and
+    # secrets-gate's `_sg_push` can share ONE predicate, `_cs_inv_word`,
+    # instead of the two hand-written membership tests they were.
+    #
+    # VERIFIED PER-FILE BEFORE RE-BASELINING, per fixture, base-vs-worktree
+    # plan actions (NOT the installed tree — freeze-exception no. 17's error):
+    #   default          57 -> 57 actions, 0 added, 0 removed, 12 changed,
+    #                    45 byte-identical
+    #   full_autonomous  69 -> 69 actions, 0 added, 0 removed, 16 changed,
+    #                    53 byte-identical
+    #   design_steering  59 -> 59 actions, 0 added, 0 removed, 12 changed,
+    #                    47 byte-identical
+    # Every changed action is a hook `.sh` or `sdk_gates/gates.py`; no
+    # markdown, no settings.json, no skill, no steering artifact moves. The
+    # per-file deltas are exactly four values, and each is explained:
+    #   +18286  every hook that only carries the header (the moved `_xp_iw`
+    #           plus `_cs_inv_word` and its rationale)
+    #   +19122  secrets-gate — the header, plus its own `_sg_push` edits
+    #   +14147  dependency-gate — the header, MINUS the 77-line `_xp_iw`
+    #           block that left its body, plus the 6-line pointer
+    #   +13382  sdk_gates/gates.py — `_tok_words` and `_tok_forms`, all four
+    #           `_invoker_at` arms, the `_INV_WORD_MAX` prelude line, the
+    #           `_int_word` docstring
+    # These byte counts are measured on THIS tree and are comment-length
+    # dependent: do not copy them into a later exception, re-measure. They
+    # were re-derived after the code-review pass below, which is why they are
+    # larger than the ones this exception carried when it was first written —
+    # that pass added code AND the reasoning for it.
+    #
+    # BLAST RADIUS, MEASURED ON A DENY-CAPABLE FIXTURE — and this is the part
+    # a `commands.test: "true"` probe config gets wrong. All 13 hooks move
+    # BYTES. SIX move BEHAVIOUR: secrets-gate (120 rows), dependency-gate
+    # (40), test-gate (40), spec-gate-commit (40), ci-mirror (40) and
+    # eval-gate (40) — exactly the six wired to `PreToolUse Bash`. The last
+    # four arrive through `cmd_segments` -> `cmd_has_verb` -> `git_verb` and
+    # are invisible unless the project's test/CI commands FAIL and a git repo
+    # with a staged file exists; with `true` commands and no repo those four
+    # hooks deny nothing for any input, which is how three designs and a
+    # judge all concluded "2 of 13".
+    #
+    # RE-DERIVED ON THE FINAL TREE, ALL 13 HOOKS AND ALL 7 SDK GATES, which is
+    # the sweep the first verification did not do — it answered the blast-
+    # radius question on one hook and presented it as the whole surface.
+    # 350 payloads (342 Bash + 8 non-Bash) x 13 hooks x 2 installs = 9,100
+    # shell rows, and x 7 SDK gates x 2 installs = 4,900 SDK rows.
+    # 0 deny -> allow in both. Five SDK gates move — the same six minus
+    # ci-mirror, which has no SDK twin.
+    #
+    # DENY CAPABILITY WAS VERIFIED PER HOOK AND PER GATE AT THE BASE, not
+    # assumed, because a row asserted against a hook that cannot refuse
+    # asserts nothing: 7 of 13 hooks can deny in that fixture (the six above
+    # plus `tdd-gate`) and 6 of 7 SDK gates (all but `format-lint-gate`).
+    # SEVEN hooks move bytes only, and that is a measurement rather than an
+    # assumption in two senses: fed Bash payloads DIRECTLY they moved 0 rows,
+    # and the non-Bash rows (Write/Read/Edit/Grep/Glob/NotebookEdit) moved 0.
+    # `tdd-gate` is deny-capable in that fixture (it denies `Write
+    # src/new.py`) and still moves 0. The other six are not wired to
+    # `PreToolUse Bash` at all, so they never receive a command to walk — for
+    # them "bytes only" rests on the wiring and on the direct-payload rows,
+    # not on a reachable deny path.
+    #
+    # WHAT THE TWO ADVERSARIAL CODE REVIEWS CHANGED, recorded here because the
+    # second of them found a defect in the FIRST fix for the first:
+    #   1. `_invoker_at` had normalised TWO of its arms and left the
+    #      prefix/assignment/flag arm on a raw token, so a quote character on
+    #      the WRAPPER hid the versioned invoker behind it from the SDK —
+    #      5,520 shell-DENY / SDK-ALLOW rows on a 6,480-row wrapper matrix,
+    #      and unlike the disclosed residue bash EXECUTES these. Fixed; the
+    #      matrix re-measures 0 new SDK-more-permissive, 0 deny -> allow.
+    #   2. THAT FIX, AS FIRST WRITTEN, INTRODUCED FIVE deny -> allow ROWS.
+    #      Feeding the assignment and flag arms the BASENAMED spelling set
+    #      turns `FOO=/usr/lib/x` into `x`, which is neither an assignment nor
+    #      a flag, so the walk stops and the payload behind the wrapper is
+    #      allowed. `_tok_forms` (the same four spellings WITHOUT the basename
+    #      step) exists for that reason, and the rule it encodes — every arm
+    #      must read a SUPERSET of what it read before — is the one that would
+    #      have prevented it. Caught by a new exhaustive predicate pin, not by
+    #      the verdict corpora, and pinned at both levels now.
+    #   3. The ceiling claim in `lib/cmdpos.py` was false: the bound removes
+    #      the single-long-word band and a SECOND band remains, driven by the
+    #      NUMBER of recognised invoker tokens, which no length cap can reach
+    #      (dependency-gate crosses 60 s at ~72 KB of repeated `bash5.2`;
+    #      eval-gate just past 100 KB). Direction is fail-CLOSED and the cost
+    #      is inherited — base with `bash` x 16,384 is 123.76 s at v2.7.2 —
+    #      so the record is amended rather than a second budget added. See
+    #      `lib/cmdpos.py` and backlog X-36y.
+    #
+    # A VERDICT-INVISIBLE CONSEQUENCE, recorded because "0 verdicts moved" is
+    # not evidence against it: on a config where the project's commands PASS,
+    # `test-gate` and `ci-mirror` now EXECUTE `commands.test` / `ci_local`
+    # for a versioned-invoker-wrapped git verb where they previously executed
+    # nothing. Same verdict, new latency and new side effects — and exact
+    # parity with the unversioned twin, which always did this.
+    #
+    # `lib/cmdpos.py` is NOT byte-identical: it gains ONE named budget,
+    # `INVOKER_WORD_MAX = 255` (POSIX NAME_MAX), rendered into both
+    # substrates the way `RESOLVED_SPELLING_MAX` is. It is a SEMANTIC bound —
+    # a basename longer than NAME_MAX cannot name an executable — not a
+    # length fence, which inside a security fix would be a fail-open guard.
+    # `INTERP_SUFFIX` is UNCHANGED; widening it is X-36i and stays blocked.
+    # The three digests this exception re-baselines are set at their existing
+    # positions below, so this dict keeps ONE entry per fixture.
+
     # [freeze-exception no. 44, 2026-08-05] RELEASE 2.7.2 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.1 -> 2.7.2. PATCH on this repo's stated criterion:
     # no configuration key exists that did not, and across both merged PRs
@@ -2357,19 +2468,23 @@ EXPECTED_DIGESTS = {
     # docstring, which that method does not strip. All emitted `.sh` bodies
     # pass `bash -n` and `gates.py` compiles under `-W error::SyntaxWarning`.
     #
-    # FIVE THINGS ARE LEFT OPEN, DELIBERATELY, and each is pinned in
+    # FIVE THINGS WERE LEFT OPEN, DELIBERATELY, and each is pinned in
     # test_issue_fixes.py section (j)/(i) so it cannot be mistaken for a
-    # regression later:
-    #   1. X-36q, THE FOURTH CONSUMER. `_invoker_at` / `_cs_isinv` and the
-    #      secrets gate's `_SG_INVOKER` ask the same question and still test
-    #      exact membership: measured over 10 invokers x 4 version
-    #      suffixes, ALL 40 versioned spellings leak an approved-list bypass
-    #      (`bash5.2 -c "pip install evil"`, `ksh93 -c ...` - allow/allow at
-    #      v2.7.1 AND here) while all 10 unversioned twins deny. Left open on BLAST RADIUS,
-    #      not merit: joining it moves `@@INV_CASE@@`, which IS a
-    #      `_HEADER_PLACEHOLDERS` member, so all 13 hooks move. The docstring
-    #      on `_int_word` says "three consumers of at least five" for this
-    #      reason and must not be read as "closed".
+    # regression later. ONE OF THE FIVE (no. 1, X-36q) IS NOW CLOSED by issue
+    # #54; its entry is kept rather than deleted because the reasoning that
+    # deferred it is the reasoning issue #54 had to correct, and two new
+    # residue rows (X-36u, X-36x) were filed out of closing it:
+    #   1. X-36q, THE FOURTH CONSUMER. *** CLOSED by issue #54; see
+    #      freeze-exception no. 45 at the top of EXPECTED_DIGESTS. *** As
+    #      recorded here it was an approved-list bypass on 40 versioned
+    #      spellings; re-measured at v2.7.2 it was ALSO a
+    #      `secrets.never_read_paths` bypass on both substrates, so this entry
+    #      understated its own severity. The blast-radius estimate that
+    #      deferred it - "all 13 hooks move" - was right about bytes and wrong
+    #      about behaviour in the reassuring direction: SIX hooks move
+    #      behaviour, not one, and the four beyond dependency-gate and
+    #      secrets-gate are invisible on a fixture whose project commands
+    #      succeed. The `_int_word` docstring now says five of five joined.
     #   2. X-36r, THE EXACT-MEMBER INVERSE ASYMMETRY, pre-existing and NOT
     #      issue #50's: the `_FILE_RUNNERS` arm breaks before the hit test, so
     #      the UNVERSIONED spelling is MORE permissive than the versioned one
@@ -2401,8 +2516,16 @@ EXPECTED_DIGESTS = {
     # Rows 4 and 5 were added by the adversarial passes and are pinned as
     # SPLITS in test_issue_fixes.py section (j) - `dep_both` cannot express
     # them, which is precisely why they had gone unrecorded.
+    # [freeze-exception no. 45] TWELVE moved bodies: the 11 hook `.sh` files
+    # this fixture emits plus `.claude/sdk_gates/gates.py`. 45 bodies
+    # byte-identical, 0 added, 0 removed, count still 57. Note the CONTRAST
+    # with no. 43 directly below the `full_autonomous` entry: that exception
+    # moved two bodies BECAUSE issue #50's placeholders were body-only and
+    # `_HOOK_HEADER` did not move. X-36q is the change that moves the header,
+    # so every hook moves - which is exactly the blast radius #50 deferred it
+    # on, now measured rather than estimated.
     "default":
-        "c40da1ade2204840e59fab677bb126f60759869ac04b3610a639025079813d8e",
+        "1424553e1c94c906a6d573c18833a3b18b023760100bede871fc466b6061de19",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2551,8 +2674,13 @@ EXPECTED_DIGESTS = {
     # `_HOOK_HEADER` does not move - the contrast with the amendment above is
     # the point, and it is the per-file check that establishes it. 0 added, 0
     # removed, count still 69.
+    # [freeze-exception no. 45] SIXTEEN moved bodies: the 15 hook `.sh` files
+    # this fixture emits plus `.claude/sdk_gates/gates.py`. 53 bodies
+    # byte-identical, 0 added, 0 removed, count still 69. `_HOOK_HEADER` moves
+    # here, which is the invariant no. 43 above spent one sentence
+    # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "a9e825dfdfad1aaaf1f730fee28f5e3d1439c7407052357bcf08e64fc45f596f",
+        "cb36e6b1d73c0efc65ffab492f04ff6d08c3b69e042aa0ca55e84b718af0c414",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2646,7 +2774,13 @@ EXPECTED_DIGESTS = {
         # (.claude/steering/design.md and the design-review skill and command)
         # are UNCHANGED - verified per-file, not assumed. 0 added, 0 removed,
         # count still 59.
-        "e29406c9feff6918002ade8eacc300de4ddf590a7dcdd5a4c1002e85594a1e2d",
+        # [freeze-exception no. 45] TWELVE moved bodies: the 11 hook `.sh`
+        # files plus `.claude/sdk_gates/gates.py`. 47 bodies byte-identical,
+        # 0 added, 0 removed, count still 59 - and all three frozen
+        # design-steering artifacts (.claude/steering/design.md, the
+        # design-review skill and the design-review command) are UNCHANGED,
+        # verified per-file rather than assumed.
+        "99b8ce9b0dfc5fb37ca3e908622b43ac320456b4653138a901789095c4fcd8e1",
 }
 
 EXPECTED_ACTION_COUNTS = {
