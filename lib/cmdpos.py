@@ -146,7 +146,126 @@ INVOKERS = (
 DUAL = ("watch", "xargs", "ssh")
 
 # Shell keywords that open a command position.
-KEYWORDS = ("then", "else", "do", "elif")
+#
+# [X-36v/w] FOUR MEMBERS WERE ADDED AND THE ADMISSION RULE IS NOW WRITTEN DOWN,
+# because the first four were the ones one consumer happened to need and the
+# other six spellings of the same word class were live fail-opens for three
+# releases.
+#
+# ADMISSION RULE: a word belongs here iff bash may follow it DIRECTLY with a
+# command word. Every member is verified by execution - the payload parses
+# (`bash -n` rc=0) and a fake `pip` on PATH really runs:
+#
+#   !       ! bash -c "pip install evil"
+#   if      if bash -c "..."; then :; fi
+#   while   while bash -c "..."; do break; done
+#   until   until bash -c "..."; do break; done
+#   then    if true; then bash -c "..."; fi
+#   else    if false; then :; else bash -c "..."; fi
+#   elif    if false; then :; elif bash -c "..."; then :; fi
+#   do      for i in 1; do bash -c "..."; done
+#
+# THE ROW THAT FILED THIS CALLED THE KEYWORD HALF BOUNDED, on the evidence that
+# `then bash -c '...'` is a syntax error. That is a property of the FRAGMENT,
+# not of the class: in `if true; then bash -c '...'; fi` the walkers are handed
+# a segment that still STARTS with `then` and bash runs the whole command. The
+# same mistake is filed twice in this repo's backlog (X-36u, X-36x) as a census
+# quoted without the shape class behind it.
+#
+# DELIBERATELY EXCLUDED, each because a command word cannot follow it, and each
+# verified rather than reasoned:
+#   for, select   a NAME follows. Their bodies are reached through `do`, which
+#                 is in the set: `for ((i=0;i<1;i++)); do pip install evil;
+#                 done` and `select i in 1; do pip install evil; ...` both DENY.
+#   case, in      a pattern follows. `case x in x) pip install evil ;; esac`
+#                 denies - `)` is already a segment break.
+#   done, fi, esac  a redirection or an operator follows, never a command word.
+#   [[            a conditional expression follows. `[[ -n x ]] && pip install
+#                 evil` denies because `&` is a segment break.
+#   time          already in PREFIXES, and `time pip install evil` denies.
+KEYWORDS = ("then", "else", "do", "elif", "if", "while", "until", "!")
+
+# The brace-group tokens, kept apart from KEYWORDS for two reasons that are not
+# style. (1) The ANCHOR spells them as the character class `[({] *`, which also
+# covers the glued spelling a standalone token cannot, so it does not read this
+# tuple; the WALKERS see whitespace-delimited tokens and do. (2) `(` and `)` are
+# NOT here and must not be: they never reach a walker at all, because
+# `_cs_ops` (shell) and `_shell_segments` (SDK) have already turned a
+# parenthesis into a segment break - which is exactly why the subshell twin
+# `( bash -c "pip install evil" )` DENIES while its brace twin did not.
+GROUP_TOKENS = ("{", "}")
+
+# Reserved words that take a NAME before their group, so skipping ONE token
+# does not reach the command word:
+#
+#   function f { bash -c "pip install evil"; }; f      allow/allow, RUNS
+#   coproc C { bash -c "pip install evil"; }           allow/allow, RUNS
+#
+# They therefore get the WRAPPER semantics that already exist for prefix words
+# - once one is seen, skip until an invoker turns up - rather than a one-token
+# skip. `coproc` also accepts NO name (`coproc bash -c "..."` runs), which is
+# why the anchor arm below is the unbounded wrapper shape and not a
+# name-consuming one: an arm that required a name would swallow the command
+# word itself and hide the invocation, which is the X-36c mechanism being
+# reintroduced by its own repair.
+NAMED_GROUP_HEADS = ("function", "coproc")
+
+# What a WALKER must be transparent to at a segment head. The anchor builds its
+# own spelling from KEYWORDS + `[({] *`; this is the walkers' one.
+#
+# TWO KNOWN OVER-REFUSALS, PREDICTED BEFORE THE CODE AND MEASURED AFTER, both
+# in the deny direction and both with the two substrates AGREEING - which is
+# the property that matters here, since a disagreement is what this model
+# exists to prevent. QUOTING OR ESCAPING A RESERVED WORD REMOVES ITS RESERVED
+# STATUS in bash, so `"if" pip install evil` and `\! pip install evil` name a
+# PROGRAM called `if` / `!`; bash finds neither and runs nothing (verified: no
+# marker written). Both walkers see the quote-stripped or escape-stripped
+# spelling by construction - `_CS_BUF` drops quote characters, `_tok_forms`
+# strips them, and the X-36w second classification strips escapes - so both now
+# refuse a command that would not have executed. Accepted rather than special-
+# cased: the alternative is teaching four walkers which quoting context a word
+# arrived in, and over-refusal on a command that cannot run costs an operator
+# one re-type, while the deny-list bias in every other reduction here is
+# over-match for the same reason.
+#
+# A THIRD CEILING BAND, DISCLOSED RATHER THAN FENCED - the same shape X-36y
+# files for the invoker machinery, arriving for this word class, and stated
+# here rather than left for a later reader to discover under a timeout.
+#
+# A command that is N repetitions of a head word now costs what its RECOGNISED
+# twin has always cost: `_cs_isinv` continues walking past every `if` or `{`
+# instead of returning at the first one, which turns on `_cs_scan`'s
+# pre-existing post-loop token walk. That walk is the quadratic; this tuple
+# only routes a new word class onto it. Measured on `dependency-gate`, whose
+# emitted `settings.json` declares a 60 s PreToolUse timeout and which is
+# `FAIL_CLOSED=1`, so crossing the ceiling is a REFUSAL:
+#
+#   ("if " x N) + "pip install requests"   20 KB  2.59 -> 11.25 s  (4.34x)
+#   ...an APPROVED install, allowed on     40 KB  9.35 -> 42.38 s  (4.53x)
+#   the merits at both ends                50 KB 14.43 -> 66.31 s  (4.59x)
+#                                                 ^ base ALLOWS, head is past
+#                                                   the ceiling and is killed,
+#                                                   which a FAIL_CLOSED gate
+#                                                   turns into a DENY
+#
+# So "nothing the base allowed is pushed into the ceiling" is NOT claimed, in
+# the same words `_xp_iw` and X-36y decline to claim it. The crossing is
+# BETWEEN 35 AND 45 KB and depends on the head word, which is why it is stated
+# as a band rather than as one shape's number: `{ ` and `! ` runs ending in an
+# ordinary `true` cross at ~38 KB (40 KB = 13.5 -> 62.0 s and 13.5 -> 64.5 s,
+# base allowing at 13.5 s both times), while the `if ` run above reaches it
+# nearer 45 KB. Machine-dependent as well as shape-dependent. Direction is
+# fail-CLOSED, and nothing realistic is affected -
+# `git add` of 4,000 paths 1.01x, `grep -l` over 5,000 paths 0.98x, 200 nested
+# brace groups 1.05x, 50 reserved words 1.35x on a 23 ms baseline.
+#
+# NO COUNT FENCE, and that is a decision rather than an omission: a length or
+# count bound inside a security predicate is a fail-OPEN guard (the rule
+# INVOKER_WORD_MAX is written under), and it would be guarding a cost this
+# change inherited rather than introduced. The fix direction, if it is ever
+# taken, is X-36y's: bound the token walk in `_cs_scan`, which is the actual
+# quadratic.
+HEAD_TRANSPARENT = KEYWORDS + GROUP_TOKENS
 
 # [batch 30-33, issue #31 CLOSED AS MESSAGE-ONLY] THERE IS NO NEGATED-GLOB
 # EXEMPTION, AND THIS NOTE IS HERE SO THE NEXT READER DOES NOT ADD ONE BACK.
@@ -507,17 +626,47 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
 
     The arms, in order: a wrapper word (with the optional `([^ ]*/)?` path
     arm, so `/usr/bin/env python3` is a prefix run and not an unknown word)
-    followed by any run of flags and positionals; a brace group or subshell; a
-    redirection; a `VAR=value` assignment; a shell keyword.
+    followed by any run of flags and positionals; a NAMED GROUP head with the
+    same shape; a brace group or subshell; a redirection; a `VAR=value`
+    assignment; a shell keyword.
 
     UNBOUNDED after a wrapper word, deliberately - see the ARITY section of
     this module's docstring for the 16-of-27 measurement that killed the arity
     table, and for why unbounded consumption cannot fail open in a REGEX (the
     engine backtracks; the allowance is gated on a wrapper word, so an
     ordinary command cannot drift into command position).
+
+    [X-36v/w] THE KEYWORD ARM WAS HALF A RULE, AND THE HALF IT HAD IS WHY THE
+    GAP WAS INVISIBLE. `KEYWORDS` carried `then|else|do|elif`, so
+    `if true; then pip install evil; fi` denied and every reader concluded the
+    keyword class was covered - while `! pip install evil`,
+    `if pip install evil; then :; fi`, `while ...`, `until ...`,
+    `function f { pip install evil; }` and `coproc C { pip install evil; }` all
+    ALLOWED and all really install. Six live rows behind one that passed.
+
+    The two new arms both read a cmdpos tuple rather than a literal, so this
+    function and the two shell walkers cannot encode the rule differently -
+    which is round-4 P1 finding 9's prescription applied to the class that
+    finding was about.
+
+    THE NAMED-GROUP ARM IS THE WRAPPER SHAPE, NOT A NAME-CONSUMING ONE. The
+    obvious spelling `(function|coproc) +[^ ]+ +` eats the command word of
+    `coproc pip install evil` (which is legal, and installs) as if it were the
+    name. That is X-36c's mechanism reintroduced by its own repair; the wrapper
+    shape backtracks instead, and its safety argument is the one already
+    written above.
+
+    THE TRAILING `space` ON THE KEYWORD ARM IS LOAD-BEARING and carries more
+    weight now that the tuple is longer: without it `do` would match inside
+    `done ` and `if` inside `ifconfig `. Both are pinned against THIS regex in
+    tests/test_composition.py, and `ifconfig -a` is pinned at the VERDICT in
+    tests/test_substrate_differential.py - the two failures look nothing alike.
     """
     return (
         "((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")("
+        + space + "-" + nonspace + "*|"
+        + space + "[^- ]" + nonspace + "*)*" + space
+        + "|(" + alt(NAMED_GROUP_HEADS) + ")("
         + space + "-" + nonspace + "*|"
         + space + "[^- ]" + nonspace + "*)*" + space
         + "|[({] *"

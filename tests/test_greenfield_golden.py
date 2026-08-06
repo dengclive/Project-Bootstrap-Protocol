@@ -149,6 +149,75 @@ def per_file_digests(plan):
 # Expected (regenerate with GOLDEN_UPDATE=1)
 # --------------------------------------------------------------------------- #
 EXPECTED_DIGESTS = {
+    # [freeze-exception no. 47, 2026-08-06] X-36v / X-36w — A HEAD FORM NEITHER
+    # WALKER SAW PAST. `{ bash -c "pip install evil"; }` was allow/allow on
+    # BOTH substrates while `( bash -c "pip install evil" )` — one character
+    # different — denied on both, because `(` is a segment break in `_cs_ops` /
+    # `_shell_segments` and `{` is not. Ten more spellings of the same class
+    # were live and are closed with it: `!`, `if`, `then`, `elif`, `else`,
+    # `do`, `while`, `until`, `function`, `coproc`, plus the escape-prefixed
+    # head (`\sh`, `b\ash`) on the shell.
+    #
+    # THREE THINGS THE BACKLOG ROWS GOT WRONG, each corrected in
+    # docs/deferred-backlog.md rather than quietly:
+    #   1. The keyword half was filed as BOUNDED because `then bash -c '...'`
+    #      is a syntax error. That is a property of the FRAGMENT: in
+    #      `if true; then bash -c '...'; fi` the walkers get a segment that
+    #      still starts with `then`, and bash runs it. Verified by execution.
+    #   2. X-36v was filed as an approved-list bypass. It is a
+    #      `never_read_paths` bypass too — `{ bash -c "cat a.pem extra"; }`
+    #      PRINTS A PRIVATE KEY. Same understatement as X-36q, one row later.
+    #   3. Both rows blame the walkers. There is a SECOND surface: with no
+    #      invoker anywhere, `! pip install evil`, `if pip install evil; ...`,
+    #      `while`, `until`, `function f { ... }` and `coproc C { ... }` walked
+    #      past the ANCHOR. `cmdpos.prefix_run` already encoded HALF this rule
+    #      (`[({] *` and `then|else|do|elif`), which is why the gap read as
+    #      covered — six live rows hiding behind one that passed.
+    #
+    # VERIFIED PER-FILE BEFORE RE-BASELINING, per fixture, v2.7.3-vs-worktree
+    # PLAN ACTIONS (not the installed tree — freeze-exception no. 17's error;
+    # `.bootstrap-state.json` and `.installer-manifest.json` are written
+    # outside the plan and are not hashed):
+    #   default          57 -> 57 actions, 0 added, 0 removed, 14 changed
+    #   full_autonomous  69 -> 69 actions, 0 added, 0 removed, 16 changed
+    #   design_steering  59 -> 59 actions, 0 added, 0 removed, 14 changed
+    # Every changed action is a hook `.sh` or `sdk_gates/gates.py`; no
+    # markdown, no settings.json, no skill, no steering artifact moves. FOUR
+    # distinct per-file deltas, each accounted for (measured on THIS tree,
+    # comment-length dependent — re-measure, do not copy forward):
+    #   +3594  every hook that only carries the header (`_cs_head_kind`, the
+    #          shared five-way classifier, plus its rationale)
+    #   +3655  dependency-gate — the header plus the widened anchor ERE
+    #   +4927  secrets-gate — the header plus its own `_sg_push` rewiring
+    #   +2880  sdk_gates/gates.py — `_invoker_at`'s new arm, `_NAMED_GROUP_HEADS`
+    #          joining the wrapper arm, and two prelude literals
+    #
+    # BLAST RADIUS, ON A FIXTURE WHERE ALL SIX CAN DENY. All 13 hooks move
+    # BYTES; the six wired to `PreToolUse Bash` move BEHAVIOUR. Deny capability
+    # was asserted per hook at the BARE spelling before any row was read — an
+    # earlier fixture here left `eval-gate` and `spec-gate-commit` unable to
+    # deny for ANY input (no prompt change in the pushed range, no staged file
+    # under an ENFORCED_PREFIXES directory), which is rule 1(c) exactly: four
+    # of the six would have reported "bytes only" for free.
+    #   dependency-gate 6 rows moved   spec-gate-commit 18
+    #   secrets-gate    10             ci-mirror        30
+    #   test-gate       18             eval-gate        30
+    # 112 rows allow -> deny, 0 deny -> allow. On the wider 797-command sweep
+    # (13 hooks + 7 gates x 2 installs = 31,880 probes): 0 deny -> allow and
+    # 0 new SDK-more-permissive — the 18 rows that first looked like new splits
+    # are all `git push` denied ONLY by `ci-mirror`, which has no SDK twin, so
+    # they are not a substrate split at all.
+    #
+    # MUTATION-TESTED: each of the six edits reverted alone reopens a DISTINCT
+    # set of rows (5 / 2 / 3 / 1 / 6 / 2), so no edit is redundant and none is
+    # carrying the others.
+    #
+    # DISCLOSED, NOT FENCED — see cmdpos.HEAD_TRANSPARENT and backlog X-36y:
+    # a command that is N repetitions of a head word now costs what its
+    # recognised twin always cost. Fail-CLOSED direction, realistic shapes
+    # 1.00-1.05x, and a length fence inside a security predicate is a
+    # fail-OPEN guard.
+
     # [freeze-exception no. 46, 2026-08-06] RELEASE 2.7.3 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.2 -> 2.7.3. PATCH on this repo's stated criterion:
     # `INVOKER_WORD_MAX` is an INTERNAL constant, not operator-facing surface, so
@@ -2545,7 +2614,7 @@ EXPECTED_DIGESTS = {
     # so every hook moves - which is exactly the blast radius #50 deferred it
     # on, now measured rather than estimated.
     "default":
-        "a5927ca8fe390fd3da4f9d1ad74aa7cfcc5357feafb15d1c684834c7ccc417e0",
+        "6b7fd65ed2f965ab9f57d3144d0882720f6143ea8b76045c151728893ce15cde",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2700,7 +2769,7 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "2965889e6a18e644bcffcaaf3ff7f9e737ccffe620613ad1914d5280b6d23824",
+        "7c272013630c4b76b42cf662041a8b4674ec8d62ddeb18288ee244586ba59298",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2800,7 +2869,7 @@ EXPECTED_DIGESTS = {
         # design-steering artifacts (.claude/steering/design.md, the
         # design-review skill and the design-review command) are UNCHANGED,
         # verified per-file rather than assumed.
-        "fa96d1b337789da0eba6d8589f42beb0b34ddcd1452c147d0099e25811398372",
+        "db13099a9bd5ece6756bf0cddef30c6ef80cda02594a7ca38fd62ffab20a75c8",
 }
 
 EXPECTED_ACTION_COUNTS = {

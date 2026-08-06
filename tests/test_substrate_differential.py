@@ -1557,6 +1557,133 @@ for _c, _g, _why in (
     differential(_g, bash(_c), "deny", "#54 X-36q quoted wrapper: %s" % _why)
 
 # --------------------------------------------------------------------------- #
+# X-36v / X-36w -- A HEAD FORM NEITHER WALKER SAW PAST
+# --------------------------------------------------------------------------- #
+#
+# Every row below was allow/allow at v2.7.3 (X-36w's two: shell-allow /
+# SDK-deny) and every one RUNS -- verified by execution with a fake `pip` on
+# PATH and a real key file, not by `bash -n` alone. The twin that always worked
+# is `( bash -c "pip install evil" )`: `(` is a segment break in both
+# substrates and `{` was not, so the gap was the head form and never the
+# invoker.
+#
+# THE ROW THAT FILED THIS CALLED THE KEYWORD HALF BOUNDED because `then bash -c
+# '...'` alone is a syntax error. That is a property of the FRAGMENT: in
+# `if true; then bash -c '...'; fi` the walkers get a segment that still starts
+# with `then`, bash runs the whole command, and the payload installs. Both
+# spellings are pinned so the distinction cannot be lost again.
+_V_INV = 'bash -c "pip install evil"'
+_V_SEC = 'bash -c "cat a.pem extra"'
+for _c, _g, _why in (
+        # --- the brace group, X-36v as filed ---
+        ("{ %s; }" % _V_INV, "dependency-gate", "brace group"),
+        ("{ %s;}" % _V_INV, "dependency-gate",
+         "brace group with no space before `}`"),
+        ("{ { %s; }; }" % _V_INV, "dependency-gate", "nested brace groups"),
+        ("true && { %s; }" % _V_INV, "dependency-gate",
+         "brace group after an operator, i.e. not at the head of the COMMAND "
+         "but at the head of a SEGMENT, which is what the walkers read"),
+        ('bash -c "{ bash -c %spip install evil%s; }"'
+         % (_54_BS + _54_DQ, _54_BS + _54_DQ), "dependency-gate",
+         "a brace group INSIDE an invoker argument - depth 2, which the "
+         "one-level reading of this row missed"),
+        ("{ %s; }" % _V_SEC, "secrets-gate",
+         "the brace group is a never_read_paths bypass too, and THAT IS NOT "
+         "WHAT THE ROW SAID: this printed a private key. END-anchored `*.pem` "
+         "with a trailing token, so the walk is actually exercised - a `.env` "
+         "probe denies on the substring match with no walk at all"),
+        # --- the reserved words the row never named ---
+        ("! %s" % _V_INV, "dependency-gate", "`!` before an invoker"),
+        ("! ! %s" % _V_INV, "dependency-gate",
+         "repeated `!`: the keyword arm is inside prefix_run's `(...)*`"),
+        ("! { %s; }" % _V_INV, "dependency-gate", "`!` before a brace group"),
+        ("! %s" % _V_SEC, "secrets-gate", "`!` and a private key"),
+        ("if %s; then :; fi" % _V_INV, "dependency-gate",
+         "`if` COND is a command position"),
+        ("if true; then %s; fi" % _V_INV, "dependency-gate",
+         "`then` IN A COMMAND THAT PARSES - the row called this bounded"),
+        ("if false; then :; else %s; fi" % _V_INV, "dependency-gate", "`else`"),
+        ("if false; then :; elif %s; then :; fi" % _V_INV,
+         "dependency-gate", "`elif`"),
+        ("for i in 1; do %s; done" % _V_INV, "dependency-gate", "`do`"),
+        ("while %s; do break; done" % _V_INV, "dependency-gate", "`while`"),
+        ("until %s; do break; done" % _V_INV, "dependency-gate", "`until`"),
+        ("if true; then %s; fi" % _V_SEC, "secrets-gate",
+         "`then` and a private key"),
+        # --- the two that take a NAME before their group ---
+        ("function f { %s; }; f" % _V_INV, "dependency-gate",
+         "`function` needs WRAPPER semantics, not a one-token skip: the name "
+         "sits between the keyword and the group"),
+        ("coproc C { %s; }" % _V_INV, "dependency-gate", "`coproc` with a name"),
+        ("coproc %s" % _V_INV, "dependency-gate",
+         "`coproc` with NO name - which is why the anchor arm is the "
+         "unbounded wrapper shape and not a name-consuming one"),
+        # --- the ANCHOR surface: no invoker anywhere in the command ---
+        ("! pip install evil", "dependency-gate",
+         "the ANCHOR, not the walkers: a direct install behind `!`"),
+        ("if pip install evil; then :; fi", "dependency-gate",
+         "the anchor behind `if`"),
+        ("while pip install evil; do break; done", "dependency-gate",
+         "the anchor behind `while`"),
+        ("until pip install evil; do break; done", "dependency-gate",
+         "the anchor behind `until`"),
+        ("function f { pip install evil; }; f", "dependency-gate",
+         "the anchor behind `function`"),
+        ("coproc C { pip install evil; }", "dependency-gate",
+         "the anchor behind `coproc`"),
+        # --- X-36w, the escape half, now closed on the SHELL too ---
+        ('%ssh -c "pip install evil"' % _54_BS, "dependency-gate",
+         "X-36w: escape-prefixed head. The SDK denied from v2.7.3 and the "
+         "SHELL allowed, and bash RUNS it - the two rows this replaces were "
+         "pinned as a tolerated split in the #54 ledger above"),
+        ('%sbash5.2 -c "pip install evil"' % _54_BS, "dependency-gate",
+         "X-36w on a VERSIONED escape-prefixed head"),
+        ('b%sash -c "pip install evil"' % _54_BS, "dependency-gate",
+         "the escape MID-WORD, which the row named nowhere: `b\\ash` is `bash` "
+         "to bash and was `other` to the walker"),
+        ("{ %ssh -c \"pip install evil\"; }" % _54_BS, "dependency-gate",
+         "both halves at once: an escaped invoker inside a brace group")):
+    differential(_g, bash(_c), "deny", "X-36v/w: %s" % _why)
+
+# The twins that must NOT move. Each is the control that says the fix is the
+# HEAD FORM and not a general widening: `(` was always a segment break, `time`
+# was always a prefix, `case` and `[[` reach an operator before any command
+# word, and an ordinary word that merely STARTS with a reserved word must stay
+# an ordinary word.
+for _c, _g, _want, _why in (
+        ("( %s )" % _V_INV, "dependency-gate", "deny",
+         "the subshell twin, unchanged - it denied before this change"),
+        ("time %s" % _V_INV, "dependency-gate", "deny",
+         "`time` is a PREFIX and stays one"),
+        ("case x in x) pip install evil ;; esac", "dependency-gate", "deny",
+         "`)` is already a segment break"),
+        ("[[ -n x ]] && pip install evil", "dependency-gate", "deny",
+         "`&` is already a segment break"),
+        ("{ pip install requests; }", "dependency-gate", "allow",
+         "an APPROVED package behind a brace group is still approved - the "
+         "change must not turn the head form itself into a refusal"),
+        ("! pip install requests", "dependency-gate", "allow",
+         "...and behind `!`"),
+        ("if pip install requests; then :; fi", "dependency-gate", "allow",
+         "...and behind `if`"),
+        ('git commit -m "if this works, do not merge while I am out"',
+         "dependency-gate", "allow",
+         "reserved words in PROSE inside a quoted `-m` value: one token, not "
+         "a command position"),
+        ("ifconfig -a", "dependency-gate", "allow",
+         "`ifconfig` starts with `if` and is not it - the trailing space on "
+         "prefix_run's keyword arm is what tells them apart"),
+        ("for i in 1; do :; done", "dependency-gate", "allow",
+         "`done` is not a head form and nothing installs here"),
+        ("find . -name '*.py' -exec grep -l x {} ;", "dependency-gate",
+         "allow", "`{}` is ONE token and not the reserved word `{`"),
+        ("echo {a,b,c}", "dependency-gate", "allow",
+         "brace EXPANSION is not a brace GROUP"),
+        ("xargs -I{} echo {}", "dependency-gate", "allow",
+         "the xargs replace-string idiom")):
+    differential(_g, bash(_c), _want, "X-36v/w control: %s" % _why)
+
+# --------------------------------------------------------------------------- #
 # KNOWN RESIDUE, pinned so a later reader does not mistake it for a
 # regression of this change. Each row is a SPLIT: the two substrates
 # disagree. The check name carries the EXECUTED-bash bound, because the
@@ -1618,27 +1745,20 @@ for _c, _g, _wsh, _wsd, _lbl in (
          "into agreement, that is the deny->allow"),
         ("-o/x/y bash -c \"pip install evil\"", "dependency-gate",
          "allow", "deny",
-         "...and the same for an attached FLAG VALUE carrying a slash"),
-        ('%sbash5.2 -c "pip install evil"' % _54_BS, "dependency-gate",
-         "allow", "deny",
-         "X-36w: an ESCAPE-prefixed head. TOLERATED direction (SDK stricter) "
-         "and the SDK is RIGHT - bash executes `\\ssh host x` as ssh - so the "
-         "shell half is the fail-open. Closed on the SDK here as a side "
-         "effect of the union; the shell half stays open because fixing it "
-         "changes what the walked word IS, which changes arms"),
-        ('%ssh -c "pip install evil"' % _54_BS, "dependency-gate",
-         "allow", "deny",
-         "X-36w on the UNVERSIONED spelling. READ THE HALVES SEPARATELY "
-         "[code-review 2, F3]: the SHELL half is pre-existing - allow at "
-         "v2.7.2 and allow here, and bash EXECUTES it, so the shell is the "
-         "fail-open. The SDK DENY IS INTRODUCED BY THIS CHANGE, not "
-         "inherited: this row is allow/ALLOW at v2.7.2. An earlier wording "
-         "of this check said the twin 'behaves identically, which is what "
-         "makes this a pre-existing class' - the class is pre-existing, the "
-         "SDK verdict on this row is not. It is 1 of 200 measured "
-         "unversioned-head rows that newly refuse, of 1,000 new tolerated "
-         "rows on a 4,000-row hostile-head sweep. Tolerated direction, SDK "
-         "correct")):
+         "...and the same for an attached FLAG VALUE carrying a slash")):
+    # [X-36w CLOSED] TWO ROWS WERE DELETED HERE, NOT RE-POINTED, which is the
+    # instruction this block's own failure message gives:
+    #
+    #   \bash5.2 -c "pip install evil"     shell=allow / sdk=deny
+    #   \sh      -c "pip install evil"     shell=allow / sdk=deny
+    #
+    # Both were the X-36w tolerated split - the SDK denied because `_tok_words`
+    # reads the escape-stripped spelling while `_cs_isinv` KEPT escapes, so the
+    # SHELL was the fail-open half and bash really executes the payload
+    # (`\ssh host x` -> RAN). `_cs_isinv` now consults the escape-stripped
+    # spelling as a SECOND classification, and both rows are deny/deny. They
+    # live on as agreement rows in the X-36v/w block below, so deleting them
+    # here does not delete their coverage.
     _sh54 = shell_verdict(_g, bash(_c))
     _sd54 = sdk_verdict(_g, bash(_c))
     check(f"[{_g}] #54 KNOWN SPLIT shell={_wsh}/sdk={_wsd}: {_lbl}",
