@@ -1409,6 +1409,48 @@ _cs_inv_word(){
   esac
   return 1
 }
+# [X-36v/w] THE CLASSIFICATION OF ONE HEAD WORD, FOR BOTH SHELL WALKERS.
+#
+# `_cs_isinv` and `_sg_push` each carried their own transcription of this
+# cascade. Issue #54 already paid for that once - it shared the INVOKER
+# question (`_cs_inv_word`) after secrets-gate leaked all 40 versioned
+# spellings that the header's walk had just been taught to catch - and left the
+# other four arms transcribed twice. X-36v is the same bill arriving for the
+# arms: a head form NEITHER walker sees past.
+#
+# Returns through `_CS_R` (never stdout - a `$(...)` helper on this path costs
+# a fork per call, 2.4 ms against 0.2 ms, the F-937 class):
+#
+#   inv    a shell invoker: its argument is a command line
+#   skip   a reserved word or brace token: transparent, and NOT a wrapper -
+#          the walk continues but an ordinary word after it still ends the walk
+#   wrap   a wrapper word, a named group head, or an assignment: skip until an
+#          invoker turns up
+#   flag   never the command word
+#   other  an ordinary command word: this walk is over
+#
+# ORDER IS SIGNIFICANT, and the sets are NOT all disjoint - the one overlap is
+# deliberate and is why the order is what it is. `watch`/`xargs`/`ssh` (DUAL)
+# are in the invoker set AND the wrapper set, and the invoker arm is tested
+# FIRST so they report `inv` rather than being skipped past. Every OTHER pair
+# is disjoint, and tests/test_composition.py asserts both halves of that -
+# the skip set against the invoker and wrapper sets, and DUAL as the ONLY
+# inv/wrap overlap - rather than leaving the next reader to re-derive it: a
+# word that lands in two sets silently takes the first arm. `time` is the
+# near miss - a bash reserved word that is already a PREFIXES member and
+# already denies, so it stays exactly where it is. Moving it to the skip set
+# would NARROW the walk (one token instead of skip-until-invoker), which is
+# the allow direction.
+_cs_head_kind(){
+  _CS_R="other"
+  if _cs_inv_word "$1"; then _CS_R="inv"; return 0; fi
+  case "$1" in
+    @@HEADW_CASE@@) _CS_R="skip" ;;
+    @@NAMEDGRP_CASE@@|@@PFX_CASE@@|[A-Za-z_]*=*) _CS_R="wrap" ;;
+    -*) _CS_R="flag" ;;
+  esac
+  return 0
+}
 # Is the segment currently being built headed by a shell INVOKER? Its
 # quoted argument is then a command line, not data, and has to be
 # segmented as one [round-3 lens A, A1]. Mirrors _sg_push's rule in
@@ -1434,7 +1476,7 @@ _cs_inv_word(){
 # skip, because `grep` is not a wrapper - and over-consumption is the safe
 # direction for a deny-list anyway.
 _cs_isinv(){
-  local _tail="${_CS_BUF##*$_CS_SEP}" _w _b _seen=0
+  local _tail="${_CS_BUF##*$_CS_SEP}" _w _b _e _seen=0 _k
   while : ; do
     _tail="${_tail#"${_tail%%[![:space:]]*}"}"
     _w="${_tail%%[[:space:]]*}"
@@ -1447,11 +1489,36 @@ _cs_isinv(){
     # [issue #54 / X-36q] Position UNCHANGED - still first, still this same
     # `_b`. Only the SET the arm tests membership in got wider; see
     # `_cs_inv_word` for why no token can change arm.
-    if _cs_inv_word "$_b"; then return 0; fi
-    case "$_b" in
-      @@PFX_CASE@@) _seen=1 ;;
-      [A-Za-z_]*=*) _seen=1 ;;
-      -*) ;;                     # a flag: never the command word
+    _cs_head_kind "$_b"; _k="$_CS_R"
+    # [X-36w] THE ESCAPE-STRIPPED SPELLING, AS A SECOND CLASSIFICATION RATHER
+    # THAN A REPLACEMENT. `\\sh -c "pip install evil"` was allow/allow on this
+    # substrate at v2.7.2 and bash really runs it as `sh` (verified: `\\ssh
+    # host x` -> RAN, `\\\\ssh` -> command not found). Issue #54 closed the SDK
+    # half as a side effect of `_tok_words` reading the escape-stripped
+    # spelling and left this half open, with the reason recorded: `_cs_isinv`
+    # KEEPS escapes, so stripping them changes what the walked word IS, and a
+    # token could change ARM.
+    #
+    # It cannot change arm here, because the second reading is consulted ONLY
+    # when the first already landed on `other` - the arm that ENDS the walk.
+    # So this can turn a walk-ending answer into a continuing one and never the
+    # reverse: deny-only by construction, which is the same superset rule
+    # `_invoker_at` states for its own arms ("every arm must read a superset of
+    # what it read before").
+    #
+    # The PARKED sentinels are deliberately not stripped: `\\\\sh` parks to
+    # <ESC>sh, which bash runs as the program `\\sh` - command not found - so
+    # it must keep classifying as `other`.
+    if [ "$_k" = "other" ]; then
+      case "$_b" in
+        *\\\\*) _e="${_b//\\\\/}"; _e="${_e##*/}"
+                _cs_head_kind "$_e"; _k="$_CS_R" ;;
+      esac
+    fi
+    case "$_k" in
+      inv) return 0 ;;
+      wrap) _seen=1 ;;
+      skip|flag) ;;              # transparent; never the command word
       *) [ "$_seen" = "1" ] || return 1 ;;
     esac
     _tail="${_tail#"$_w"}"
@@ -1784,6 +1851,19 @@ _SHELL_SUBST = {
     # `_INV_WORD_MAX` cannot drift to two budgets - the same discipline
     # RESOLVED_MAX above is under. Semantic, not a perf fence: see lib/cmdpos.py.
     "@@INV_WORD_MAX@@": str(cmdpos.INVOKER_WORD_MAX),
+    # [X-36v] The head forms a WALKER must be transparent to, and the two that
+    # take a NAME before their group. `_bash_case_words` is mandatory here, not
+    # cosmetic: `!`, `{` and `}` all reach a bash `case` pattern list and the
+    # helper quotes every member that is not plain alphanumeric. An unquoted
+    # `(` in a pattern list is a syntax error that fails all 13 hooks CLOSED;
+    # an unquoted `!` is safe only by accident, which is not a property to
+    # depend on when the set is meant to grow.
+    #
+    # HEADER placeholders, beside the walk they belong to - `_cs_head_kind`
+    # lives in `_HOOK_HEADER` because BOTH shell walkers call it, which is the
+    # same reason `_xp_iw` and `_cs_inv_word` moved there for issue #54.
+    "@@HEADW_CASE@@": _bash_case_words(cmdpos.HEAD_TRANSPARENT),
+    "@@NAMEDGRP_CASE@@": _bash_case_words(cmdpos.NAMED_GROUP_HEADS),
     # [X-36h perf] How much of the command `_param_default` walks at once.
     # Rendered from cmdpos too - not because the reference needs a window
     # (`re.sub` does not) but so cmdpos.PARAM_WINDOW_VECTORS, whose entire
@@ -1806,7 +1886,12 @@ _HEADER_PLACEHOLDERS = ("@@INV_CASE@@", "@@PFX_CASE@@", "@@ANCHOR_ERE@@",
                         # hooks closed.
                         "@@INT_CASE@@", "@@INT_MAXLEN@@", "@@INT_VER_CLASS@@",
                         "@@INT_TAG_CLASS@@", "@@INT_SUF_CLASS@@",
-                        "@@SHELL_INT_CASE@@", "@@INV_WORD_MAX@@")
+                        "@@SHELL_INT_CASE@@", "@@INV_WORD_MAX@@",
+                        # [X-36v] `_cs_head_kind`'s two word sets. Both render
+                        # a bash `case` pattern list through
+                        # `_bash_case_words`, so every non-alphanumeric member
+                        # arrives quoted.
+                        "@@HEADW_CASE@@", "@@NAMEDGRP_CASE@@")
 for _k in _HEADER_PLACEHOLDERS:
     if _k not in _HOOK_HEADER:
         raise AssertionError(f"hook-header placeholder {_k} not found")
@@ -2482,12 +2567,22 @@ _sg_push(){{
       # is why the predicate is shared rather than transcribed a fourth time.
       # `_b` here is the ESCAPE-stripped basename, not `_cs_isinv`'s
       # quote-stripped one; the predicate is deliberately spelling-agnostic.
+      #
+      # [X-36v] ...and the other four arms are shared now too, through
+      # `_cs_head_kind`. They were transcribed here and in `_cs_isinv`, and
+      # NEITHER copy knew a reserved word or a brace token: a brace group
+      # around `bash -c "cat a.pem extra"`, and the same payload behind a
+      # leading `!`, were allow/allow and PRINTED THE PRIVATE KEY - while the
+      # SUBSHELL twin, one character different, denied on both substrates. The
+      # row that filed this called it an approved-list bypass; it is a
+      # `never_read_paths` bypass as well, which is issue #54's understatement
+      # repeating one row later.
       _sginv=0
-      if _cs_inv_word "$_b"; then _SG_INVOKER=1; _sginv=1; fi
-      case "$_b" in
-        @@PFX_CASE@@) _SG_PFXSEEN=1 ;;
-        [A-Za-z_]*=*) _SG_PFXSEEN=1 ;;
-        -*) ;;                   # a flag is never the command word
+      _cs_head_kind "$_b"
+      case "$_CS_R" in
+        inv)  _SG_INVOKER=1; _sginv=1 ;;
+        wrap) _SG_PFXSEEN=1 ;;
+        skip|flag) ;;            # transparent; never the command word
         *)
           # THE BOUND IS GONE. `_SG_SKIPPED -lt 3` could not reach the
           # invoker behind `timeout -k 1 -s KILL 5 sh -c` (five tokens) or
@@ -2504,6 +2599,19 @@ _sg_push(){{
       # call per token, and no way for the two reads to disagree. The `[ ] &&`
       # also comes off a last-command-of-a-branch position, where a false test
       # is the branch's exit status under `set -e`.
+      #
+      # [X-36v] THIS ARM DELIBERATELY STILL READS THE PREFIX ALTERNATION AND
+      # NOT `_CS_R`, and the tidier-looking version is WRONG. (Naming the
+      # placeholder here in prose is not possible: the substitution rewrites
+      # comments too, and the prefix list is emitted with backslash line
+      # continuations, so the tail of it lands OUTSIDE the comment as bare
+      # `|nice|...` command lines and every hook dies at parse. Measured, once,
+      # by writing it.) `_cs_head_kind` folds
+      # prefixes and ASSIGNMENTS into one `wrap` class; this arm names
+      # PFX_CASE only, so an assignment after an invoker closes command
+      # position TODAY. Routing it through `wrap` would stop assignments
+      # closing it - an allow-direction behaviour change smuggled in as a
+      # refactor, in the one gate that reads private keys.
       if [ "$_sginv" = "0" ]; then
         case "$_b" in
           @@PFX_CASE@@) ;;

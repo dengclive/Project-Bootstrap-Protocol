@@ -697,6 +697,33 @@ def _invoker_at(toks):
         if any(len(_w) <= _INV_WORD_MAX and _int_word(_w) in _INT_INVOKERS
                for _w in words):
             return i
+        # [X-36v] A RESERVED WORD IS NOT THE COMMAND WORD, and this walk did
+        # not know that for any of ten spellings. Every one of these is
+        # allow/allow at v2.7.3 and every one really runs, verified with a fake
+        # `pip` on PATH:
+        #
+        #   { bash -c "pip install evil"; }         ! bash -c "..."
+        #   if bash -c "..."; then :; fi            while bash -c "..."; do ...
+        #   if true; then bash -c "..."; fi         until bash -c "..."; do ...
+        #   if false; then :; else bash -c "..."; fi
+        #
+        # while the SUBSHELL twin `( bash -c "..." )` denies on both
+        # substrates - because `(` is a segment break in `_shell_segments` and
+        # `{` is not. The gap is the head form, not the invoker.
+        #
+        # AFTER the two invoker arms, so a DUAL word still reports its index
+        # rather than being skipped past, and BEFORE the prefix arm because
+        # this is the narrower answer: `continue` WITHOUT setting `saw_prefix`,
+        # so an ordinary word after a reserved one still ends the walk. That
+        # matters - `{ pip install evil; }` must NOT make this function claim
+        # an invoker; the ANCHOR is what denies that one, and it already does.
+        #
+        # Same DENY-ONLY argument as the arms below: this only continues a walk
+        # that would otherwise `return None`, and every caller consumes
+        # `toks[idx+1:]`, so it can turn None into an index and can never turn
+        # one index into a later one.
+        if any(_w in _HEAD_TRANSPARENT for _w in forms):
+            continue
         # DENY-ONLY, by the same argument as the two arms above and stated
         # here because this arm WIDENS a skip rather than adding a return:
         # `saw_prefix` only continues a walk that would otherwise
@@ -705,7 +732,15 @@ def _invoker_at(toks):
         # a later one. Fence unaffected - `grep -r sh f`, `"grep" -r sh f`,
         # `ls bash5.2` and `frobnicate bash5.2 -c x` all still return None,
         # because `grep`/`ls`/`frobnicate` are in no spelling of _CMD_PREFIXES.
-        if (any(_w in _CMD_PREFIXES for _w in words)
+        # [X-36v] `_NAMED_GROUP_HEADS` joins this arm rather than the skip arm
+        # above, because `function` and `coproc` put a NAME between themselves
+        # and the group - `function f { bash -c "pip install evil"; }; f` runs,
+        # and a one-token skip stops dead on `f`. Wrapper semantics (skip until
+        # an invoker turns up) is what reaches it, and it is the semantics that
+        # already exists here. `coproc bash -c "..."` with no name at all also
+        # runs, and the same arm covers it.
+        if (any(_w in _CMD_PREFIXES or _w in _NAMED_GROUP_HEADS
+                for _w in words)
                 or any(_ASSIGN.match(_w) for _w in forms)):
             saw_prefix = True
             continue
@@ -3277,6 +3312,15 @@ def sdk_gates_module(cfg: dict) -> str:
         "_SHELL_INVOKERS = frozenset(%r)\n"
         "_CMD_PREFIXES = frozenset(%r)\n"
         "_CMD_DUAL = frozenset(%r)\n"
+        "# [X-36v] The head forms `_invoker_at` must be transparent to, and\n"
+        "# the two that take a NAME before their group. Rendered from the\n"
+        "# SAME cmdpos tuples the shell header's `_cs_head_kind` case arms\n"
+        "# are rendered from, so the two substrates cannot answer 'is this\n"
+        "# word the command word' differently - which is round-4 D3, and\n"
+        "# which is how `then|else|do|elif` came to be known to the anchor\n"
+        "# and to neither walker.\n"
+        "_HEAD_TRANSPARENT = frozenset(%r)\n"
+        "_NAMED_GROUP_HEADS = frozenset(%r)\n"
         "# [round-5 P4] ANSI-C and locale quoting: the `$` is part of the\n"
         "# quote. [round-5 P1] The operators a newline may follow as a JOIN.\n"
         "_ANSIC_QUOTES = %r\n"
@@ -3365,6 +3409,7 @@ def sdk_gates_module(cfg: dict) -> str:
         "_UV_WITH = re.compile(%r)\n\n"
         % (sorted(cmdpos.ALL_INVOKERS), sorted(cmdpos.ALL_PREFIXES),
            sorted(cmdpos.DUAL),
+           sorted(cmdpos.HEAD_TRANSPARENT), sorted(cmdpos.NAMED_GROUP_HEADS),
            tuple(cmdpos.ANSIC_QUOTES), tuple(cmdpos.NL_JOIN_OPS),
            _py(cmdpos.anchor_regex(space=r"\s+", nonspace=r"\S")),
            cmdpos.ANSIC_RE_SRC, cmdpos.ANSIC_SAFE,

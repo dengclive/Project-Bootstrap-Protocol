@@ -142,6 +142,60 @@ check("su and script are invokers, NOT transparent prefixes",
           for w in ("su", "script")),
       "round-4 R-3: neither runs its positional operand")
 
+# --- [X-36v/w] the head-form sets ------------------------------------------ #
+#
+# `_cs_head_kind` tests inv, then skip, then wrap, then flag, and a word in two
+# of those sets would silently take the FIRST arm. That disjointness is an
+# assumption of the cascade, so it is asserted here rather than left for the
+# next reader to re-derive - which is how round-4 D3 (two transcribed copies of
+# one word set, one of them missing `su`) happened.
+check("HEAD_TRANSPARENT is disjoint from the invoker set",
+      not (set(cmdpos.HEAD_TRANSPARENT) & set(cmdpos.ALL_INVOKERS)),
+      "a word in both takes the invoker arm and never reaches the skip arm")
+check("HEAD_TRANSPARENT is disjoint from the wrapper sets",
+      not (set(cmdpos.HEAD_TRANSPARENT)
+           & (set(cmdpos.ALL_PREFIXES) | set(cmdpos.NAMED_GROUP_HEADS))),
+      "skip must not set _seen; wrap must. A word in both gets only the first")
+check("NAMED_GROUP_HEADS is disjoint from the invoker and prefix sets",
+      not (set(cmdpos.NAMED_GROUP_HEADS)
+           & (set(cmdpos.ALL_INVOKERS) | set(cmdpos.ALL_PREFIXES))))
+check("DUAL is the ONLY overlap between the invoker and wrapper sets",
+      set(cmdpos.ALL_INVOKERS) & set(cmdpos.ALL_PREFIXES)
+      == set(cmdpos.DUAL),
+      "the invoker arm is tested first precisely so a DUAL word reports there")
+# `time` is the near miss the admission rule has to survive: a bash reserved
+# word that is ALREADY a prefix and already denies. If it were added to
+# KEYWORDS it would move from wrap (skip until an invoker) to skip (one token),
+# which is NARROWER - the allow direction.
+check("`time` stays a PREFIX and is not a head-transparent word",
+      "time" in cmdpos.PREFIXES and "time" not in cmdpos.HEAD_TRANSPARENT,
+      "moving it to the skip class would narrow the walk, i.e. allow more")
+# Both walkers and the SDK must read ONE list. A hand-written copy is D3.
+for _w in ("HEAD_TRANSPARENT", "NAMED_GROUP_HEADS"):
+    check(f"cmdpos.{_w} is defined exactly once",
+          _cmdpos.count(f"\n{_w} = ") == 1)
+check("the SDK renders the head sets from cmdpos, not by hand",
+      "_HEAD_TRANSPARENT = frozenset(%r)" in _sdk
+      and "cmdpos.HEAD_TRANSPARENT" in _sdk
+      and "cmdpos.NAMED_GROUP_HEADS" in _sdk)
+check("the shell header carries the shared head classifier",
+      "_cs_head_kind(){" in _tmpl and _tmpl.count("_cs_head_kind(){") == 1,
+      "one predicate, called by _cs_isinv AND _sg_push")
+# The trailing `space` in prefix_run's keyword arm is what stops `do` matching
+# inside `done ` and `if` inside `ifconfig `. Pinned at the REGEX, because the
+# behavioural twin is three gates away.
+import re as _re                                                # noqa: E402
+_pr = _re.compile("^" + cmdpos.prefix_run() + "$")
+for _bad in ("done ", "ifconfig ", "iffy ", "until_x ", "elsewhere ",
+             "functional ", "coprocess "):
+    check(f"prefix_run does not consume {_bad!r} as a head form",
+          not _pr.match(_bad),
+          "the trailing space on the keyword arm is load-bearing")
+for _good in ("if ", "while ", "until ", "! ", "then ", "else ", "elif ",
+              "do ", "{ ", "( ", "function f ", "coproc C ", "! ! ",
+              "if ! { ", "sudo "):
+    check(f"prefix_run consumes {_good!r} as a head form", bool(_pr.match(_good)))
+
 # --------------------------------------------------------------------------
 # 2. The sampled composition sweep, at GATE level, on BOTH substrates.
 # --------------------------------------------------------------------------
