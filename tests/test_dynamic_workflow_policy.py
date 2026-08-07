@@ -32,6 +32,7 @@ Importing lib/ writes bytecode beside the source, which bin/run-tests' pollution
 detector reports (policy DW-R3/DW-R4 — the rule this repo learned by tripping).
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -61,18 +62,24 @@ def check(name, cond, detail=""):
 # The predicate
 # --------------------------------------------------------------------------- #
 # Every token is either part of the Workflow tool's API surface, its mandatory
-# script preamble, or a string that only a fan-out feature would emit. Bare
-# `agent(` / `phase(` / `parallel(` are deliberately EXCLUDED: emitted prose
-# could plausibly write "the agent(s)" and produce a false positive, which would
-# train a future maintainer to weaken this file. The `await ` prefix makes them
-# unambiguously JavaScript.
+# script preamble, a dispatch-config parameter, or a string that only a fan-out
+# feature would emit. Bare `agent(` / `phase(` / `parallel(` are deliberately
+# EXCLUDED: emitted prose could plausibly write "the agent(s)" and produce a
+# false positive, which would train a future maintainer to weaken this file.
+#
+# Matching is CASE-INSENSITIVE. The prose tokens are the reason: emitted docs
+# write "Fan-out" at the start of a sentence or heading far more often than
+# lowercase, and a case-sensitive scan misses exactly the spelling most likely
+# to appear.
 ORCHESTRATION_TOKENS = [
-    "export const meta",       # mandatory preamble of every workflow script
-    "subagent_type",
-    "run_in_background",
+    "export const meta",       # mandatory preamble of a Workflow script
+    "export default",          # the other module form a script could take
+    "subagent_type",           # dispatch config: which agent type to spawn
+    "run_in_background",       # dispatch config: detached execution
     "await agent(",
     "await parallel(",
     "await pipeline(",
+    "promise.all(",            # the fan-out primitive that needs no tool API
     ".claude/workflows",
     "min(16, cores",           # the tool's concurrency cap, which reads no config
     "dynamic-workflow-policy",  # the policy itself is maintainer-side, never emitted
@@ -80,13 +87,37 @@ ORCHESTRATION_TOKENS = [
     "fanout",
 ]
 
+# A workflow does not have to be JavaScript. The likeliest way orchestration
+# regresses into THIS repository is a shell dispatch loop, because
+# lib/templates.py already emits `claude -p` sixteen times — every one of them a
+# single serial dispatch. What distinguishes a fan-out is CONCURRENCY: a
+# backgrounded dispatch, a backgrounded loop body, or a parallel map.
+#
+# Every pattern below was checked against the real emitted tree and against
+# lib/, bin/ and plugin/: all five match zero live bytes today. They are
+# additions in detection power, not in false-positive risk.
+SHELL_FANOUT_PATTERNS = [
+    ("backgrounded claude dispatch", r"claude\s+(?:-p|--print)[^\n]*&[ \t]*$"),
+    ("backgrounded loop body", r"&[ \t]*\n[ \t]*done"),
+    ("bare `wait` for background jobs", r"^[ \t]*wait[ \t]*$"),
+    ("parallel xargs", r"xargs[^\n]*-P[ \t]*[0-9]"),
+    ("GNU parallel", r"\bparallel\b[ \t]+-"),
+]
+
 # Paths that would carry orchestration if it were ever emitted.
 ORCHESTRATION_PATH_MARKERS = [".claude/workflows", ".workflow.js", "workflow.sh"]
 
 
 def scan(text):
-    """Return the orchestration tokens present in `text`."""
-    return [t for t in ORCHESTRATION_TOKENS if t in text]
+    """Return every orchestration signal present in `text`.
+
+    Case-insensitive for tokens; multiline-anchored for the shell patterns.
+    """
+    low = text.lower()
+    hits = [t for t in ORCHESTRATION_TOKENS if t in low]
+    hits += [name for name, rx in SHELL_FANOUT_PATTERNS
+             if re.search(rx, text, re.M)]
+    return hits
 
 
 # --------------------------------------------------------------------------- #
@@ -185,25 +216,65 @@ PLANS = [(label, plan_for(text)) for label, text in FIXTURES]
 # X-36v/w sweep, which asserted deny-capability before measuring allow/deny.
 print("\n=== Section 0: the predicate catches a planted violation ===")
 
+# Each payload names the ONE signal it is here to exercise. Section 0 then
+# asserts that every token and every pattern is named by some payload — so a
+# signal cannot be added to the predicate without a plant proving it fires, and
+# a signal cannot silently stop firing. The earlier version of this file planted
+# six payloads covering four of eleven tokens; six tokens could be deleted
+# outright with this section still fully green.
 PLANTED = [
-    ("workflow script preamble",
-     "export const meta = {\n  name: 'emit-fanout',\n}\n"),
-    ("an await agent() call",
+    ("export const meta", "workflow script preamble",
+     "export const meta = {\n  name: 'emit-dispatch',\n}\n"),
+    ("export default", "the other module form",
+     "export default { meta: { name: 'x' }, run: async () => {} }\n"),
+    ("subagent_type", "dispatch config naming an agent type",
+     '{"subagent_type": "general-purpose"}\n'),
+    ("run_in_background", "dispatch config detaching a worker",
+     '{"run_in_background": true}\n'),
+    ("await agent(", "an awaited agent call",
      "const r = await agent('review this', {schema: S})\n"),
-    ("a pipeline fan-out",
+    ("await parallel(", "an awaited parallel barrier",
+     "const rs = await parallel(items.map(i => () => go(i)))\n"),
+    ("await pipeline(", "an awaited pipeline",
      "const rs = await pipeline(items, s1, s2)\n"),
-    ("an emitted operator instruction to fan out",
-     "Run a fan-out across your task queue for faster review.\n"),
-    ("the tool's uncapped concurrency default",
+    ("promise.all(", "fan-out with no tool API at all",
+     "const rs = await Promise.all(lenses.map(l => spawn(l)))\n"),
+    (".claude/workflows", "an emitted workflow directory",
+     "Scripts live in .claude/workflows/ and run on demand.\n"),
+    ("min(16, cores", "the tool's uncapped concurrency default",
      "Concurrency is min(16, cores-2) and reads no config.\n"),
-    ("a reference to the maintainer-side policy",
-     "See .claude/dynamic-workflow-policy.md for fan-out rules.\n"),
+    ("dynamic-workflow-policy", "a reference to the maintainer-side policy",
+     "See the dynamic-workflow-policy document for the rules.\n"),
+    ("fan-out", "an operator instruction, capitalised as prose does",
+     "Fan-out across your task queue for faster review.\n"),
+    ("fanout", "the closed-up spelling",
+     "Set fanout_width to 8 before the nightly run.\n"),
+    ("backgrounded claude dispatch", "a shell fan-out runner",
+     'for lens in a b c; do\n  claude -p "review $lens" &\ndone\n'),
+    ("backgrounded loop body", "a backgrounded loop, any command",
+     "for f in $FILES; do\n  process \"$f\" &\ndone\n"),
+    ("bare `wait` for background jobs", "the join half of a shell fan-out",
+     "start_all\nwait\necho done\n"),
+    ("parallel xargs", "parallel map via xargs",
+     'printf "%s\\n" $T | xargs -P 8 -I{} claude -p "{}"\n'),
+    ("GNU parallel", "parallel map via GNU parallel",
+     'parallel -j 8 claude -p "{}" ::: $TASKS\n'),
 ]
-for label, payload in PLANTED:
+
+for signal, label, payload in PLANTED:
     hits = scan(payload)
     check(f"planted violation is detected: {label}",
-          len(hits) > 0,
-          f"    predicate returned no hits for payload: {payload!r}")
+          signal in hits,
+          f"    payload {payload!r}\n    expected signal {signal!r}, got {hits}")
+
+# Completeness: no signal may sit in the predicate without a plant proving it
+# fires. This is what stops the predicate growing untested entries.
+ALL_SIGNALS = ORCHESTRATION_TOKENS + [n for n, _ in SHELL_FANOUT_PATTERNS]
+planted_signals = {s for s, _, _ in PLANTED}
+uncovered = [s for s in ALL_SIGNALS if s not in planted_signals]
+check("every signal in the predicate has a planted violation proving it fires",
+      uncovered == [],
+      f"    signals with no plant: {uncovered}")
 
 # And the converse: the LEGITIMATE workflow.* config namespace must NOT trip it.
 # If it did, this file would fail on a clean tree and get weakened or deleted.
@@ -271,12 +342,41 @@ for label, plan in PLANS:
 # The legitimate workflow.* namespace must still be emitting. If this stops being
 # true, the emission surface changed shape and section 1's clean result may be
 # clean for the wrong reason.
-default_plan = dict(PLANS)["default"]
+by_label = dict(PLANS)
+default_plan = by_label["default"]
 worktree_hits = [a["path"] for a in default_plan if "worktree" in a["body"]]
 check("default: the legitimate workflow.* isolation surface is still emitted",
       len(worktree_hits) > 0,
       "    no emitted body mentions 'worktree' — emission shape changed; "
       "re-verify that section 1 is clean for the right reason")
+
+# THE FIXTURES MUST ACTUALLY BE FOUR DIFFERENT EMISSION PATHS. Without this, a
+# build_plan that silently returned the greenfield plan for every fixture — a
+# lost `mode: retrofit` dispatch, say — leaves sections 1 and 2 fully green while
+# three of the four claimed paths are no longer being covered at all. That exact
+# collapse was demonstrated against the previous version of this file.
+paths = {label: {a["path"] for a in plan} for label, plan in PLANS}
+
+check("retrofit is a genuinely different emission path from greenfield",
+      len(paths["retrofit_service"] - paths["default"]) >= 5,
+      f"    retrofit-only paths: "
+      f"{sorted(paths['retrofit_service'] - paths['default'])[:6]} — if this is "
+      f"empty the retrofit fixture silently fell back to greenfield")
+
+check("full_autonomous reaches templates the default never does",
+      len(paths["full_autonomous"] - paths["default"]) >= 3,
+      f"    autonomous-only paths: "
+      f"{sorted(paths['full_autonomous'] - paths['default'])[:6]}")
+
+check("design_steering reaches its three flag-gated additions",
+      len(paths["design_steering"] - paths["default"]) >= 3,
+      f"    design-only paths: "
+      f"{sorted(paths['design_steering'] - paths['default'])[:6]}")
+
+check("all four fixtures produce distinct plans",
+      len({frozenset(p) for p in paths.values()}) == 4,
+      f"    action-count by fixture: "
+      f"{ {k: len(v) for k, v in paths.items()} }")
 
 
 # --------------------------------------------------------------------------- #
@@ -289,30 +389,46 @@ check("default: the legitimate workflow.* isolation surface is still emitted",
 # failure this repo has paid for.
 print("\n=== Section 4: DW-P3, lib/ and bin/ never learn this exists ===")
 
-SOURCE_DIRS = [("lib", os.path.join(ROOT, "lib")), ("bin", os.path.join(ROOT, "bin"))]
+# `plugin/` is included even though DW-P3 names only lib/ and bin/: it is a
+# shipped, operator-facing surface (plugin.json + two command docs), and a rule
+# that stops at the two directories it happens to name is the "reads as covered"
+# failure this section's own comment is about. Scanning is free; the policy is
+# the narrower statement and this is the wider check.
+SOURCE_DIRS = [("lib", os.path.join(ROOT, "lib")),
+               ("bin", os.path.join(ROOT, "bin")),
+               ("plugin", os.path.join(ROOT, "plugin"))]
 
 for label, d in SOURCE_DIRS:
     offenders = []
-    for name in sorted(os.listdir(d)):
-        path = os.path.join(d, name)
-        if not os.path.isfile(path):
-            continue
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except (UnicodeDecodeError, OSError):
-            continue
-        # The policy filename is allowed to appear nowhere in lib/ or bin/;
-        # the whole point of DW-P3 is that neither knows it exists.
-        hits = scan(text)
-        if hits:
-            offenders.append((name, hits))
+    js = []
+    scanned = 0
+    # RECURSIVE. os.listdir stops at the top level, so a workflow parked one
+    # directory down (lib/orchestration/run.js) would have been invisible.
+    for root, _dirs, files in os.walk(d):
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            rel = os.path.relpath(path, d)
+            if name.endswith(".js"):
+                js.append(rel)
+            try:
+                with open(path, encoding="utf-8") as fh:
+                    text = fh.read()
+            except (UnicodeDecodeError, OSError):
+                continue
+            scanned += 1
+            # The policy filename is allowed to appear nowhere here; the whole
+            # point of DW-P3 is that the source does not know it exists.
+            hits = scan(text)
+            if hits:
+                offenders.append((rel, hits))
+
     check(f"{label}/: no source file references workflow orchestration",
           offenders == [],
           "\n".join(f"    {n}: {h}" for n, h in offenders))
-
-    js = [n for n in os.listdir(d) if n.endswith(".js")]
     check(f"{label}/: contains no .js file", js == [], f"    {js}")
+    # Non-vacuity for this section: a scan of zero files trivially finds nothing.
+    check(f"{label}/: the scan actually read files", scanned > 0,
+          f"    walked {d} and read {scanned} files")
 
 
 # --------------------------------------------------------------------------- #

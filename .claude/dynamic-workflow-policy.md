@@ -142,7 +142,7 @@ records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
 
-*Locator note.* `docs/dynamic-workflow-assessment.md:310` attributes this to
+*Locator note.* `docs/dynamic-workflow-assessment.md:321` attributes this to
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
@@ -242,12 +242,18 @@ single-process, single-threaded pure function of config; no workflow runs during
 `build_plan`."* This is the same posture `bin/trust-ramp` holds and for the same
 reason — it is what keeps the golden digests meaningful.
 
-**`bin/` is in scope, not an afterthought.** `bin/bootstrap-install`,
-`bin/bootstrap-interview`, and `bin/retrofit-interview` are the CLI entry points
-the seam contract's §3.2 is written about. A workflow reachable from one of them
-is orchestration on the wire, whatever the module boundary says — and a rule
-scoped to `lib/` alone would read as covered while leaving three of the five
-`bin/` scripts open. §7's tripwire is scoped to match.
+**`bin/` is in scope, not an afterthought.** `bin/bootstrap-install` and
+`bin/bootstrap-interview` are the CLI entry points the seam contract's §3.2
+table is written about (`SEAM-CONTRACT-v2-0-0.md:136-138`). A workflow reachable
+from either is orchestration on the wire, whatever the module boundary says, and
+a rule scoped to `lib/` alone would read as covered while leaving them open.
+
+Two rows of that table are **struck through** — `bootstrap-install --force`
+(`:139`) and `retrofit-interview` (`:140`, *"NOT a permitted Tessera entry point
+at this pin"*). Do not read a strikethrough as out of scope here: it removes a
+row from *Tessera's permitted invocation set*, not from this repository's
+executable surface. §7's tripwire therefore scans **all five** `bin/` scripts
+plus `lib/` and `plugin/`, which is wider than §3.2 and deliberately so.
 
 ### DW-P4 — No fan-out in front of a gated tree, including a fixture.
 
@@ -279,7 +285,7 @@ enforces it.**
 
 **Do not cite `Companion:161` as licensing one level.** The Companion reasons
 from *"your custom subagents spawn further subagents — **currently none do**"*,
-and the assessment (§2, `docs/dynamic-workflow-assessment.md:85-90`) reads that
+and the assessment (§2, `docs/dynamic-workflow-assessment.md:96-101`) reads that
 sentence as **already falsified by any workflow use at all**: a workflow script
 *is* subagents spawning subagents. So :161 is not a support for this rule; it is
 a premise this policy has already spent. DW-P6 keeps the spend to one level and
@@ -392,7 +398,7 @@ which wrote six `.pyc` files into `lib/__pycache__/`. Four of the six lenses
 found the error independently; one of them produced the evidence by committing
 it.
 
-The mechanism was already recorded — `docs/dynamic-workflow-assessment.md:413`
+The mechanism was already recorded — `docs/dynamic-workflow-assessment.md:425`
 is the checkpoint note *"`bin/run-tests`' pollution detector fires on a
 concurrent agent importing `lib/`"* — and this document dropped it while
 carrying the rest of §8. That is the "a rule encoded in one place reads as
@@ -506,7 +512,7 @@ repo-local and non-protocol-surface.
 It does **not** answer assessment gap **G-1** (trust-ramp semantics for a fleet:
 inherit / floor / ineligible), which is an owner decision of cluster-A class and
 remains open. G-1's scope is *"before any adoption **beyond dev tooling**"*
-(`docs/dynamic-workflow-assessment.md:284`, §10 header at `:454`) — **not**
+(`docs/dynamic-workflow-assessment.md:295`, §10 header at `:465`) — **not**
 "emitted installs" specifically, which is narrower than what the assessment
 reserved. This policy binds dev tooling only, i.e. it operates inside the space
 G-1 leaves open rather than pre-empting it. Do not cite DW-A2 as G-1's answer.
@@ -540,14 +546,30 @@ A naive substring match on `workflow` fails immediately: `lib/templates.py`
 carries 14 legitimate occurrences — the `workflow.*` config namespace this
 document's header disambiguates (`workflow.implementer_isolation` resolved into
 emitted prose) and ordinary English (*"Tests-first workflow per task"*). So the
-test matches on **high-specificity orchestration tokens** — the `Workflow`
-tool's own API surface and script preamble — never on the bare word, and it
-covers `bin/` alongside `lib/` per DW-P3.
+predicate never matches the bare word.
+
+**A workflow does not have to be JavaScript, and the JS-only version of this
+predicate was its central defect.** The likeliest regression shape *in this
+repository* is a shell dispatch loop, because `lib/templates.py` already emits
+`claude -p` sixteen times — every one a single serial dispatch. What separates a
+fan-out from those is **concurrency**, so the predicate carries five
+shell-concurrency patterns (backgrounded dispatch, backgrounded loop body, bare
+`wait`, `xargs -P`, GNU `parallel`) alongside the tool's API surface, its two
+module forms, its dispatch-config parameters, and `Promise.all(` — which fans
+out with no tool API at all. Matching is case-insensitive, because emitted prose
+writes "Fan-out" at the head of a sentence far more often than lowercase. All
+five shell patterns match **zero live bytes** across the emitted tree, `lib/`,
+`bin/` and `plugin/`: they add detection, not false-positive risk.
 
 Following this repo's own idiom (deny-capability asserted first, as the X-36v/w
-sweep did), the suite **plants a synthetic violation and asserts the predicate
-catches it** before asserting the real tree is clean. A tripwire that has never
-been shown to fire is not a tripwire.
+sweep did), the suite **plants a synthetic violation for every signal** and
+asserts each fires before asserting the real tree is clean — and asserts the
+converse, that the legitimate `workflow.*` config namespace does *not* trip it.
+Coverage is itself asserted: a signal cannot enter the predicate without a plant
+proving it fires. The fixtures are likewise checked to be four *distinct*
+emission paths, so a `build_plan` that silently collapsed them to one could not
+leave the scan green. A tripwire that has never been shown to fire is not a
+tripwire, and a scan that reads nothing passes every test.
 
 **Not mechanically enforceable: everything else.** §2's admission test, §4's
 operating rules, and §5's width discipline are **authoring-time discipline**.
