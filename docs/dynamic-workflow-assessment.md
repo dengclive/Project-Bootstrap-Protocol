@@ -11,6 +11,13 @@ and if so where.
 
 **This step decides IF and WHERE. It does not design the feature.**
 
+**HOW is decided in `.claude/dynamic-workflow-policy.md`** — the maintainer-side
+policy this assessment's verdict authorises: the closed list of permitted uses,
+the prohibitions, and the operating rules that make §8's finding (the pollution
+detector) survivable in practice. Its DW-P1/DW-P3 clauses are pinned by
+`tests/test_dynamic_workflow_policy.py`. That document is likewise not protocol
+surface and emits nothing.
+
 ---
 
 ## 0. Evidence labels
@@ -37,7 +44,11 @@ This is the third answer, not a softened yes.
 **Permitted:** the `Workflow` tool as a maintainer-side instrument for work *on
 this repository* — adversarial review fan-out, corpus sweeps, migration
 pipelines, judge panels. Nothing about that use enters an emitted tree, the
-seam, or a target project.
+seam, or a target project. **Those four uses are the closed allowlist in
+`.claude/dynamic-workflow-policy.md` §2 (DW-U1–DW-U4); the conditions on them
+are that document's §3–§5.** In particular the grant is conditioned on this
+repo having no registered `PreToolUse` hook from *any* settings source — a
+stronger and more fragile property than "no install of its own."
 
 **Refused, on a measured blocking finding:** emitting workflow orchestration
 into a target project's `.claude/`, or admitting fan-out as an autonomous mode
