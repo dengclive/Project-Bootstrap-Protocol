@@ -11,7 +11,7 @@ rows moving allow → deny. `PROTOCOL_VERSION` in `lib/installer.py` and
 version assertions **and their check labels** in four suites, the README pin
 target and applicability range, and the PRD's `**Version:**` header.
 
-Contains PRs **#57**, **#58** and **#59**. Suite 9276 → **9411 checks**, 0
+Contains PRs **#57**, **#58** and **#59**. Suite 9276 → **9416 checks**, 0
 failed; 23 → **24 suites**. Freeze-exceptions **47** (PR #57) and **48** (the
 version stamp).
 
@@ -19,9 +19,13 @@ version stamp).
 
 `{ bash -c "pip install evil"; }` was allow/allow on **both** substrates while
 the subshell twin `( bash -c "pip install evil" )` denied — because `(` is a
-segment break and `{` is not. **Twelve live spellings, not two:** `{`, `!`,
+segment break and `{` is not. **Twelve live spellings, not two:** `{`, `}`, `!`,
 `if`, `then`, `elif`, `else`, `do`, `while`, `until`, `function`, `coproc`,
-`select`, plus the escape-prefixed head on the shell.
+plus the escape-prefixed head on the shell. (`select` is **not** among them and
+is not in the fix's lists: `lib/cmdpos.py:176-179` records it as verified to
+DENY already, because its body is reached through `do`, which is in the set.
+The count of twelve is right; an earlier draft of this entry swapped `}` for
+`select`, inheriting the error rather than rebuilding the list.)
 
 Two review lessons are recorded with it, both of which changed the fix:
 
@@ -54,7 +58,9 @@ completes it.
 - **#59 — `.claude/dynamic-workflow-policy.md` + `tests/test_dynamic_workflow_policy.py`.**
   The policy decides HOW where the assessment decided IF and WHERE: four
   permitted uses behind a two-limb admission test, six prohibitions, six
-  operating rules, three accounting rules. It carries **B-4**, which the
+  operating rules, two accounting rules, and one named open question
+  (**DW-G1**, how a fan-out interacts with the trust ramp — owner's to close).
+  It carries **B-4**, which the
   assessment classifies as blocking *maintainer* use — the pollution detector
   is a whole-repo before/after diff, sound only under a single serialised
   writer — so test execution is serial by any entry point and there is one
@@ -80,9 +86,11 @@ This is the partial close of assessment gap **G-6**; the filename-vs-version
 skew that gap also names is unchanged and still open.
 
 **No PRD section describes a fan-out feature, and none should.** The verdict is
-*never emitted*, so the protocol has no such concept; the only PRD change is one
-sentence extending the existing "Not protocol surface, deliberately excluded"
-block to name `.claude/dynamic-workflow-policy.md` beside `.claude/trust-ramp.md`.
+*never emitted*, so the protocol has no such concept. The PRD changes are exactly
+two: the `**Version:**` header (with its v2.7.4 release block, in the form every
+prior release used), and one paragraph extending the existing "Not protocol
+surface, deliberately excluded" block to name `.claude/dynamic-workflow-policy.md`
+beside `.claude/trust-ramp.md`. No other section moves.
 Assessment §12's list of PRD sections a delta *would* touch remains unspent —
 it is explicitly conditioned on a delta touching emitted surface.
 

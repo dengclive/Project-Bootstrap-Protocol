@@ -7,8 +7,11 @@
 >
 > The normative spec is still `Bootstrap-Protocol-v2-6-0.md` +
 > `Bootstrap-Protocol-Companion-v2-6-0.md`: **2.6.1 through 2.7.4 are gate
-> corrections, and none of them adds operator-facing surface a PRD would
-> describe.** Older PRD/Companion pairs are retained as historical record — with
+> corrections, with one exception — 2.7.0 added two configuration keys
+> (`commands.execute_in_cwd`, `workflow.implementer_isolation`), which is why it
+> is the MINOR in the run and why the PRD carries a v2.7.0 block. No other
+> release in that range adds operator-facing surface a PRD would describe.**
+> Older PRD/Companion pairs are retained as historical record — with
 > one exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
 > corrections applied *in place* on 2026-07-28, each marked at its edit site,
 > made before a 2.6.0 document existed to hold them. They are native text in the

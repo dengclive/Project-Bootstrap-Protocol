@@ -231,11 +231,24 @@ EXPECTED_DIGESTS = {
     # EXACTLY ONE plan-hashed body moves per fixture: `.claude/settings.json`,
     # carrying the `_generatedBy (protocol 2.7.4)` stamp. Action counts unchanged
     # at 57 / 69 / 59. NO hook body and NOT `sdk_gates/gates.py` move.
-    # VERIFIED BEFORE RE-BASELINING, not assumed: for all three fixtures,
-    # substituting "2.7.4" -> "2.7.3" in every action body reproduces the PRIOR
-    # digest EXACTLY — the 2.7.3 values this block replaces, all three matching.
-    # That is a stronger check than a per-file eyeball: it proves byte-identity
-    # everywhere outside the stamp, rather than inspecting for it file by file.
+    # VERIFIED BEFORE RE-BASELINING, not assumed, by TWO independent methods:
+    #   1. Substituting "2.7.4" -> "2.7.3" in every action body reproduces the
+    #      PRIOR digest exactly, all three fixtures.
+    #   2. A per-action byte diff against a worktree at `main` (695befd):
+    #      identical path lists in identical order, identical modes and kinds,
+    #      and exactly one differing body per fixture differing on exactly one
+    #      line — `.claude/settings.json`'s `_generatedBy`.
+    # Method 1 alone is NOT sufficient and the second is what carries the claim.
+    # A global substitution of the version literal is blind by construction to a
+    # change that also involves that literal, and this tree does contain a
+    # second, unrelated "2.7.3" (lib/sdk_gates_template.py:702, a defect comment
+    # that is emitted). Method 2 has no such blind spot.
+    # NOT PINNED BY ANY GOLDEN, and moved stamp-only in this release (verified
+    # directly, recorded so a later reader does not assume coverage):
+    # `.claude/steering/telemetry.md`, which stamps PROTOCOL_VERSION into its
+    # OTEL_RESOURCE_ATTRIBUTES line but is off in all three fixtures; and the
+    # retrofit plans, for which tests/test_retrofit.py computes digests only
+    # relatively (a == b, a != x) and never against a constant.
     #
     # [freeze-exception no. 46, 2026-08-06] RELEASE 2.7.3 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.2 -> 2.7.3. PATCH on this repo's stated criterion:

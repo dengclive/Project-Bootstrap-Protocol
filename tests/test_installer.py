@@ -1338,6 +1338,25 @@ if os.path.exists(_PLUGIN_JSON):
     check("AC-A0-1: plugin.json description names the current version",
           f"v{_installer_mod.PROTOCOL_VERSION}" in _pj.get("description", ""))
 
+# [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
+# and the PRD version header were not, and both went stale — the README at
+# v2.6.0 for three releases, the PRD at 2.7.0 for three more. Each was fixed by
+# hand and by memory, twice. Pin them the same way plugin.json is pinned, so the
+# next bump fails here instead of shipping a tag whose own documents disagree.
+_PV = _installer_mod.PROTOCOL_VERSION
+_readme = open(os.path.join(ROOT, "README.md")).read()
+check("AC-A0-1: README release line tracks PROTOCOL_VERSION",
+      f"Current release: v{_PV}." in _readme)
+check("AC-A0-1: README pin target tracks PROTOCOL_VERSION",
+      f"pin the annotated git tag `v{_PV}`" in _readme)
+_prd = open(os.path.join(ROOT, "Bootstrap-Protocol-v2-6-0.md")).read()
+check("AC-A0-1: PRD **Version:** header tracks PROTOCOL_VERSION",
+      f"**Version:** {_PV}" in _prd)
+_comp = open(os.path.join(ROOT,
+                          "Bootstrap-Protocol-Companion-v2-6-0.md")).read()
+check("AC-A0-1: Companion version line tracks the PRD",
+      f"matches Bootstrap-Protocol-v2-6-0.md {_PV}." in _comp)
+
 d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
