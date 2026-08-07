@@ -26,7 +26,7 @@ Nothing in this policy reads, writes, or implies a config key.
 ## Pre-flight — the whole document as a checklist
 
 Run this before writing a workflow script. Every line links to the rule that
-owns it; if all nine pass, author the script.
+owns it; if all ten pass, author the script.
 
 | # | Check | Rule |
 |---|---|---|
@@ -39,6 +39,7 @@ owns it; if all nine pass, author the script.
 | 7 | `PYTHONDONTWRITEBYTECODE=1` set for any agent that imports a repo module; scratch goes to the session scratchpad | DW-R3, DW-R4 |
 | 8 | No agent commits, tags, pushes, or merges | DW-R6 |
 | 9 | Width is stated in the plan with its reason, and bounded by what you will read | §5 |
+| 10 | The current rung's requirements apply **unchanged** — fan-out unlocks nothing. At R0: plan approved before work starts, diff reviewed before every commit | DW-G1 |
 
 After: count the `null` returns, ratify every finding yourself before it becomes
 a claim in the record (DW-A1), and log **one** ledger entry (DW-A2).
@@ -517,16 +518,47 @@ remains open. G-1's scope is *"before any adoption **beyond dev tooling**"*
 reserved. This policy binds dev tooling only, i.e. it operates inside the space
 G-1 leaves open rather than pre-empting it. Do not cite DW-A2 as G-1's answer.
 
-### DW-A3 — Fan-out is not rung-gated; write authority is.
+### DW-G1 — How a fan-out interacts with the ramp is OPEN. Owner decision.
 
-Read-only fan-out (DW-U1/U2/U3) is available at **every** rung, R0 included.
-The rungs govern *unattended iteration*; a supervised fan-out whose output a
-human reads is not unattended, and the ramp's invariant is untouched — the diff
-is still reviewed by a human before it merges.
+**Named, not answered.** An earlier revision of this document decided it —
+*"fan-out is not rung-gated; write authority is"* — on the reasoning that the
+rungs govern unattended iteration and a supervised fan-out is not unattended.
+That reasoning survived adversarial challenge on the narrow question of
+*authority*: assessment gap **G-1** reserves its decision to the owner only
+*"before any adoption beyond dev tooling"* (`:295`, §10 header `:465`), and this
+policy binds dev tooling only, so deciding it here was inside the space G-1
+leaves open.
 
-Writing fan-out (DW-U4) is what interacts with the ramp, because it multiplies
-diff volume per unit of review, and diff volume per unit of review is the
-quantity the ramp is denominated in.
+**Authority is not the same as being right.** The ramp is the owner's
+instrument, its currency is operator review capacity, and fan-out changes the
+ratio of work to review — the one quantity the ramp exists to bound. That makes
+the question the same *class* as G-1 even though it is not G-1's scope, so this
+document names it and declines to settle it.
+
+**The question, stated so it can be answered:** does a fan-out at rung R
+(a) inherit R's grant unchanged, (b) require a higher rung than the same work
+done by one agent, or (c) constitute a distinct autonomy surface the ramp does
+not currently model at all?
+
+**Interim posture, deliberately conservative — fan-out is ramp-NEUTRAL.**
+Until the owner answers, a fan-out **neither unlocks nor requires** anything on
+the ramp. It is a tool used *inside* the current rung's grant, not an extension
+of it:
+
+- Every requirement of the current rung applies to a fan-out unchanged. At
+  **R0** (`.claude/trust-ramp.md`, current rung at time of writing) that is a
+  plan approved before work starts and the diff reviewed before every commit.
+  §5's "state the width and the reason in the plan" sits inside the plan R0
+  already requires approved.
+- **A fan-out does not by itself confer unattended operation.** If the work
+  would need R1+ done by one agent — unattended iteration on a scoped task — it
+  needs R1+ done by sixteen. Width is not a substitute for a rung.
+- The ramp's invariant is untouched at every rung: the diff is reviewed by a
+  human before it merges.
+
+This posture grants strictly less than the withdrawn clause did. That is the
+point: an interim rule should be the one that is cheap to loosen once the owner
+decides, not the one that is expensive to take back.
 
 ---
 
@@ -590,6 +622,12 @@ mechanism; it works only if it is read before the script is written.
 - **Any proposal to emit orchestration.** Blocked on B-1 and gaps G-1 / G-3, and
   it is a seam event plus an owner-side pin event (§7 of the assessment). Not an
   authoring decision.
+- **The owner answering DW-G1.** Whichever of (a) inherit / (b) higher rung /
+  (c) unmodelled surface is chosen, DW-G1's interim ramp-neutral posture is
+  replaced by it and §6 is rewritten to match. This is the one open question
+  the document carries, and it is deliberately cheap to close: the interim
+  posture grants less than any of the three answers is likely to, so closing it
+  loosens rather than retracts.
 - **A fifth permitted use.** Amend §2 explicitly; state the admission test it
   passes.
 - **`bin/run-tests` gaining per-writer attribution or a scoped fixture**
@@ -606,7 +644,7 @@ mechanism; it works only if it is read before the script is written.
 | Document | Role |
 |---|---|
 | `docs/dynamic-workflow-assessment.md` | The verdict and every measurement. Decides IF and WHERE; this decides HOW. |
-| `.claude/trust-ramp.md` | Sibling governance doc; the placement and "not protocol surface" precedent. DW-A2/A3 bind to its ledger. |
+| `.claude/trust-ramp.md` | Sibling governance doc; the placement and "not protocol surface" precedent. DW-A2 binds to its ledger; **DW-G1 is the open question about its rungs.** |
 | `docs/agentic-harness-security-kb.md` | §4.7 is W-1, which DW-R1 exists to avoid re-arming. |
 | `SEAM-CONTRACT-v2-0-0.md` §8.4, §9 | The bump triggers DW-P1 avoids, and the declined-runner decision it would reopen. |
 | `Bootstrap-Protocol-v2-6-0.md` `:133-136`, `:339` | The not-protocol-surface exclusion, and the review-throughput justification §5 inherits. |
