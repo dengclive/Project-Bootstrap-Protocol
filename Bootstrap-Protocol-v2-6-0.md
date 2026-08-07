@@ -1,6 +1,24 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.7.0
+**Version:** 2.7.4
+
+> **v2.7.4 — a head form neither walker saw past, PATCH (2026-08-07).** Contains
+> PR **#57** (backlog X-36v / X-36w): `{ bash -c "pip install evil"; }` was
+> allow/allow on both substrates while the subshell twin denied, because `(` is
+> a segment break and `{` is not. Twelve live spellings, not two. **0 verdicts
+> moved deny → allow** over 31,880 probes; 112 rows moved allow → deny.
+> **Why PATCH:** no configuration key exists that did not — the fix is one
+> shared list (`cmdpos.KEYWORDS` + `GROUP_TOKENS` + `NAMED_GROUP_HEADS`) read by
+> four consumers, all internal constants — and the emitted gates only got
+> stricter. Also contains PRs **#58** and **#59**, which are maintainer-side
+> documentation and tests: they emit nothing and move no digest.
+>
+> **This header was stale at 2.7.0 through three releases (2.7.1, 2.7.2,
+> 2.7.3).** Those were gate corrections that added no operator-facing surface a
+> PRD would describe, so the body needed no edit — but the version field should
+> have tracked `PROTOCOL_VERSION` regardless, and did not. Recorded as the
+> partial close of `docs/dynamic-workflow-assessment.md` gap **G-6**; the
+> filename/PRD-version skew that gap also names is unchanged and still open.
 
 > **v2.7.0 — five filed issues, MINOR (2026-08-03).** Additive *and* corrective.
 > **Why MINOR and not PATCH:** two new configuration keys exist that did not
@@ -134,6 +152,14 @@
 > `.claude/trust-ramp.md` governs how much autonomy the agent is granted *on the
 > protocol repo itself*. It emits nothing, no installer plan references it, and it
 > is not part of any conformance surface.
+> **[v2.7.4] The same exclusion covers `.claude/dynamic-workflow-policy.md`**,
+> which governs maintainer use of Claude Code's `Workflow` (dynamic-workflow)
+> tool on this repository. It meets the same three criteria — emits nothing, no
+> installer plan references it, not part of any conformance surface — and is
+> pinned as such by `tests/test_dynamic_workflow_policy.py`. Its verdict
+> (`docs/dynamic-workflow-assessment.md`) is *dev tooling only, never emitted*,
+> so **no PRD section describes a fan-out feature and none should**: the
+> protocol has no such concept, and documenting one here would imply otherwise.
 > **Seam impact: none.** `SEAM-CONTRACT-v2-0-0.md` §8.4 lists seven triggers and none
 > fire: no §7.2 security-critical tier membership change (2.6.0 changes hook
 > *matchers* and gate *behavior*; §7.2 pins the *membership* of the set, and no member

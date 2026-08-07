@@ -1,5 +1,99 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.7.3 → 2.7.4 — a head form neither walker saw past, and a policy for the tool that found it (2026-08-07)
+
+**PATCH**, on the criterion this file states: no configuration key exists that
+did not — PR #57's fix is one shared list (`cmdpos.KEYWORDS` + `GROUP_TOKENS` +
+`NAMED_GROUP_HEADS`), all internal constants — and the emitted gates only got
+**stricter**: **0 verdicts moved deny → allow** across 31,880 probes, with 112
+rows moving allow → deny. `PROTOCOL_VERSION` in `lib/installer.py` and
+`lib/templates.py`, `plugin/plugin.json`'s version and description prose, the
+version assertions **and their check labels** in four suites, the README pin
+target and applicability range, and the PRD's `**Version:**` header.
+
+Contains PRs **#57**, **#58** and **#59**. Suite 9276 → **9416 checks**, 0
+failed; 23 → **24 suites**. Freeze-exceptions **47** (PR #57) and **48** (the
+version stamp).
+
+### PR #57 — a head form neither walker saw past (X-36v / X-36w)
+
+`{ bash -c "pip install evil"; }` was allow/allow on **both** substrates while
+the subshell twin `( bash -c "pip install evil" )` denied — because `(` is a
+segment break and `{` is not. **Twelve live spellings, not two:** `{`, `}`, `!`,
+`if`, `then`, `elif`, `else`, `do`, `while`, `until`, `function`, `coproc`,
+plus the escape-prefixed head on the shell. (`select` is **not** among them and
+is not in the fix's lists: `lib/cmdpos.py:176-179` records it as verified to
+DENY already, because its body is reached through `do`, which is in the set.
+The count of twelve is right; an earlier draft of this entry swapped `}` for
+`select`, inheriting the error rather than rebuilding the list.)
+
+Two review lessons are recorded with it, both of which changed the fix:
+
+- **"Bounded" was a property of the fragment, not the class.** The keyword half
+  was filed bounded because `then bash -c '…'` is a syntax error. Inside
+  `if true; then bash -c '…'; fi` the walkers get a segment that still starts
+  with `then`, and bash runs it.
+- **`while` / `until` / `coproc` / `select` were recorded bounded from a probe
+  that measured the harness, not the payload** — `while false` never entered
+  its body, `coproc` is asynchronous and the parent exited first, and `select`
+  read EOF. All four run. Measure execution with a file marker, never captured
+  stdout.
+
+One list read by four consumers (`prefix_run`, `_invoker_at`, and both shell
+walkers through a new shared `_cs_head_kind`), mutation-tested six ways.
+
+### PRs #58 and #59 — dynamic workflows: assessed, then bounded
+
+**Maintainer-side only. Nothing emitted, no seam event, no pin moves.** PR #58
+was not recorded in this file at the time; it is recorded here with #59, which
+completes it.
+
+- **#58 — `docs/dynamic-workflow-assessment.md`.** Verdict on Claude Code's
+  `Workflow` tool: **adopt-narrowed, development tooling only, never emitted.**
+  The blocking finding is measured: one Bash call fires *five* `PreToolUse`
+  hooks, and at N=16 concurrent agents ordinary commands flip verdict —
+  `git add` at 5,000–7,000 paths is **allowed solo and refused at N=16**, same
+  command, same config, same install. A gate verdict that depends on ambient
+  fleet size is indistinguishable from a flaky gate.
+- **#59 — `.claude/dynamic-workflow-policy.md` + `tests/test_dynamic_workflow_policy.py`.**
+  The policy decides HOW where the assessment decided IF and WHERE: four
+  permitted uses behind a two-limb admission test, six prohibitions, six
+  operating rules, two accounting rules, and one named open question
+  (**DW-G1**, how a fan-out interacts with the trust ramp — owner's to close).
+  It carries **B-4**, which the
+  assessment classifies as blocking *maintainer* use — the pollution detector
+  is a whole-repo before/after diff, sound only under a single serialised
+  writer — so test execution is serial by any entry point and there is one
+  writer to the repository including the index and refs.
+
+  The suite is a tripwire the golden digests cannot be: re-baselining a digest
+  is routine (see exceptions 30, 31, 33, 34, 35, 40 and 48 below), so emitted
+  orchestration would land green through the goldens. It plants a violation for
+  every signal and asserts each fires before asserting the tree is clean.
+
+  **DW-G1 is left open on purpose.** How a fan-out interacts with the trust
+  ramp is an owner decision; the interim posture is that fan-out is
+  ramp-neutral — it neither unlocks nor requires anything, and width is not a
+  substitute for a rung.
+
+### The PRD header, and what this release does *not* do
+
+`Bootstrap-Protocol-v2-6-0.md`'s `**Version:**` field read **2.7.0** through
+three releases (2.7.1, 2.7.2, 2.7.3). Those were gate corrections adding no
+operator-facing surface a PRD would describe, so the body needed no edit — but
+the version field should have tracked `PROTOCOL_VERSION` regardless. Now 2.7.4.
+This is the partial close of assessment gap **G-6**; the filename-vs-version
+skew that gap also names is unchanged and still open.
+
+**No PRD section describes a fan-out feature, and none should.** The verdict is
+*never emitted*, so the protocol has no such concept. The PRD changes are exactly
+two: the `**Version:**` header (with its v2.7.4 release block, in the form every
+prior release used), and one paragraph extending the existing "Not protocol
+surface, deliberately excluded" block to name `.claude/dynamic-workflow-policy.md`
+beside `.claude/trust-ramp.md`. No other section moves.
+Assessment §12's list of PRD sections a delta *would* touch remains unspent —
+it is explicitly conditioned on a delta touching emitted surface.
+
 ## 2.7.2 → 2.7.3 — the fourth and fifth consumers, and a control that kept agreeing for the wrong reason (2026-08-06)
 
 **PATCH**, on the criterion this file states: no configuration key exists that

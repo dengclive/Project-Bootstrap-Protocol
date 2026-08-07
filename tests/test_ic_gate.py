@@ -111,8 +111,8 @@ try:
                                         ".bootstrap-state.json")))
     check('AC-9-2: state records gate_substrate "sdk-callable"',
           state.get("gate_substrate") == "sdk-callable")
-    check("AC-9-5: state records protocol 2.7.3",
-          state.get("bootstrap_protocol_version") == "2.7.3")
+    check("AC-9-5: state records protocol 2.7.4",
+          state.get("bootstrap_protocol_version") == "2.7.4")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -215,10 +215,10 @@ check("AC-9-4: undetectable CLI warns loudly (never silent)",
 import installer   # noqa: E402
 import templates   # noqa: E402
 
-check("AC-9-5: installer PROTOCOL_VERSION is 2.7.3",
-      installer.PROTOCOL_VERSION == "2.7.3")
-check("AC-9-5: templates PROTOCOL_VERSION is 2.7.3",
-      templates.PROTOCOL_VERSION == "2.7.3")
+check("AC-9-5: installer PROTOCOL_VERSION is 2.7.4",
+      installer.PROTOCOL_VERSION == "2.7.4")
+check("AC-9-5: templates PROTOCOL_VERSION is 2.7.4",
+      templates.PROTOCOL_VERSION == "2.7.4")
 check("AC-9-5: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       installer.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 check("AC-9-5: seam runtime floor constant is 2.1.210",
@@ -235,6 +235,16 @@ check("v2.5.0: changelog carries the 2.4.0 -> 2.5.0 entry",
 # Same tripwire, one release on: every bump owes a changelog entry.
 check("v2.6.0: changelog carries the 2.5.0 -> 2.6.0 entry",
       "2.5.0 → 2.6.0" in changelog)
+# [v2.7.4] DERIVED, so it never needs extending again. The hand-maintained
+# chain above stopped being extended after 2.6.0 and silently asserted nothing
+# for 2.6.1, 2.7.0, 2.7.1, 2.7.2 and 2.7.3 — a tripwire that stops tracking the
+# version is a tripwire that has stopped firing. This one reads
+# PROTOCOL_VERSION, so the invariant the comment above states ("every bump owes
+# a changelog entry") is now actually enforced for the CURRENT bump.
+check(f"changelog carries an entry landing on {installer.PROTOCOL_VERSION}",
+      f"→ {installer.PROTOCOL_VERSION}" in changelog,
+      f"    no '→ {installer.PROTOCOL_VERSION}' heading in docs/changelog.md — "
+      f"a version bump without a changelog entry")
 conformance = open(os.path.join(
     ROOT, "Bootstrap-Protocol-v2-0-0.md")).read()
 check("AC-9-5: conformance note marks the substrate operative",

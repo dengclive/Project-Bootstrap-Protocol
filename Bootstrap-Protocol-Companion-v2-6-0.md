@@ -1,6 +1,6 @@
 # BOOTSTRAP Companion — Reference Material
 
-**Version:** matches Bootstrap-Protocol-v2-6-0.md 2.6.0.
+**Version:** matches Bootstrap-Protocol-v2-6-0.md 2.7.4.
 
 This file holds reference material that lives alongside the Bootstrap Protocol but is not part of the phase-by-phase wizard flow. Operators consult these sections as needed; the AI reads them when the wizard would otherwise reach for the omitted context.
 
