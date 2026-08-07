@@ -34,7 +34,7 @@ from defaults import resolve_config    # archetype defaults + validation
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "2.7.3"
+PROTOCOL_VERSION = "2.7.4"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
 # Seam binds floor (SEAM-CONTRACT v2.0.0, claude_code_runtime; unchanged
 # against the official changelog 2026-07-18): below 2.1.210 a PreToolUse

@@ -218,6 +218,25 @@ EXPECTED_DIGESTS = {
     # 1.00-1.05x, and a length fence inside a security predicate is a
     # fail-OPEN guard.
 
+    # [freeze-exception no. 48, 2026-08-07] RELEASE 2.7.4 — VERSION STAMP ONLY.
+    # PROTOCOL_VERSION 2.7.3 -> 2.7.4. PATCH on this repo's stated criterion:
+    # the release's only behavioral content is PR #57 (X-36v/w), whose fix is one
+    # shared list (`cmdpos.KEYWORDS` + `GROUP_TOKENS` + `NAMED_GROUP_HEADS`) read
+    # by four consumers — all INTERNAL constants, so no configuration key exists
+    # that did not — and the gates only got stricter: 0 verdicts moved
+    # deny -> allow over 31,880 probes, 112 rows moved allow -> deny. PR #57 was
+    # its own freeze exception (no. 47) and is ALREADY in these digests; this
+    # exception covers the version stamp alone. PRs #58 and #59 are
+    # maintainer-side docs and tests that emit nothing.
+    # EXACTLY ONE plan-hashed body moves per fixture: `.claude/settings.json`,
+    # carrying the `_generatedBy (protocol 2.7.4)` stamp. Action counts unchanged
+    # at 57 / 69 / 59. NO hook body and NOT `sdk_gates/gates.py` move.
+    # VERIFIED BEFORE RE-BASELINING, not assumed: for all three fixtures,
+    # substituting "2.7.4" -> "2.7.3" in every action body reproduces the PRIOR
+    # digest EXACTLY — the 2.7.3 values this block replaces, all three matching.
+    # That is a stronger check than a per-file eyeball: it proves byte-identity
+    # everywhere outside the stamp, rather than inspecting for it file by file.
+    #
     # [freeze-exception no. 46, 2026-08-06] RELEASE 2.7.3 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.2 -> 2.7.3. PATCH on this repo's stated criterion:
     # `INVOKER_WORD_MAX` is an INTERNAL constant, not operator-facing surface, so
@@ -2614,7 +2633,7 @@ EXPECTED_DIGESTS = {
     # so every hook moves - which is exactly the blast radius #50 deferred it
     # on, now measured rather than estimated.
     "default":
-        "6b7fd65ed2f965ab9f57d3144d0882720f6143ea8b76045c151728893ce15cde",
+        "c77e68337295dd5e237c045527aed4ccc6cfc0396db1aa5deca350c5e6a8d44a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2769,7 +2788,7 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "7c272013630c4b76b42cf662041a8b4674ec8d62ddeb18288ee244586ba59298",
+        "c736bd47fe543dc7dd049bba63ccf46479e886b128ba5a85067a6960828534ee",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2869,7 +2888,7 @@ EXPECTED_DIGESTS = {
         # design-steering artifacts (.claude/steering/design.md, the
         # design-review skill and the design-review command) are UNCHANGED,
         # verified per-file rather than assumed.
-        "db13099a9bd5ece6756bf0cddef30c6ef80cda02594a7ca38fd62ffab20a75c8",
+        "f10a57d08cb3e2736ca4566351538546c2f3e0786a5a88ba2c7ea13054c0f2f2",
 }
 
 EXPECTED_ACTION_COUNTS = {

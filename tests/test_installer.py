@@ -1308,10 +1308,10 @@ finally:
 import installer as _installer_mod          # noqa: E402
 import templates as _templates_mod          # noqa: E402
 
-check("AC-A0-1: installer.PROTOCOL_VERSION is 2.7.3",
-      _installer_mod.PROTOCOL_VERSION == "2.7.3")
-check("AC-A0-1: templates.PROTOCOL_VERSION is 2.7.3",
-      _templates_mod.PROTOCOL_VERSION == "2.7.3")
+check("AC-A0-1: installer.PROTOCOL_VERSION is 2.7.4",
+      _installer_mod.PROTOCOL_VERSION == "2.7.4")
+check("AC-A0-1: templates.PROTOCOL_VERSION is 2.7.4",
+      _templates_mod.PROTOCOL_VERSION == "2.7.4")
 check("AC-A0-1: RETROFIT_PROTOCOL_VERSION untouched (1.6.2)",
       _installer_mod.RETROFIT_PROTOCOL_VERSION == "1.6.2")
 # The two constants are declared independently in installer.py and
@@ -1342,16 +1342,16 @@ d = _install(FULL)
 try:
     state = _json.load(open(os.path.join(d, ".claude",
                                          ".bootstrap-state.json")))
-    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.7.3",
-          state.get("bootstrap_protocol_version") == "2.7.3")
+    check("AC-A0-2: fresh install writes bootstrap_protocol_version 2.7.4",
+          state.get("bootstrap_protocol_version") == "2.7.4")
     settings = _json.load(open(os.path.join(d, ".claude", "settings.json")))
-    check("AC-A0-3: settings.json _generatedBy reads protocol 2.7.3",
+    check("AC-A0-3: settings.json _generatedBy reads protocol 2.7.4",
           settings.get("_generatedBy")
-          == "bootstrap-installer (protocol 2.7.3)")
+          == "bootstrap-installer (protocol 2.7.4)")
     manifest = _json.load(open(os.path.join(d, ".claude",
                                             ".installer-manifest.json")))
-    check("AC-A0-3: manifest records protocol_version 2.7.3",
-          manifest.get("protocol_version") == "2.7.3")
+    check("AC-A0-3: manifest records protocol_version 2.7.4",
+          manifest.get("protocol_version") == "2.7.4")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

@@ -1,12 +1,12 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-> **Current release: v2.7.3.** `PROTOCOL_VERSION = 2.7.3`. **External consumers
-> pin the annotated git tag `v2.7.3`** — pinning a moving `main` is pinning a
+> **Current release: v2.7.4.** `PROTOCOL_VERSION = 2.7.4`. **External consumers
+> pin the annotated git tag `v2.7.4`** — pinning a moving `main` is pinning a
 > branch, not a release. This line was stale at `v2.6.0` through three releases
 > (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
 >
 > The normative spec is still `Bootstrap-Protocol-v2-6-0.md` +
-> `Bootstrap-Protocol-Companion-v2-6-0.md`: **2.6.1 through 2.7.3 are gate
+> `Bootstrap-Protocol-Companion-v2-6-0.md`: **2.6.1 through 2.7.4 are gate
 > corrections, and none of them adds operator-facing surface a PRD would
 > describe.** Older PRD/Companion pairs are retained as historical record — with
 > one exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
