@@ -75,7 +75,7 @@ admits is a different object than fan-out.** CITED.
 The PRD admits concurrency at **task** granularity, with a budget, an accounting
 structure, and a derived cap:
 
-- `Bootstrap-Protocol-v2-6-0.md:339` — *"**Concurrency rule across autonomous
+- `Bootstrap-Protocol-v2-6-0.md:401` — *"**Concurrency rule across autonomous
   modes.** … concurrency budgets apply to the **combined** sum across modes …
   **Recommended starting concurrency: 2 across all autonomous modes combined for
   the first week of use**, expanding based on review throughput."*
@@ -265,7 +265,7 @@ emit, and that is controllable.
 **UNSPECIFIED. This is a spec gap to name, not a default to invent.** CITED.
 
 The ramp is explicitly **not protocol surface**.
-`Bootstrap-Protocol-v2-6-0.md:133-136`: *"**Not protocol surface, deliberately
+`Bootstrap-Protocol-v2-6-0.md:187-190`: *"**Not protocol surface, deliberately
 excluded:** this repository's own `.claude/trust-ramp.md` governs how much
 autonomy the agent is granted *on the protocol repo itself*. It emits nothing,
 no installer plan references it, and it is not part of any conformance
@@ -491,6 +491,39 @@ whole-repo diff.
 **G-6 — PRD/implementation version skew (found incidentally, worth recording).**
 The highest PRD in the root is `v2-6-0`; `PROTOCOL_VERSION` is `2.7.3`. Any
 delta written against the PRD needs to state which document it amends.
+
+> **CLOSED 2026-08-08.** Two halves, both answered.
+>
+> **The version half** — the PRD's `**Version:**` field read 2.7.0 while
+> `PROTOCOL_VERSION` was 2.7.3. Fixed at v2.7.4 and now *pinned*:
+> `tests/test_installer.py` asserts the PRD header, the Companion mirror line,
+> and both README lines track `PROTOCOL_VERSION`, so the skew cannot recur.
+>
+> **The filename half** — answered by a convention that already existed and
+> that this gap was written without noticing: the PRD's own filename note
+> (search `Filename note`) states the filename records **when the pair was
+> cut**, not what it describes. It now also carries the decidable trigger it
+> lacked — *since 2.7.0 releases amend in place; a new pair is cut only by an
+> explicit re-issue recorded in the changelog* — together with the history that
+> contradicts the tidier version of the rule (three of the five root pairs were
+> cut by code commits, and the v2.3.0 "fold" produced no file). So G-6's
+> operative clause is satisfiable: **a delta amends the pair whose
+> `**Version:**` equals `PROTOCOL_VERSION`**, and `tests/test_installer.py`
+> pins that value across the PRD header, the Companion mirror line and both
+> README lines. README carries the same statement.
+>
+> **Renaming was considered in two shapes and declined in both**: rename to
+> `v2-7-4` (would contradict the shipped fold convention, and must then recur
+> every release), and a stable unversioned filename (same objection, plus it
+> invalidates the *path* of every historical citation rather than just its
+> line). Both cost an emitted-body move: the PRD filename ships inside
+> `.claude/hooks/iteration-summary-enforcement.sh`.
+>
+> **The larger half G-6 did not name** was line-citation rot — citations into
+> the PRD were correct when written and silently invalidated by later edits
+> (one target moved 654 → 670 → 713 → 739 → 759 across five releases). Closed
+> by `tests/test_doc_citations.py`, which derives each cited line from a
+> uniqueness-checked anchor instead of trusting a stored integer.
 
 ---
 

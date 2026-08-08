@@ -1950,5 +1950,100 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
+# Retrofit goldens — the emission path nothing pinned
+# --------------------------------------------------------------------------- #
+# Until now this file computed plan digests only RELATIVELY (a == b, a != x),
+# never against a constant, so retrofit emission could change freely and no
+# check would notice. Freeze exception 48 recorded that gap; this closes it.
+#
+# WHAT IT COST TO NOT HAVE THIS, measured: across v2.7.3 -> v2.7.4 the service
+# retrofit plan moved TWELVE bodies. Exactly one was the version stamp; the
+# other eleven were PR #57's hook bodies, which the greenfield goldens pinned
+# via freeze exception 47 and which retrofit carried unobserved. Exception 48's
+# claim that "the retrofit plans moved stamp-only" was therefore FALSE, and is
+# corrected in tests/test_greenfield_golden.py.
+#
+# KIND IS PART OF THE DIGEST, and must be. This file's own `plan_digest` above
+# hashes path+body+mode and OMITS `kind` -- and retrofit is the one mode that
+# MUTATES kind (the agent fixture emits `gitignore_root`, which service does
+# not). A kind-blind golden would be blind to exactly the regression class it
+# is being added for, so this uses its own kind-inclusive digest, matching
+# tests/test_greenfield_golden.py's `plan_digest_full`.
+print("\n=== Retrofit goldens ===")
+
+
+def retrofit_digest_full(yaml_text):
+    """SHA-256 over (path, body, mode, kind) in plan order. Kind INCLUDED."""
+    _c, _e = cfg_from(yaml_text)
+    assert not _e, f"fixture must validate; got {_e}"
+    h = hashlib.sha256()
+    for a in build_plan(_c):
+        h.update(b"|PATH|")
+        h.update(a["path"].encode())
+        h.update(b"|BODY|")
+        h.update(a["body"].encode())
+        h.update(b"|MODE|")
+        h.update(str(a["mode"]).encode())
+        h.update(b"|KIND|")
+        h.update(a["kind"].encode())
+    return h.hexdigest()
+
+
+EXPECTED_RETROFIT_DIGESTS = {
+    "service": "fef839ae78300f49cb5dd562529b9fab13438f08e4daaf6208dfbd465e5ef378",
+    "agent": "60aa7f6f3d2c7b9e00e87c9f61ac92ae5ba762e7fde2383566cf35112480512d",
+}
+# Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
+# rather than showing up only as an opaque digest move.
+EXPECTED_RETROFIT_COUNTS = {"service": 79, "agent": 93}
+
+_RETROFIT_FIXTURES = [("service", SERVICE_RETROFIT_CFG),
+                      ("agent", AGENT_RETROFIT_CFG)]
+
+# Deny capability FIRST: a golden that has never been shown to move is not a
+# golden. Perturb one body and confirm the digest changes.
+_probe_cfg, _probe_errs = cfg_from(SERVICE_RETROFIT_CFG)
+_probe_plan = build_plan(_probe_cfg)
+_h = hashlib.sha256()
+for _a in _probe_plan:
+    _b = _a["body"] + "x" if _a is _probe_plan[0] else _a["body"]
+    _h.update(b"|PATH|" + _a["path"].encode() + b"|BODY|" + _b.encode()
+              + b"|MODE|" + str(_a["mode"]).encode()
+              + b"|KIND|" + _a["kind"].encode())
+check("retrofit golden: a one-byte body change moves the digest",
+      _h.hexdigest() != EXPECTED_RETROFIT_DIGESTS["service"])
+
+for _label, _text in _RETROFIT_FIXTURES:
+    _cfg, _ = cfg_from(_text)
+    _plan = build_plan(_cfg)
+    _actual = retrofit_digest_full(_text)
+    if os.environ.get("GOLDEN_UPDATE"):
+        print(f'  EXPECTED_RETROFIT_DIGESTS["{_label}"] = "{_actual}"')
+        print(f'  EXPECTED_RETROFIT_COUNTS["{_label}"] = {len(_plan)}')
+    check(f"retrofit golden[{_label}]: action count is stable",
+          len(_plan) == EXPECTED_RETROFIT_COUNTS[_label],
+          f"    expected {EXPECTED_RETROFIT_COUNTS[_label]} actions, "
+          f"got {len(_plan)}")
+    check(f"retrofit golden[{_label}]: plan digest byte-identical",
+          _actual == EXPECTED_RETROFIT_DIGESTS[_label],
+          f"    expected {EXPECTED_RETROFIT_DIGESTS[_label]}\n"
+          f"    actual   {_actual}\n"
+          f"    Re-baseline only with a recorded freeze exception.")
+    # Determinism, in-process. Cross-process determinism (hash-seed dependent
+    # iteration) was verified separately at 5 seeds, 2 TZs and 2 locales.
+    check(f"retrofit golden[{_label}]: two passes agree",
+          retrofit_digest_full(_text) == _actual)
+
+# The kind-inclusive digest must actually differ from the kind-blind one for at
+# least one fixture, or the paragraph above is decoration. `agent` emits a
+# `gitignore_root` action that `service` does not.
+_kinds_service = {a["kind"] for a in build_plan(cfg_from(SERVICE_RETROFIT_CFG)[0])}
+_kinds_agent = {a["kind"] for a in build_plan(cfg_from(AGENT_RETROFIT_CFG)[0])}
+check("retrofit fixtures exercise different `kind` sets (so kind matters)",
+      _kinds_service != _kinds_agent,
+      f"    service={sorted(_kinds_service)} agent={sorted(_kinds_agent)}")
+
+
+# --------------------------------------------------------------------------- #
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
