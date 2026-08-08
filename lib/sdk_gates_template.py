@@ -473,6 +473,15 @@ _CS_WS = "\\002"
 # round-4 probe corpus: a fourth level needs four nested quoting contexts,
 # which no reachable spelling produces.
 _EXPAND_DEPTH = 3
+# [item 1] The length past which the quote-aware command-substitution walk
+# (_subst_inners) stops lifting `$(...)`/backtick bodies out of a double-quoted
+# run. Fail-closed: the run itself is still flattened and scanned, so a
+# substitution beyond the bound is simply not ADDITIONALLY re-parsed; it never
+# becomes an allow the walk would otherwise deny. The shell twin
+# (_SUBST_MAXLEN in the header) carries the SAME number so neither substrate can
+# hit its fail-closed timeout while the other completes on a large command
+# (the X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
+_SUBST_MAXLEN = 8192
 _SECRETS_OPS = ";&|()<>\\n"
 _CMD_OPS = ";&|()`\\n"
 
@@ -801,9 +810,17 @@ def _expand_invoker_args(segs):
     while frontier and depth < _EXPAND_DEPTH:
         nxt = []
         for seg in frontier:
-            if _invoker_at(seg.split()) is None:
-                continue
-            for inner in _invoker_arguments(seg):
+            if _invoker_at(seg.split()) is not None:
+                for inner in _invoker_arguments(seg):
+                    if inner.strip():
+                        nxt.extend(_shell_segments(inner, _CMD_OPS))
+            # [item 1] A `$(...)`/backtick inside double quotes is a command
+            # line bash executes; lift and re-segment it, in the SAME frontier
+            # as the invoker arm so a substitution wrapping an invoker
+            # (`echo "$(sh -c 'pip install evil')"`) and an invoker wrapping a
+            # substitution both resolve. Shell parity: _cs_subst_scan feeding
+            # _CS_EXTRA, which cmd_segments drains in the same recursion.
+            for inner in _subst_inners(seg):
                 if inner.strip():
                     nxt.extend(_shell_segments(inner, _CMD_OPS))
         out.extend(nxt)
@@ -922,6 +939,133 @@ def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
     return [s for s in segs if s.strip()]
 
 
+def _subst_inners(seg):
+    r"""Every COMMAND SUBSTITUTION whose output bash executes because it sits in
+    an ACTIVE quoting context - i.e. `$(...)` / `` `...` `` inside DOUBLE quotes
+    or unquoted, but NOT inside single quotes (which suppress it). Returns each
+    one's inner text as a command line, for the caller to re-segment. Shell
+    parity: the header's `_cs_subst_scan` / `_CS_SUBST_R`.
+
+    [item 1] `echo "$(cat .env)"` reads a secret and `echo "$(pip install evil)"`
+    installs, because bash runs the substitution; neither segmenter walked into
+    it, so both were allow/allow on both substrates.
+
+    It is a SINGLE quote-and-escape-aware char-walk, NOT a per-run extractor:
+      * per-run extraction tears at the inner `"` of `echo "$(cat ".env")"` -
+        which bash executes, because `$(...)` RESETS the quoting context - and
+        pulls an unbalanced `$(cat `. So the walk models the reset: once inside
+        `$(...)`/backtick it matches to the balanced close QUOTE-BLIND (parens
+        are still balanced, escaped chars skipped), and a `'` inside a `"` run
+        stays a literal, not a quote.
+      * a `$`/backtick preceded by an ODD number of backslashes is escaped and
+        INERT (`echo "\\$(cat .env)"` prints a literal `$(...)`), so the walk
+        skips a backslash-and-its-successor as a pair - which also makes an even
+        run of backslashes leave the opener live.
+    Bounded: over _SUBST_MAXLEN characters the walk stops (fail-closed - the
+    surrounding run is still flattened and scanned; a substitution past the
+    bound simply is not additionally lifted). The shell twin carries the same
+    bound so neither substrate can time out while the other completes.
+    """
+    seg = seg[:_SUBST_MAXLEN]     # bound the WHOLE walk (openers AND the paren
+    out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
+    while i < n:                  # the shell twin's O(n^2) walk cannot time out
+        ch = seg[i]              # while this O(n) one completes (parity by cap)
+        if ch == "\\\\" and i + 1 < n and quote != "'":
+            i += 2                       # escaped char: skip it and its target
+            continue
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            i += 1
+            continue
+        if quote != '"':
+            # Outside double quotes an unquoted `$(...)` / backtick is already
+            # a command position to the segmenters (the `(`/`)`/backtick
+            # operator breaks in _CMD_OPS), so this walk only LIFTS the ones
+            # hidden inside double quotes. A bare sub at command position that
+            # RUNS its own output is Class B, handled by the download-then-run
+            # rule, not here.
+            if ch in ("'", '"'):
+                quote = ch
+            i += 1
+            continue
+        # inside "...": a ' is a literal char, but $( and ` are still active
+        if ch == '"':
+            quote = None
+            i += 1
+            continue
+        if ch == "$" and i + 1 < n and seg[i + 1] == "(":
+            # Balance to the matching `)`, but QUOTE-AWARE: a `)` inside a
+            # quoted run does not close the substitution (bash: `$(printf ')';
+            # cat .env)` runs `cat .env`). Single quotes suppress escapes; a `(`
+            # or `)` inside double quotes is a literal, and a nested `$(...)`
+            # there balances to itself (its parens cancel) and is re-lifted by
+            # the recursion. Missing this was a live fail-open a quoted `)`
+            # reached.
+            depth, j, start, q = 1, i + 2, i + 2, None
+            while j < n and depth:
+                c = seg[j]
+                if q == "'":
+                    if c == "'":
+                        q = None
+                    j += 1
+                    continue
+                if c == "\\\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if q == '"':
+                    if c == '"':
+                        q = None
+                    j += 1
+                    continue
+                if c == "'" or c == '"':
+                    q = c
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out.append(seg[start:j])
+            i = j + 1
+            continue
+        if ch == "`":
+            j = start = i + 1
+            while j < n and seg[j] != "`":
+                if seg[j] == "\\\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            out.append(seg[start:j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def _lift_subs(cmd, ops=_SECRETS_OPS, _depth=0):
+    """The segments of `cmd`, PLUS the segments of every command line lifted
+    from a double-quoted substitution inside it, recursively.
+
+    [item 1] The substitution walk MUST run on the RAW command, before
+    _shell_segments. _shell_segments is quote-aware but NOT substitution-aware,
+    so it tears at the inner `"` of a substitution whose body re-opens a quote:
+    `echo "$(echo ")" ; cat .env)"` splits at that `"`, and the `; cat .env`
+    tail lands in a segment a per-segment subst walk never reaches - a live
+    fail-open that denied on the shell (which runs _cs_subst_scan on the raw
+    command) but ALLOWED here. Lifting from the raw command first restores
+    parity. Depth-bounded like the invoker recursion; the per-segment subst arm
+    in _segment_candidates / _expand_invoker_args still composes subst extraction
+    with invoker expansion (a sub inside a single-quoted `-c` argument)."""
+    segs = list(_shell_segments(cmd, ops))
+    if _depth < _EXPAND_DEPTH:
+        for inner in _subst_inners(cmd):
+            if inner.strip():
+                segs += _lift_subs(inner, ops, _depth + 1)
+    return segs
+
+
 def _bash_candidates(cmd):
     # [lens A F1 / lens B finding 4] Tokenize the way the SHELL does: split
     # on UNQUOTED whitespace only, joining adjacent quoted and unquoted runs
@@ -932,7 +1076,7 @@ def _bash_candidates(cmd):
     # multi-line input - the shell gate's hand-rolled equivalent exists only
     # because bash has no shlex.
     out = []
-    for _seg in _shell_segments(cmd):
+    for _seg in _lift_subs(cmd):
         out.extend(_segment_candidates(_seg))
     return out
 
@@ -1001,6 +1145,17 @@ def _segment_candidates(cmd, _depth=0):
             # `F=.env; cat $F` hides the path behind an expansion this gate
             # cannot perform, but the ASSIGNMENT is in plain sight.
             out.append(m.group(1))
+    # [item 1] A `$(...)`/backtick inside double quotes is a command line bash
+    # executes, so a secret read hidden in `echo "$(cat .env)"` is at a command
+    # position the token scan above never reaches. Lift each and re-parse it as
+    # its own segment(s); the recursion re-applies the invoker rule, so
+    # `echo "$(sh -c 'cat .env')"` resolves too. Depth-bounded like the invoker
+    # arm below. Shell parity: _cs_subst_scan feeding _sg_pass's _SG_EXTRA.
+    if _depth < _EXPAND_DEPTH:
+        for _inner in _subst_inners(cmd):
+            if _inner.strip():
+                for _iseg in _shell_segments(_inner):
+                    out.extend(_segment_candidates(_iseg, _depth + 1))
     # [round-4 D8] ONE head scan, shared with _expand_invoker_args. This
     # function used to carry its own - a separate `saw_prefix`/`skipped < 3`
     # copy - which is why fixing the OTHER one changed nothing for this gate.
@@ -1353,7 +1508,7 @@ def _git_verb(cmd, verb):
     pat = _GIT_VERB_TMPL % verb
     return any(re.search(pat, " " + _flatten_seg(seg) + " ")
                for seg in _expand_invoker_args(
-                   _shell_segments(cmd, _CMD_OPS)))
+                   _lift_subs(cmd, _CMD_OPS)))
 
 
 # Command-position prefixes that do not change WHICH program runs, so the
@@ -2815,7 +2970,7 @@ def _scan_install_line(line, approved):
     # it, because that install does not run - and it did not treat a
     # backtick substitution as a command position, so `` echo `pip install
     # leftpad` `` was allowed while `echo $(pip install leftpad)` was denied.
-    for seg in _expand_invoker_args(_shell_segments(norm, _CMD_OPS)):
+    for seg in _expand_invoker_args(_lift_subs(norm, _CMD_OPS)):
         seg = _flatten_seg(seg)
         seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
         # [round-4 D20] Checked per segment so the operator is told WHICH

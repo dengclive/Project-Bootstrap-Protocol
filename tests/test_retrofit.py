@@ -1989,9 +1989,14 @@ def retrofit_digest_full(yaml_text):
     return h.hexdigest()
 
 
+# [freeze-exception no. 50, 2026-08-08] item 1 — the quote-aware
+# command-substitution walk `_cs_subst_scan` lands in the shared `_HOOK_HEADER`
+# (and secrets-gate's `_sg_pass`), so the retrofit-emitted hook `.sh` bodies and
+# gates.py move too, exactly as the greenfield goldens do (no. 50 there). Counts
+# unchanged (service 79, agent 93).
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "fef839ae78300f49cb5dd562529b9fab13438f08e4daaf6208dfbd465e5ef378",
-    "agent": "60aa7f6f3d2c7b9e00e87c9f61ac92ae5ba762e7fde2383566cf35112480512d",
+    "service": "02c2a4b0aad669ecf075daf6789c598f767df0de6f987b843e750d0da70b6c97",
+    "agent": "de74e1675ab46a0d2f9fc29d6e3987d49da75db25a7ef7a528f5fa9c2671f6cf",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

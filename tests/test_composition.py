@@ -132,6 +132,27 @@ check("both substrates state the same expansion depth",
       "_CS_DEPTH=3" in _tmpl and "_EXPAND_DEPTH = 3" in _sdk,
       "shell _CS_DEPTH and SDK _EXPAND_DEPTH must agree")
 
+# [item 1] The quote-aware command-substitution walk is ONE shell helper fed by
+# BOTH segmenter drivers, and its SDK twin must reach BOTH SDK candidate paths -
+# the secrets path (_segment_candidates) does NOT go through _expand_invoker_args,
+# so wiring only the invoker site is the round-4 D8 "fix landed in the copy the
+# gate doesn't use" trap, which here would leave `echo "$(cat .env)"` fail-open
+# on the SDK while the shell denies (a forbidden-direction divergence).
+check("shell _cs_subst_scan is defined exactly once",
+      _tmpl.count("_cs_subst_scan(){") == 1)
+check("shell _cs_subst_scan is seeded from BOTH segmenter drivers",
+      '_cs_subst_scan "$_s"' in _tmpl and '_cs_subst_scan "$_cmd"' in _tmpl,
+      "cmd_segments seeds _CS_EXTRA; secrets-gate's _sg_pass seeds _SG_EXTRA")
+check("SDK _subst_inners is defined once and wired into BOTH candidate paths",
+      _sdk.count("def _subst_inners(") == 1
+      and "_subst_inners(seg)" in _sdk        # _expand_invoker_args (dep/verb)
+      and "_subst_inners(cmd)" in _sdk,        # _segment_candidates (secrets)
+      "the secrets path skips _expand_invoker_args; wiring one site is D8")
+check("the substitution walk's length bound agrees across substrates",
+      "_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk,
+      "same cap or one substrate times out (fail-closed) while the other "
+      "completes (allow) on a large command - the X-36l divergence")
+
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.
 check("DUAL words are in both membership sets",

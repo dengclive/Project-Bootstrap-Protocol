@@ -1086,6 +1086,15 @@ _CS_EXTRA=""
 # `basename` regression F-937. Setting a global is 0.2 ms. Every helper on this
 # path is written this way; do not "simplify" one back into a subshell.
 _CS_R=""
+# [item 1] The quote-aware command-substitution walk's output (SEP-joined inner
+# command lines) and the length past which it stops scanning for openers.
+# Fail-closed and bounded like _xp_iw: a substitution beyond _SUBST_MAXLEN is
+# not additionally lifted (the surrounding run is still flattened and scanned).
+# The SDK twin (_SUBST_MAXLEN in sdk_gates_template) carries the SAME number so
+# neither substrate can hit its timeout while the other completes on a large
+# command; test_composition asserts the two literals agree.
+_CS_SUBST_R=""
+_SUBST_MAXLEN=8192
 _cs_esc_park(){                 # \\x -> sentinel, so quotes cannot be forged
   _CS_R="$1"
   case "$_CS_R" in *\\\\*) ;; *) return 0 ;; esac
@@ -1124,6 +1133,94 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   # parsers giving opposite answers about one character.
   _t="${_t//$'\\n'/$_CS_SEP}"
   _CS_BUF="$_CS_BUF$_t"
+  return 0
+}
+# [item 1] Lift every COMMAND SUBSTITUTION whose output bash executes because it
+# sits in an ACTIVE quoting context - `$(...)` / `` `...` `` inside DOUBLE quotes
+# - out into _CS_SUBST_R (SEP-joined inner command lines) for cmd_segments /
+# _sg_pass to re-scan through the existing recursion. `echo "$(cat .env)"` reads
+# a secret and `echo "$(pip install evil)"` installs, but the quote walkers
+# never entered the substitution, so both were allow/allow on both substrates.
+#
+# A SINGLE quote-and-escape-aware walk, NOT a per-run extractor: a per-run
+# extractor tears at the inner `"` of `echo "$(cat ".env")"` - which bash runs,
+# because `$(...)` RESETS the quoting context - and pulls an unbalanced `$(cat `.
+# So once inside `$(...)`/backtick the walk matches to the balanced close
+# QUOTE-BLIND (parens balanced, escaped chars skipped); a `'` inside a `"` run is
+# a literal; and a `$`/backtick after an ODD run of backslashes is escaped and
+# INERT. Unquoted `$(...)` is left to _cs_ops' `(`/`)` breaks; a bare sub that
+# runs its own output is Class B (download-then-run), handled elsewhere.
+# Chunk-based (jumps delimiter to delimiter) so a substitution with a long body
+# stays O(n); bounded by _SUBST_MAXLEN. Mirrors the SDK _subst_inners exactly
+# (tests/test_composition and the substrate differential pin the two together).
+_cs_subst_scan(){
+  local _s="$1" _q="" _pre _c _rest _depth _inner _q2
+  _CS_SUBST_R=""
+  case "$_s" in *'$('*|*'`'*) ;; *) return 0 ;; esac
+  _s="${_s:0:$_SUBST_MAXLEN}"
+  while [ -n "$_s" ]; do
+    # jump to the next interesting char: \\ " ' ` $
+    _pre="${_s%%[\\\\\\"\\'\\`\\$]*}"
+    if [ "$_pre" = "$_s" ]; then break; fi
+    _s="${_s#"$_pre"}"
+    _c="${_s:0:1}"
+    if [ "$_c" = "\\\\" ]; then
+      if [ "$_q" = "'" ]; then _s="${_s:1}"; else _s="${_s:2}"; fi
+      continue
+    fi
+    if [ "$_q" = "'" ]; then
+      [ "$_c" = "'" ] && _q=""
+      _s="${_s:1}"; continue
+    fi
+    if [ "$_q" != '"' ]; then
+      case "$_c" in "'"|'"') _q="$_c" ;; esac
+      _s="${_s:1}"; continue
+    fi
+    # inside double quotes: ' is literal; $( and ` are active
+    if [ "$_c" = '"' ]; then _q=""; _s="${_s:1}"; continue; fi
+    if [ "${_s:0:2}" = '$(' ]; then
+      # Balance to the matching `)`, QUOTE-AWARE: a `)` inside a quoted run does
+      # not close the sub (`$(printf ')'; cat .env)` runs cat .env). Single
+      # quotes suppress escapes; parens inside double quotes are literal and a
+      # nested `$(...)` there balances to itself, re-lifted by the recursion.
+      _depth=1; _rest="${_s:2}"; _inner=""; _q2=""
+      while [ "$_depth" -gt 0 ] && [ -n "$_rest" ]; do
+        _pre="${_rest%%[()\\\\\\'\\"]*}"
+        _inner="$_inner$_pre"; _rest="${_rest#"$_pre"}"
+        [ -z "$_rest" ] && break
+        _c="${_rest:0:1}"
+        if [ "$_q2" = "'" ]; then
+          [ "$_c" = "'" ] && _q2=""
+          _inner="$_inner$_c"; _rest="${_rest:1}"; continue
+        fi
+        if [ "$_c" = "\\\\" ]; then _inner="$_inner${_rest:0:2}"; _rest="${_rest:2}"; continue; fi
+        if [ "$_q2" = '"' ]; then
+          [ "$_c" = '"' ] && _q2=""
+          _inner="$_inner$_c"; _rest="${_rest:1}"; continue
+        fi
+        case "$_c" in
+          "'"|'"') _q2="$_c"; _inner="$_inner$_c"; _rest="${_rest:1}" ;;
+          "(") _depth=$((_depth+1)); _inner="$_inner("; _rest="${_rest:1}" ;;
+          ")") _depth=$((_depth-1)); if [ "$_depth" -eq 0 ]; then _rest="${_rest:1}"; break; fi; _inner="$_inner)"; _rest="${_rest:1}" ;;
+        esac
+      done
+      _CS_SUBST_R="$_CS_SUBST_R$_CS_SEP$_inner"; _s="$_rest"; continue
+    fi
+    if [ "$_c" = '`' ]; then
+      _rest="${_s:1}"; _inner=""
+      while [ -n "$_rest" ]; do
+        _pre="${_rest%%[\\`\\\\]*}"
+        _inner="$_inner$_pre"; _rest="${_rest#"$_pre"}"
+        [ -z "$_rest" ] && break
+        _c="${_rest:0:1}"
+        if [ "$_c" = "\\\\" ]; then _inner="$_inner${_rest:0:2}"; _rest="${_rest:2}"; continue; fi
+        _rest="${_rest:1}"; break
+      done
+      _CS_SUBST_R="$_CS_SUBST_R$_CS_SEP$_inner"; _s="$_rest"; continue
+    fi
+    # a lone $ not opening a substitution
+    _s="${_s:1}"
+  done
   return 0
 }
 # [round-4 P1, finding 9] Interpreter membership on a basename with a trailing
@@ -1623,6 +1720,12 @@ cmd_segments(){
   _s="${_s//$_CS_ESC/ }"; _s="${_s//$_CS_EDQ/ }"
   _s="${_s//$_CS_ESQ/ }"; _s="${_s//$_CS_ESP/ }"
   _CS_BUF=""; _CS_EXTRA=""
+  # [item 1] Lift double-quoted command substitutions BEFORE the scan and seed
+  # the recursion queue with them; the loop below re-scans each (invoker rule
+  # re-applied) exactly as it does an invoker's quoted argument. `_s` is the RAW
+  # command (real backslashes) - the walk is escape-aware and the queued inners
+  # are re-parked by the recursion, so it matches the invoker arm's convention.
+  _cs_subst_scan "$_s"; _CS_EXTRA="$_CS_EXTRA$_CS_SUBST_R"
   _cs_esc_park "$_s"
   _cs_scan "$_CS_R"
   # [round-4 D5] RECURSION, DEPTH 2, re-applying the invoker test at each
@@ -2762,6 +2865,12 @@ _sg_pass(){{
   # way out, exactly as cmd_segments does.
   _cmd="${{_cmd//$_CS_ESC/ }}"; _cmd="${{_cmd//$_CS_EDQ/ }}"
   _cmd="${{_cmd//$_CS_ESQ/ }}"; _cmd="${{_cmd//$_CS_ESP/ }}"
+  # [item 1] Lift double-quoted command substitutions and seed the recursion
+  # queue with them (shared header helper). `echo "$(cat .env)"` reads a secret
+  # from a command position _sg_scan never entered; the queued `cat .env` is
+  # re-scanned by the loop below and denies. Shell twin of the SDK
+  # _segment_candidates subst arm.
+  _cs_subst_scan "$_cmd"; _SG_EXTRA="$_SG_EXTRA$_CS_SUBST_R"
   _cs_esc_park "$_cmd"
   _sg_scan "$_CS_R"
   # [round-4 D5/D8] DEPTH 2, re-applying the invoker test at each level.

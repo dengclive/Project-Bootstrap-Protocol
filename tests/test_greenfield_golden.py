@@ -2699,7 +2699,14 @@ EXPECTED_DIGESTS = {
     # so every hook moves - which is exactly the blast radius #50 deferred it
     # on, now measured rather than estimated.
     "default":
-        "c77e68337295dd5e237c045527aed4ccc6cfc0396db1aa5deca350c5e6a8d44a",
+        # [freeze-exception no. 50, 2026-08-08] item 1 — the quote-aware
+        # command-substitution walk `_cs_subst_scan` lands in the shared
+        # `_HOOK_HEADER` (and its call site in secrets-gate's `_sg_pass`), so
+        # every hook `.sh` body moves plus the SDK `gates.py`. Closes the Class-A
+        # double-quoted `$(...)`/backtick hole on both substrates (secret reads,
+        # exfil, installs); Class-B download-then-run-via-substitution stays open
+        # as item 1b. Action count unchanged (57).
+        "93412eb77df14a524edd2189fee690c7021d343ba5c420b59f604086de320a3e",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2854,7 +2861,9 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "a69ea90621600630ef279b1b7ab583af587da9665150631d40bfac639cce9754",
+        # [freeze-exception no. 50, 2026-08-08] item 1 — _cs_subst_scan (see the
+        # `default` note). All plan-action bodies embed the moved header.
+        "457a0d8c27f44a983a71b20b5bf7e60121c95537daddee4e85866a5e681089f1",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2954,7 +2963,10 @@ EXPECTED_DIGESTS = {
         # design-steering artifacts (.claude/steering/design.md, the
         # design-review skill and the design-review command) are UNCHANGED,
         # verified per-file rather than assumed.
-        "f10a57d08cb3e2736ca4566351538546c2f3e0786a5a88ba2c7ea13054c0f2f2",
+        # [freeze-exception no. 50, 2026-08-08] item 1 — _cs_subst_scan (see the
+        # `default` note). TWELVE moved bodies (11 hook `.sh` + gates.py); the
+        # three frozen design-steering artifacts are UNCHANGED; count still 59.
+        "b35e572986e468f44698d4eb3d55dc78991945e9be16da0c078fb16cd1ce2f2a",
 }
 
 EXPECTED_ACTION_COUNTS = {

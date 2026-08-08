@@ -203,6 +203,22 @@ motivated agent or a compromised dependency.
    in the shared segmenter, and **fix `test_substrate_differential.py:2304`'s
    confounded row first** so the fix is pinned. Re-check X-32j, which cites the
    confound as proof.
+   **[DONE for Class A, 2026-08-08.]** The plan-review found the hole is TWO
+   classes and the naive fix falsifiable (nested `"$(cat ".env")"`, escaped
+   `\$(`, single-quote-in-double, subst-wrapping-invoker all defeat a per-run
+   extractor). **Class A** — a read/install at a command position inside the
+   substitution — is closed on both substrates by a quote-and-escape-aware walk
+   `_cs_subst_scan` (shell `_HOOK_HEADER`, seeded into `cmd_segments` and
+   `_sg_pass`) and its exact twin SDK `_subst_inners` (wired into BOTH the
+   dependency/invoker and the secrets `_segment_candidates` paths). 14 rows
+   flip allow/allow → deny/deny; every boundary/FP row (single-quote, escaped
+   `\$`, arithmetic, benign subs, prose) stays allow; 0 divergences. The
+   confounded AXIS-9d row is corrected and X-32j reopened→closed. Freeze
+   exception no. 50 (every hook body + gates.py move). **Class B** —
+   download-then-run laundered through a substitution (`bash -c "$(curl)"`,
+   `eval`, bare/backtick/process-sub) — is a DISTINCT correlation, **still open
+   as item 1b / backlog X-37**, ledgered `allow` in the differential corpus
+   (pre-existing, not a regression). Item 1 is release-blocking until 1b lands.
 2. **Add a LICENSE** and re-tag. Hours of work; blocks everything else.
 3. **Make the gate substrate self-protecting** — deny writes to
    `.claude/hooks/**` and `.claude/settings.json`.
