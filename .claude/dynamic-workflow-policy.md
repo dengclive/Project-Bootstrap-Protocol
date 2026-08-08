@@ -7,7 +7,7 @@ document decides **HOW**, and binds only maintainer-side use.
 **Not protocol surface.** Like `.claude/trust-ramp.md` beside it, this governs
 how much autonomy the agent is granted *on this repo*: it emits nothing, is not
 imported by `lib/` or `bin/`, appears in no installer plan, and touches no
-golden digest. `Bootstrap-Protocol-v2-6-0.md:133-136` excludes
+golden digest. `Bootstrap-Protocol-v2-6-0.md:171-174` excludes
 `.claude/trust-ramp.md` by name and states the criteria for doing so — *"It
 emits nothing, no installer plan references it, and it is not part of any
 conformance surface"*. It defines no class and does not name this file; the
@@ -440,7 +440,7 @@ assessment measured — and **it reads no config.** That number is a machine
 property. It is not a permission.
 
 **The binding constraint is review capacity.** The PRD's own justification for
-its concurrency budget is not machine capacity: `Bootstrap-Protocol-v2-6-0.md:339`
+its concurrency budget is not machine capacity: `Bootstrap-Protocol-v2-6-0.md:385`
 budgets 2 across all autonomous modes *"expanding based on review throughput"*,
 and warns that *"running more concurrent autonomous tasks than the operator can
 review … defeats the point."* The **number** does not transfer to fan-out — the

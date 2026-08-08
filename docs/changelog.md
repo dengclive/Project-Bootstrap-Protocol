@@ -1,5 +1,71 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Unreleased — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
+
+**No version bump.** No configuration key exists that did not, and the one
+emitted body that moves does so by one comment line. Recorded here *before*
+release rather than at release time: PR #58 went unrecorded for exactly the
+opposite habit.
+
+Freeze exception **49**. Suite 24 → **25 suites**, 9416 → **9458 checks**.
+
+### G-6 is closed, and it was two gaps plus a third it never named
+
+The **version half** was fixed at v2.7.4 and is pinned. The **filename half** is
+answered by a convention that already existed and that G-6 was written without
+noticing — the PRD's own filename note says the filename tracks *doc folds*, not
+code releases. It now carries the decidable trigger it lacked, so a delta can
+state what it amends: **the pair whose `**Version:**` equals `PROTOCOL_VERSION`**,
+exactly one at any time, asserted by `tests/test_installer.py`. README now says
+the same; it was the only genuinely missing statement of the three.
+
+**Renaming was considered in two shapes and declined in both** — to `v2-7-4`
+(contradicts the shipped fold convention, and must then recur every release) and
+to a stable unversioned name (same objection, and it invalidates the *path* of
+every historical citation, not just its line). Both also move an emitted body,
+because the PRD filename ships inside `.claude/hooks/iteration-summary-enforcement.sh`.
+
+### The third gap: line citations rot silently, and one of them ships
+
+Citations into the PRD are **unversioned, not wrong** — each was correct when
+written and invalidated by the next edit. One target moved
+**654 → 670 → 713 → 739 → 759** across five releases. Five reviews passed over it.
+
+`tests/test_doc_citations.py` closes the class. It stores an **anchor, never a
+line**, asserts the anchor is **unique** in the cited document, derives the line,
+and asserts the citing file states it. Uniqueness is the load-bearing part: a
+plain substring check produces *false passes* whenever the anchor repeats, and
+`Iteration-summary enforcement` occurs twice in the PRD.
+
+Its completeness scan immediately found **six citations nobody knew about**,
+including two into the Companion, and then flagged **freeze exception 49's own
+note** minutes after it was written. Historical records (`docs/changelog.md`,
+closed backlog rows, the dated lens-findings docs) are excluded by name —
+renumbering them to today's lines would corrupt a dated record.
+
+### The two unpinned emission paths
+
+`.claude/steering/telemetry.md` and the retrofit plans both carried
+`PROTOCOL_VERSION` and moved at every release, pinned by nothing.
+
+- **telemetry.md** — pinned by a targeted body digest, not a fourth aggregate
+  fixture: ~60 actions to observe one new body would enlarge every future
+  re-baseline for no added coverage.
+- **retrofit** — pinned with a **kind-inclusive** digest. This file's existing
+  `plan_digest` hashes path+body+mode and omits `kind`, and retrofit is the one
+  mode that *mutates* `kind` (the agent fixture emits `gitignore_root`), so a
+  kind-blind golden would have been blind to the exact regression class.
+
+**Freeze exception 48's note was wrong in both halves and is corrected in
+place.** "Moved stamp-only" was false for retrofit: measured across v2.7.3 →
+v2.7.4, the service fixture moved **twelve** bodies, of which one was the stamp
+and eleven were PR #57's hook bodies — pinned for greenfield by exception 47, and
+for retrofit by nothing.
+
+**Cost, in the honest unit:** the pinned set is larger, so *every* emitted-surface
+change re-baselines more digests — not just version bumps. Those bytes were
+already moving; they were simply unobserved.
+
 ## 2.7.3 → 2.7.4 — a head form neither walker saw past, and a policy for the tool that found it (2026-08-07)
 
 **PATCH**, on the criterion this file states: no configuration key exists that

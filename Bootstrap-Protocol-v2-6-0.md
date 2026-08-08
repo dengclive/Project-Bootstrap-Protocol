@@ -54,9 +54,29 @@
 > previous-release diff, and the "previously denied, now allowed" set must be
 > empty.**
 >
-> Filename note: this document keeps its `v2-6-0` name. The filename tracks
-> *doc folds*, not code releases — 2.1.0 was likewise a code MINOR served by the
-> `v2-0-0` document.
+> **Filename note — and the rule for deciding it.** This document keeps its
+> `v2-6-0` name. **The filename tracks *doc folds*, not code releases** — 2.1.0
+> was likewise a code MINOR served by the `v2-0-0` document, and 2.7.0 was a
+> code MINOR (two new configuration keys) served by this one.
+>
+> **[v2.7.4] The trigger, stated so a reader can check it against the tree.** A
+> new PRD/Companion pair is cut **only when the normative text is restructured
+> or re-issued as a whole** — the fold events are recorded in `docs/changelog.md`
+> and are the only reason a new filename has ever appeared. A code release,
+> however large, amends this document **in place** with a `**Version:**` bump and
+> a release block; it never renames. So:
+>
+> - **The normative pair is the one whose `**Version:**` equals
+>   `PROTOCOL_VERSION`.** That is exactly one pair at any time, it is mechanically
+>   checkable, and `tests/test_installer.py` asserts it.
+> - **A delta amends that pair**, and should name it by `**Version:**`, not by
+>   filename — the filename is a fold identifier, not a version.
+> - Older pairs in the repo root are frozen historical record. The v2.6.0
+>   *document* is preserved at tag `v2.6.0`; this working file has carried later
+>   normative text since 2026-07-31 and is not that document.
+>
+> This closes `docs/dynamic-workflow-assessment.md` gap **G-6**, whose operative
+> clause was that a delta must be able to state which document it amends.
 
 > **v2.6.1 — parser-usability fail-open, PATCH (2026-07-31).** No phase, artifact,
 > state field, opt-in or gate *predicate* changes; the document itself is amended

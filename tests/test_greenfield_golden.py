@@ -27,7 +27,7 @@ ROOT = os.path.join(HERE, "..")
 sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 from defaults import resolve_config           # noqa: E402
-from installer import build_plan              # noqa: E402
+from installer import build_plan, PROTOCOL_VERSION   # noqa: E402
 from minyaml import load_yaml                 # noqa: E402
 
 passed = failed = 0
@@ -115,6 +115,16 @@ def plan_actions(yaml_text):
     cfg, errs = resolve_config(raw)
     assert not errs, f"fixture must validate; got errors: {errs}"
     return cfg, build_plan(cfg)
+
+
+def telemetry_body(yaml_text):
+    """The `.claude/steering/telemetry.md` body for a config, or None."""
+    cfg, errs = resolve_config(load_yaml(yaml_text))
+    assert not errs, f"fixture must validate; got errors: {errs}"
+    for a in build_plan(cfg):
+        if a["path"] == ".claude/steering/telemetry.md":
+            return a["body"]
+    return None
 
 
 def plan_digest_full(plan):
@@ -218,6 +228,28 @@ EXPECTED_DIGESTS = {
     # 1.00-1.05x, and a length fence inside a security predicate is a
     # fail-OPEN guard.
 
+    # [freeze-exception no. 49, 2026-08-08] ONE ROTTED CITATION, EMITTED.
+    # `full_autonomous` ONLY; default and design_steering are byte-IDENTICAL
+    # (verified, not assumed). ONE body moves —
+    # `.claude/hooks/iteration-summary-enforcement.sh` — on ONE line: a shell
+    # comment that cited the PRD at line 654-655 for the exit-code convention,
+    # corrected to line 759. (Written in prose, not in `file.md:NNN` form, on
+    # purpose: this is a HISTORICAL record of what a citation used to say, and
+    # tests/test_doc_citations.py's completeness scan correctly flags a live
+    # citation with no table row. It flagged this note within minutes of being
+    # written — the collision was predicted by the plan review and this is the
+    # resolution it recommended.)
+    # WHY AN EMITTED BODY CARRIES A CITATION AT ALL: lib/templates.py:5110-5111
+    # is a comment INSIDE a template, so it ships. That also made it the one
+    # citation nothing could find by grep — the filename ends one line and the
+    # `:NNN` begins the next, behind a `#`.
+    # THE CITATION WAS NOT WRONG WHEN WRITTEN. Traced: the target sat at :654 at
+    # v2.6.0, :670 at v2.6.1, :713 at v2.7.0, :739 after the 2.7.4 release block,
+    # and :759 after this commit's own PRD edit. Citations here are UNVERSIONED,
+    # not wrong, which is why five reviews passed over it.
+    # Pinned henceforth by tests/test_doc_citations.py, which DERIVES the line
+    # from a uniqueness-checked anchor instead of storing an integer.
+    #
     # [freeze-exception no. 48, 2026-08-07] RELEASE 2.7.4 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.3 -> 2.7.4. PATCH on this repo's stated criterion:
     # the release's only behavioral content is PR #57 (X-36v/w), whose fix is one
@@ -243,12 +275,26 @@ EXPECTED_DIGESTS = {
     # change that also involves that literal, and this tree does contain a
     # second, unrelated "2.7.3" (lib/sdk_gates_template.py:702, a defect comment
     # that is emitted). Method 2 has no such blind spot.
-    # NOT PINNED BY ANY GOLDEN, and moved stamp-only in this release (verified
-    # directly, recorded so a later reader does not assume coverage):
-    # `.claude/steering/telemetry.md`, which stamps PROTOCOL_VERSION into its
-    # OTEL_RESOURCE_ATTRIBUTES line but is off in all three fixtures; and the
-    # retrofit plans, for which tests/test_retrofit.py computes digests only
-    # relatively (a == b, a != x) and never against a constant.
+    # [CORRECTED 2026-08-08 — this note was wrong in BOTH halves; the correction
+    # is recorded rather than the note silently rewritten.]
+    # It read: "NOT PINNED BY ANY GOLDEN, and moved stamp-only in this release"
+    # for `.claude/steering/telemetry.md` and the retrofit plans.
+    #   - "stamp-only" was FALSE for retrofit. Measured v2.7.3 -> v2.7.4 on the
+    #     service fixture: TWELVE bodies moved, of which exactly ONE was the
+    #     stamp. The other eleven were PR #57's hook bodies — pinned for
+    #     greenfield by freeze exception 47, and for retrofit by nothing, so
+    #     they moved unobserved. The error was conflating "the release" with
+    #     "the version-stamp commit": greenfield showed 1 body only because #57
+    #     was already in its digests.
+    #   - "not pinned" is now FALSE too, deliberately: both are pinned as of
+    #     freeze exception 49's commit. telemetry.md by a targeted body digest
+    #     below (TEL-01 section); the retrofit plans by
+    #     EXPECTED_RETROFIT_DIGESTS in tests/test_retrofit.py, with a
+    #     kind-inclusive digest because retrofit is the one mode that mutates
+    #     `kind` and this file's sibling helper omits it.
+    # COST, in the honest unit: the pinned set is now larger, so EVERY
+    # emitted-surface change — not just a version bump — re-baselines more
+    # digests. That is the trade: those bytes were already moving.
     #
     # [freeze-exception no. 46, 2026-08-06] RELEASE 2.7.3 — VERSION STAMP ONLY.
     # PROTOCOL_VERSION 2.7.2 -> 2.7.3. PATCH on this repo's stated criterion:
@@ -2801,7 +2847,7 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "c736bd47fe543dc7dd049bba63ccf46479e886b128ba5a85067a6960828534ee",
+        "bf42d08d362d3b812ed5f0bd73c1f2a74c3c04f56a3820d631c08a34a37e242b",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -2970,6 +3016,53 @@ def run_fixture(label, yaml_text):
 run_fixture("default", FIXTURE_DEFAULT)
 run_fixture("full_autonomous", FIXTURE_FULL_AUTONOMOUS)
 run_fixture("design_steering", FIXTURE_DESIGN_STEERING)
+
+
+# --------------------------------------------------------------------------- #
+# TEL-01: the one emitted body no aggregate fixture reaches
+# --------------------------------------------------------------------------- #
+# `.claude/steering/telemetry.md` is emitted only when `telemetry_export_enabled`
+# is true, and it is FALSE in all three fixtures above -- deliberately, because
+# their whole point is to prove the flag is off by default and byte-identical.
+# The consequence, recorded in freeze exception 48 and closed here: telemetry.md
+# carried PROTOCOL_VERSION and moved at every release, pinned by NOTHING.
+#
+# A fourth aggregate fixture would pin ~60 actions to observe ONE new body, and
+# would enlarge every future re-baseline for no added coverage. This is the
+# targeted form instead: one flag flip on fixture C, one body, one digest.
+print("\n=== TEL-01: telemetry.md body is pinned ===")
+
+FIXTURE_TELEMETRY = FIXTURE_DESIGN_STEERING.replace(
+    "design_steering_enabled: true",
+    "design_steering_enabled: true\ntelemetry_export_enabled: true")
+
+_tel_off = telemetry_body(FIXTURE_DESIGN_STEERING)
+check("telemetry.md is NOT emitted with the flag off",
+      _tel_off is None,
+      "    the off-by-default invariant broke; the three digests above are now "
+      "measuring something else")
+
+_tel_on = telemetry_body(FIXTURE_TELEMETRY)
+check("telemetry.md IS emitted with the flag on", _tel_on is not None)
+
+if _tel_on is not None:
+    # Version-stamp-bearing. If this moves for any reason OTHER than a release
+    # bump, the change is unintended -- that is the whole point of pinning it.
+    EXPECTED_TELEMETRY_BODY = (
+        "fb6f51965f05d837568d8ded6dfad484083fdb1b9d43c3e8718e2a9bc0a57ed8")
+    actual = hashlib.sha256(_tel_on.encode()).hexdigest()
+    if os.environ.get("GOLDEN_UPDATE"):
+        print(f'  EXPECTED_TELEMETRY_BODY = "{actual}"')
+    check("telemetry.md body matches its golden digest",
+          actual == EXPECTED_TELEMETRY_BODY,
+          f"    expected {EXPECTED_TELEMETRY_BODY}\n    actual   {actual}\n"
+          f"    Re-baseline only with a recorded freeze exception.")
+    # Non-vacuity: prove the pinned body really carries the stamp, so a future
+    # reader knows this digest is what makes a release bump visible here.
+    check("the pinned body carries PROTOCOL_VERSION",
+          f"bootstrap.protocol_version={PROTOCOL_VERSION}" in _tel_on,
+          f"    no 'bootstrap.protocol_version={PROTOCOL_VERSION}' in the body")
+
 
 # Determinism: same fixture digests identically across two construction
 # passes in the same process. Guards against non-determinism creeping into

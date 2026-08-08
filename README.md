@@ -11,6 +11,13 @@
 > (`commands.execute_in_cwd`, `workflow.implementer_isolation`), which is why it
 > is the MINOR in the run and why the PRD carries a v2.7.0 block. No other
 > release in that range adds operator-facing surface a PRD would describe.**
+> **Why the filename says `v2-6-0` when the version says 2.7.4:** the filename
+> tracks *doc folds* (a whole re-issue of the normative text), not code
+> releases, which amend the pair in place. **The normative pair is the one whose
+> `**Version:**` equals `PROTOCOL_VERSION`** — exactly one at any time, asserted
+> by `tests/test_installer.py`. The rule and its trigger are stated in the PRD's
+> own filename note.
+>
 > Older PRD/Companion pairs are retained as historical record — with
 > one exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
 > corrections applied *in place* on 2026-07-28, each marked at its edit site,
