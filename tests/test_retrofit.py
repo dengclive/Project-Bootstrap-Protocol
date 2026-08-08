@@ -1991,7 +1991,7 @@ def retrofit_digest_full(yaml_text):
 
 EXPECTED_RETROFIT_DIGESTS = {
     "service": "fef839ae78300f49cb5dd562529b9fab13438f08e4daaf6208dfbd465e5ef378",
-    "agent": "191d1e2a13f11c7a15419cca4e671cdd2a203a2c6d42e4224dfb02414ddd7fb8",
+    "agent": "60aa7f6f3d2c7b9e00e87c9f61ac92ae5ba762e7fde2383566cf35112480512d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

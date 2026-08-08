@@ -7,7 +7,7 @@ document decides **HOW**, and binds only maintainer-side use.
 **Not protocol surface.** Like `.claude/trust-ramp.md` beside it, this governs
 how much autonomy the agent is granted *on this repo*: it emits nothing, is not
 imported by `lib/` or `bin/`, appears in no installer plan, and touches no
-golden digest. `Bootstrap-Protocol-v2-6-0.md:171-174` excludes
+golden digest. `Bootstrap-Protocol-v2-6-0.md:187-190` excludes
 `.claude/trust-ramp.md` by name and states the criteria for doing so — *"It
 emits nothing, no installer plan references it, and it is not part of any
 conformance surface"*. It defines no class and does not name this file; the
@@ -138,7 +138,7 @@ cases, each blind to the others' findings.
 **Why fan-out.** A sequential reviewer inherits its own earlier framing; a
 second pass by the same agent re-reads the same file with the same priors. The
 failure this repo has actually paid for is *correlated blind spots*, not
-insufficient iterations: `docs/changelog.md:207` (the 2.7.1 → 2.7.2 section)
+insufficient iterations: `docs/changelog.md:367` (the 2.7.1 → 2.7.2 section)
 records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
@@ -147,7 +147,7 @@ previous stage had stated as measured fact.
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
-`docs/changelog.md:207`; it also appears at
+`docs/changelog.md:367`; it also appears at
 `.claude/checkpoints/checkpoint-20260806-083157-main.md:118`, which is
 gitignored (`.gitignore:11`) and therefore not citable. Cite the changelog.
 
@@ -440,7 +440,7 @@ assessment measured — and **it reads no config.** That number is a machine
 property. It is not a permission.
 
 **The binding constraint is review capacity.** The PRD's own justification for
-its concurrency budget is not machine capacity: `Bootstrap-Protocol-v2-6-0.md:385`
+its concurrency budget is not machine capacity: `Bootstrap-Protocol-v2-6-0.md:401`
 budgets 2 across all autonomous modes *"expanding based on review throughput"*,
 and warns that *"running more concurrent autonomous tasks than the operator can
 review … defeats the point."* The **number** does not transfer to fan-out — the
@@ -647,5 +647,5 @@ mechanism; it works only if it is read before the script is written.
 | `.claude/trust-ramp.md` | Sibling governance doc; the placement and "not protocol surface" precedent. DW-A2 binds to its ledger; **DW-G1 is the open question about its rungs.** |
 | `docs/agentic-harness-security-kb.md` | §4.7 is W-1, which DW-R1 exists to avoid re-arming. |
 | `SEAM-CONTRACT-v2-0-0.md` §8.4, §9 | The bump triggers DW-P1 avoids, and the declined-runner decision it would reopen. |
-| `Bootstrap-Protocol-v2-6-0.md` `:133-136`, `:339` | The not-protocol-surface exclusion, and the review-throughput justification §5 inherits. |
+| `Bootstrap-Protocol-v2-6-0.md` `:187-190`, `:401` | The not-protocol-surface exclusion, and the review-throughput justification §5 inherits. |
 | `Bootstrap-Protocol-Companion-v2-6-0.md` `:150`, `:161` | Judge-is-advisory; subagents-do-not-spawn-subagents (DW-P6). |

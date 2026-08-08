@@ -75,7 +75,7 @@ admits is a different object than fan-out.** CITED.
 The PRD admits concurrency at **task** granularity, with a budget, an accounting
 structure, and a derived cap:
 
-- `Bootstrap-Protocol-v2-6-0.md:385` — *"**Concurrency rule across autonomous
+- `Bootstrap-Protocol-v2-6-0.md:401` — *"**Concurrency rule across autonomous
   modes.** … concurrency budgets apply to the **combined** sum across modes …
   **Recommended starting concurrency: 2 across all autonomous modes combined for
   the first week of use**, expanding based on review throughput."*
@@ -265,7 +265,7 @@ emit, and that is controllable.
 **UNSPECIFIED. This is a spec gap to name, not a default to invent.** CITED.
 
 The ramp is explicitly **not protocol surface**.
-`Bootstrap-Protocol-v2-6-0.md:171-174`: *"**Not protocol surface, deliberately
+`Bootstrap-Protocol-v2-6-0.md:187-190`: *"**Not protocol surface, deliberately
 excluded:** this repository's own `.claude/trust-ramp.md` governs how much
 autonomy the agent is granted *on the protocol repo itself*. It emits nothing,
 no installer plan references it, and it is not part of any conformance
@@ -501,11 +501,16 @@ delta written against the PRD needs to state which document it amends.
 >
 > **The filename half** — answered by a convention that already existed and
 > that this gap was written without noticing: the PRD's own filename note
-> (search `Filename note`) states the filename tracks **doc folds**, not code
-> releases. It now also carries the decidable trigger it lacked, so G-6's
+> (search `Filename note`) states the filename records **when the pair was
+> cut**, not what it describes. It now also carries the decidable trigger it
+> lacked — *since 2.7.0 releases amend in place; a new pair is cut only by an
+> explicit re-issue recorded in the changelog* — together with the history that
+> contradicts the tidier version of the rule (three of the five root pairs were
+> cut by code commits, and the v2.3.0 "fold" produced no file). So G-6's
 > operative clause is satisfiable: **a delta amends the pair whose
-> `**Version:**` equals `PROTOCOL_VERSION`** — exactly one pair at any time,
-> mechanically checkable. README carries the same statement.
+> `**Version:**` equals `PROTOCOL_VERSION`**, and `tests/test_installer.py`
+> pins that value across the PRD header, the Companion mirror line and both
+> README lines. README carries the same statement.
 >
 > **Renaming was considered in two shapes and declined in both**: rename to
 > `v2-7-4` (would contradict the shipped fold convention, and must then recur

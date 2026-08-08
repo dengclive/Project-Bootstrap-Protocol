@@ -7,7 +7,7 @@ emitted body that moves does so by one comment line. Recorded here *before*
 release rather than at release time: PR #58 went unrecorded for exactly the
 opposite habit.
 
-Freeze exception **49**. Suite 24 → **25 suites**, 9416 → **9458 checks**.
+Freeze exception **49**. Suite 24 → **25 suites**, 9416 → **9462 checks**.
 
 ### G-6 is closed, and it was two gaps plus a third it never named
 

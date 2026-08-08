@@ -73,21 +73,27 @@ COMPANION = "Bootstrap-Protocol-Companion-v2-6-0.md"
 # Frozen: last touched long before the 2.7.x line. Cannot rot, but a wrong
 # citation into it would be wrong permanently, so it is cheap to pin.
 FROZEN_V200 = "Bootstrap-Protocol-v2-0-0.md"
+# CITED as well as historical-as-a-CITER: `.claude/dynamic-workflow-policy.md`
+# quotes it by line, and this branch's own 66-line prepend rotted that citation.
+CHANGELOG = "docs/changelog.md"
 
 # (citing file, cited doc, anchor). The anchor must be unique in the cited doc;
 # section 1 enforces that. `Iteration-summary enforcement` alone is NOT unique
 # (:740 and :1664) — hence the longer form.
 CITATIONS = [
     (".claude/dynamic-workflow-policy.md", PRD,
-     "**Not protocol surface, deliberately excluded:**"),
+     "**Not protocol surface, deliberately excluded:**",
+     "is not part of any conformance surface."),
     (".claude/dynamic-workflow-policy.md", PRD,
      "**Concurrency rule across autonomous modes.**"),
     ("docs/dynamic-workflow-assessment.md", PRD,
-     "**Not protocol surface, deliberately excluded:**"),
+     "**Not protocol surface, deliberately excluded:**",
+     "is not part of any conformance surface."),
     ("docs/dynamic-workflow-assessment.md", PRD,
      "**Concurrency rule across autonomous modes.**"),
     ("tests/test_wrapper_behavior.py", PRD,
-     "exit 2 blocks, but exit 1 is"),
+     "exit 2 blocks, but exit 1 is",
+     "**Fails closed when the parser does not WORK"),
     ("docs/deferred-backlog.md", PRD,
      "**Iteration-summary enforcement** (only if"),
     # EMITTED. This one ships inside .claude/hooks/iteration-summary-enforcement.sh
@@ -95,7 +101,8 @@ CITATIONS = [
     # also the citation a naive scanner misses, because the filename ends one line
     # and `:NNN` begins the next.
     ("lib/templates.py", PRD,
-     "exit 2 blocks, but exit 1 is"),
+     "exit 2 blocks, but exit 1 is",
+     "**Fails closed when the parser does not WORK"),
     # The Companion is the other half of the living pair — it rots the same way.
     # Both of these were found by section 3's completeness scan, not by hand.
     (".claude/dynamic-workflow-policy.md", COMPANION,
@@ -108,7 +115,12 @@ CITATIONS = [
      "**`.claude/goal-config.md`** — operator-tunable settings"),
     ("tests/test_greenfield_golden.py", FROZEN_V200,
      "**`.claude/goal-config.md`** — operator-tunable settings"),
+    (".claude/dynamic-workflow-policy.md", CHANGELOG,
+     "**A judge that only scores designs inherits their shared blind"),
 ]
+
+# Normalise: rows may be 3-tuples (single line) or 4-tuples (a range).
+CITATIONS = [(r + (None,))[:4] for r in CITATIONS]
 
 # Files whose citations are deliberately NOT maintained (see SCOPE above).
 HISTORICAL = {
@@ -121,7 +133,9 @@ HISTORICAL = {
 }
 # Rows inside otherwise-live files that are dated/closed records.
 HISTORICAL_LINE_MARKERS = {
-    ("docs/deferred-backlog.md", 283),   # P-10, status `done` — a closed record
+    # Keyed on (citing file, CITED DOC, line). Keying on (file, line) alone
+    # would suppress that same number cited into a different document.
+    ("docs/deferred-backlog.md", "Bootstrap-Protocol-v2-6-0.md", 283),
 }
 
 
@@ -166,7 +180,7 @@ check("a stale line number is detected", 99 != _l,
 # --------------------------------------------------------------------------- #
 print("\n=== Section 1: anchors are unique (no false passes) ===")
 
-for citing, doc, anchor in CITATIONS:
+for citing, doc, anchor, end in CITATIONS:
     _, n = derive_line(read(doc), anchor)
     check(f"anchor unique in {doc}: {anchor[:46]!r}", n == 1,
           f"    occurs {n} times — a non-unique anchor can mask a rotted "
@@ -174,34 +188,76 @@ for citing, doc, anchor in CITATIONS:
 
 
 # --------------------------------------------------------------------------- #
-# 2. Every citing file states the derived line
+# 2 + 3. SET EQUALITY per (citing file, cited doc) — every citation, not one
 # --------------------------------------------------------------------------- #
-print("\n=== Section 2: cited line numbers match the derived line ===")
+# The first version of this section asked `derived_line in numbers_found`. That
+# is MEMBERSHIP, and membership is satisfied by any ONE correct citation: a
+# second, rotted citation to the same document from the same file passed
+# unnoticed. The review of this file proved it with three mutations, and two
+# real instances were live at the time — `.claude/dynamic-workflow-policy.md`
+# cited PRD :133-136 and :339 in its provenance table while the very same file's
+# prose had already been corrected to :171-174 and :385.
+#
+# So: collect EVERY number this file cites into that doc (both ends of a range),
+# collect EVERY line the table derives for that pair, and require the two SETS
+# to be equal. A stale number is then an unmatched element, not a near-miss.
+print("\n=== Sections 2+3: every cited number resolves, and nothing is uncited ===")
 
-for citing, doc, anchor in CITATIONS:
-    line, n = derive_line(read(doc), anchor)
-    if n != 1:
-        continue  # section 1 already failed this row
-    text = read(citing)
-    # Tolerate: `<doc>:NNN`, `<doc>:NNN-MMM`, backticks, and a newline+comment
-    # continuation between the filename and the colon (the emitted form).
-    pat = re.escape(doc) + r"`?\s*(?:\n\s*#?\s*)?`?:(\d+)(?:-(\d+))?"
-    found = [int(m.group(1)) for m in re.finditer(pat, text)]
-    check(f"{citing} cites {doc}:{line}",
-          line in found,
-          f"    derived line {line} from anchor {anchor[:40]!r}; "
-          f"{citing} cites {found or 'nothing matching'}")
+CITE = r"`?\s*(?:\n\s*#?\s*)?`?:(\d+)(?:-(\d+))?"
+
+
+def cited_numbers(citing_text, doc, citing_rel):
+    """Every line number `citing_text` cites into `doc`, range ends included.
+
+    Numbers listed in HISTORICAL_LINE_MARKERS are dropped: they are dated
+    records whose citation was correct on its date, and renumbering them to
+    today's lines would corrupt the record.
+    """
+    out = set()
+    for m in re.finditer(re.escape(doc) + CITE, citing_text):
+        for g in (m.group(1), m.group(2)):
+            if g and (citing_rel, doc, int(g)) not in HISTORICAL_LINE_MARKERS:
+                out.add(int(g))
+    return out
+
+
+pairs = {}
+for citing, doc, anchor, end in CITATIONS:
+    pairs.setdefault((citing, doc), []).append((anchor, end))
+
+for (citing, doc), rows in sorted(pairs.items()):
+    doc_text = read(doc)
+    derived = set()
+    ok = True
+    for anchor, end in rows:
+        line, n = derive_line(doc_text, anchor)
+        if n != 1:
+            ok = False
+            continue
+        derived.add(line)
+        if end is not None:
+            eline, en = derive_line(doc_text, end)
+            check(f"{citing}: range-end anchor unique in {doc}", en == 1,
+                  f"    end anchor {end[:40]!r} occurs {en} times")
+            if en == 1:
+                derived.add(eline)
+    if not ok:
+        continue
+    found = cited_numbers(read(citing), doc, citing)
+    check(f"{citing} -> {doc}: cited numbers == derived lines",
+          found == derived,
+          f"    cites   {sorted(found)}\n    derives {sorted(derived)}\n"
+          f"    stale (cited, not derived): {sorted(found - derived)}\n"
+          f"    missing (derived, not cited): {sorted(derived - found)}")
 
 
 # --------------------------------------------------------------------------- #
-# 3. Completeness — no live citation escapes the table
+# 4. Completeness — no live citation escapes the table
 # --------------------------------------------------------------------------- #
-# Scans tracked files via `git ls-files` (not a filesystem walk, which would
-# sweep in __pycache__, worktrees and the gitignored checkpoints).
-print("\n=== Section 3: the table covers every live citation ===")
+print("\n=== Section 4: the table covers every live citation ===")
 
 SCAN = re.compile(
-    r"(Bootstrap-Protocol(?:-Companion)?-v\d+-\d+-\d+\.md)`?\s*(?:\n\s*#?\s*)?`?:(\d+)")
+    r"((?:Bootstrap-Protocol(?:-Companion)?-v\d+-\d+-\d+|docs/changelog)\.md)" + CITE)
 
 try:
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,
@@ -209,33 +265,30 @@ try:
 except (subprocess.CalledProcessError, FileNotFoundError):
     tracked = []
 check("git ls-files returned a file list", len(tracked) > 20,
-      f"    got {len(tracked)} files; section 3 cannot run vacuously")
+      f"    got {len(tracked)} files; section 4 cannot run vacuously")
 
 SELF = os.path.relpath(os.path.abspath(__file__), ROOT)
-covered = {(c, d) for c, d, _ in CITATIONS}
+covered = {(c, d) for c, d, _, _ in CITATIONS}
 uncovered = []
 for rel in tracked:
     if rel == SELF or rel in HISTORICAL:
         continue
-    path = os.path.join(ROOT, rel)
     try:
-        with open(path, encoding="utf-8") as fh:
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
             text = fh.read()
     except (UnicodeDecodeError, OSError, IsADirectoryError):
         continue
     for m in SCAN.finditer(text):
         doc, num = m.group(1), int(m.group(2))
-        if (rel, num) in HISTORICAL_LINE_MARKERS:
+        if (rel, doc, num) in HISTORICAL_LINE_MARKERS:
             continue
         if (rel, doc) not in covered:
             uncovered.append((rel, doc, num))
 
 check("every live citation has a table row", uncovered == [],
-      "\n".join(f"    {r}:{d}:{n} has no entry in CITATIONS" for r, d, n in uncovered)
-      + "\n    Add a row (citing file, cited doc, unique anchor) — a citation "
-        "with no row is a citation nothing checks.")
+      "\n".join(f"    {r} cites {d}:{n} with no CITATIONS row" for r, d, n in uncovered)
+      + "\n    A citation with no row is a citation nothing checks.")
 
-# The scan must actually find things, or section 3 passes by finding nothing.
 total_found = 0
 for rel in tracked:
     if rel == SELF:
@@ -246,16 +299,12 @@ for rel in tracked:
     except (UnicodeDecodeError, OSError, IsADirectoryError):
         continue
 check("the scan is not vacuous (it finds citations)", total_found >= len(CITATIONS),
-      f"    scan found {total_found}, table has {len(CITATIONS)} — if the scan "
-      f"finds fewer than the table, the regex no longer matches the forms in use")
+      f"    scan found {total_found}, table has {len(CITATIONS)}")
 
-# And it must find the EMITTED, line-split one specifically — the form a naive
-# regex misses, and the only citation that ships to users.
 _tpl = read("lib/templates.py")
 check("the scan matches the line-split EMITTED citation",
       any(m.group(1) == PRD for m in SCAN.finditer(_tpl)),
-      "    lib/templates.py's citation spans a newline and a `#` continuation; "
-      "if this fails the regex has regressed to the naive form")
+      "    lib/templates.py's citation spans a newline and a `#` continuation")
 
 
 print(f"\n{passed} passed, {failed} failed")

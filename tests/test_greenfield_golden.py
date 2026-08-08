@@ -229,11 +229,18 @@ EXPECTED_DIGESTS = {
     # fail-OPEN guard.
 
     # [freeze-exception no. 49, 2026-08-08] ONE ROTTED CITATION, EMITTED.
-    # `full_autonomous` ONLY; default and design_steering are byte-IDENTICAL
-    # (verified, not assumed). ONE body moves —
+    # `full_autonomous` and the AGENT RETROFIT fixture; default and
+    # design_steering are byte-IDENTICAL (verified, not assumed). The retrofit
+    # SERVICE fixture is unaffected — it does not emit this hook, which is
+    # goal-mode gated. That split is itself the new retrofit golden earning its
+    # keep on its first commit: it caught a body no greenfield fixture sees.
+    # ONE body moves —
     # `.claude/hooks/iteration-summary-enforcement.sh` — on ONE line: a shell
     # comment that cited the PRD at line 654-655 for the exit-code convention,
-    # corrected to line 759. (Written in prose, not in `file.md:NNN` form, on
+    # corrected to lines 775-776. It is a RANGE, not one line: 775 carries the
+    # exit-1-proceeds half and 776 the "on a Stop hook exit 2 means do not stop"
+    # half, and an earlier pass of this commit wrongly narrowed it to a single
+    # line, dropping support for the second clause of the sentence citing it. (Written in prose, not in `file.md:NNN` form, on
     # purpose: this is a HISTORICAL record of what a citation used to say, and
     # tests/test_doc_citations.py's completeness scan correctly flags a live
     # citation with no table row. It flagged this note within minutes of being
@@ -2847,7 +2854,7 @@ EXPECTED_DIGESTS = {
     # here, which is the invariant no. 43 above spent one sentence
     # establishing was intact - it is not intact any more, on purpose.
     "full_autonomous":
-        "bf42d08d362d3b812ed5f0bd73c1f2a74c3c04f56a3820d631c08a34a37e242b",
+        "a69ea90621600630ef279b1b7ab583af587da9665150631d40bfac639cce9754",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact

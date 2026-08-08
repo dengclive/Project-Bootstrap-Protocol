@@ -59,18 +59,34 @@
 > was likewise a code MINOR served by the `v2-0-0` document, and 2.7.0 was a
 > code MINOR (two new configuration keys) served by this one.
 >
-> **[v2.7.4] The trigger, stated so a reader can check it against the tree.** A
-> new PRD/Companion pair is cut **only when the normative text is restructured
-> or re-issued as a whole** — the fold events are recorded in `docs/changelog.md`
-> and are the only reason a new filename has ever appeared. A code release,
-> however large, amends this document **in place** with a `**Version:**` bump and
-> a release block; it never renames. So:
+> **[Unreleased, post-2.7.4] The trigger, stated so a reader can check it
+> against the tree — including where the tree contradicts the tidy version.**
 >
+> The honest history, from `git log --diff-filter=A` on each root PRD: a new
+> pair was cut at **every MAJOR/MINOR through 2.6.0**, by whatever commit
+> happened to ship it — `v2-0-0` and `v2-2-0` by code releases, `v2-4-0` by the
+> 2.4.0 fold, `v2-5-0` by `feat(ds-01)`, `v2-6-0` by a docs release. So "only a
+> fold cuts a new file" would be false, and the v2.3.0 "doc fold" recorded in
+> the changelog produced no file at all. **The naming axis was never
+> consistently applied.**
+>
+> **The practice changed at 2.7.0 and that is the rule going forward.** 2.7.0
+> was a code MINOR — it added `commands.execute_in_cwd` and
+> `workflow.implementer_isolation` — and it amended this document **in place**
+> with a `**Version:**` bump and a release block rather than cutting
+> `v2-7-0`. 2.7.1 through 2.7.4 did the same. So:
+>
+> - **Releases amend in place.** A new pair is cut only by an explicit decision
+>   to re-issue the normative text, recorded in `docs/changelog.md` as such.
+>   Absent that entry, no new file.
 > - **The normative pair is the one whose `**Version:**` equals
->   `PROTOCOL_VERSION`.** That is exactly one pair at any time, it is mechanically
->   checkable, and `tests/test_installer.py` asserts it.
+>   `PROTOCOL_VERSION`** — one pair, mechanically checkable.
+>   `tests/test_installer.py` asserts that this file's header, the Companion's
+>   mirror line and both README lines all track `PROTOCOL_VERSION`. (It does not
+>   enumerate the root to prove uniqueness; it pins these four surfaces to one
+>   value, which is what keeps them from drifting apart.)
 > - **A delta amends that pair**, and should name it by `**Version:**`, not by
->   filename — the filename is a fold identifier, not a version.
+>   filename — the filename records when the pair was cut, not what it describes.
 > - Older pairs in the repo root are frozen historical record. The v2.6.0
 >   *document* is preserved at tag `v2.6.0`; this working file has carried later
 >   normative text since 2026-07-31 and is not that document.
