@@ -977,6 +977,7 @@ def _subst_inners(seg):
     # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
     # computed there on the same already-truncated string.
     heredoc = "<<" in seg.replace("<<<", "")
+    bd = 0                        # unquoted `${...}` nesting depth
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)
         if ch == "\\\\" and i + 1 < n and quote != "'":
@@ -1013,7 +1014,25 @@ def _subst_inners(seg):
             # `#` mid-word is literal (`echo a#b`), and a word survives an
             # ESCAPED blank (`echo a\\ #b` is the single word `a #b`), which is
             # why word-start is carried as state and not read off seg[i - 1].
-            if ch == "#" and wstart and not heredoc:
+            # [B5 review] PARAMETER EXPANSION. A blank inside `${...}` does not
+            # end a word and `#` there is data - `echo ${FOO:-a #b} END` prints
+            # `a #b END`. Reading that space as a word start invented a comment
+            # and dropped the line: `echo ${x:- #} "$(pip install evil)"` ran
+            # while both substrates allowed. Depth is CARRIED, not used to skip
+            # the region, because `${x:-"$(cat .env)"}` is live and must still
+            # be lifted. Shell parity: `_bd` in _cs_subst_scan.
+            if ch == "$" and i + 1 < n and seg[i + 1] == "{":
+                bd += 1
+                i += 2
+                wstart = False
+                continue
+            if ch == "}":
+                if bd:
+                    bd -= 1
+                i += 1
+                wstart = False
+                continue
+            if ch == "#" and wstart and not heredoc and not bd:
                 nl = seg.find("\\n", i)
                 if nl < 0:
                     break

@@ -640,6 +640,21 @@ _join_cont(){
       *) break ;;
     esac
   done
+  # [B5 review] These three are NOT bash blanks: `echo a<CR>#x` is the single
+  # word `a<CR>#x`, so the `#` is literal and a `$(...)` after it RUNS. Mapping
+  # them to a space is deliberate and stays (it over-splits, which is the deny
+  # direction for tokenisation) - but it is LOSSY, and after it no later stage
+  # can tell a synthesised blank from a typed one. That is fine until something
+  # RELAXES on a blank: B5's comment rule then reads `echo a<CR>#"$(pip install
+  # evil)"` as a comment and drops an install bash really runs, while the SDK -
+  # which is handed the raw string and whose word-start set excludes these three
+  # - correctly denies. So record that the substitution happened and let
+  # `_cs_subst_scan` switch its `#` rule off for this command; those commands
+  # keep their pre-B5 behaviour. Deleting the characters instead would be more
+  # faithful to bash but changes tokenisation in the allow direction, which is
+  # not a trade this fix gets to make.
+  _CMD_CTLWS=0
+  case "$_CMD_R" in *$'\\v'*|*$'\\f'*|*$'\\r'*) _CMD_CTLWS=1 ;; esac
   _CMD_R="${_CMD_R//$'\\v'/ }"
   _CMD_R="${_CMD_R//$'\\f'/ }"
   _CMD_R="${_CMD_R//$'\\r'/ }"
@@ -1154,7 +1169,7 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
 # stays O(n); bounded by _SUBST_MAXLEN. Mirrors the SDK _subst_inners exactly
 # (tests/test_composition and the substrate differential pin the two together).
 _cs_subst_scan(){
-  local _s="$1" _q="" _pre _c _rest _depth _inner _q2 _ws=1 _lc _hd=0 _hdt
+  local _s="$1" _q="" _pre _c _rest _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0
   _CS_SUBST_R=""
   case "$_s" in *'$('*|*'`'*) ;; *) return 0 ;; esac
   _s="${_s:0:$_SUBST_MAXLEN}"
@@ -1171,15 +1186,31 @@ _cs_subst_scan(){
   # the bound is one the walk never reaches either, and the test stays bounded.
   _hdt="${_s//<<</}"
   case "$_hdt" in *'<<'*) _hd=1 ;; esac
+  # ...and off as well when `_join_cont` turned a CR/VT/FF into a blank in this
+  # command: the blank it produced is indistinguishable from a typed one, so a
+  # word start here may be an artefact rather than something bash would see.
+  [ "${_CMD_CTLWS:-0}" = 1 ] && _hd=1
   while [ -n "$_s" ]; do
     # Jump to the next interesting char: \\ " ' ` $ - plus `#`, but ONLY where
     # the comment rule can fire. `#` reaches that rule only while UNQUOTED (the
     # arm sits behind both quote tests), so carrying it in the jump set inside a
-    # quoted run buys nothing and costs one loop iteration per `#`: measured
-    # +5.9 s on an 8 KB `#`-dense command, against dependency-gate's 60 s
-    # fail-closed ceiling, where added cost IS over-denial.
+    # quoted run buys nothing and costs one loop iteration per `#`. Measured at
+    # 8 KB against dependency-gate's 60 s fail-closed ceiling, where added cost
+    # IS over-denial:
+    #     quoted `#`-dense        6.54 s -> 0.37 s   (pre-B5 0.37 s)
+    #     unquoted, `#` at word start     0.29 s     (pre-B5 0.40 s)
+    #     unquoted, `#` MID-WORD          3.27 s     (pre-B5 0.43 s)  <-- NOT
+    # The mid-word case is the one this does NOT recover, and it is stated
+    # rather than hidden: a mid-word `#` is neither dropped from the jump set
+    # (the walk is unquoted, where the rule can fire) nor able to end the walk
+    # (only a word-start `#` swallows the line), so it pays one iteration each.
+    # It is BOUNDED - the walk stops at _SUBST_MAXLEN, so ~3.3 s is the whole
+    # of it, not a curve - and it is 18x under the ceiling. Recovering it needs
+    # a second bracket expression to skip to the next word boundary; that is
+    # deliberately left to the queued exhaustion work (B4), which re-measures
+    # this walk anyway and must include this shape.
     if [ -z "$_q" ] && [ "$_hd" = 0 ]; then
-      _pre="${_s%%[\\\\\\"\\'\\`\\$#]*}"
+      _pre="${_s%%[\\\\\\"\\'\\`\\$#\\}]*}"
     else
       _pre="${_s%%[\\\\\\"\\'\\`\\$]*}"
     fi
@@ -1236,7 +1267,24 @@ _cs_subst_scan(){
       # `#` mid-word is literal (`echo a#b`), and a word survives an ESCAPED
       # blank (`echo a\\ #b` is the single word `a #b`), which is why word-start
       # is carried as state instead of read back off the preceding character.
-      if [ "$_c" = '#' ] && [ "$_ws" = 1 ] && [ "$_hd" = 0 ]; then
+      # [B5 review] PARAMETER EXPANSION. A blank inside `${...}` does NOT end a
+      # word and a `#` there is ordinary data - `echo ${FOO:-a #b} END` prints
+      # `a #b END`. Without this the walk read the space in `${x:- #}` as a word
+      # start, invented a comment, and dropped the rest of the line: bash really
+      # ran `echo ${x:- #} "$(pip install evil)"` while BOTH substrates allowed.
+      # The depth is CARRIED rather than used to skip the region, because a
+      # double-quoted substitution nested inside one is live and must still be
+      # lifted (`${x:-"$(cat .env)"}`). `}` is in the unquoted jump set above so
+      # the close is seen; it must be written `\\}` there or it terminates the
+      # enclosing `${_s%%...}` instead of joining the bracket expression.
+      if [ "$_c" = '$' ] && [ "${_s:1:1}" = '{' ]; then
+        _bd=$((_bd + 1)); _s="${_s:2}"; _ws=0; continue
+      fi
+      if [ "$_c" = '}' ]; then
+        [ "$_bd" -gt 0 ] && _bd=$((_bd - 1))
+        _s="${_s:1}"; _ws=0; continue
+      fi
+      if [ "$_c" = '#' ] && [ "$_ws" = 1 ] && [ "$_hd" = 0 ] && [ "$_bd" = 0 ]; then
         case "$_s" in
           *$'\\n'*) _s="${_s#*$'\\n'}"; _ws=1 ;;
           *) _s="" ;;

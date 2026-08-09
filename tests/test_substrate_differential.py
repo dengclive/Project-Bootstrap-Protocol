@@ -3268,6 +3268,25 @@ _DQCS = [
     ("secrets-gate", 'echo a\r#"$(cat .env)"', "deny", "B5 fence: CR is not a bash blank"),
     ("secrets-gate", 'echo a\v#"$(cat .env)"', "deny", "B5 fence: VT is not a bash blank"),
     ("secrets-gate", 'echo a\f#"$(cat .env)"', "deny", "B5 fence: FF is not a bash blank"),
+    # ...and the same on a gate that reaches the walk through `cmd_segments`.
+    # The three rows above are secrets-gate only, and secrets-gate is the ONE
+    # gate whose `_sg_pass` walks the command it was handed - so they could not
+    # fail no matter what `cmd_segments` did. This row is the one that can.
+    # It survives only because `_join_cont` FLAGS the CR->blank substitution
+    # (`_CMD_CTLWS`): by the time any walker runs, the byte is already a space
+    # and nothing downstream can tell it from a typed one.
+    ("dependency-gate", 'echo a\r#"$(pip install evil)"', "deny", "B5 fence: CR through cmd_segments, not just _sg_pass"),
+    # PARAMETER EXPANSION. A blank inside `${...}` does not end a word and `#`
+    # there is data - `echo ${FOO:-a #b} END` prints `a #b END`. These were
+    # allow/allow with the canary read / pip really running.
+    ("dependency-gate", 'echo ${x:- #} "$(pip install evil)"', "deny", "B5 fence: blank in ${...} is not a word start"),
+    ("secrets-gate", 'echo ${x:- #} "$(cat .env)"', "deny", "B5 fence: blank in ${...}, secrets"),
+    ("secrets-gate", 'echo ${FOO:-a #b} "$(cat .env)"', "deny", "B5 fence: # inside ${...} is data"),
+    # ...and the reason the depth is CARRIED rather than used to skip the whole
+    # `${...}`: a double-quoted substitution nested in one is live and must
+    # still be lifted (canary fired). Skipping the region passes every row
+    # above and loses this one.
+    ("secrets-gate", 'echo ${x:-"$(cat .env)"}', "deny", "B5 fence: sub nested in ${...} is still lifted"),
     ("secrets-gate", 'echo a\t#"$(cat .env)"', "allow", "B5: TAB IS a bash blank, so this one IS a comment"),
     # A backslash-NEWLINE pair is a line continuation: bash DELETES it, so the
     # word-start before it survives it. The first cut cleared word-start there

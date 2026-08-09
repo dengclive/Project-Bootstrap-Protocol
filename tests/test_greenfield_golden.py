@@ -2732,7 +2732,7 @@ EXPECTED_DIGESTS = {
         # the walk resumes after the newline), so `_cs_subst_scan` in the
         # shared header moves every hook body and `_subst_inners` moves
         # `gates.py`. Count still 57.
-        "ad0a2d57c05a60c0c3b1fc2d4adce06c8d70a9339952e5586a79937eb76a782f",
+        "9025109ccd0dbf27f4e91cfdf596e320d180cb89c5c662e87eeb0a4e742921d4",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2895,7 +2895,7 @@ EXPECTED_DIGESTS = {
         # [no. 50 B5, pre-commit] comment-aware substitution walk in the shared
         # header + its SDK twin: all sixteen hook bodies and `gates.py` move
         # (see the `default` note). Count still 69.
-        "93df18a7d38ae917405c0061b82e765fb67a00ed54067aa8f644d1f6f6bb82f4",
+        "f21f68ee9f10d3deacbf9848ef0613e0c6bd8ac1c90c0f155832f5fde60f7f7f",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3005,7 +3005,7 @@ EXPECTED_DIGESTS = {
         # [no. 50 B5, pre-commit] comment-aware substitution walk: the hook
         # bodies and `gates.py` move, the three frozen design-steering
         # artifacts still UNCHANGED, count still 59.
-        "ffe99704099c41860627373e1d293445bdda35dc7818b114451c50b7b45c1186",
+        "b265f0fe3aeda3889e75f9321f18c00f2e2c170968d4222641f81dc00359db61",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -73,13 +73,49 @@ is a different way for a relaxation to invent a comment bash does not have:
 * **Cost.** Adding `#` to the walk's jump set cost +5.9 s on an 8 KB `#`-dense
   command, against dependency-gate's 60 s fail-closed ceiling where added cost
   IS over-denial. `#` now enters the jump set only where the comment arm can
-  fire (unquoted, no heredoc): 6.54 s → 0.38 s, against a pre-B5 0.39 s.
+  fire (unquoted, no heredoc): 6.54 s → 0.37 s against a pre-B5 0.37 s. **One
+  shape is not recovered and is stated rather than hidden:** an unquoted
+  MID-WORD `#`-dense 8 KB command is 3.27 s against a pre-B5 0.43 s, because
+  such a `#` neither leaves the jump set nor ends the walk. It is bounded by
+  `_SUBST_MAXLEN` (~3.3 s total, not a curve) and 18x under the ceiling;
+  recovering it belongs to the queued exhaustion work, which re-measures this
+  walk anyway. The first write-up of this bullet quoted only the quoted-`#`
+  number and so overstated what the change achieves.
 
-**Measured.** 29 rows. Every fence was proved load-bearing by building the wrong
+**A second review round, on the repairs themselves, found two more blockers**
+— which is why it was run at all, the first cut having been green and wrong:
+
+* **A blank inside `${...}` is not a word boundary.** `echo ${FOO:-a #b} END`
+  prints `a #b END`, so the `#` is data; the walk read the space before it as a
+  word start and dropped the line. `echo ${x:- #} "$(pip install evil)"` was
+  allow/allow with pip really running. The walk now carries `${...}` depth —
+  *carries*, not skips, because a substitution nested inside one is live and
+  must still be lifted (`${x:-"$(cat .env)"}`, canary fired).
+* **CR, VT and FF never reach any gate as themselves.** `_join_cont`, the
+  sanctioned reader, maps all three to a SPACE before gate code runs, and after
+  that nothing can tell a synthesised blank from a typed one. That was inert
+  until B5 added a rule that RELAXES on a blank. It also means the previous
+  round's repair — spelling the word-start set without those characters — was a
+  no-op on the shell for exactly the bytes it named; the review caught that the
+  three corpus rows pinning it were all on secrets-gate, the one gate whose
+  `_sg_pass` walks the command it was handed, so they could not fail. `_join_cont`
+  now flags the substitution and the walk switches its `#` rule off for that
+  command. The SDK half survives for the three VERB gates, which read a
+  normalised spelling: **ledgered as X-43**, shell-deny / SDK-allow, the
+  direction this module tolerates.
+
+A repair from the first round was also **reverted**: passing the raw command to
+the walk and to six `git_verb` call sites was measured to change nothing once
+the `_join_cont` flag existed — identical on the corpus and on every targeted
+battery — so it was surface across six gates for no effect.
+
+**Measured.** 34 rows. Every fence was proved load-bearing by building the wrong
 fix and watching it fail — stopping at the `#` breaks 5 rows, reading
 `seg[i - 1]` breaks 1, ignoring word-start breaks 2, the naive quote-blind
 pre-strip (the other fix direction) breaks 7, and restoring each of the six
-repairs above breaks 1–3 each. One row is labelled a CONTROL rather than a
+repairs above breaks 1–3 each, and so does each round-2 repair. Two changes
+that did NOT discriminate were handled as such rather than kept on faith: one
+row is labelled a CONTROL, and the raw-command repair was reverted. One row is labelled a CONTROL rather than a
 fence because it was measured to pass either way: its deny is over-determined by
 the comment line's plain text, so no payload of that shape can isolate the walk.
 Gate verdict and `execprobe` ground truth agree on every row.
