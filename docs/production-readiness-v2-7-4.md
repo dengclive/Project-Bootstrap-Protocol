@@ -229,6 +229,8 @@ execprobe shows bash runs nothing there.
 substrates, so a substitution whose closing paren lands past byte 8192 is
 silently dropped and fails **open**:
 
+**UPDATE 2026-08-09: a fix for this was built, measured and REVERTED** (backlog **X-44**). Replacing the prefix cap with a delimiter budget did close the padding bypass, but it recreated the two-denominator split on the SDK side (which budgets per segment and per token, not per command), it hid a substitution at byte 5006 behind a `}` run plus trailing padding — inside the 8192 bytes the old cap guaranteed were walked — and it pushed three shapes that previously returned `allow` in ~50 s across the 60 s fail-closed ceiling. The measurement that matters for planning: the shell's per-delimiter cost is O(remaining bytes), so **no bound of this shape works until that is fixed** — a flat budget large enough to keep the ~8 KB floor costs 87.6 s on 128 KB, and a length-scaled one splits the substrates. §8's exhaustion item therefore has to come first. The hole below is still open and still measured exactly as written.
+
 ```
 $ grep -n _SUBST_MAXLEN <stock branch install>/.claude/hooks/secrets-gate.sh
 751:_SUBST_MAXLEN=8192
