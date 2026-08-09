@@ -3334,6 +3334,95 @@ for _g, _cmd, _want, _lbl in _DQCS:
     differential(_g, bash(_cmd), _want, _lbl)
 
 # --------------------------------------------------------------------------- #
+# B4 -- THE WALK'S WINDOW BOUNDARY.
+#
+# `_cs_subst_scan` consumes a front window of _CS_WIN=1024 characters and
+# re-slices the tail only when it runs dry, because bash has no string cursor
+# and `${_s:1}` rebuilds the remainder (the walk was quadratic in delimiters:
+# `}`-dense at 8/16/32 KB cost 3.1 / 11.8 / 46.3 s, x3.9 per doubling).
+#
+# The window is a COST bound and must change nothing about which substitution
+# is found - so these rows put each construct at the boundary and assert the
+# two substrates still agree.
+#
+# WHICH OF THEM ARE FENCES, measured rather than assumed: the wrong fix was
+# built (the windowed walk with the post-jump refill deleted - the first cut,
+# which refilled only before the delimiter JUMP, so consuming the run before a
+# delimiter could leave ONE character before the DISPATCH) and every row re-run
+# against it. Exactly THREE fail there, all at offset _CS_WIN-1, and in BOTH
+# directions: a live opener stopped being seen (`dq $(` and the EVEN backslash
+# run) and an INERT one started being lifted (the ODD backslash run). Those
+# three are the fences.
+# The other rows pass either way and are CONTROLS - they hold the boundary
+# still for a future change to _CS_WIN or to the arms, and they are labelled
+# as controls rather than counted as coverage for this one.
+#
+# The SDK has no counterpart to the window (`_subst_inners` walks an index over
+# an immutable string), which is exactly why a differential row catches this:
+# the shell moves and the SDK does not.
+# --------------------------------------------------------------------------- #
+_W = 1024
+_B4WIN = []
+for _off in (_W - 1, _W, _W + 1):
+    _pad = "a" * (_off - 6)
+    _B4WIN += [
+        # a live opener whose `$` is the window's last character
+        ("secrets-gate", 'echo "' + _pad + '$(cat .env)"', "deny",
+         "B4 window: dq $( opener at _CS_WIN-1+%d" % (_off - _W + 1)),
+        # an EVEN backslash run leaves the opener live ...
+        ("secrets-gate", 'echo "' + _pad + '\\\\$(cat .env)"', "deny",
+         "B4 window: even backslash run at the boundary, opener LIVE"),
+        # ... and an ODD one makes it inert: bash prints a literal `$(cat .env)`
+        ("secrets-gate", 'echo "' + _pad + '\\$(cat .env)"', "allow",
+         "B4 window: odd backslash run at the boundary, opener INERT"),
+        # `${` is a two-character lookahead too, and its depth suppresses `#`
+        ("secrets-gate", 'echo "' + _pad + '${x:-q}$(cat .env)"', "deny",
+         "B4 window: ${ lookahead at the boundary"),
+        # a backtick opener at the boundary
+        ("secrets-gate", 'echo "' + _pad + '`cat .env`"', "deny",
+         "B4 window: backtick opener at the boundary"),
+    ]
+# A line continuation straddling the boundary. bash DELETES the pair outright,
+# so what precedes the `\` is what the `#` sees - and these two `want`s are
+# written from BASH, not from the gates: `echo a\<nl>#b` prints `a#b` (the `#`
+# is MID-WORD and the substitution after it RUNS), while `echo a \<nl>#b`
+# prints `a` (the space survives, the `#` opens a comment). Verified by running
+# both. The first spelling was pinned `allow` here on the reasoning that a
+# continuation "keeps the comment"; both substrates denied it, correctly, and
+# the row was wrong rather than the code.
+_B4WIN += [
+    ("secrets-gate",
+     "make x \\\n" + "a" * (_W - 9) + '\\\n# note "$(cat .env)"', "deny",
+     "B4 window: continuation at the boundary leaves `#` MID-WORD - bash runs it"),
+    ("secrets-gate",
+     "make x \\\n" + "a" * (_W - 10) + ' \\\n# note "$(cat .env)"', "allow",
+     "B4 window: continuation after a BLANK keeps the `#` at a word start"),
+    # the comment's terminating newline lies several windows ahead: the drop
+    # loop must keep dropping, and must resume the walk after it
+    ("secrets-gate",
+     'echo hi # ' + "z" * (2 * _W + 7) + '\necho "$(cat .env)"', "deny",
+     "B4 window: comment newline three windows out, walk resumes after it"),
+    ("secrets-gate", 'echo hi # ' + "z" * (3 * _W) + ' "$(cat .env)"', "allow",
+     "B4 window: comment running to end-of-command swallows the sub"),
+    # the balance loop reads on past the boundary: close paren, quote state and
+    # the accumulator flush all straddle it
+    ("secrets-gate", 'echo "$(cat ' + "a" * _W + ' .env)"', "deny",
+     "B4 window: substitution body longer than a window"),
+    ("secrets-gate", 'echo "`cat ' + "a" * _W + ' .env`"', "deny",
+     "B4 window: backtick body longer than a window"),
+    ("secrets-gate", 'echo "$(printf \'' + ")" * 4 + "a" * _W + "' ; cat .env)\"",
+     "deny", "B4 window: quoted parens inside the body span the boundary"),
+    # multibyte padding: bash slices CHARACTERS under a UTF-8 locale, so a
+    # window can never tear a multibyte sequence - and the walk must agree with
+    # the SDK about where the opener is either way
+    ("secrets-gate", 'echo "' + "é" * _W + '$(cat .env)"', "deny",
+     "B4 window: multibyte padding across the boundary"),
+]
+print("\n== B4: substitution-walk window boundary ==")
+for _g, _cmd, _want, _lbl in _B4WIN:
+    differential(_g, bash(_cmd), _want, _lbl)
+
+# --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the
 # configured command and deny only when it FAILS, so under `"true"` test-gate,

@@ -2010,9 +2010,15 @@ def retrofit_digest_full(yaml_text):
 # [no. 50 B5, pre-commit] the comment-aware substitution walk lands in the
 # shared hook header, so every retrofit hook body moves. Retrofit emits no
 # `gates.py`. Counts unchanged: service 79, agent 93.
+# [no. 51 B4, pre-commit] the substitution walk now consumes a 1024-character
+# front WINDOW instead of re-slicing the whole remainder per delimiter. It is
+# a COST change only - 1020 pre/post/SDK walk comparisons show 0 behavioural
+# differences - but it lands in the shared hook header, so every retrofit hook
+# body moves. Retrofit emits no `gates.py`. Counts unchanged: service 79,
+# agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "c75a50df0085bcf9dfa0d0090d915110e9cee1734ff829fba5c6ff0ddfd00133",
-    "agent": "6c449989b8b2ba18fc6eb3fde17743d315ac018f43cb003064c9086c07bfe5be",
+    "service": "a2903e53d57230be7153cb10eb54110ee154241e51b4446329fdf811cf3a05d3",
+    "agent": "24f15611234533451f5b9da10d5d4dc11c15a75d65b05dcd960f6eb4b8abdfed",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

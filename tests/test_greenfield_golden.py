@@ -2732,7 +2732,14 @@ EXPECTED_DIGESTS = {
         # the walk resumes after the newline), so `_cs_subst_scan` in the
         # shared header moves every hook body and `_subst_inners` moves
         # `gates.py`. Count still 57.
-        "9025109ccd0dbf27f4e91cfdf596e320d180cb89c5c662e87eeb0a4e742921d4",
+        # [freeze-exception no. 51, 2026-08-09] B4 — `_cs_subst_scan`
+        # now consumes a 1024-character front WINDOW instead of re-slicing
+        # the whole remainder per delimiter, and accumulates bodies and
+        # results in two levels. SHELL-ONLY and cost-only: 1020 pre/post/SDK
+        # walk comparisons show 0 behavioural changes, so `gates.py` does
+        # NOT move - only the shared header, hence every hook body.
+        # Count still 57.
+        "24df71c46622b535b2e2d4aab7abd4443e227dbc6eb8ef87a45116ad1645b199",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2895,7 +2902,14 @@ EXPECTED_DIGESTS = {
         # [no. 50 B5, pre-commit] comment-aware substitution walk in the shared
         # header + its SDK twin: all sixteen hook bodies and `gates.py` move
         # (see the `default` note). Count still 69.
-        "f21f68ee9f10d3deacbf9848ef0613e0c6bd8ac1c90c0f155832f5fde60f7f7f",
+        # [freeze-exception no. 51, 2026-08-09] B4 — `_cs_subst_scan`
+        # now consumes a 1024-character front WINDOW instead of re-slicing
+        # the whole remainder per delimiter, and accumulates bodies and
+        # results in two levels. SHELL-ONLY and cost-only: 1020 pre/post/SDK
+        # walk comparisons show 0 behavioural changes, so `gates.py` does
+        # NOT move - only the shared header, hence every hook body.
+        # Count still 69.
+        "a7855a2d93836108c9222f5a77cda9e1214b1d0ca4a9f29350fd18e6f2c39286",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3005,7 +3019,14 @@ EXPECTED_DIGESTS = {
         # [no. 50 B5, pre-commit] comment-aware substitution walk: the hook
         # bodies and `gates.py` move, the three frozen design-steering
         # artifacts still UNCHANGED, count still 59.
-        "b265f0fe3aeda3889e75f9321f18c00f2e2c170968d4222641f81dc00359db61",
+        # [freeze-exception no. 51, 2026-08-09] B4 — `_cs_subst_scan`
+        # now consumes a 1024-character front WINDOW instead of re-slicing
+        # the whole remainder per delimiter, and accumulates bodies and
+        # results in two levels. SHELL-ONLY and cost-only: 1020 pre/post/SDK
+        # walk comparisons show 0 behavioural changes, so `gates.py` does
+        # NOT move - only the shared header, hence every hook body.
+        # Count still 59.
+        "5d23769eef50bfc2fe268e4779acd24895d97fbde74d59201c35b7fdd29bcda2",
 }
 
 EXPECTED_ACTION_COUNTS = {

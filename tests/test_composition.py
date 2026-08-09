@@ -152,6 +152,17 @@ check("the substitution walk's length bound agrees across substrates",
       "_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk,
       "same cap or one substrate times out (fail-closed) while the other "
       "completes (allow) on a large command - the X-36l divergence")
+# [B4] _CS_WIN is deliberately SHELL-ONLY, and that asymmetry is pinned so it
+# is not "corrected" into the SDK. _SUBST_MAXLEN above must agree across
+# substrates because it decides WHICH substitutions are walked; _CS_WIN decides
+# only which byte bash examines first while it consumes a string it has no
+# cursor for. `_subst_inners` walks an index over an immutable string, is
+# already O(n), and giving it a window would add a second boundary to keep in
+# step for no gain.
+check("the walk's cost window is shell-only",
+      "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
+      "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "
+      "and needs no counterpart - a twin would be a boundary to keep in sync")
 
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.

@@ -1110,6 +1110,33 @@ _CS_R=""
 # command; test_composition asserts the two literals agree.
 _CS_SUBST_R=""
 _SUBST_MAXLEN=8192
+# [B4] The walk's WINDOW, and the reason there is one. bash has no string
+# cursor: `${_s:1}` and `${_s#"$_pre"}` REBUILD the remainder, so consuming one
+# delimiter costs O(remaining) and a delimiter-dense command is QUADRATIC.
+# Measured on the emitted walk, `}`-dense at 2/4/8 KB: 0.24 / 0.81 / 2.96 s,
+# x3.5 per doubling, while delimiter-FREE text of the same sizes is flat at
+# 0.03 s. So the walk carries a front window of this many characters and
+# consumes THAT; the tail is re-sliced only when the window runs dry. Each
+# delimiter then costs O(_CS_WIN) instead of O(remaining), which is the whole
+# point: cost stops depending on how much text FOLLOWS the delimiter.
+# What it does NOT do is make the walk linear, and the comment should not
+# pretend otherwise. `_s="${_s:$_CS_WIN}"` still rebuilds the tail, so the
+# refills alone cost n^2/(2*_CS_WIN) - a 1024x smaller quadratic, not none.
+# Measured on delimiter-free padding, where refills are the ONLY cost:
+# 0.14 / 0.43 / 1.53 s at 64 / 128 / 256 KB, still bending upward, against a
+# pre-B4 curve that reaches the same 0.73 s at 32 KB. bash offers no cursor
+# that avoids this - `${_s:$_i:$_CS_WIN}` walks to `_i` under a multibyte
+# locale, which is the same term again.
+# It is a COST bound and NOT a semantic one - unlike _SUBST_MAXLEN above, it
+# cannot hide a substitution. The window is a PREFIX of the remainder, so the
+# first delimiter in it is the first delimiter overall; a window carrying none
+# is dropped whole and the search continues in the next; and the refill keeps
+# two characters available so the two-character lookaheads (`\\<newline>`, `$(`,
+# `${`) cannot straddle a boundary. Which byte is examined first changes, which
+# byte is FOUND does not. That is also why the SDK twin has no counterpart to
+# it: `_subst_inners` walks an index over an immutable string and is already
+# O(n), so this is the shell paying to reach the parity the SDK had for free.
+_CS_WIN=1024
 _cs_esc_park(){                 # \\x -> sentinel, so quotes cannot be forged
   _CS_R="$1"
   case "$_CS_R" in *\\\\*) ;; *) return 0 ;; esac
@@ -1169,7 +1196,10 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
 # stays O(n); bounded by _SUBST_MAXLEN. Mirrors the SDK _subst_inners exactly
 # (tests/test_composition and the substrate differential pin the two together).
 _cs_subst_scan(){
-  local _s="$1" _q="" _pre _c _rest _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0
+  # [B4] `_w` is the front WINDOW and `_s` the tail past it; together they are
+  # always exactly the unconsumed remainder. `_ib` is the inner accumulator's
+  # small half - see the balance loop.
+  local _s="$1" _q="" _pre _c _w="" _ib _rb="" _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0
   _CS_SUBST_R=""
   case "$_s" in *'$('*|*'`'*) ;; *) return 0 ;; esac
   _s="${_s:0:$_SUBST_MAXLEN}"
@@ -1190,7 +1220,19 @@ _cs_subst_scan(){
   # command: the blank it produced is indistinguishable from a typed one, so a
   # word start here may be an artefact rather than something bash would see.
   [ "${_CMD_CTLWS:-0}" = 1 ] && _hd=1
-  while [ -n "$_s" ]; do
+  while : ; do
+    # [B4] REFILL. Top the window up whenever it holds fewer than two
+    # characters, so every two-character lookahead below (`\\<newline>`, `$(`,
+    # `${`, and the balance loops' escape pairs) reads real text rather than the
+    # end of a window. `${_w:1:1}` is empty for a window of 0 or 1 characters,
+    # and the tail is re-sliced HERE and nowhere else - once per _CS_WIN
+    # characters consumed, which is what makes the per-character copy O(1).
+    # When both are empty the walk is over; that replaces the old `[ -n "$_s" ]`
+    # loop condition and the `_pre = _s` break below.
+    if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+      _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+    fi
+    [ -z "$_w" ] && break
     # Jump to the next interesting char: \\ " ' ` $ - plus `#`, but ONLY where
     # the comment rule can fire. `#` reaches that rule only while UNQUOTED (the
     # arm sits behind both quote tests), so carrying it in the jump set inside a
@@ -1199,22 +1241,28 @@ _cs_subst_scan(){
     # IS over-denial:
     #     quoted `#`-dense        6.54 s -> 0.37 s   (pre-B5 0.37 s)
     #     unquoted, `#` at word start     0.29 s     (pre-B5 0.40 s)
-    #     unquoted, `#` MID-WORD          3.27 s     (pre-B5 0.43 s)  <-- NOT
-    # The mid-word case is the one this does NOT recover, and it is stated
-    # rather than hidden: a mid-word `#` is neither dropped from the jump set
-    # (the walk is unquoted, where the rule can fire) nor able to end the walk
-    # (only a word-start `#` swallows the line), so it pays one iteration each.
-    # It is BOUNDED - the walk stops at _SUBST_MAXLEN, so ~3.3 s is the whole
-    # of it, not a curve - and it is 18x under the ceiling. Recovering it needs
-    # a second bracket expression to skip to the next word boundary; that is
-    # deliberately left to the queued exhaustion work (B4), which re-measures
-    # this walk anyway and must include this shape.
+    #     unquoted, `#` MID-WORD          3.27 s     (pre-B5 0.43 s)  <-- was
+    # A mid-word `#` is neither dropped from the jump set (the walk is
+    # unquoted, where the rule can fire) nor able to end the walk (only a
+    # word-start `#` swallows the line), so it pays one loop iteration each.
+    # [B4] RECOVERED, and not the way this note predicted. It guessed a second
+    # bracket expression skipping to the next word boundary; what actually paid
+    # was the window, because the cost was never the iteration COUNT - it was
+    # that each iteration re-sliced the whole remainder. Same shape, same 8 KB,
+    # dependency-gate end to end, pre-B4 and post-B4 measured back to back:
+    #     unquoted, `#` MID-WORD    3.32 s -> 0.94 s   (3.5x)
+    #     unquoted, `#` word-start  0.79 s -> 0.58 s
+    #     quoted `#`-dense          0.25 s -> 0.25 s
+    # The bound is now _CS_WIN per `#` rather than "the walk stops at
+    # _SUBST_MAXLEN". That matters for the queued B3: B3 replaces the prefix
+    # cap with a delimiter budget, so the OLD sentence would have become false
+    # silently. This one survives B3 - a windowed iteration costs O(_CS_WIN)
+    # whatever bounds the walk's reach.
     if [ -z "$_q" ] && [ "$_hd" = 0 ]; then
-      _pre="${_s%%[\\\\\\"\\'\\`\\$#\\}]*}"
+      _pre="${_w%%[\\\\\\"\\'\\`\\$#\\}]*}"
     else
-      _pre="${_s%%[\\\\\\"\\'\\`\\$]*}"
+      _pre="${_w%%[\\\\\\"\\'\\`\\$]*}"
     fi
-    if [ "$_pre" = "$_s" ]; then break; fi
     # [B5] Word-start state for the `#` rule below, taken from the last
     # character JUMPED OVER. Empty _pre means the previous iteration consumed
     # the character and already set _ws.
@@ -1237,22 +1285,40 @@ _cs_subst_scan(){
       _lc="${_pre: -1}"
       case "$_lc" in ' '|$'\\t'|$'\\n'|';'|'&'|'|') _ws=1 ;; *) _ws=0 ;; esac
     fi
-    _s="${_s#"$_pre"}"
-    _c="${_s:0:1}"
+    # [B4] A window with no delimiter in it is DROPPED WHOLE and the search goes
+    # on in the next one. The old code broke out of the walk here (`_pre = _s`
+    # meant end of string); with a window it means end of WINDOW, so the word
+    # -start state above is taken from the dropped run's last character FIRST -
+    # it is the character immediately preceding whatever the next window opens
+    # with, exactly as it would have been in one unwindowed pass.
+    if [ "$_pre" = "$_w" ]; then _w=""; continue; fi
+    _w="${_w#"$_pre"}"
+    # [B4] REFILL AGAIN, and this one is the load-bearing copy. The refill at
+    # the top of the loop guarantees two characters when the JUMP runs; taking
+    # `_pre` out can leave exactly one before the DISPATCH, which happens
+    # whenever a delimiter is the window's last character. Measured: without
+    # this, `$` at offset 1023 of `echo "<pad>$(cat .env)"` stopped being an
+    # opener (`${_w:1:1}` read the end of the window instead of the `(`), an
+    # even backslash run stopped being inert-free and an ODD one started
+    # lifting - four cases, in BOTH directions, at exactly _CS_WIN-1.
+    if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+      _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+    fi
+    _c="${_w:0:1}"
     if [ "$_c" = "\\\\" ]; then
       # [B5 review] A backslash-NEWLINE pair is a LINE CONTINUATION: bash
       # deletes it outright, so the word-start state before it is the state
       # after it. Clearing _ws here made `make build \\` + newline + `# note
       # "$(pip install ...)"` lift the install out of a comment bash never runs.
-      if [ "$_q" = "'" ]; then _s="${_s:1}"; _ws=0; else
-        case "${_s:1:1}" in $'\\n') ;; *) _ws=0 ;; esac
-        _s="${_s:2}"
+      if [ "$_q" = "'" ]; then _w="${_w:1}"; _ws=0; else
+        case "${_w:1:1}" in $'\\n') ;; *) _ws=0 ;; esac
+        _w="${_w:2}"
       fi
       continue
     fi
     if [ "$_q" = "'" ]; then
       [ "$_c" = "'" ] && _q=""
-      _s="${_s:1}"; _ws=0; continue
+      _w="${_w:1}"; _ws=0; continue
     fi
     if [ "$_q" != '"' ]; then
       # [B5] An unquoted `#` that BEGINS a word opens a comment, and bash
@@ -1277,18 +1343,25 @@ _cs_subst_scan(){
       # lifted (`${x:-"$(cat .env)"}`). `}` is in the unquoted jump set above so
       # the close is seen; it must be written `\\}` there or it terminates the
       # enclosing `${_s%%...}` instead of joining the bracket expression.
-      if [ "$_c" = '$' ] && [ "${_s:1:1}" = '{' ]; then
-        _bd=$((_bd + 1)); _s="${_s:2}"; _ws=0; continue
+      if [ "$_c" = '$' ] && [ "${_w:1:1}" = '{' ]; then
+        _bd=$((_bd + 1)); _w="${_w:2}"; _ws=0; continue
       fi
       if [ "$_c" = '}' ]; then
         [ "$_bd" -gt 0 ] && _bd=$((_bd - 1))
-        _s="${_s:1}"; _ws=0; continue
+        _w="${_w:1}"; _ws=0; continue
       fi
       if [ "$_c" = '#' ] && [ "$_ws" = 1 ] && [ "$_hd" = 0 ] && [ "$_bd" = 0 ]; then
-        case "$_s" in
-          *$'\\n'*) _s="${_s#*$'\\n'}"; _ws=1 ;;
-          *) _s="" ;;
-        esac
+        # [B4] The newline that ends the comment may be past the window, so the
+        # windows are dropped one at a time until one contains it. Dropping is
+        # correct without any "in a comment" state precisely BECAUSE the drop
+        # loop lives here: control does not return to the walk until the newline
+        # is found or the command ends.
+        while : ; do
+          case "$_w" in *$'\\n'*) _w="${_w#*$'\\n'}"; break ;; esac
+          if [ -z "$_s" ]; then _w=""; break; fi
+          _w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        done
+        _ws=1
         continue
       fi
       # _c is always one of the jump-set characters, so it can never be a blank
@@ -1296,54 +1369,115 @@ _cs_subst_scan(){
       # and this arm only has to record that a quote leaves us MID-word.
       case "$_c" in "'"|'"') _q="$_c" ;; esac
       _ws=0
-      _s="${_s:1}"; continue
+      _w="${_w:1}"; continue
     fi
     _ws=0
     # inside double quotes: ' is literal; $( and ` are active
-    if [ "$_c" = '"' ]; then _q=""; _s="${_s:1}"; continue; fi
-    if [ "${_s:0:2}" = '$(' ]; then
+    if [ "$_c" = '"' ]; then _q=""; _w="${_w:1}"; continue; fi
+    if [ "${_w:0:2}" = '$(' ]; then
       # Balance to the matching `)`, QUOTE-AWARE: a `)` inside a quoted run does
       # not close the sub (`$(printf ')'; cat .env)` runs cat .env). Single
       # quotes suppress escapes; parens inside double quotes are literal and a
       # nested `$(...)` there balances to itself, re-lifted by the recursion.
-      _depth=1; _rest="${_s:2}"; _inner=""; _q2=""
-      while [ "$_depth" -gt 0 ] && [ -n "$_rest" ]; do
-        _pre="${_rest%%[()\\\\\\'\\"]*}"
-        _inner="$_inner$_pre"; _rest="${_rest#"$_pre"}"
-        [ -z "$_rest" ] && break
-        _c="${_rest:0:1}"
+      # [B4] The balance loop reads on past the window through the SAME refill,
+      # so paren, quote and escape state simply carry across a boundary - there
+      # is one cursor (`_w` + `_s`), not a second one over a copied remainder.
+      # The old `_rest="${_s:2}"` copy WAS the second cursor, and re-slicing it
+      # per delimiter is where the worst measured shape lived: `echo "$(` plus
+      # dense quoted parens was 573x the delimiter-free baseline.
+      #
+      # `_inner` is accumulated in TWO halves for the same reason. Appending one
+      # character to a string costs O(length) here, so a substitution body of d
+      # delimiters cost O(d^2) even after the cursor was fixed. `_ib` takes the
+      # per-delimiter appends and is flushed into `_inner` once it passes a
+      # window, which makes the append O(_CS_WIN) amortised. Every path out of
+      # this loop must flush - the single flush below the loop is the only one,
+      # and `continue`/`break` both reach it.
+      _depth=1; _w="${_w:2}"; _inner=""; _ib=""; _q2=""
+      while [ "$_depth" -gt 0 ]; do
+        if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+          _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        fi
+        [ -z "$_w" ] && break
+        _pre="${_w%%[()\\\\\\'\\"]*}"
+        _ib="$_ib$_pre"
+        if [ "$_pre" = "$_w" ]; then
+          _w=""
+          [ -z "$_s" ] && break
+          _inner="$_inner$_ib"; _ib=""; continue
+        fi
+        _w="${_w#"$_pre"}"
+        if [ "${#_ib}" -gt "$_CS_WIN" ]; then _inner="$_inner$_ib"; _ib=""; fi
+        # the post-jump refill, for the same reason as the outer loop's: an
+        # escape pair whose backslash is the window's last character must still
+        # read its target, or the target is dropped from `_inner` outright.
+        if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+          _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        fi
+        _c="${_w:0:1}"
         if [ "$_q2" = "'" ]; then
           [ "$_c" = "'" ] && _q2=""
-          _inner="$_inner$_c"; _rest="${_rest:1}"; continue
+          _ib="$_ib$_c"; _w="${_w:1}"; continue
         fi
-        if [ "$_c" = "\\\\" ]; then _inner="$_inner${_rest:0:2}"; _rest="${_rest:2}"; continue; fi
+        if [ "$_c" = "\\\\" ]; then _ib="$_ib${_w:0:2}"; _w="${_w:2}"; continue; fi
         if [ "$_q2" = '"' ]; then
           [ "$_c" = '"' ] && _q2=""
-          _inner="$_inner$_c"; _rest="${_rest:1}"; continue
+          _ib="$_ib$_c"; _w="${_w:1}"; continue
         fi
         case "$_c" in
-          "'"|'"') _q2="$_c"; _inner="$_inner$_c"; _rest="${_rest:1}" ;;
-          "(") _depth=$((_depth+1)); _inner="$_inner("; _rest="${_rest:1}" ;;
-          ")") _depth=$((_depth-1)); if [ "$_depth" -eq 0 ]; then _rest="${_rest:1}"; break; fi; _inner="$_inner)"; _rest="${_rest:1}" ;;
+          "'"|'"') _q2="$_c"; _ib="$_ib$_c"; _w="${_w:1}" ;;
+          "(") _depth=$((_depth+1)); _ib="$_ib("; _w="${_w:1}" ;;
+          ")") _depth=$((_depth-1)); if [ "$_depth" -eq 0 ]; then _w="${_w:1}"; break; fi; _ib="$_ib)"; _w="${_w:1}" ;;
         esac
       done
-      _CS_SUBST_R="$_CS_SUBST_R$_CS_SEP$_inner"; _s="$_rest"; continue
+      _inner="$_inner$_ib"
+      # [B4] the RESULT is two-level for the same reason `_inner` is: appending
+      # each lifted body to one growing string is O(total) per substitution, so
+      # a command that is mostly substitutions stayed quadratic after the
+      # cursor and the body accumulator were both bounded. Measured on
+      # `"$(id)"`-dense input before this: 0.34 / 0.75 / 1.89 / 5.45 / 17.56 s
+      # at 8 / 16 / 32 / 64 / 128 KB - x3.2 per doubling and climbing. `_rb` is
+      # flushed below the loop, on the ONE path out.
+      _rb="$_rb$_CS_SEP$_inner"
+      if [ "${#_rb}" -gt "$_CS_WIN" ]; then _CS_SUBST_R="$_CS_SUBST_R$_rb"; _rb=""; fi
+      continue
     fi
     if [ "$_c" = '`' ]; then
-      _rest="${_s:1}"; _inner=""
-      while [ -n "$_rest" ]; do
-        _pre="${_rest%%[\\`\\\\]*}"
-        _inner="$_inner$_pre"; _rest="${_rest#"$_pre"}"
-        [ -z "$_rest" ] && break
-        _c="${_rest:0:1}"
-        if [ "$_c" = "\\\\" ]; then _inner="$_inner${_rest:0:2}"; _rest="${_rest:2}"; continue; fi
-        _rest="${_rest:1}"; break
+      _w="${_w:1}"; _inner=""; _ib=""
+      while : ; do
+        if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+          _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        fi
+        [ -z "$_w" ] && break
+        _pre="${_w%%[\\`\\\\]*}"
+        _ib="$_ib$_pre"
+        if [ "$_pre" = "$_w" ]; then
+          _w=""
+          [ -z "$_s" ] && break
+          _inner="$_inner$_ib"; _ib=""; continue
+        fi
+        _w="${_w#"$_pre"}"
+        if [ "${#_ib}" -gt "$_CS_WIN" ]; then _inner="$_inner$_ib"; _ib=""; fi
+        # the post-jump refill, for the same reason as the outer loop's: an
+        # escape pair whose backslash is the window's last character must still
+        # read its target, or the target is dropped from `_inner` outright.
+        if [ -z "${_w:1:1}" ] && [ -n "$_s" ]; then
+          _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        fi
+        _c="${_w:0:1}"
+        if [ "$_c" = "\\\\" ]; then _ib="$_ib${_w:0:2}"; _w="${_w:2}"; continue; fi
+        _w="${_w:1}"; break
       done
-      _CS_SUBST_R="$_CS_SUBST_R$_CS_SEP$_inner"; _s="$_rest"; continue
+      _inner="$_inner$_ib"
+      # [B4] same two-level result buffer as the `$(...)` arm above.
+      _rb="$_rb$_CS_SEP$_inner"
+      if [ "${#_rb}" -gt "$_CS_WIN" ]; then _CS_SUBST_R="$_CS_SUBST_R$_rb"; _rb=""; fi
+      continue
     fi
     # a lone $ not opening a substitution
-    _s="${_s:1}"
+    _w="${_w:1}"
   done
+  _CS_SUBST_R="$_CS_SUBST_R$_rb"
   return 0
 }
 # [round-4 P1, finding 9] Interpreter membership on a basename with a trailing
