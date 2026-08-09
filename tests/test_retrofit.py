@@ -1991,12 +1991,28 @@ def retrofit_digest_full(yaml_text):
 
 # [freeze-exception no. 50, 2026-08-08] item 1 — the quote-aware
 # command-substitution walk `_cs_subst_scan` lands in the shared `_HOOK_HEADER`
-# (and secrets-gate's `_sg_pass`), so the retrofit-emitted hook `.sh` bodies and
-# gates.py move too, exactly as the greenfield goldens do (no. 50 there). Counts
+# (and secrets-gate's `_sg_pass`), so the retrofit-emitted hook `.sh` bodies
+# move too, exactly as the greenfield goldens do (no. 50 there). Counts
 # unchanged (service 79, agent 93).
+#
+# NOT `gates.py`: an earlier revision of this note said the retrofit plans move
+# "the hook `.sh` bodies and gates.py". They do not — a retrofit plan emits NO
+# `gates.py` at all (0 paths matching in both fixtures, checked by rendering).
+# The claim was transcribed from the greenfield note, where it is true.
+#
+# [no. 50, adversarial-review round-2 addition, pre-commit, same named set]
+# `_sg_pass`'s drain loop now re-runs `_cs_subst_scan` on each queued item,
+# closing invoker-wrapping-sub (`sh -c 'echo "$(cat .env)"'`, a shell-ALLOW /
+# SDK-deny live exfil). Blast radius verified by rendering both trees:
+# `.claude/hooks/secrets-gate.sh` ONLY — and, unlike greenfield, NOT
+# `gates.py`, because retrofit emits none (see the note above). Counts still
+# 79 / 93.
+# [no. 50 B5, pre-commit] the comment-aware substitution walk lands in the
+# shared hook header, so every retrofit hook body moves. Retrofit emits no
+# `gates.py`. Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "02c2a4b0aad669ecf075daf6789c598f767df0de6f987b843e750d0da70b6c97",
-    "agent": "de74e1675ab46a0d2f9fc29d6e3987d49da75db25a7ef7a528f5fa9c2671f6cf",
+    "service": "cbf0755f0f6a1d3ced54b463bedc3f254fabeb835eec9aa5274eeb4ad4376302",
+    "agent": "0cf7adf5da9b704157ba780954e757a731eca820a9466df69b87a56a30fff4ad",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
