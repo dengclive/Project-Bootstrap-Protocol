@@ -3508,6 +3508,93 @@ for _g, _cmd, _want, _lbl in _X36Y:
     differential(_g, bash(_cmd), _want, _lbl)
 
 # --------------------------------------------------------------------------- #
+# B3 -- THE CHARGING BOUNDARY, and the behavioural half of what
+# test_composition can only assert on source.
+#
+# `_SUBST_MAXLEN` was a PREFIX CAP, so whether a substitution got walked
+# depended on how much text PRECEDED it - which the attacker writes.
+# `echo "<8300 x>$(cat .env)"` was allow/allow with the canary read, on BOTH
+# substrates, which is exactly why no row here could catch it: a differential
+# pins AGREEMENT, and the two substrates agreed. These rows' `want` therefore
+# comes from what BASH does, not from what the gates did.
+#
+# The bound is now a FLAT budget charged only on \\ " ' ` $ in the outer walk,
+# plus a cost-only length backstop. The first attempt at this passed 4034 rows
+# and was reverted anyway, because every row it added used `$`-DENSE padding and
+# neither parity bug is visible there. So these rows cover EVERY charging family
+# and both uncharged families, straddling the boundary.
+_W = 8192
+_SUB = '"$(cat .env)"'
+_B3 = [
+    # --- THE BYPASS ITSELF: benign padding, uncharged, must now be walked --- #
+    ("secrets-gate", 'echo "' + "x" * 8300 + '$(cat .env)"', "deny",
+     "B3: 8300 B of padding no longer pushes the sub out of reach (X-44)"),
+    ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "deny",
+     "B3: 20 KB of padding - well past the old 8192 prefix cap"),
+    ("secrets-gate", 'echo "' + "x" * 60000 + '$(cat .env)"', "deny",
+     "B3: 60 KB of padding, just inside the cost backstop"),
+    # --- X-44 GROUND 2, the net regression that reverted the first attempt:
+    #     5000 `}` then padding, with the sub at ~byte 5006 - INSIDE the 8192
+    #     the old prefix cap guaranteed. `}` is not charged now, so it survives.
+    ("secrets-gate", "echo " + "}" * 5000 + " " + _SUB, "deny",
+     "B3: 5000 unquoted `}` do not spend budget - X-44 ground 2"),
+    # --- UNCHARGED families at multiples of the budget: must NEVER stop ----- #
+    ("secrets-gate", "echo " + "}" * (4 * _W) + " " + _SUB, "deny",
+     "B3: 4x the budget in `}` - uncharged, walk continues"),
+    ("secrets-gate", "echo " + "a" * (4 * _W) + " " + _SUB, "deny",
+     "B3: 4x the budget in plain padding - uncharged"),
+    ("secrets-gate", "echo a" + "a#" * (2 * _W) + " " + _SUB, "deny",
+     "B3: mid-word `#` is uncharged and does not open a comment"),
+    # --- CR: B5 folds _CMD_CTLWS into _hd, and _hd must NOT select the
+    #     charging set. One CR would otherwise change what the shell charges
+    #     with no SDK counterpart - X-44 ground 4, half two.
+    ("secrets-gate", "echo x\r" + "}" * (2 * _W) + " " + _SUB, "deny",
+     "B3: a CR in the command does not change what is charged"),
+    ("secrets-gate", "echo x\r" + "$" * 8190 + " " + _SUB, "allow",
+     "B3: ...and does not change it on the CHARGED side either"),
+    # --- BACKTICK, AND THIS ROW IS A FENCE FOR X-44 GROUND 4, HALF ONE.
+    #     The SDK's balance loop exits ON the closing backtick and skips it
+    #     (`i = j + 1`) while the shell CONSUMES it, so charging inside the
+    #     loops bills shell 2 per pair and SDK 1. Neither charges there now, so
+    #     a pair costs exactly 2 in the outer walk on both.
+    #     2048 pairs = 4096 charges, well inside the budget -> the sub is
+    #     reached -> deny. Under the 2-per-pair bug the same input would spend
+    #     8192 and stop, i.e. ALLOW. The count is picked so the two answers
+    #     differ.
+    ("secrets-gate", "echo " + "`x`" * (_W // 4) + " " + _SUB, "deny",
+     "B3 fence: a backtick pair costs 2 charges, not 4 (X-44 ground 4)"),
+    # ...and the QUOTED spelling, which is the only one that reaches the dquote
+    # balance loop at all. The unquoted row above is handled by the outer
+    # dispatch's default arm on both substrates, so it CANNOT see a charge
+    # added inside that loop - built as a wrong fix, it survived the unquoted
+    # row and was caught only by this one. 5000 pairs = ~5002 charges when the
+    # loop charges nothing, ~10002 when it charges one more per pair.
+    ("secrets-gate", 'echo "' + "`x`" * 5000 + '$(cat .env)"', "deny",
+     "B3 fence: QUOTED backticks - the balance loop charges nothing"),
+    ("secrets-gate", "echo " + "`x`" * (4 * _W) + " " + _SUB, "allow",
+     "B3: ...and enough of them DO exhaust it, on both substrates alike"),
+    # --- THE BOUNDARY, sharp and identical on both substrates. The payload
+    #     spends one charge on the opening `"` and one on the `$` of `$(`, so
+    #     8189 is the last count that still lifts.
+    ("secrets-gate", "echo " + "$" * 8189 + " " + _SUB, "deny",
+     "B3 fence: 8189 charges - the last that still reaches the sub"),
+    ("secrets-gate", "echo " + "$" * 8190 + " " + _SUB, "allow",
+     "B3 fence: 8190 charges - budget exhausted, sub not lifted"),
+    # --- THE RESIDUAL, PINNED RATHER THAN HIDDEN. ~8 KB of charging characters
+    #     still hides a substitution, and padding past the backstop still does
+    #     too. Both are ledgered `allow` deliberately; a flat budget cannot
+    #     close either, and only an unbounded walk would - which is a timeout,
+    #     and on this gate a timeout is a deny nobody can override.
+    ("secrets-gate", "echo " + "'" * (_W + 10) + " " + _SUB, "allow",
+     "B3 residual: ~8 KB of charging characters still exhausts the budget"),
+    ("secrets-gate", 'echo "' + "x" * 70000 + '$(cat .env)"', "allow",
+     "B3 residual: padding past _SUBST_SCANMAX returns to prefix-cap behaviour"),
+]
+print("\n== B3: the charging boundary ==")
+for _g, _cmd, _want, _lbl in _B3:
+    differential(_g, bash(_cmd), _want, _lbl)
+
+# --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the
 # configured command and deny only when it FAILS, so under `"true"` test-gate,

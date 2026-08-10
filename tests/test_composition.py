@@ -13,6 +13,7 @@ which is exactly how a sampled sweep misses this class.
 Run: python3 tests/test_composition.py
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -148,10 +149,52 @@ check("SDK _subst_inners is defined once and wired into BOTH candidate paths",
       and "_subst_inners(seg)" in _sdk        # _expand_invoker_args (dep/verb)
       and "_subst_inners(cmd)" in _sdk,        # _segment_candidates (secrets)
       "the secrets path skips _expand_invoker_args; wiring one site is D8")
-check("the substitution walk's length bound agrees across substrates",
-      "_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk,
-      "same cap or one substrate times out (fail-closed) while the other "
-      "completes (allow) on a large command - the X-36l divergence")
+# [B3] Was `"_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk`.
+# That spelling carried a THIRD copy of the number - it asked whether each
+# substrate matched the TEST, not whether the two matched EACH OTHER - and the
+# rename is what made it break loudly instead of passing against a constant that
+# no longer means what it says. Read both numbers out and compare them directly.
+#
+# The BEHAVIOURAL half of this lives in test_substrate_differential's "B3: the
+# charging boundary" block, which needs a rendered install this file does not
+# have: source equality cannot show that the two walkers stop at the same
+# CHARACTER, only that they were given the same allowance.
+def _const(text, name):
+    m = re.search(r"^%s\s*=\s*(\d+)" % re.escape(name), text, re.M)
+    return int(m.group(1)) if m else None
+
+
+for _n in ("_SUBST_BUDGET", "_SUBST_SCANMAX"):
+    _t, _s = _const(_tmpl, _n), _const(_sdk, _n)
+    check("%s agrees across substrates" % _n,
+          _t is not None and _t == _s,
+          f"shell={_t} sdk={_s} - a split here means one substrate times out "
+          "(fail-closed deny) while the other completes (allow) on a large "
+          "command, which is the X-36l divergence")
+
+# [B3] The non-regression precondition, in one line. Exhausting the budget needs
+# _SUBST_BUDGET charging characters and each consumes at least one byte, so the
+# walk always reaches at least byte _SUBST_BUDGET - which is exactly what the old
+# prefix cap guaranteed. That argument only holds while the cost backstop is not
+# the SMALLER of the two; if _SUBST_SCANMAX ever drops below _SUBST_BUDGET it
+# silently becomes the real bound and the guarantee is gone.
+check("the cost backstop cannot undercut the budget",
+      _const(_tmpl, "_SUBST_SCANMAX") >= _const(_tmpl, "_SUBST_BUDGET"),
+      "_SUBST_SCANMAX < _SUBST_BUDGET makes the length cap the effective bound "
+      "and drops the 'always reaches byte _SUBST_BUDGET' guarantee")
+
+# [B3] The charging set is the whole parity argument, so pin its MEMBERSHIP on
+# both substrates. `#`, `}`, `(` and `)` must stay OUT: each is conditional in
+# both walkers and the conditions differ, which is where the first attempt's two
+# parity bugs came from (backlog X-44).
+check("the SDK charging set is exactly the invariant five",
+      '_SUBST_CHARGED = ("\\\\\\\\", \'"\', "\'", "`", "$")' in _sdk,
+      "adding `#`/`}` makes heredoc state select the charging set, and B5 folds "
+      "_CMD_CTLWS into it - one CR would change what the shell charges")
+check("the shell charges the same five, in the outer dispatch",
+      "_bg=$((_bg - 1))" in _tmpl and _tmpl.count("_bg=$((_bg - 1))") == 1,
+      "exactly one charge site, in the outer walk; charging inside either "
+      "balance loop bills the shell 2 per backtick sub and the SDK 1")
 # [B4] _CS_WIN is deliberately SHELL-ONLY, and that asymmetry is pinned so it
 # is not "corrected" into the SDK. _SUBST_MAXLEN above must agree across
 # substrates because it decides WHICH substitutions are walked; _CS_WIN decides

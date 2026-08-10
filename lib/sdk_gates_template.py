@@ -473,15 +473,28 @@ _CS_WS = "\\002"
 # round-4 probe corpus: a fourth level needs four nested quoting contexts,
 # which no reachable spelling produces.
 _EXPAND_DEPTH = 3
-# [item 1] The length past which the quote-aware command-substitution walk
-# (_subst_inners) stops lifting `$(...)`/backtick bodies out of a double-quoted
-# run. Fail-closed: the run itself is still flattened and scanned, so a
-# substitution beyond the bound is simply not ADDITIONALLY re-parsed; it never
-# becomes an allow the walk would otherwise deny. The shell twin
-# (_SUBST_MAXLEN in the header) carries the SAME number so neither substrate can
-# hit its fail-closed timeout while the other completes on a large command
-# (the X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
-_SUBST_MAXLEN = 8192
+# [item 1] What bounds the quote-aware command-substitution walk
+# (_subst_inners) when it lifts `$(...)`/backtick bodies out of a double-quoted
+# run. Fail-closed either way: the run itself is still flattened and scanned, so
+# a substitution beyond a bound is simply not ADDITIONALLY re-parsed; it never
+# becomes an allow the walk would otherwise deny.
+#
+# [B3] This was ONE number, `_SUBST_MAXLEN`, used as a prefix cap - which made
+# whether a substitution got walked depend on how much text PRECEDED it, i.e. on
+# something the attacker writes (backlog X-44). It is now a flat semantic BUDGET
+# plus a cost-only length backstop. The shell twins (`_SUBST_BUDGET` /
+# `_SUBST_SCANMAX` in the header) carry the SAME numbers so neither substrate can
+# hit its fail-closed timeout while the other completes on a large command (the
+# X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
+_SUBST_BUDGET = 8192
+_SUBST_SCANMAX = 65536
+# [B3] The characters `_subst_inners` charges its budget for, and the SHELL
+# twin's `case` in _cs_subst_scan is spelled from the same five. They are the
+# only ones in both walkers' dispatch UNCONDITIONALLY; `#`, `}`, `(` and `)`
+# are all conditional and the conditions differ between substrates, which is
+# where the first attempt's two parity bugs came from. See the shell's charge
+# site for the full argument.
+_SUBST_CHARGED = ("\\\\", '"', "'", "`", "$")
 _SECRETS_OPS = ";&|()<>\\n"
 _CMD_OPS = ";&|()`\\n"
 
@@ -961,12 +974,22 @@ def _subst_inners(seg):
         INERT (`echo "\\$(cat .env)"` prints a literal `$(...)`), so the walk
         skips a backslash-and-its-successor as a pair - which also makes an even
         run of backslashes leave the opener live.
-    Bounded: over _SUBST_MAXLEN characters the walk stops (fail-closed - the
-    surrounding run is still flattened and scanned; a substitution past the
-    bound simply is not additionally lifted). The shell twin carries the same
-    bound so neither substrate can time out while the other completes.
+    [B3] TWO BOUNDS, both matching the shell twin's number. `_SUBST_BUDGET` is
+    the semantic one: one unit per `_SUBST_CHARGED` character met in THIS loop,
+    and the walk stops when it runs out. It is FLAT - not derived from
+    len(seg) - precisely because this function is called on the command, on each
+    SEGMENT and on each TOKEN while the shell twin is not, so any length-derived
+    budget would hand the two substrates different allowances for the same text.
+    `_SUBST_SCANMAX` is the cost one, a plain prefix bound for input made
+    entirely of characters nothing charges.
+
+    The walk therefore always reaches at least byte `_SUBST_BUDGET` (each charge
+    consumes >= 1 character), which is what the old prefix cap guaranteed, and
+    padding beyond `_SUBST_SCANMAX` returns to the old prefix-cap behaviour -
+    the hole moves from ~8 KB to ~64 KB, it does not close.
     """
-    seg = seg[:_SUBST_MAXLEN]     # bound the WHOLE walk (openers AND the paren
+    seg = seg[:_SUBST_SCANMAX]    # bound the WHOLE walk (openers AND the paren
+    budget = _SUBST_BUDGET
     out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
     wstart = True                 # `#` opens a comment only at a WORD START
     # [B5 review] A heredoc BODY is not shell code: inside an UNQUOTED `<<EOF`
@@ -980,6 +1003,17 @@ def _subst_inners(seg):
     bd = 0                        # unquoted `${...}` nesting depth
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)
+        # [B3] THE CHARGE, and it sits HERE - at the top of the OUTER loop,
+        # before any arm - so it bills exactly the characters the shell twin's
+        # jump set stops on, in every quote state, once each. The balance loops
+        # below are separate `while`s this line never runs for, which is what
+        # keeps the backtick loop's off-by-one (it exits ON the closing backtick
+        # and skips it, while the shell CONSUMES it) from becoming a 2-vs-1
+        # charging split.
+        if ch in _SUBST_CHARGED:
+            budget -= 1
+            if budget <= 0:
+                break
         if ch == "\\\\" and i + 1 < n and quote != "'":
             # A backslash-NEWLINE pair is a LINE CONTINUATION - bash deletes it,
             # so the word-start state before it survives it. Clearing wstart

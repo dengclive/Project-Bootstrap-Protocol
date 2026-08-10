@@ -1111,15 +1111,53 @@ _CS_TAIL=""
 # `basename` regression F-937. Setting a global is 0.2 ms. Every helper on this
 # path is written this way; do not "simplify" one back into a subshell.
 _CS_R=""
-# [item 1] The quote-aware command-substitution walk's output (SEP-joined inner
-# command lines) and the length past which it stops scanning for openers.
-# Fail-closed and bounded like _xp_iw: a substitution beyond _SUBST_MAXLEN is
-# not additionally lifted (the surrounding run is still flattened and scanned).
-# The SDK twin (_SUBST_MAXLEN in sdk_gates_template) carries the SAME number so
-# neither substrate can hit its timeout while the other completes on a large
-# command; test_composition asserts the two literals agree.
+# [item 1] The quote-aware command-substitution walk's output: SEP-joined inner
+# command lines.
 _CS_SUBST_R=""
-_SUBST_MAXLEN=8192
+# [B3] TWO BOUNDS, because the old single `_SUBST_MAXLEN` was doing two jobs
+# badly. It was a PREFIX CAP - the walk saw `${_s:0:8192}` - so whether a
+# substitution was walked depended on how much text PRECEDED it, which the
+# attacker writes: `echo "<8300 x>$(cat .env)"` was allow/allow with the canary
+# read on BOTH substrates (backlog X-44). Both agreeing is why no differential
+# row could ever catch it.
+#
+# _SUBST_BUDGET is the SEMANTIC bound and it is FLAT - deliberately not scaled
+# by length. The first attempt at this scaled it, and that recreated the very
+# defect it retired: the SDK twin runs per command AND per segment AND per
+# token, so a length-derived budget hands a short segment the full allowance on
+# one substrate and a shrunken one on the other. One number, two denominators,
+# again. Flat means every call on every substrate gets exactly this, whatever
+# it was handed.
+#
+# It is charged ONLY on the five characters below and ONLY in the outer walk's
+# dispatch - see the charge site in _cs_subst_scan for why that set and no
+# other, and why neither balance loop charges anything.
+#
+# THE NON-REGRESSION ARGUMENT, which is what makes this safe to swap in:
+# exhausting a budget of W needs W charging characters, and each one consumes at
+# least one byte, so the walk ALWAYS reaches at least byte W. With W equal to
+# the old cap, nothing the prefix cap guaranteed was walked stops being walked.
+# The first attempt failed exactly here - it charged `}`, so 5000 braces
+# exhausted a shrunken budget and hid a substitution at byte 5006, well inside
+# the 8192 the cap had guaranteed.
+_SUBST_BUDGET=8192
+# _SUBST_SCANMAX is the COST bound: benign padding is free under the budget, so
+# without it a `}`-dense or `#`-dense command is walked end to end. Chosen by
+# MEASUREMENT, not argument - dependency-gate end to end on 128 KB payloads,
+# worst of four uncharged-dense shapes:
+#     backstop  8192 (the old cap)   36.5 s
+#     backstop 65536                 46.0 s   <- chosen, 14 s of headroom
+#     backstop 131072                57.4 s   <- rejected, 2.6 s of headroom
+# against a 60 s fail-closed ceiling where added cost IS over-denial. 256 KB
+# commands sit at 141 s and are over the ceiling ALREADY at the old cap; that is
+# the segmenters' own quadratic (X-36y), which no bound here reaches.
+#
+# SAY THE RESIDUAL PLAINLY: padding beyond this returns to the old prefix-cap
+# behaviour. The hole moves from ~8 KB to ~64 KB; it does not close. Neither
+# does the charging-character floor - ~8192 bytes of \\ " ' ` $ still exhaust the
+# budget - and no bound of this shape closes either; only an unbounded walk
+# does, and that is a timeout, which on this gate is a deny nobody can override.
+_SUBST_SCANMAX=65536
 # [B4] The walk's WINDOW, and the reason there is one. bash has no string
 # cursor: `${_s:1}` and `${_s#"$_pre"}` REBUILD the remainder, so consuming one
 # delimiter costs O(remaining) and a delimiter-dense command is QUADRATIC.
@@ -1137,7 +1175,7 @@ _SUBST_MAXLEN=8192
 # pre-B4 curve that reaches the same 0.73 s at 32 KB. bash offers no cursor
 # that avoids this - `${_s:$_i:$_CS_WIN}` walks to `_i` under a multibyte
 # locale, which is the same term again.
-# It is a COST bound and NOT a semantic one - unlike _SUBST_MAXLEN above, it
+# It is a COST bound and NOT a semantic one - unlike _SUBST_BUDGET above, it
 # cannot hide a substitution. The window is a PREFIX of the remainder, so the
 # first delimiter in it is the first delimiter overall; a window carrying none
 # is dropped whole and the search continues in the next; and the refill keeps
@@ -1214,16 +1252,20 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
 # INERT. Unquoted `$(...)` is left to _cs_ops' `(`/`)` breaks; a bare sub that
 # runs its own output is Class B (download-then-run), handled elsewhere.
 # Chunk-based (jumps delimiter to delimiter) so a substitution with a long body
-# stays O(n); bounded by _SUBST_MAXLEN. Mirrors the SDK _subst_inners exactly
+# stays O(n); bounded by _SUBST_BUDGET (semantic) and _SUBST_SCANMAX (cost).
+# Mirrors the SDK _subst_inners exactly
 # (tests/test_composition and the substrate differential pin the two together).
 _cs_subst_scan(){
   # [B4] `_w` is the front WINDOW and `_s` the tail past it; together they are
   # always exactly the unconsumed remainder. `_ib` is the inner accumulator's
   # small half - see the balance loop.
-  local _s="$1" _q="" _pre _c _w="" _ib _rb="" _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0
+  local _s="$1" _q="" _pre _c _w="" _ib _rb="" _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0 _bg
   _CS_SUBST_R=""
   case "$_s" in *'$('*|*'`'*) ;; *) return 0 ;; esac
-  _s="${_s:0:$_SUBST_MAXLEN}"
+  # [B3] The budget is per CALL and FLAT, so it does not matter that this
+  # function and its SDK twin are reached different numbers of times per event.
+  _bg=$_SUBST_BUDGET
+  _s="${_s:0:$_SUBST_SCANMAX}"
   # [B5 review] A heredoc BODY is not shell code. Inside an UNQUOTED `<<EOF`
   # body a line-leading `#` is ordinary text and bash STILL expands `$(...)`,
   # so reading it as a comment INVENTS one bash does not have and drops a live
@@ -1275,10 +1317,12 @@ _cs_subst_scan(){
     #     unquoted, `#` word-start  0.79 s -> 0.58 s
     #     quoted `#`-dense          0.25 s -> 0.25 s
     # The bound is now _CS_WIN per `#` rather than "the walk stops at
-    # _SUBST_MAXLEN". That matters for the queued B3: B3 replaces the prefix
-    # cap with a delimiter budget, so the OLD sentence would have become false
-    # silently. This one survives B3 - a windowed iteration costs O(_CS_WIN)
-    # whatever bounds the walk's reach.
+    # _SUBST_MAXLEN". That mattered for B3, which has since LANDED and did
+    # exactly what this predicted - replaced the prefix cap with a delimiter
+    # budget, so the OLD sentence would have become false silently. This one
+    # survived it: a windowed iteration costs O(_CS_WIN) whatever bounds the
+    # walk's reach, and `#` is not in B3's charging set, so the budget does not
+    # shorten this loop either.
     if [ -z "$_q" ] && [ "$_hd" = 0 ]; then
       _pre="${_w%%[\\\\\\"\\'\\`\\$#\\}]*}"
     else
@@ -1326,6 +1370,30 @@ _cs_subst_scan(){
       _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
     fi
     _c="${_w:0:1}"
+    # [B3] THE CHARGE. Exactly the five characters that are in BOTH branches of
+    # the jump set above, and in the SDK twin's dispatch, UNCONDITIONALLY.
+    # Everything else is conditional and every condition differs between the two
+    # walkers, which is how the first attempt shipped two parity bugs:
+    #   * `#` and `}` are EXCLUDED. They enter the jump set only while
+    #     `[ -z "$_q" ] && [ "$_hd" = 0 ]`; the SDK reaches its `}` arm on
+    #     `quote != '"'` and its `#` arm on `not heredoc and not bd` - different
+    #     predicates over different state. Charging either would make `_hd`
+    #     select the CHARGING SET, and B5 folds `_CMD_CTLWS` into `_hd`, so one
+    #     CR in the command would change what the shell charges with no SDK
+    #     counterpart.
+    #   * `(` and `)` are EXCLUDED. They appear only inside the balance loops,
+    #     never in the outer jump set.
+    # NEITHER BALANCE LOOP CHARGES ANYTHING, and that is also structural rather
+    # than a matching pair of edits that can drift: their exits are not 1:1. The
+    # SDK's backtick loop exits ON the closing backtick and skips it with
+    # `i = j + 1` (its loop runs while the char is not the closing one), while
+    # the twin below CONSUMES it - so charging inside the loops would bill the
+    # shell 2 per backtick substitution and the SDK 1.
+    case "$_c" in
+      \\\\|'"'|"'"|'`'|'$')
+        _bg=$((_bg - 1))
+        [ "$_bg" -le 0 ] && break ;;
+    esac
     if [ "$_c" = "\\\\" ]; then
       # [B5 review] A backslash-NEWLINE pair is a LINE CONTINUATION: bash
       # deletes it outright, so the word-start state before it is the state
