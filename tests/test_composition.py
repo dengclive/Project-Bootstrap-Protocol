@@ -163,6 +163,35 @@ check("the walk's cost window is shell-only",
       "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
       "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "
       "and needs no counterpart - a twin would be a boundary to keep in sync")
+# [X-45] `_cs_isinv` runs once per QUOTED RUN, so anything it does to the whole
+# accumulated buffer is paid per run. It used to open with
+# `${_CS_BUF##*$_CS_SEP}`; `##` with a leading `*` is quadratic in bash (0.044 s
+# at 1 KB -> 10.25 s at 16 KB, 200 reps), and the substitution lift is what made
+# that buffer long, because the lifted inner is re-scanned with _CS_BUF already
+# holding the raw command's segments. Pinned as a SOURCE property because the
+# cost is invisible to a verdict: every one of the 1570 corpus commands emits
+# byte-identical segments either way.
+check("_cs_isinv reads the carried segment tail, not the whole buffer",
+      "_cs_isinv(){" in _tmpl
+      and 'local _tail="$_CS_TAIL"' in _tmpl
+      and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
+      "re-deriving the tail per quoted run is what put dependency-gate at "
+      "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
+# Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
+# unsound. There are four; a fifth added later without a tail update is the
+# way this breaks, so the count is pinned rather than described.
+check("_CS_TAIL is maintained by every _CS_BUF writer",
+      _tmpl.count('_CS_BUF="$_CS_BUF') == 2
+      and _tmpl.count("_CS_TAIL=") == 6,
+      "declaration + cmd_segments' reset + a two-branch update beside each of "
+      "the two appends (2 + 2 + 1 + 1); a new _CS_BUF writer without one "
+      "silently stales the tail")
+# [X-45] Shell-only for the same reason _CS_WIN is: the SDK's `_invoker_at`
+# takes an already-tokenised list, so it never re-derived anything per run.
+check("the carried segment tail is shell-only",
+      "_CS_TAIL" not in _sdk and "def _invoker_at(toks):" in _sdk,
+      "_CS_TAIL exists because bash has no cheap way back to the last "
+      "separator; the SDK indexes tokens and needs no counterpart")
 
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.

@@ -2739,7 +2739,19 @@ EXPECTED_DIGESTS = {
         # walk comparisons show 0 behavioural changes, so `gates.py` does
         # NOT move - only the shared header, hence every hook body.
         # Count still 57.
-        "24df71c46622b535b2e2d4aab7abd4443e227dbc6eb8ef87a45116ad1645b199",
+        # [freeze-exception no. 52, 2026-08-10] X-45 - `_cs_isinv` reads a
+        # carried `_CS_TAIL` instead of re-deriving `${_CS_BUF##*$_CS_SEP}`
+        # once per quoted run, and takes a basename only when the word holds a
+        # `/`. Both `##`-with-leading-`*` expansions are QUADRATIC in bash
+        # (0.044 s -> 10.25 s from 1 KB to 16 KB per 200 reps), and the
+        # substitution lift is what made the buffer long. SHELL-ONLY and
+        # cost-only: 1570 commands emit BYTE-IDENTICAL `cmd_segments` output
+        # pre/post and the carried-tail invariant holds on all of them, so
+        # `gates.py` does NOT move - only the shared header, hence every hook
+        # body. dependency-gate on the 6010 B Csq shape: 62.4 s -> 7.5 s,
+        # which is the 60 s fail-closed crossing item 1 introduced, closed.
+        # Count still 57.
+        "2be43f0d07dcc587c712b050cfdd6dd8e9e92c38de7e6b04c0cf0c532cda441e",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2909,7 +2921,11 @@ EXPECTED_DIGESTS = {
         # walk comparisons show 0 behavioural changes, so `gates.py` does
         # NOT move - only the shared header, hence every hook body.
         # Count still 69.
-        "a7855a2d93836108c9222f5a77cda9e1214b1d0ca4a9f29350fd18e6f2c39286",
+        # [freeze-exception no. 52, 2026-08-10] X-45 - the carried `_CS_TAIL`
+        # and the guarded basename (see the `default` note). Shared header
+        # only, so every hook body moves and `gates.py` does not.
+        # Count still 69.
+        "6dd2dea7eaeedc9928ba17857a3213381e1e8dde97f963231c05814bb7745665",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3026,7 +3042,11 @@ EXPECTED_DIGESTS = {
         # walk comparisons show 0 behavioural changes, so `gates.py` does
         # NOT move - only the shared header, hence every hook body.
         # Count still 59.
-        "5d23769eef50bfc2fe268e4779acd24895d97fbde74d59201c35b7fdd29bcda2",
+        # [freeze-exception no. 52, 2026-08-10] X-45 - the carried `_CS_TAIL`
+        # and the guarded basename (see the `default` note). Shared header
+        # only; the three design-steering artifacts are untouched.
+        # Count still 59.
+        "3ee287601d0cfaaf9e6f06efa9cc633adc76dc396974f85e3a0c8b4bb7b7f386",
 }
 
 EXPECTED_ACTION_COUNTS = {

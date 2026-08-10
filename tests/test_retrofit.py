@@ -2016,9 +2016,18 @@ def retrofit_digest_full(yaml_text):
 # differences - but it lands in the shared hook header, so every retrofit hook
 # body moves. Retrofit emits no `gates.py`. Counts unchanged: service 79,
 # agent 93.
+# [no. 52 X-45, pre-commit] `_cs_isinv` reads a carried `_CS_TAIL` instead of
+# re-deriving `${_CS_BUF##*$_CS_SEP}` once per quoted run, and takes a basename
+# only when the word holds a `/`. Both are `##`-with-leading-`*` expansions and
+# both are QUADRATIC in bash (0.044 s -> 10.25 s from 1 KB to 16 KB per 200
+# reps); the substitution lift is what made the buffer they run on long. COST
+# ONLY - 1570 commands emit byte-identical `cmd_segments` output pre/post, with
+# the carried-tail invariant asserted on every one - but it lands in the shared
+# hook header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
+# Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "a2903e53d57230be7153cb10eb54110ee154241e51b4446329fdf811cf3a05d3",
-    "agent": "24f15611234533451f5b9da10d5d4dc11c15a75d65b05dcd960f6eb4b8abdfed",
+    "service": "9c878fed4defa04936018808623c0eb47e6b879dbdd22913eaaa0313fb0d33e6",
+    "agent": "a100852fcb0dfa111e78753e8ee96ffb5309eb2221fc8a1820c6389f143ba01b",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

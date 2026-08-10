@@ -1091,6 +1091,16 @@ _CS_ESQ=$'\\005'                 # an escaped single quote
 _CS_ESP=$'\\006'                 # an escaped space
 _CS_BUF=""
 _CS_EXTRA=""
+# [X-45] The part of _CS_BUF after its last _CS_SEP - i.e. the segment being
+# built right now - carried forward on every append instead of being re-derived
+# from the whole buffer. `_cs_isinv` needs it ONCE PER QUOTED RUN, and
+# `${_CS_BUF##*$_CS_SEP}` is QUADRATIC in bash: measured at 200 reps, LC_ALL=C,
+# it costs 0.044 s at 1 KB and 10.25 s at 16 KB (3.3-5.1x per doubling). That
+# one expansion was 8x of the whole dependency-gate on a substitution-bearing,
+# quote-dense command. Kept in step by every writer of _CS_BUF; there are four
+# (this line, _cs_ops, _cs_scan, cmd_segments' per-event reset) and the
+# invariant `_CS_TAIL == ${_CS_BUF##*$_CS_SEP}` is what makes the swap sound.
+_CS_TAIL=""
 # [round-4 D17] `_CS_INVOKERS` used to live here: emitted into every hook,
 # ZERO call sites, and already drifted (it was missing `su`). A second, silent
 # invoker list whose only effect was to make the count of them look smaller.
@@ -1175,6 +1185,14 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   # parsers giving opposite answers about one character.
   _t="${_t//$'\\n'/$_CS_SEP}"
   _CS_BUF="$_CS_BUF$_t"
+  # [X-45] Keep _CS_TAIL in step. This is the writer that can INTRODUCE a
+  # separator, so a translated chunk carrying one starts a new segment and the
+  # tail restarts after the last of them; the `##` here runs on the short `_t`,
+  # never on the accumulated buffer.
+  case "$_t" in
+    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}" ;;
+    *) _CS_TAIL="$_CS_TAIL$_t" ;;
+  esac
   return 0
 }
 # [item 1] Lift every COMMAND SUBSTITUTION whose output bash executes because it
@@ -1830,12 +1848,22 @@ _cs_head_kind(){
 # skip, because `grep` is not a wrapper - and over-consumption is the safe
 # direction for a deny-list anyway.
 _cs_isinv(){
-  local _tail="${_CS_BUF##*$_CS_SEP}" _w _b _e _seen=0 _k
+  # [X-45] `$_CS_TAIL`, not `${_CS_BUF##*$_CS_SEP}`. Identical by the invariant
+  # every _CS_BUF writer maintains, and the reason this function stopped being
+  # the cost of the whole gate - see the _CS_TAIL declaration for the numbers.
+  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k
   while : ; do
     _tail="${_tail#"${_tail%%[![:space:]]*}"}"
     _w="${_tail%%[[:space:]]*}"
     [ -z "$_w" ] && return 1
-    _b="${_w##*/}"
+    # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
+    # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is
+    # its own basename, so ask first and pay only when there is a path to
+    # strip. Same value, both branches.
+    case "$_w" in
+      */*) _b="${_w##*/}" ;;
+      *) _b="$_w" ;;
+    esac
     # An invoker is tested FIRST, so a DUAL word (watch/xargs/ssh - both a
     # transparent prefix and a thing whose argument is a command line) reports
     # true here while still leaving the head scannable for the anchor.
@@ -1914,6 +1942,14 @@ _cs_scan(){
     _run="${_run//$'\\n'/$_CS_WS}"; _run="${_run// /$_CS_WS}"
     _run="${_run//$'\\t'/$_CS_WS}"
     _CS_BUF="$_CS_BUF$_run"
+    # [X-45] A quoted RUN cannot carry a separator - cmd_segments scrubs every
+    # sentinel out of the input before the walk starts - but the `case` costs
+    # one pattern test on a short string and removes the assumption rather than
+    # documenting it.
+    case "$_run" in
+      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}" ;;
+      *) _CS_TAIL="$_CS_TAIL$_run" ;;
+    esac
     if [ -z "$_s" ]; then break; fi
   done
   # [round-4 D5, third reproduction] `sh -c pip\\ install\\ evil` has NO quoted
@@ -1921,7 +1957,7 @@ _cs_scan(){
   # backslashes - so the loop above never fires and the invoker rule never saw
   # it. A parked escaped space is exactly the marker for that shape.
   if _cs_isinv; then
-    _rem="${_CS_BUF##*$_CS_SEP}"
+    _rem="$_CS_TAIL"          # [X-45] same swap, once per call rather than per run
     while [ -n "$_rem" ]; do
       _rem="${_rem#"${_rem%%[![:space:]]*}"}"
       _tok="${_rem%%[[:space:]]*}"
@@ -1976,7 +2012,7 @@ cmd_segments(){
   _s="${_s//$_CS_SEP/ }"; _s="${_s//$_CS_WS/ }"
   _s="${_s//$_CS_ESC/ }"; _s="${_s//$_CS_EDQ/ }"
   _s="${_s//$_CS_ESQ/ }"; _s="${_s//$_CS_ESP/ }"
-  _CS_BUF=""; _CS_EXTRA=""
+  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""
   # [item 1] Lift double-quoted command substitutions BEFORE the scan and seed
   # the recursion queue with them; the loop below re-scans each (invoker rule
   # re-applied) exactly as it does an invoker's quoted argument. `_s` is the RAW

@@ -3423,6 +3423,49 @@ for _g, _cmd, _want, _lbl in _B4WIN:
     differential(_g, bash(_cmd), _want, _lbl)
 
 # --------------------------------------------------------------------------- #
+# X-45 -- THE CARRIED SEGMENT TAIL.
+#
+# `_cs_isinv` decides whether the segment being built is headed by a shell
+# invoker, and it runs ONCE PER QUOTED RUN. It used to answer by re-deriving
+# `${_CS_BUF##*$_CS_SEP}` from the whole accumulated buffer and then taking
+# `${_w##*/}`; both are `##` with a leading `*`, which is quadratic in bash
+# (0.044 s at 1 KB -> 10.25 s at 16 KB, 200 reps), and the substitution lift is
+# what made that buffer long. It now reads a carried `_CS_TAIL` and takes a
+# basename only when the word holds a `/`.
+#
+# THESE ROWS ARE FENCES, NOT DECORATION. Each was checked against six
+# deliberately-WRONG builds of the fix and flips to ALLOW on at least one:
+#   * the first three flip under "_cs_ops never restarts the tail" - a
+#     separator then fails to begin a new segment, so `_cs_isinv` keeps
+#     reading `echo ...` and never sees the invoker that follows it;
+#   * the `/usr/bin/sh` pair flips under "basename guard inverted" - a
+#     path-carrying invoker stops resolving to its basename;
+#   * the last flips under BOTH.
+# Nine further candidates (the same shapes on secrets-gate) were measured and
+# do NOT flip on any wrong build - secrets-gate walks with `_sg_pass`, which
+# has no `_CS_TAIL` - so they are deliberately NOT included; a row that passes
+# on the broken build pins nothing.
+_X45 = [
+    ("dependency-gate", 'echo x; sh -c "pip install evil"', "deny",
+     "X-45 fence: `;` restarts the tail, invoker found in the NEXT segment"),
+    ("dependency-gate", 'echo x | bash -c "pip install evil"', "deny",
+     "X-45 fence: `|` restarts the tail"),
+    ("dependency-gate", 'echo "$(echo hi)"; sh -c "pip install evil"', "deny",
+     "X-45 fence: a lifted inner precedes the separator that restarts it"),
+    ("dependency-gate", '/usr/bin/sh -c "pip install evil"', "deny",
+     "X-45 fence: the guarded basename still resolves a path-carrying invoker"),
+    ("dependency-gate",
+     '/a/very/long/path/that/keeps/going/bin/sh -c "pip install evil"', "deny",
+     "X-45 fence: long path - the guard must not skip the basename"),
+    ("dependency-gate",
+     'echo a; timeout 5 /usr/bin/env /bin/sh -c "pip install evil"', "deny",
+     "X-45 fence: restart AND basename together, behind a wrapper run"),
+]
+print("\n== X-45: the carried segment tail ==")
+for _g, _cmd, _want, _lbl in _X45:
+    differential(_g, bash(_cmd), _want, _lbl)
+
+# --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the
 # configured command and deny only when it FAILS, so under `"true"` test-gate,
