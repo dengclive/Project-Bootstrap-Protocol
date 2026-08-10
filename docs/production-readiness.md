@@ -68,10 +68,12 @@ open, and one cost regression that was introduced and then paid back.
 | §2 Class A — read, install, exfil | ALLOW/ALLOW | DENY/DENY | **DENY/DENY** |
 | §2 Class A + 8,300 B padding | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — B3 **parked**, X-44 open |
 | §2 Class B (`bash -c "$(curl …)"`) | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — X-37 open |
-| Csq 6,010 B — shell wall clock | 0.16 s | **65.08 s** | **7.64 s** |
-| Csq 9,010 B — shell wall clock | 0.29 s | **158.65 s** | **13.23 s** |
+| Csq* 6,010 B — shell wall clock | 0.16 s | **65.08 s** | **7.64 s** |
+| Csq* 9,010 B — shell wall clock | 0.29 s | **158.65 s** | **13.23 s** |
 | suite | 9,416 / 0 (24 files) | 9,568 / 0 | **9,601 / 0 (25 files)** |
 | `test_substrate_differential.py` | 3,926 | 4,028 | **4,051** |
+
+*\* `Csq` = a **q**uote-dense **c**ommand **s**ubstitution — `echo "$(` followed by dense `'('` and a closing `)"`. It is the shape the 60 s crossing below lives on, and the one B3 was later parked over.*
 
 ### The one genuinely new thing: a fail-closed crossing that item 1 INTRODUCED, and `main` has since paid back
 
@@ -738,6 +740,7 @@ so each is an error made on 2026-08-08 — **not** a regression on the branch:
 | §5 | the 16 / 8 / 36 / 26 / 2 class split | does not reproduce under any written rule; only bucket (a) is defensible, and it was **14** at the tag |
 | §5 | "13 rows carry more cells than their header" | correct at the tag; **15** now, plus 2 rows with *fewer* |
 | §9 | `main` moved "docs and tests only, no emitted change" | one line of `lib/templates.py` moved too — a citation inside a comment in the emitted iteration-summary Stop hook |
+| §8.1 *(added 2026-08-10)* | **B4** queued *behind* B3 | backwards — B4 is a COST fix and X-44 itself says a delimiter budget is unaffordable until the per-delimiter cost is bounded, so B4 landed first. **X-45**, which did not exist when §8 was written, is what actually closed the crossing |
 
 ---
 
@@ -803,7 +806,7 @@ and a motivated agent needs only padding.
    any row of §2's table** — that table was already closed by `850f61c` alone,
    so the headline must not be credited to them. ~~Also queued behind B3: **B4**
    (~6 KB exhaustion divergence), **X-40**, **X-39**, **X-38**, **X-41**.~~
-   **REVISED @ main 560588c — the ordering above was wrong about B4, and the
+   **CHANGED @ main — the ordering above was wrong about B4, and the
    queue has changed shape:**
    * **B4 did NOT wait behind B3** — it landed first (`b0d30fc`), because the
      ~6 KB crossing is a *cost* defect and B3's own X-44 row says a delimiter
@@ -811,7 +814,7 @@ and a motivated agent needs only padding.
    * **X-45 (`5969fa9`) is what actually closed the crossing**, and it is a row
      that did not exist when this section was written: B4 bounded the walk and
      the gate cost barely moved, because the cost was never the walk. Both are
-     in `main`; the shape is 65.08 s → 7.64 s (see REVISION 2).
+     in `main`; the shape is 65.08 s → 7.64 s (see the CURRENT ASSESSMENT above).
    * **B3 is BUILT and PARKED**, not queued — `wip/b3-flat-budget` (`395b955`).
      Its design is validated (0 walker divergences over 41 charging cases, six
      deliberately wrong builds each caught) but its cost backstop pushes benign
