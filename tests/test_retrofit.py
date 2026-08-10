@@ -1989,9 +1989,45 @@ def retrofit_digest_full(yaml_text):
     return h.hexdigest()
 
 
+# [freeze-exception no. 50, 2026-08-08] item 1 — the quote-aware
+# command-substitution walk `_cs_subst_scan` lands in the shared `_HOOK_HEADER`
+# (and secrets-gate's `_sg_pass`), so the retrofit-emitted hook `.sh` bodies
+# move too, exactly as the greenfield goldens do (no. 50 there). Counts
+# unchanged (service 79, agent 93).
+#
+# NOT `gates.py`: an earlier revision of this note said the retrofit plans move
+# "the hook `.sh` bodies and gates.py". They do not — a retrofit plan emits NO
+# `gates.py` at all (0 paths matching in both fixtures, checked by rendering).
+# The claim was transcribed from the greenfield note, where it is true.
+#
+# [no. 50, adversarial-review round-2 addition, pre-commit, same named set]
+# `_sg_pass`'s drain loop now re-runs `_cs_subst_scan` on each queued item,
+# closing invoker-wrapping-sub (`sh -c 'echo "$(cat .env)"'`, a shell-ALLOW /
+# SDK-deny live exfil). Blast radius verified by rendering both trees:
+# `.claude/hooks/secrets-gate.sh` ONLY — and, unlike greenfield, NOT
+# `gates.py`, because retrofit emits none (see the note above). Counts still
+# 79 / 93.
+# [no. 50 B5, pre-commit] the comment-aware substitution walk lands in the
+# shared hook header, so every retrofit hook body moves. Retrofit emits no
+# `gates.py`. Counts unchanged: service 79, agent 93.
+# [no. 51 B4, pre-commit] the substitution walk now consumes a 1024-character
+# front WINDOW instead of re-slicing the whole remainder per delimiter. It is
+# a COST change only - 1020 pre/post/SDK walk comparisons show 0 behavioural
+# differences - but it lands in the shared hook header, so every retrofit hook
+# body moves. Retrofit emits no `gates.py`. Counts unchanged: service 79,
+# agent 93.
+# [no. 52 X-45, pre-commit] `_cs_isinv` reads a carried `_CS_TAIL` instead of
+# re-deriving `${_CS_BUF##*$_CS_SEP}` once per quoted run, and takes a basename
+# only when the word holds a `/`. Both are `##`-with-leading-`*` expansions and
+# both are QUADRATIC in bash (0.044 s -> 10.25 s from 1 KB to 16 KB per 200
+# reps); the substitution lift is what made the buffer they run on long. COST
+# ONLY - 1570 commands emit byte-identical `cmd_segments` output pre/post, with
+# the carried-tail invariant asserted on every one - but it lands in the shared
+# hook header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
+# Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "fef839ae78300f49cb5dd562529b9fab13438f08e4daaf6208dfbd465e5ef378",
-    "agent": "60aa7f6f3d2c7b9e00e87c9f61ac92ae5ba762e7fde2383566cf35112480512d",
+    "service": "9c878fed4defa04936018808623c0eb47e6b879dbdd22913eaaa0313fb0d33e6",
+    "agent": "a100852fcb0dfa111e78753e8ee96ffb5309eb2221fc8a1820c6389f143ba01b",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

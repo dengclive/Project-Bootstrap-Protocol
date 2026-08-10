@@ -132,6 +132,67 @@ check("both substrates state the same expansion depth",
       "_CS_DEPTH=3" in _tmpl and "_EXPAND_DEPTH = 3" in _sdk,
       "shell _CS_DEPTH and SDK _EXPAND_DEPTH must agree")
 
+# [item 1] The quote-aware command-substitution walk is ONE shell helper fed by
+# BOTH segmenter drivers, and its SDK twin must reach BOTH SDK candidate paths -
+# the secrets path (_segment_candidates) does NOT go through _expand_invoker_args,
+# so wiring only the invoker site is the round-4 D8 "fix landed in the copy the
+# gate doesn't use" trap, which here would leave `echo "$(cat .env)"` fail-open
+# on the SDK while the shell denies (a forbidden-direction divergence).
+check("shell _cs_subst_scan is defined exactly once",
+      _tmpl.count("_cs_subst_scan(){") == 1)
+check("shell _cs_subst_scan is seeded from BOTH segmenter drivers",
+      '_cs_subst_scan "$_s"' in _tmpl and '_cs_subst_scan "$_cmd"' in _tmpl,
+      "cmd_segments seeds _CS_EXTRA; secrets-gate's _sg_pass seeds _SG_EXTRA")
+check("SDK _subst_inners is defined once and wired into BOTH candidate paths",
+      _sdk.count("def _subst_inners(") == 1
+      and "_subst_inners(seg)" in _sdk        # _expand_invoker_args (dep/verb)
+      and "_subst_inners(cmd)" in _sdk,        # _segment_candidates (secrets)
+      "the secrets path skips _expand_invoker_args; wiring one site is D8")
+check("the substitution walk's length bound agrees across substrates",
+      "_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk,
+      "same cap or one substrate times out (fail-closed) while the other "
+      "completes (allow) on a large command - the X-36l divergence")
+# [B4] _CS_WIN is deliberately SHELL-ONLY, and that asymmetry is pinned so it
+# is not "corrected" into the SDK. _SUBST_MAXLEN above must agree across
+# substrates because it decides WHICH substitutions are walked; _CS_WIN decides
+# only which byte bash examines first while it consumes a string it has no
+# cursor for. `_subst_inners` walks an index over an immutable string, is
+# already O(n), and giving it a window would add a second boundary to keep in
+# step for no gain.
+check("the walk's cost window is shell-only",
+      "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
+      "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "
+      "and needs no counterpart - a twin would be a boundary to keep in sync")
+# [X-45] `_cs_isinv` runs once per QUOTED RUN, so anything it does to the whole
+# accumulated buffer is paid per run. It used to open with
+# `${_CS_BUF##*$_CS_SEP}`; `##` with a leading `*` is quadratic in bash (0.044 s
+# at 1 KB -> 10.25 s at 16 KB, 200 reps), and the substitution lift is what made
+# that buffer long, because the lifted inner is re-scanned with _CS_BUF already
+# holding the raw command's segments. Pinned as a SOURCE property because the
+# cost is invisible to a verdict: every one of the 1570 corpus commands emits
+# byte-identical segments either way.
+check("_cs_isinv reads the carried segment tail, not the whole buffer",
+      "_cs_isinv(){" in _tmpl
+      and 'local _tail="$_CS_TAIL"' in _tmpl
+      and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
+      "re-deriving the tail per quoted run is what put dependency-gate at "
+      "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
+# Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
+# unsound. There are four; a fifth added later without a tail update is the
+# way this breaks, so the count is pinned rather than described.
+check("_CS_TAIL is maintained by every _CS_BUF writer",
+      _tmpl.count('_CS_BUF="$_CS_BUF') == 2
+      and _tmpl.count("_CS_TAIL=") == 6,
+      "declaration + cmd_segments' reset + a two-branch update beside each of "
+      "the two appends (2 + 2 + 1 + 1); a new _CS_BUF writer without one "
+      "silently stales the tail")
+# [X-45] Shell-only for the same reason _CS_WIN is: the SDK's `_invoker_at`
+# takes an already-tokenised list, so it never re-derived anything per run.
+check("the carried segment tail is shell-only",
+      "_CS_TAIL" not in _sdk and "def _invoker_at(toks):" in _sdk,
+      "_CS_TAIL exists because bash has no cheap way back to the last "
+      "separator; the SDK indexes tokens and needs no counterpart")
+
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.
 check("DUAL words are in both membership sets",

