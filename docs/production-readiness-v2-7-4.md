@@ -43,6 +43,107 @@ re-verified by the author against a fresh `git archive v2.7.4` install.
 
 ---
 
+> ## ⟳ REVISION 2 — 2026-08-10 · **the subject is now `main`, not the tag**
+>
+> **PR #62 merged.** `main` moved `6f77ccc` → **`560588c`**, and for the first
+> time the item-1 work is *in* `main`. This revision therefore answers a
+> different question from the two above: **not "can you pin the tag" but "what
+> is true of `main` today".** Tag findings are untouched — `d884a43` has still
+> not moved, and every verdict about *the tag* stands.
+>
+> | marker | meaning |
+> |---|---|
+> | **STILL TRUE @ main** | re-measured on `main` @ 560588c, unchanged |
+> | **CHANGED @ main** | no longer true of `main`, or true with a narrower scope |
+>
+> **Method:** the same stock install both earlier passes used — the repo's own
+> `bootstrap.config.yaml` (`approved: []`, archetype `service`), giving **5 SDK
+> gates / 11 shell hooks**, exactly the "stock" row of K-2's table in §3. A
+> different config would silently rescope every finding. **Positive control
+> first on every gate used**: `cat .env` → DENY/DENY and `pip install evil` →
+> DENY/DENY on the same install, before any `allow` below was believed. Three
+> trees measured back to back: `git archive v2.7.4^{commit}`, `git archive
+> e47d827` (the previous revision's subject) and `main`.
+>
+> **THE VERDICT DOES NOT CHANGE. `main` is not production ready.** C-1 alone
+> settles it — there is still no LICENSE, so there is no legal grant to adopt —
+> and C-3, C-5 and C-6 are untouched. What changed is *which* of §2's rows are
+> open, and one cost regression that was introduced and then paid back.
+>
+> ### What `main` actually does now — MEASURED
+>
+> | | tag `d884a43` | branch `e47d827` | **`main` 560588c** |
+> |---|---|---|---|
+> | §2 Class A — read, install, exfil | ALLOW/ALLOW | DENY/DENY | **DENY/DENY** |
+> | §2 Class A + 8,300 B padding | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — B3 **parked**, X-44 open |
+> | §2 Class B (`bash -c "$(curl …)"`) | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — X-37 open |
+> | Csq 6,010 B — shell wall clock | 0.16 s | **65.08 s** | **7.64 s** |
+> | Csq 9,010 B — shell wall clock | 0.29 s | **158.65 s** | **13.23 s** |
+> | suite | 9,416 / 0 (24 files) | 9,568 / 0 | **9,601 / 0 (25 files)** |
+> | `test_substrate_differential.py` | 3,926 | 4,028 | **4,051** |
+>
+> ### The one genuinely new thing: a fail-closed crossing that item 1 INTRODUCED, and `main` has since paid back
+>
+> This is the finding worth carrying, and neither earlier pass could state it,
+> because it did not exist at the tag and was not yet fixed on the branch.
+>
+> `dependency-gate` is emitted with `timeout: 60` and `FAIL_CLOSED=1`
+> (`dependency-gate.sh:41`, verified on `main`'s stock install), so **a hook
+> that runs long is a DENY the operator cannot override**. On a 6,010-byte
+> quote-dense substitution the shell took **0.16 s at the tag** and **65.08 s at
+> `e47d827`** — past that ceiling, while the SDK completed and allowed. Item 1
+> bought Class A closure at the price of a benign-input over-denial *and* a
+> substrate split. **`main` takes it to 7.64 s**: comfortably inside, both
+> substrates allow, the split is gone.
+>
+> Two commits did that, and both are in the merge: **B4** (`b0d30fc`) bounded
+> the walk's per-delimiter cost with a front window, and **X-45** (`5969fa9`)
+> found that B4 had *not* closed the crossing and that the cost was never the
+> walk at all — `_cs_isinv`, called once per quoted run, used two `##`-with-
+> leading-`*` expansions, which are quadratic in bash (0.044 s at 1 KB → 10.25 s
+> at 16 KB). Three further gates were carrying the same defect unattributed
+> (test-gate, eval-gate, ci-mirror, each 30.4 → 3.5 s).
+>
+> **State it honestly both ways:** against the tag, `main` is still **~48×
+> slower** on this shape (0.16 → 7.64 s). That is the standing price of walking
+> into substitutions at all. It is far inside the ceiling, and it is not a
+> defect — but it is not free either, and the next person raising any bound in
+> this area needs to know the headroom is finite.
+>
+> ### Everything else — why C-1 … C-8 cannot have moved, and the check that proves it
+>
+> **The entire code delta from the previous revision's subject to `main` is two
+> shell-only cost commits in ONE file.** `git diff e47d827..main -- lib/` is
+> `lib/templates.py` only, and **`lib/sdk_gates_template.py` is BYTE-IDENTICAL**
+> across that range — so the SDK substrate is exactly what REVISION 1 measured,
+> and no C-row's mechanism was touched. Spot-verified directly rather than
+> inferred: **C-1** — `git ls-tree -r --name-only main | grep -icE 'licen[cs]e'`
+> → **0**, no LICENSE at tag, at `main`, or anywhere; **C-7** — `import
+> claude_agent_sdk` → `ModuleNotFoundError` on `main`. **C-2 … C-6 and C-8 are
+> STILL TRUE @ main** on that basis.
+>
+> **Backlog rows carrying `open`** (counted as `grep -c '`open`'`, which is a
+> looser pattern than the 88/93 figures elsewhere in this document — the *delta*
+> is the comparable quantity, not the base): tag **93** → `e47d827` **98** →
+> `main` **101**. It went UP across a merge that closed a hole, for the same
+> reason §4 already gives: closing §2 could never decrement it, while the review
+> rounds that closed it filed new rows.
+>
+> ### What the merge did NOT do, stated plainly
+>
+> * **B3 is not in `main`.** It was built, went green at 9,621 / 0 with 4,073
+>   differential rows, and was **parked** at `wip/b3-flat-budget` (`395b955`)
+>   after adversarial review of the diff found its cost backstop turns benign
+>   lift-heavy commands into unoverridable denies (the same 60 s ceiling as
+>   above: 15.75 s → **85.14 s** at 20.5 KB). Its design is validated and
+>   re-usable; its precondition is **X-36y**. So **§2.2's padding bypass is
+>   still open on `main` exactly as written**, and the fix for it is further
+>   away than §8 implied, not closer.
+> * **Class B / X-37 is untouched.**
+> * **None of §8's items 2–8 has been done.**
+
+---
+
 ## 0. Evidence labels
 
 **MEASURED** = executed in a throwaway install from the tag archive, with a
@@ -666,8 +767,28 @@ and a motivated agent needs only padding.
    landed 2026-08-09 in `7ef6b0b` / `e47d827`; B5 added ledger rows **X-42**
    (heredocs unmodelled by both walkers) and **X-43**. **None of B1/B2/B5 moved
    any row of §2's table** — that table was already closed by `850f61c` alone,
-   so the headline must not be credited to them. Also queued behind B3: **B4**
-   (~6 KB exhaustion divergence), **X-40**, **X-39**, **X-38**, **X-41**.
+   so the headline must not be credited to them. ~~Also queued behind B3: **B4**
+   (~6 KB exhaustion divergence), **X-40**, **X-39**, **X-38**, **X-41**.~~
+   **REVISED @ main 560588c — the ordering above was wrong about B4, and the
+   queue has changed shape:**
+   * **B4 did NOT wait behind B3** — it landed first (`b0d30fc`), because the
+     ~6 KB crossing is a *cost* defect and B3's own X-44 row says a delimiter
+     budget is unaffordable until the per-delimiter cost is bounded.
+   * **X-45 (`5969fa9`) is what actually closed the crossing**, and it is a row
+     that did not exist when this section was written: B4 bounded the walk and
+     the gate cost barely moved, because the cost was never the walk. Both are
+     in `main`; the shape is 65.08 s → 7.64 s (see REVISION 2).
+   * **B3 is BUILT and PARKED**, not queued — `wip/b3-flat-budget` (`395b955`).
+     Its design is validated (0 walker divergences over 41 charging cases, six
+     deliberately wrong builds each caught) but its cost backstop pushes benign
+     lift-heavy commands past the same 60 s ceiling, so **its precondition is
+     now X-36y** — bound `_cs_scan`'s per-run tail re-slice with B4's
+     front-window technique. That is the second time an item in this area
+     shipped ahead of its cost precondition, which is the reusable lesson.
+   * **Still queued, unchanged:** **X-40**, **X-39**, **X-38**, **X-41**.
+
+   **Revised order for item 1:** X-36y → re-land B3 (re-measuring its backstop
+   on a *lift-heavy* shape, not a padded one) → X-40 → X-39+X-38 → X-41 → X-37.
 2. **Add a LICENSE** and re-tag. Hours of work; blocks everything else.
    **[NOT DONE — still absent at tag, `main` and branch.]**
 3. **Make the gate substrate self-protecting** — deny writes to
