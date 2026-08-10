@@ -2025,9 +2025,19 @@ def retrofit_digest_full(yaml_text):
 # the carried-tail invariant asserted on every one - but it lands in the shared
 # hook header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
 # Counts unchanged: service 79, agent 93.
+# [no. 53 B3, pre-commit] `_SUBST_MAXLEN` is retired. It was a PREFIX CAP, so
+# whether a substitution got walked depended on how much text PRECEDED it -
+# something the attacker writes: `echo "<8300 x>$(cat .env)"` was allow/allow
+# with the canary read on BOTH substrates (X-44). Replaced by a FLAT
+# `_SUBST_BUDGET` (8192) charged only on \ " ' ` $ in the outer walk, plus a
+# cost-only `_SUBST_SCANMAX` (65536) chosen by measurement against the 60 s
+# fail-closed ceiling. It lands in the shared hook header, so every retrofit
+# hook body moves. Retrofit still emits no `gates.py`, so the SDK half of this
+# change is invisible here - it shows up only in the greenfield fixtures.
+# Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "9c878fed4defa04936018808623c0eb47e6b879dbdd22913eaaa0313fb0d33e6",
-    "agent": "a100852fcb0dfa111e78753e8ee96ffb5309eb2221fc8a1820c6389f143ba01b",
+    "service": "93b30692a6f0ae77d3f1a22df47d10a26ca5ef5550e2388c34c5526c22a82b1f",
+    "agent": "88c098b1207b7770a1387d2d747d0e2d37ef3c2962d00eab694cb18145ab3c47",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

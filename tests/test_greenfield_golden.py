@@ -2751,7 +2751,17 @@ EXPECTED_DIGESTS = {
         # body. dependency-gate on the 6010 B Csq shape: 62.4 s -> 7.5 s,
         # which is the 60 s fail-closed crossing item 1 introduced, closed.
         # Count still 57.
-        "2be43f0d07dcc587c712b050cfdd6dd8e9e92c38de7e6b04c0cf0c532cda441e",
+        # [freeze-exception no. 53, 2026-08-10] B3 - `_SUBST_MAXLEN` is
+        # retired. It was a PREFIX CAP, so whether a substitution was walked
+        # depended on how much text PRECEDED it, which the attacker writes:
+        # `echo "<8300 x>$(cat .env)"` was allow/allow with the canary read on
+        # BOTH substrates (X-44), which is why no differential row could catch
+        # it. Replaced by a FLAT `_SUBST_BUDGET` (8192) charged only on
+        # \ " ' ` $ in the outer walk, plus a cost-only `_SUBST_SCANMAX`
+        # (65536) measured against the 60 s ceiling. BOTH substrates move this
+        # time - the shared header AND `gates.py` - unlike no. 51 and no. 52,
+        # which were shell-only. Count still 57.
+        "dbb7cba43754a07b63157d313f0c26dcfbf12f1199804d01c1176358017aefb7",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2925,7 +2935,17 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only, so every hook body moves and `gates.py` does not.
         # Count still 69.
-        "6dd2dea7eaeedc9928ba17857a3213381e1e8dde97f963231c05814bb7745665",
+        # [freeze-exception no. 53, 2026-08-10] B3 - `_SUBST_MAXLEN` is
+        # retired. It was a PREFIX CAP, so whether a substitution was walked
+        # depended on how much text PRECEDED it, which the attacker writes:
+        # `echo "<8300 x>$(cat .env)"` was allow/allow with the canary read on
+        # BOTH substrates (X-44), which is why no differential row could catch
+        # it. Replaced by a FLAT `_SUBST_BUDGET` (8192) charged only on
+        # \ " ' ` $ in the outer walk, plus a cost-only `_SUBST_SCANMAX`
+        # (65536) measured against the 60 s ceiling. BOTH substrates move this
+        # time - the shared header AND `gates.py` - unlike no. 51 and no. 52,
+        # which were shell-only. Count still 69.
+        "65a0b51e83431d2379c4a268323458698e6e91a39b170f3db7faf1fd376ecff6",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3046,7 +3066,17 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only; the three design-steering artifacts are untouched.
         # Count still 59.
-        "3ee287601d0cfaaf9e6f06efa9cc633adc76dc396974f85e3a0c8b4bb7b7f386",
+        # [freeze-exception no. 53, 2026-08-10] B3 - `_SUBST_MAXLEN` is
+        # retired. It was a PREFIX CAP, so whether a substitution was walked
+        # depended on how much text PRECEDED it, which the attacker writes:
+        # `echo "<8300 x>$(cat .env)"` was allow/allow with the canary read on
+        # BOTH substrates (X-44), which is why no differential row could catch
+        # it. Replaced by a FLAT `_SUBST_BUDGET` (8192) charged only on
+        # \ " ' ` $ in the outer walk, plus a cost-only `_SUBST_SCANMAX`
+        # (65536) measured against the 60 s ceiling. BOTH substrates move this
+        # time - the shared header AND `gates.py` - unlike no. 51 and no. 52,
+        # which were shell-only. Count still 59.
+        "43404c818cd552e65e4a3a545c2443f22431245aabf910413c86252235e49436",
 }
 
 EXPECTED_ACTION_COUNTS = {
