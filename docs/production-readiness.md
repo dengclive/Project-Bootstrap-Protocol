@@ -1,13 +1,140 @@
-# Production-readiness analysis — v2.7.4
+# Production-readiness analysis — `main`
 
-**Date:** 2026-08-08 · **Subject:** annotated tag `v2.7.4` → `d884a43`
-**Method:** 8-agent fan-out — six independent evidence lenses, then two
-advocates arguing opposite verdicts on the same dossier. Every headline claim
-re-verified by the author against a fresh `git archive v2.7.4` install.
+**Subject:** `main` @ **560588c** · **Baseline:** annotated tag `v2.7.4` →
+`d884a43`, which is where this analysis started and against which every delta
+below is measured.
+
+**How to read this document.** It is layered, oldest evidence at the bottom,
+and the layering is deliberate — nothing that was measured is deleted when it
+stops being current, because a finding that *was* true is the only way to show
+what a change actually bought.
+
+| layer | subject | status |
+|---|---|---|
+| **CURRENT ASSESSMENT** (below) | `main` @ 560588c | **what is true today** |
+| HISTORY — REVISION 1 | branch `fix/item1-…` @ e47d827 | superseded, retained as evidence |
+| HISTORY — §§0–9 (2026-08-08) | tag `v2.7.4` @ d884a43 | superseded **as a description of `main`**; still exactly true of the tag |
+
+**§§0–9 were written about the TAG.** Where a finding was re-measured later it
+carries a **STILL TRUE @ …** or **CHANGED @ …** marker in place; where it does
+not, read it as a tag finding whose current status is given in the assessment
+above. **No tag finding has been retracted** — the tag has not moved.
+
+**Method, unchanged across all three passes so the numbers stay comparable:**
+a stock install from the repo's own `bootstrap.config.yaml` (`approved: []`,
+archetype `service`) giving 5 SDK gates / 11 shell hooks, with a **positive
+control on every gate before any `allow` is believed**, and execution proof — a
+canary `.env` and fake binaries on `PATH` writing a marker — wherever the claim
+is that something *runs* rather than merely that it is permitted.
+
+**Original method (2026-08-08):** 8-agent fan-out — six independent evidence
+lenses, then two advocates arguing opposite verdicts on the same dossier. Every
+headline claim re-verified by the author against a fresh `git archive v2.7.4`
+install.
 
 ---
 
-> ## ⟳ REVISION — 2026-08-09
+## CURRENT ASSESSMENT — `main` @ 560588c · 2026-08-10
+
+**PR #62 merged.** `main` moved `6f77ccc` → **`560588c`**, and for the first
+time the item-1 work is *in* `main`. This revision therefore answers a
+different question from the two passes below it: **not "can you pin the tag" but "what
+is true of `main` today".** Tag findings are untouched — `d884a43` has still
+not moved, and every verdict about *the tag* stands.
+
+| marker | meaning |
+|---|---|
+| **STILL TRUE @ main** | re-measured on `main` @ 560588c, unchanged |
+| **CHANGED @ main** | no longer true of `main`, or true with a narrower scope |
+
+**Method:** the same stock install both earlier passes used — the repo's own
+`bootstrap.config.yaml` (`approved: []`, archetype `service`), giving **5 SDK
+gates / 11 shell hooks**, exactly the "stock" row of K-2's table in §3. A
+different config would silently rescope every finding. **Positive control
+first on every gate used**: `cat .env` → DENY/DENY and `pip install evil` →
+DENY/DENY on the same install, before any `allow` below was believed. Three
+trees measured back to back: `git archive v2.7.4^{commit}`, `git archive
+e47d827` (the previous revision's subject) and `main`.
+
+**THE VERDICT DOES NOT CHANGE. `main` is not production ready.** C-1 alone
+settles it — there is still no LICENSE, so there is no legal grant to adopt —
+and C-3, C-5 and C-6 are untouched. What changed is *which* of §2's rows are
+open, and one cost regression that was introduced and then paid back.
+
+### What `main` actually does now — MEASURED
+
+| | tag `d884a43` | branch `e47d827` | **`main` 560588c** |
+|---|---|---|---|
+| §2 Class A — read, install, exfil | ALLOW/ALLOW | DENY/DENY | **DENY/DENY** |
+| §2 Class A + 8,300 B padding | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — B3 **parked**, X-44 open |
+| §2 Class B (`bash -c "$(curl …)"`) | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — X-37 open |
+| Csq 6,010 B — shell wall clock | 0.16 s | **65.08 s** | **7.64 s** |
+| Csq 9,010 B — shell wall clock | 0.29 s | **158.65 s** | **13.23 s** |
+| suite | 9,416 / 0 (24 files) | 9,568 / 0 | **9,601 / 0 (25 files)** |
+| `test_substrate_differential.py` | 3,926 | 4,028 | **4,051** |
+
+### The one genuinely new thing: a fail-closed crossing that item 1 INTRODUCED, and `main` has since paid back
+
+This is the finding worth carrying, and neither earlier pass could state it,
+because it did not exist at the tag and was not yet fixed on the branch.
+
+`dependency-gate` is emitted with `timeout: 60` and `FAIL_CLOSED=1`
+(`dependency-gate.sh:41`, verified on `main`'s stock install), so **a hook
+that runs long is a DENY the operator cannot override**. On a 6,010-byte
+quote-dense substitution the shell took **0.16 s at the tag** and **65.08 s at
+`e47d827`** — past that ceiling, while the SDK completed and allowed. Item 1
+bought Class A closure at the price of a benign-input over-denial *and* a
+substrate split. **`main` takes it to 7.64 s**: comfortably inside, both
+substrates allow, the split is gone.
+
+Two commits did that, and both are in the merge: **B4** (`b0d30fc`) bounded
+the walk's per-delimiter cost with a front window, and **X-45** (`5969fa9`)
+found that B4 had *not* closed the crossing and that the cost was never the
+walk at all — `_cs_isinv`, called once per quoted run, used two `##`-with-
+leading-`*` expansions, which are quadratic in bash (0.044 s at 1 KB → 10.25 s
+at 16 KB). Three further gates were carrying the same defect unattributed
+(test-gate, eval-gate, ci-mirror, each 30.4 → 3.5 s).
+
+**State it honestly both ways:** against the tag, `main` is still **~48×
+slower** on this shape (0.16 → 7.64 s). That is the standing price of walking
+into substitutions at all. It is far inside the ceiling, and it is not a
+defect — but it is not free either, and the next person raising any bound in
+this area needs to know the headroom is finite.
+
+### Everything else — why C-1 … C-8 cannot have moved, and the check that proves it
+
+**The entire code delta from the previous revision's subject to `main` is two
+shell-only cost commits in ONE file.** `git diff e47d827..main -- lib/` is
+`lib/templates.py` only, and **`lib/sdk_gates_template.py` is BYTE-IDENTICAL**
+across that range — so the SDK substrate is exactly what REVISION 1 measured,
+and no C-row's mechanism was touched. Spot-verified directly rather than
+inferred: **C-1** — `git ls-tree -r --name-only main | grep -icE 'licen[cs]e'`
+→ **0**, no LICENSE at tag, at `main`, or anywhere; **C-7** — `import
+claude_agent_sdk` → `ModuleNotFoundError` on `main`. **C-2 … C-6 and C-8 are
+STILL TRUE @ main** on that basis.
+
+**Backlog rows carrying `open`** (counted as `grep -c '`open`'`, which is a
+looser pattern than the 88/93 figures elsewhere in this document — the *delta*
+is the comparable quantity, not the base): tag **93** → `e47d827` **98** →
+`main` **101**. It went UP across a merge that closed a hole, for the same
+reason §4 already gives: closing §2 could never decrement it, while the review
+rounds that closed it filed new rows.
+
+### What the merge did NOT do, stated plainly
+
+* **B3 is not in `main`.** It was built, went green at 9,621 / 0 with 4,073
+  differential rows, and was **parked** at `wip/b3-flat-budget` (`395b955`)
+  after adversarial review of the diff found its cost backstop turns benign
+  lift-heavy commands into unoverridable denies (the same 60 s ceiling as
+  above: 15.75 s → **85.14 s** at 20.5 KB). Its design is validated and
+  re-usable; its precondition is **X-36y**. So **§2.2's padding bypass is
+  still open on `main` exactly as written**, and the fix for it is further
+  away than §8 implied, not closer.
+* **Class B / X-37 is untouched.**
+* **None of §8's items 2–8 has been done.**
+
+---
+> ## HISTORY — REVISION 1 · 2026-08-09 · subject: branch `e47d827`
 >
 > **This is an update, not a rewrite.** The subject of the original analysis —
 > annotated tag `v2.7.4` → `d884a43` — **has not moved**, and every verdict
@@ -43,106 +170,6 @@ re-verified by the author against a fresh `git archive v2.7.4` install.
 
 ---
 
-> ## ⟳ REVISION 2 — 2026-08-10 · **the subject is now `main`, not the tag**
->
-> **PR #62 merged.** `main` moved `6f77ccc` → **`560588c`**, and for the first
-> time the item-1 work is *in* `main`. This revision therefore answers a
-> different question from the two above: **not "can you pin the tag" but "what
-> is true of `main` today".** Tag findings are untouched — `d884a43` has still
-> not moved, and every verdict about *the tag* stands.
->
-> | marker | meaning |
-> |---|---|
-> | **STILL TRUE @ main** | re-measured on `main` @ 560588c, unchanged |
-> | **CHANGED @ main** | no longer true of `main`, or true with a narrower scope |
->
-> **Method:** the same stock install both earlier passes used — the repo's own
-> `bootstrap.config.yaml` (`approved: []`, archetype `service`), giving **5 SDK
-> gates / 11 shell hooks**, exactly the "stock" row of K-2's table in §3. A
-> different config would silently rescope every finding. **Positive control
-> first on every gate used**: `cat .env` → DENY/DENY and `pip install evil` →
-> DENY/DENY on the same install, before any `allow` below was believed. Three
-> trees measured back to back: `git archive v2.7.4^{commit}`, `git archive
-> e47d827` (the previous revision's subject) and `main`.
->
-> **THE VERDICT DOES NOT CHANGE. `main` is not production ready.** C-1 alone
-> settles it — there is still no LICENSE, so there is no legal grant to adopt —
-> and C-3, C-5 and C-6 are untouched. What changed is *which* of §2's rows are
-> open, and one cost regression that was introduced and then paid back.
->
-> ### What `main` actually does now — MEASURED
->
-> | | tag `d884a43` | branch `e47d827` | **`main` 560588c** |
-> |---|---|---|---|
-> | §2 Class A — read, install, exfil | ALLOW/ALLOW | DENY/DENY | **DENY/DENY** |
-> | §2 Class A + 8,300 B padding | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — B3 **parked**, X-44 open |
-> | §2 Class B (`bash -c "$(curl …)"`) | ALLOW/ALLOW | ALLOW/ALLOW | **ALLOW/ALLOW** — X-37 open |
-> | Csq 6,010 B — shell wall clock | 0.16 s | **65.08 s** | **7.64 s** |
-> | Csq 9,010 B — shell wall clock | 0.29 s | **158.65 s** | **13.23 s** |
-> | suite | 9,416 / 0 (24 files) | 9,568 / 0 | **9,601 / 0 (25 files)** |
-> | `test_substrate_differential.py` | 3,926 | 4,028 | **4,051** |
->
-> ### The one genuinely new thing: a fail-closed crossing that item 1 INTRODUCED, and `main` has since paid back
->
-> This is the finding worth carrying, and neither earlier pass could state it,
-> because it did not exist at the tag and was not yet fixed on the branch.
->
-> `dependency-gate` is emitted with `timeout: 60` and `FAIL_CLOSED=1`
-> (`dependency-gate.sh:41`, verified on `main`'s stock install), so **a hook
-> that runs long is a DENY the operator cannot override**. On a 6,010-byte
-> quote-dense substitution the shell took **0.16 s at the tag** and **65.08 s at
-> `e47d827`** — past that ceiling, while the SDK completed and allowed. Item 1
-> bought Class A closure at the price of a benign-input over-denial *and* a
-> substrate split. **`main` takes it to 7.64 s**: comfortably inside, both
-> substrates allow, the split is gone.
->
-> Two commits did that, and both are in the merge: **B4** (`b0d30fc`) bounded
-> the walk's per-delimiter cost with a front window, and **X-45** (`5969fa9`)
-> found that B4 had *not* closed the crossing and that the cost was never the
-> walk at all — `_cs_isinv`, called once per quoted run, used two `##`-with-
-> leading-`*` expansions, which are quadratic in bash (0.044 s at 1 KB → 10.25 s
-> at 16 KB). Three further gates were carrying the same defect unattributed
-> (test-gate, eval-gate, ci-mirror, each 30.4 → 3.5 s).
->
-> **State it honestly both ways:** against the tag, `main` is still **~48×
-> slower** on this shape (0.16 → 7.64 s). That is the standing price of walking
-> into substitutions at all. It is far inside the ceiling, and it is not a
-> defect — but it is not free either, and the next person raising any bound in
-> this area needs to know the headroom is finite.
->
-> ### Everything else — why C-1 … C-8 cannot have moved, and the check that proves it
->
-> **The entire code delta from the previous revision's subject to `main` is two
-> shell-only cost commits in ONE file.** `git diff e47d827..main -- lib/` is
-> `lib/templates.py` only, and **`lib/sdk_gates_template.py` is BYTE-IDENTICAL**
-> across that range — so the SDK substrate is exactly what REVISION 1 measured,
-> and no C-row's mechanism was touched. Spot-verified directly rather than
-> inferred: **C-1** — `git ls-tree -r --name-only main | grep -icE 'licen[cs]e'`
-> → **0**, no LICENSE at tag, at `main`, or anywhere; **C-7** — `import
-> claude_agent_sdk` → `ModuleNotFoundError` on `main`. **C-2 … C-6 and C-8 are
-> STILL TRUE @ main** on that basis.
->
-> **Backlog rows carrying `open`** (counted as `grep -c '`open`'`, which is a
-> looser pattern than the 88/93 figures elsewhere in this document — the *delta*
-> is the comparable quantity, not the base): tag **93** → `e47d827` **98** →
-> `main` **101**. It went UP across a merge that closed a hole, for the same
-> reason §4 already gives: closing §2 could never decrement it, while the review
-> rounds that closed it filed new rows.
->
-> ### What the merge did NOT do, stated plainly
->
-> * **B3 is not in `main`.** It was built, went green at 9,621 / 0 with 4,073
->   differential rows, and was **parked** at `wip/b3-flat-budget` (`395b955`)
->   after adversarial review of the diff found its cost backstop turns benign
->   lift-heavy commands into unoverridable denies (the same 60 s ceiling as
->   above: 15.75 s → **85.14 s** at 20.5 KB). Its design is validated and
->   re-usable; its precondition is **X-36y**. So **§2.2's padding bypass is
->   still open on `main` exactly as written**, and the fix for it is further
->   away than §8 implied, not closer.
-> * **Class B / X-37 is untouched.**
-> * **None of §8's items 2–8 has been done.**
-
----
 
 ## 0. Evidence labels
 
@@ -166,7 +193,10 @@ addressed in §7.
 
 ---
 
-## 1. VERDICT — **not production ready**
+## 1. VERDICT — **not production ready** *(as measured at the TAG, 2026-08-08)*
+
+> **Still the verdict for `main` @ 560588c**, on different evidence — see the
+> CURRENT ASSESSMENT at the top. C-1 alone settles it either way.
 
 **Lens verdicts: 5 × not-ready, 1 × ready-with-caveats.** 11 critical findings,
 23 high, all measured.
@@ -444,7 +474,7 @@ document, not regressions.
 
 | # | Finding | Note |
 |---|---|---|
-| C-1 | **No LICENSE at tag `v2.7.4` — nor anywhere since** | **STILL TRUE @ e47d827.** Re-verified 2026-08-09: `git ls-tree -r --name-only` finds no `LICEN[CS]E` at the tag, at `main` (6f77ccc), or at the branch (e47d827); README carries no license statement either. Exactly two tracked files were added after the tag (`docs/production-readiness-v2-7-4.md`, `tests/test_doc_citations.py`). A public repo with no legal grant to adopt. Cheapest fix here, and a hard blocker. |
+| C-1 | **No LICENSE at tag `v2.7.4` — nor anywhere since** | **STILL TRUE @ e47d827.** Re-verified 2026-08-09: `git ls-tree -r --name-only` finds no `LICEN[CS]E` at the tag, at `main` (6f77ccc), or at the branch (e47d827); README carries no license statement either. Exactly two tracked files were added after the tag (`docs/production-readiness.md` — then named `production-readiness-v2-7-4.md` — and `tests/test_doc_citations.py`). A public repo with no legal grant to adopt. Cheapest fix here, and a hard blocker. |
 | C-2 | **Autonomous-mode wrappers dispatch nothing** | **STILL TRUE @ e47d827**, with a count correction. `loop.sh`, `goal-loop.sh` and `auto.sh` are byte-identical to the tag. `loop.sh` has 8 `claude -p` occurrences — **6 in comments, 2 in `echo … >&2` advisories** — and `goal-loop.sh` has 10 — **8 in comments, 2 in advisories**: four non-comment occurrences in total, all echoes (the original said two). `loop.sh:3` reads *"SKELETON: the claude -p iteration loop is intentionally unimplemented"*. Driven end-to-end past the eligibility guards with a `loop_eligible: true` task, `loop.sh` prints *"No agent work was dispatched."* and exits 1; `goal-loop.sh` does the same. |
 | C-3 | **Nothing protects the gate substrate from itself** | **STILL TRUE @ e47d827.** Re-measured end-to-end on a stock install with a canary `.env`, positive control first: the five-hook Bash chain DENIES `cat .env` and `pip install evil`. Then `printf "exit 0" > .claude/hooks/secrets-gate.sh` is **allowed** by all five and executes (secrets-gate.sh becomes 6 bytes); `cat .env` is then allowed and returns `SECRET=CANARY-…`; `cat .env > /dev/null && echo STOLEN:$(cat .env)` prints the secret. `printf "{}" > .claude/settings.json` is allowed too, and so is the same overwrite via the **Write tool**. Identical against a `git archive v2.7.4` install. |
 | C-4 | **P-19 — a `jq` that *exits 0 without parsing* fails every parsing gate open** | **CORRECTION — the row as written on 2026-08-08 was over-broad**, and reproduces over-broad at the tag (`jget` is byte-identical tag↔branch). "A broken `jq` fails every parsing gate open" is false: **only the exit-0 shape fails open.** P-19's own substrate, the defensive wrapper `real-jq "$@" 2>/dev/null \|\| true; exit 0`, gives `cat .env` rc=0 and `npm install evil` rc=0, with a marker proving the fake ran. Every other breakage **denies**: `jq` exiting 127 (the asdf/mise shim, the broken-`libonig` image), `chmod 644` jq, and jq absent entirely all give rc=2, because P0-3d's exit-status check already catches them. The remedy is §4.6's capability probe — parse a known literal — **not** an operator `jq` shim. Still a live, marker-proven fail-open; narrower than stated. |
@@ -513,6 +543,10 @@ review rounds that closed it filed five new ones.
 ---
 
 ## 5. Backlog triage — **93** `open` *(88 at the tag)*, of which ~12 actually block
+
+> *Counts here are the 2026-08-09 figures. On `main` @ 560588c the same rows
+> number **101** by a looser `grep -c '`open`'` pattern whose base differs from
+> this section's; the DELTA is the comparable quantity, not the base.*
 
 **CHANGED @ e47d827 · MEASURED.** The original heading read *"88 `open`, of
 which ~10 actually block"*. That was correct for the tag and has been
