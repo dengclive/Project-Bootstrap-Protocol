@@ -2037,9 +2037,13 @@ def retrofit_digest_full(yaml_text):
 # closing the ~8 KB padding bypass on both substrates. Lands in the shared hook
 # header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
 # Counts unchanged: service 79, agent 93.
+# [no. 55 X-46, pre-commit] the B3 budget is lifted to the scan cap when
+# `_CMD_CTLWS` is set, closing the one-CR shell-ALLOW / SDK-DENY divergence.
+# Shared hook header, so every retrofit hook body moves; retrofit emits no
+# `gates.py`. Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "42235a28ef3be9f2ffde5a742389a75c48d6d5fe27bf62e3083d98591838394b",
-    "agent": "ced037c241a345793b7f1392d7e4a5e5cc46a6c9b62ea892c4e4201119eec118",
+    "service": "8d170a792c7e599c5a05c66d5d571c58d684f65a6e9b5799d75e86c047abea14",
+    "agent": "5a214a068c67e653972c102e2d3714da3fc59782b7ad1bb9c87aff1939f3d0a9",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

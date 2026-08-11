@@ -1010,6 +1010,22 @@ def _subst_inners(seg):
     # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
     # computed there on the same already-truncated string.
     heredoc = "<<" in seg.replace("<<<", "")
+    # [X-46 round 5] THE MIRROR WAS REVERTED, AND THE REASON IS AN ORDERING
+    # CONCLUSION, not a preference. Lifting this side's budget on `heredoc` to
+    # match the shell's lift on `_hd` looks like the obvious parity move and is
+    # UNSOUND while X-47 is open: the shell computes its flag on a BYTE-
+    # truncated prefix (bash substring under the ambient locale) and this side
+    # on a CODE-POINT-truncated one, so a `<<` between the two windows is
+    # visible HERE and invisible THERE. Measured on a stock install with
+    # `echo "axxb" ` + 8192 `$` + a substitution + 2800 x U+4E2D + `<<`
+    # (11020 characters, 16620 bytes): with the mirror in place that string is
+    # shell-ALLOW / SDK-DENY under the ambient locale and under LC_ALL=C, and
+    # deny/deny only under a UTF-8 locale - the forbidden direction, created by
+    # the mirror itself. Controls isolate it: the same string without the `<<`
+    # is allow everywhere, and with the `<<` moved inside both windows it is
+    # deny everywhere. So the mirror is blocked on X-47; until the two walks
+    # truncate over the same text, no flag computed from that text may select a
+    # budget on one side only.
     bd = 0                        # unquoted `${...}` nesting depth
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)

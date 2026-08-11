@@ -1305,7 +1305,73 @@ _cs_subst_scan(){
   # ...and off as well when `_join_cont` turned a CR/VT/FF into a blank in this
   # command: the blank it produced is indistinguishable from a typed one, so a
   # word start here may be an artefact rather than something bash would see.
+  #
+  # [X-46] AND WHEN THAT HAPPENS THE BUDGET IS LIFTED TO THE SCAN CAP, which is
+  # the whole fix. Turning the `#` rule off makes THIS walker traverse comment
+  # bodies that its SDK twin skips - `_subst_inners` derives its flag from `<<`
+  # alone and has no `_CMD_CTLWS` counterpart at all (X-43). Before B3 that
+  # asymmetry was harmless and deliberately shell-STRICTER: the shell lifted
+  # substitutions out of comment bodies and the SDK did not. B3 made walking
+  # cost BUDGET, which inverted it - the characters only this side examines were
+  # billed only to this side, so 8192 charged characters inside a comment
+  # exhausted the shell's budget while the SDK's stayed intact, and the same
+  # command became shell-ALLOW / SDK-DENY with bash reading the secret. One CR
+  # anywhere in the command was enough to switch B3's protection off.
+  #
+  # Note the exclusion of `#`/`}` from the CHARGING SET does not reach this:
+  # `_hd` selects what is charged not through the `case` but through whether the
+  # comment body is WALKED AT ALL.
+  #
+  # Lifting the budget rather than suppressing the charge keeps this small and
+  # one-directional FOR THE BUDGET: a larger budget can only make this walker
+  # lift more than the same walker lifted before, so it cannot manufacture an
+  # allow. `_SUBST_SCANMAX` still bounds the walk and each charge consumes at
+  # least one character, so a budget equal to that cap can never bind first:
+  # this is "no semantic budget, cost bound unchanged", not "unbounded".
+  #
+  # COST, MEASURED PROPERLY THE SECOND TIME. An earlier draft claimed "within
+  # noise at 32/48/64 KB" - a NULL measurement, because those sizes are past
+  # `_SUBST_SCANMAX` and the walk is truncated before the budget is consulted,
+  # so no budget value could have changed them. It is the same error the
+  # backstop note above records being burned by once. The discriminating shape
+  # is UNDER the cap and charge-dense: `echo "a<<b" ` + 8192 `$` + a `'('`-dense
+  # substitution (16310 characters) measures 1.83 s without the lift and
+  # 12.07 s with it - the X-45 re-scan of what the walk now newly lifts. The
+  # GLOBAL worst case is unchanged (~31 s at inner == backstop, because the lift
+  # only raises the budget to the cap that already bounded the walk), so this is
+  # bounded and measured, not free.
+  #
+  # WHAT THIS DOES NOT BUY, stated because an earlier draft of this comment
+  # claimed it and it is FALSE: it does NOT make the shell's lifted set a
+  # superset of the SDK's on CTLWS-bearing commands. `_hd=1` has a SECOND
+  # effect this line cannot reach - the comment body is not merely charged, it
+  # is TOKENISED, so `'` and `"` inside it update `_q` even though bash never
+  # tokenises a comment at all. An odd `'` in a comment therefore captures this
+  # walker in single-quote state across the newline, the `$(` arm becomes
+  # unreachable, and the shell lifts NOTHING while the SDK - which skips the
+  # body outright - lifts normally. That is shell-lifts-LESS, the forbidden
+  # direction, reachable by the same single CR. It is **X-48**, it is OLDER than
+  # B3 (measured identical on the pre-B3 tree), and no budget value closes it.
+  # Both triggers are covered for the same reason: whenever the `#` rule is off
+  # THIS walker traverses a comment body, and whether its SDK twin does so for
+  # the same text depends on the twin's PER-SEGMENT flag, which cannot be
+  # assumed to agree.
   [ "${_CMD_CTLWS:-0}" = 1 ] && _hd=1
+  # THE LIFT IS ON `_hd`, NOT ON ITS TRIGGER. An earlier draft scoped it to
+  # `_CMD_CTLWS` on the reasoning that the heredoc trigger "already had parity
+  # because both substrates set their flag". That is FALSE and was measured so:
+  # this walker runs ONCE on the WHOLE command, while `_subst_inners` runs again
+  # on every SEGMENT with its own `heredoc = "<<" in seg`, and a NEWLINE is a
+  # separator, so the line carrying `<<` and the line carrying the comment are
+  # DIFFERENT segments - the SDK's flag is false for the comment segment, so it
+  # takes its `#`
+  # arm, skips the body and spends nothing, while this walker has `_hd=1` for
+  # the whole command and is billed for every charged character in that body.
+  # Measured on a stock install: `echo $((1<<2))` (an arithmetic left shift, no
+  # heredoc at all) or a real `cat <<EOF` in front of the same
+  # 8200-charges-in-a-comment payload is shell=ALLOW / SDK=DENY, byte-for-byte
+  # the X-46 mechanism with `<<` in place of the CR.
+  [ "$_hd" = 1 ] && _bg=$_SUBST_SCANMAX
   while : ; do
     # [B4] REFILL. Top the window up whenever it holds fewer than two
     # characters, so every two-character lookahead below (`\\<newline>`, `$(`,

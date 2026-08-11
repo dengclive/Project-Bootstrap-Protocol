@@ -1884,9 +1884,12 @@ for _c, _want in (('echo "git commit"', "allow"),
 # changing or a count changing, not both at once. The pin is a tripwire
 # against accident, not against intent.
 
-check(f"known-defect ledger holds exactly 0 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 0,
-      "a row was added or removed without updating this count")
+# [X-46] The count pin MOVED TO THE END OF THE FILE. It used to sit here, which
+# was correct while every `ledger()` call was in the block above; the X-43 row
+# armed with the B3 charging boundary is ~1700 lines further down, so evaluated
+# here the pin counted a PREFIX of the ledger and read 0. A tripwire that runs
+# before the thing it counts is the inert-ledger failure this block's own note
+# is about, one level up.
 
 # --------------------------------------------------------------------------- #
 # The tables themselves -- an equality assertion, not a getattr default.
@@ -3556,8 +3559,16 @@ _B3 = [
     #     with no SDK counterpart - X-44 ground 4, half two.
     ("secrets-gate", "echo x\r" + "}" * (_W + 64) + " " + _SUB, "deny",
      "B3 fence: a CR does not change what is charged (budget-exhausting run)"),
-    ("secrets-gate", "echo x\r" + "$" * 8190 + " " + _SUB, "allow",
-     "B3: ...and does not change it on the CHARGED side either"),
+    # [X-46] The CHARGED-side twin of the row above used to assert
+    #     shell==sdk==allow here. That is no longer true and the change is
+    #     DELIBERATE: X-46 lifts the shell's budget to the scan cap whenever
+    #     `_CMD_CTLWS` is set, so the shell no longer exhausts on this input and
+    #     lifts the substitution - which is what BASH does, so the shell is now
+    #     the CORRECT substrate. The SDK still exhausts because it has no
+    #     `_CMD_CTLWS` counterpart at all (X-43). The pair is therefore a
+    #     shell-DENY / SDK-ALLOW residual, the tolerated over-denial direction
+    #     and the exact inverse of the X-46 defect, so it is LEDGERED against
+    #     X-43 below rather than asserted equal here.
     # --- BACKTICK, AND THIS ROW IS A FENCE FOR X-44 GROUND 4, HALF ONE.
     #     The SDK's balance loop exits ON the closing backtick and skips it
     #     (`i = j + 1`) while the shell CONSUMES it, so charging inside the
@@ -3596,7 +3607,92 @@ _B3 = [
     ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "allow",
      "B3 residual: padding past the 16384 backstop returns to prefix-cap "
      "behaviour - the hole moves from ~8 KB to ~16 KB, it does not close"),
+    # --- X-46: ONE CR MUST NOT SWITCH THE BUDGET PROTECTION OFF.
+    #     `_join_cont` sets `_CMD_CTLWS`, which sets `_hd=1`, which drops `#`
+    #     from the jump set - so the shell walks comment bodies its SDK twin
+    #     SKIPS (`_subst_inners` derives its flag from `<<` alone; X-43). Before
+    #     the fix those unilaterally-walked characters were BILLED to the shell
+    #     alone, so 8200 charged characters inside a comment exhausted the
+    #     shell's budget and not the SDK's: the pair below was deny/deny WITHOUT
+    #     the CR and shell-ALLOW / SDK-DENY WITH it, one character apart, with
+    #     bash reading the secret on the third line. The `want` comes from BASH:
+    #     line 3 is outside the comment and runs in both spellings.
+    #     These two rows are only meaningful AS A PAIR - the CR-free row alone
+    #     passes on the broken build.
+    ("secrets-gate",
+     "echo a b\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 control: comment-borne charges, NO CR - the `#` rule skips the body"),
+    ("secrets-gate",
+     "echo a\rb\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: ONE CR must not let comment-borne charges exhaust the budget"),
+    # [X-46 round 3] THE OTHER TRIGGER. `_hd` is set by `<<` as well as by
+    #     `_CMD_CTLWS`, and an earlier draft lifted the budget only for the
+    #     latter on the reasoning that the heredoc case "already had parity
+    #     because both substrates set their flag". Measured false: this walker
+    #     runs once on the WHOLE command while `_subst_inners` runs again per
+    #     SEGMENT with its own `heredoc = "<<" in seg`, and `\n` is a separator -
+    #     so the `<<` line and the comment line are different segments, the
+    #     SDK's flag is false for the comment one, and only the shell was billed.
+    #     Both spellings below were shell-ALLOW / SDK-DENY before the lift was
+    #     re-keyed onto `_hd`. The arithmetic one carries no heredoc at all.
+    ("secrets-gate",
+     "echo $((1<<2))\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: an arithmetic `<<` must not let comment charges exhaust it"),
+    ("secrets-gate",
+     "cat <<EOF\nx\nEOF\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: a REAL heredoc opener - same trigger, same requirement"),
+    # [X-46 round 4] THE MIRROR. Lifting the budget on the SHELL alone made the
+    #     `<<` trigger diverge the other way: `<<` sets the flag on BOTH
+    #     substrates from the same string, so a shell-only lift left them
+    #     breaking at different characters and turned this agreeing allow/allow
+    #     into shell-DENY / SDK-ALLOW. `_subst_inners` now mirrors the lift on
+    #     that shared trigger (and ONLY that one - `_CMD_CTLWS` has no SDK
+    #     counterpart and stays ledgered as X-43). The control carries no `<<`
+    #     and must stay allow/allow: it is what proves the rows below are about
+    #     the trigger and not about the padding.
+    ("secrets-gate", 'echo "axxb" ' + "$" * 8192 + ' "$(cat .env)"', "allow",
+     "X-46 control: no `<<`, budget binds on BOTH, agreeing residual"),
 ]
+# [X-48] The QUOTE-STATE half of the one-CR class, which X-46's budget fix does
+# NOT reach and which is older than B3 (identical on the pre-B3 tree). `_hd=1`
+# tokenises the comment body, so the apostrophe in `don't` puts this walker in
+# single-quote state across the newline and the `$(` on line 3 is never lifted;
+# the SDK skips the body and lifts it. The CR-free control is asserted deny/deny
+# above the ledger call so the PAIR stays meaningful: without it, a build that
+# broke the control would still look healthy here.
+differential("secrets-gate",
+             bash("echo a b\necho x # don't\necho \"$(cat .env)\""), "deny",
+             "X-48 control: apostrophe in a comment, NO CR - still lifted")
+ledger("secrets-gate",
+       bash("echo a\rb\necho x # don't\necho \"$(cat .env)\""),
+       ("allow", "deny"), ("deny", "deny"), "X-48",
+       "one CR + an unbalanced quote in a comment captures the shell walk in "
+       "single-quote state, so it lifts nothing while the SDK lifts normally")
+
+ledger("secrets-gate",
+       bash("echo x\r" + "$" * 8190 + " " + _SUB),
+       ("deny", "allow"), ("deny", "deny"), "X-43",
+       "a CR lifts the SHELL's budget (X-46) but the SDK has no _CMD_CTLWS "
+       "counterpart, so it still exhausts and does not lift - shell-stricter, "
+       "the tolerated direction; giving the SDK the flag closes it")
+
+# [X-46 round 5] The `<<` half of the lift is SHELL-ONLY, deliberately. Mirroring
+# it into `_subst_inners` was tried and REVERTED: the two walkers compute the
+# heredoc flag over differently-truncated text (bytes vs code points, X-47), so
+# with the mirror a `<<` between the two windows was shell-ALLOW / SDK-DENY -
+# the forbidden direction, created by the parity fix itself. Shell-only leaves
+# these two in the TOLERATED direction instead (shell denies what bash really
+# runs; the SDK exhausts its 8192 and does not lift), so they are ledgered here
+# rather than asserted equal. Closing them is X-47's job, and this is the
+# ordering conclusion: the mirror is blocked on X-47.
+ledger("secrets-gate", bash('echo "a<<b" ' + "$" * 8192 + ' "$(cat .env)"'),
+       ("deny", "allow"), ("deny", "deny"), "X-47",
+       "`<<` lifts the SHELL's budget; mirroring it into the SDK is unsound "
+       "until both walks truncate over the same text")
+ledger("secrets-gate", bash("echo $((1<<2)) " + "$" * 8192 + ' "$(cat .env)"'),
+       ("deny", "allow"), ("deny", "deny"), "X-47",
+       "same, via an arithmetic left shift - no heredoc anywhere")
+
 print("\n== B3: the charging boundary ==")
 for _g, _cmd, _want, _lbl in _B3:
     differential(_g, bash(_cmd), _want, _lbl)
@@ -3705,6 +3801,10 @@ if _r_armed.returncode == 0:
 
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
+
+check(f"known-defect ledger holds exactly 4 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 4,
+      "a row was added or removed without updating this count")
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
