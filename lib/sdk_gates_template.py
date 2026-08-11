@@ -998,7 +998,31 @@ def _subst_inners(seg):
     padding beyond `_SUBST_SCANMAX` returns to the old prefix-cap behaviour -
     the hole moves from ~8 KB to ~64 KB, it does not close.
     """
-    seg = seg[:_SUBST_SCANMAX]    # bound the WHOLE walk (openers AND the paren
+    # [X-47] BYTES, not code points, so this agrees with the shell twin in
+    # EVERY locale. `seg[:N]` counts code points; the shell's `${_s:0:N}` counts
+    # whatever the ambient locale says. That split was measured live -
+    # 6000 x U+4E2D of padding is shell-ALLOW / SDK-DENY with no locale set -
+    # and the unit chosen is BYTES because characters are unaffordable: a
+    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s fail-closed
+    # ceiling. `surrogatepass` for `budget_len`'s reason - a command arrives
+    # through JSON and a lone surrogate must weigh the same here as it does to
+    # bash rather than crash a PreToolUse hook. The decode is trimmed back to a
+    # whole character because a byte cut can land mid-sequence; the shell keeps
+    # those trailing bytes and this side drops them, and an incomplete sequence
+    # cannot open or close a substitution, so no arm of either walk can see the
+    # difference.
+    _sb = seg.encode("utf-8", "surrogatepass")
+    if len(_sb) > _SUBST_SCANMAX:
+        _sb = _sb[:_SUBST_SCANMAX]
+        while _sb:
+            try:
+                seg = _sb.decode("utf-8", "surrogatepass")
+                break
+            except UnicodeDecodeError:
+                _sb = _sb[:-1]
+        else:
+            seg = ""
+                                  # bound the WHOLE walk (openers AND the paren
     budget = _SUBST_BUDGET
     out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
     wstart = True                 # `#` opens a comment only at a WORD START
@@ -1010,22 +1034,21 @@ def _subst_inners(seg):
     # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
     # computed there on the same already-truncated string.
     heredoc = "<<" in seg.replace("<<<", "")
-    # [X-46 round 5] THE MIRROR WAS REVERTED, AND THE REASON IS AN ORDERING
-    # CONCLUSION, not a preference. Lifting this side's budget on `heredoc` to
-    # match the shell's lift on `_hd` looks like the obvious parity move and is
-    # UNSOUND while X-47 is open: the shell computes its flag on a BYTE-
-    # truncated prefix (bash substring under the ambient locale) and this side
-    # on a CODE-POINT-truncated one, so a `<<` between the two windows is
-    # visible HERE and invisible THERE. Measured on a stock install with
-    # `echo "axxb" ` + 8192 `$` + a substitution + 2800 x U+4E2D + `<<`
-    # (11020 characters, 16620 bytes): with the mirror in place that string is
-    # shell-ALLOW / SDK-DENY under the ambient locale and under LC_ALL=C, and
-    # deny/deny only under a UTF-8 locale - the forbidden direction, created by
-    # the mirror itself. Controls isolate it: the same string without the `<<`
-    # is allow everywhere, and with the `<<` moved inside both windows it is
-    # deny everywhere. So the mirror is blocked on X-47; until the two walks
-    # truncate over the same text, no flag computed from that text may select a
-    # budget on one side only.
+    # [X-46 / X-49] THE MIRROR IS STILL NOT SAFE, AND THE REASON MOVED. It was
+    # first reverted because the two walkers truncated over different UNITS;
+    # X-47 pinned both to UTF-8 bytes and it was re-applied - and measured
+    # WRONG a second time, for a different reason: they truncate over different
+    # DOMAINS. The shell runs its walk ONCE, on the whole command, and byte-
+    # truncates there; this side runs again on EVERY SEGMENT, each with its own
+    # window starting at its own offset 0. So a segment beginning past the
+    # shell's cap is untruncated HERE and invisible THERE, its `<<` sets this
+    # flag and not `_hd`, and the mirror hands this side a budget the shell
+    # never gets. Measured, pure ASCII, locale-independent:
+    # `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + `"$(cat .env)"` is
+    # allow/allow without the mirror and shell-ALLOW / SDK-DENY with it - the
+    # forbidden direction, manufactured by the parity fix. The control with
+    # `axxb` in place of `a<<b` is allow/allow either way, which is what pins it
+    # to the flag rather than to the length. Blocked on X-49.
     bd = 0                        # unquoted `${...}` nesting depth
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)

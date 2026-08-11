@@ -2792,7 +2792,10 @@ EXPECTED_DIGESTS = {
         # mirrored: doing so was tried and reverted, because the two walkers
         # truncate over different text (bytes vs code points, X-47) and the
         # mirror created a forbidden-direction split of its own - so `gates.py`
-        # does NOT move, and the residual is ledgered against X-47. Cost:
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
         # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
         # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
         # measurement, those sizes being past the cap. Global worst case
@@ -2801,7 +2804,7 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "61a0ccabe2a97994afca8619fb88095ae5ce5c050c6c9beea4744ca3d9c4cc8b",
+        "fab1c188b4ae028ac3b8fddc48ee05041466b4b842ae602f8e713fa69e881599",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3008,7 +3011,10 @@ EXPECTED_DIGESTS = {
         # mirrored: doing so was tried and reverted, because the two walkers
         # truncate over different text (bytes vs code points, X-47) and the
         # mirror created a forbidden-direction split of its own - so `gates.py`
-        # does NOT move, and the residual is ledgered against X-47. Cost:
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
         # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
         # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
         # measurement, those sizes being past the cap. Global worst case
@@ -3017,7 +3023,7 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "9db351d05d6a5f5a301369c7567d694241396ae539bf497a214ea6b81d34915f",
+        "4d26810591fb1be81e56dfd2e5c00e254c9f567d179cdb2a384bd759497b1492",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3171,7 +3177,10 @@ EXPECTED_DIGESTS = {
         # mirrored: doing so was tried and reverted, because the two walkers
         # truncate over different text (bytes vs code points, X-47) and the
         # mirror created a forbidden-direction split of its own - so `gates.py`
-        # does NOT move, and the residual is ledgered against X-47. Cost:
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
         # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
         # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
         # measurement, those sizes being past the cap. Global worst case
@@ -3180,7 +3189,7 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "e312afc7a2a0d162b8e24317d5d3dbc77f8703cf3b5fb33d398d0c3655478fda",
+        "0a7d8a5fb3ec6192bda2ad6bde64205121843483517448b38b0ed230768eac28",
 }
 
 EXPECTED_ACTION_COUNTS = {

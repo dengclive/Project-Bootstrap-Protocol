@@ -3676,22 +3676,77 @@ ledger("secrets-gate",
        "counterpart, so it still exhausts and does not lift - shell-stricter, "
        "the tolerated direction; giving the SDK the flag closes it")
 
-# [X-46 round 5] The `<<` half of the lift is SHELL-ONLY, deliberately. Mirroring
-# it into `_subst_inners` was tried and REVERTED: the two walkers compute the
-# heredoc flag over differently-truncated text (bytes vs code points, X-47), so
-# with the mirror a `<<` between the two windows was shell-ALLOW / SDK-DENY -
-# the forbidden direction, created by the parity fix itself. Shell-only leaves
-# these two in the TOLERATED direction instead (shell denies what bash really
-# runs; the SDK exhausts its 8192 and does not lift), so they are ledgered here
-# rather than asserted equal. Closing them is X-47's job, and this is the
-# ordering conclusion: the mirror is blocked on X-47.
+# [X-46 / X-49] The `<<` budget lift stays SHELL-ONLY. Mirroring it into the SDK
+# was tried twice and reverted twice: first because the two walks truncated over
+# different UNITS (X-47, now fixed), then because they truncate over different
+# DOMAINS (X-49 - whole command vs per segment), which X-47 does not touch. With
+# the mirror, a segment past the shell's cap gets an SDK budget the shell never
+# gets, and `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + a substitution
+# goes allow/allow -> shell-ALLOW / SDK-DENY. Ledgered against X-49.
 ledger("secrets-gate", bash('echo "a<<b" ' + "$" * 8192 + ' "$(cat .env)"'),
-       ("deny", "allow"), ("deny", "deny"), "X-47",
+       ("deny", "allow"), ("deny", "deny"), "X-49",
        "`<<` lifts the SHELL's budget; mirroring it into the SDK is unsound "
-       "until both walks truncate over the same text")
+       "while the two walks bound different domains")
 ledger("secrets-gate", bash("echo $((1<<2)) " + "$" * 8192 + ' "$(cat .env)"'),
-       ("deny", "allow"), ("deny", "deny"), "X-47",
+       ("deny", "allow"), ("deny", "deny"), "X-49",
        "same, via an arithmetic left shift - no heredoc anywhere")
+# X-49 itself, in its plainest form: PURE ASCII, so it cannot be read as a
+# leftover of X-47's unit split. The control has no second segment.
+differential("secrets-gate",
+             bash('echo "' + "x" * 4000 + '"' + chr(10) + 'echo "$(cat .env)"'),
+             "deny", "X-49 control: second segment inside the shell's cap")
+ledger("secrets-gate",
+       bash('echo "' + "x" * 18000 + '"' + chr(10) + 'echo "$(cat .env)"'),
+       ("allow", "deny"), ("deny", "deny"), "X-49",
+       "the shell bounds the WHOLE command and the SDK bounds each SEGMENT, so "
+       "a segment past the cap is scanned by one walker only")
+
+# [X-47] THE BACKSTOP'S UNIT, FENCED ACROSS LOCALES. `${_s:0:N}` counts bytes
+# under LC_ALL=C or no locale and CHARACTERS under a UTF-8 one, while the SDK
+# sliced code points - so the SAME command got DIFFERENT verdicts depending on
+# an environment variable, and the enforcing substrate was the permissive one.
+# Both are pinned to UTF-8 BYTES now. This drives the shell under every locale
+# the machine actually has and requires the verdict to be constant AND to match
+# the SDK. An ASCII control of the same CHARACTER count is included because it
+# is what isolates a failure to the UNIT rather than to the length.
+try:
+    _x47_locs = ["C"] + sorted({_l.strip() for _l in subprocess.run(
+        ["locale", "-a"], capture_output=True).stdout.decode(
+            "utf-8", "replace").splitlines()
+        if _l.strip().lower().replace("-", "").endswith("utf8")})[:2]
+except OSError:
+    _x47_locs = ["C"]
+print("\n== X-47: the substitution backstop's unit, across locales ==")
+print("   locales: %r" % (_x47_locs,))
+for _lbl, _x47cmd, _x47want in (
+        ("multibyte padding INSIDE the byte window",
+         'echo "' + "\u4e2d" * 4000 + '$(cat .env)"', "deny"),
+        ("ASCII control, same CHARACTER count",
+         'echo "' + "x" * 4000 + '$(cat .env)"', "deny"),
+        ("multibyte padding PAST it - agreeing residual",
+         'echo "' + "\u4e2d" * 6000 + '$(cat .env)"', "allow"),
+        # the band GIVEN UP by choosing bytes: 8000 x U+4E2D is 24018 bytes but
+        # only 8018 characters, so a UTF-8-locale install used to DENY this and
+        # now allows it. Pinned so the loss is a recorded decision rather than
+        # something that drifts back and forth with an environment variable.
+        ("the band a UTF-8 install gives up - deliberately allowed now",
+         'echo "' + "\u4e2d" * 8000 + '$(cat .env)"', "allow")):
+    _x47_seen = set()
+    for _loc in _x47_locs:
+        _e = dict(os.environ); _e["LC_ALL"] = _loc
+        _e["CLAUDE_PROJECT_DIR"] = PROJ
+        _pp = subprocess.run(
+            [BASH, os.path.join(PROJ, ".claude", "hooks", "secrets-gate.sh")],
+            input=json.dumps(bash(_x47cmd)), capture_output=True, text=True,
+            env=_e, cwd=PROJ)
+        _x47_seen.add({0: "allow", 2: "deny"}.get(_pp.returncode,
+                                                 "rc=%d" % _pp.returncode))
+    _x47_sdk = sdk_verdict("secrets-gate", bash(_x47cmd))
+    check("[secrets-gate] X-47: verdict is locale-invariant and matches the "
+          "SDK (%s): %s" % (_x47want, _lbl),
+          _x47_seen == {_x47want} and _x47_sdk == _x47want,
+          "shell across %r gave %r, sdk=%s, want=%s"
+          % (_x47_locs, sorted(_x47_seen), _x47_sdk, _x47want))
 
 print("\n== B3: the charging boundary ==")
 for _g, _cmd, _want, _lbl in _B3:
@@ -3802,8 +3857,8 @@ if _r_armed.returncode == 0:
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 
-check(f"known-defect ledger holds exactly 4 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 4,
+check(f"known-defect ledger holds exactly 5 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 5,
       "a row was added or removed without updating this count")
 
 print(f"\n{passed} passed, {failed} failed")

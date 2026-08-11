@@ -1211,6 +1211,18 @@ _SUBST_SCANMAX=16384
 # per-run `${_s#*"$_q"}` re-slice was the second quadratic of this class -
 # and its SDK twins (`shlex.split`, `_shell_segments`) index too.
 _CS_WIN=1024
+_CS_TRUNC_R=""
+_cs_btrunc(){                   # $1 truncated to the first $2 BYTES
+  # `local LC_ALL=C` is scoped to THIS function and restored on return, exactly
+  # as `_blen` does it, so no `case` glob and no bracket range anywhere else in
+  # the walk changes meaning - only this one substring becomes byte-indexed.
+  # A byte cut can land mid-character; the tail it leaves is an incomplete
+  # sequence, which cannot open or close a substitution, so it is inert to
+  # every arm of the walk.
+  local LC_ALL=C
+  _CS_TRUNC_R="${1:0:$2}"
+  return 0
+}
 _cs_esc_park(){                 # \\x -> sentinel, so quotes cannot be forged
   _CS_R="$1"
   case "$_CS_R" in *\\\\*) ;; *) return 0 ;; esac
@@ -1288,7 +1300,42 @@ _cs_subst_scan(){
   # [B3] The budget is per CALL and FLAT, so it does not matter that this
   # function and its SDK twin are reached different numbers of times per event.
   _bg=$_SUBST_BUDGET
-  _s="${_s:0:$_SUBST_SCANMAX}"
+  # [X-47] THE BACKSTOP'S UNIT, PINNED - the same disease `_blen` exists for,
+  # one walker further in. `${_s:0:N}` is NOT a byte count and not a character
+  # count either: it is whichever the AMBIENT LOCALE says, bytes under LC_ALL=C
+  # or no locale at all, characters under a UTF-8 one. The SDK twin slices
+  # Python code points. Leaving it to the environment put a substrate SPLIT
+  # behind an environment variable, measured on a stock install: `echo "` +
+  # 6000 x U+4E2D + `$(cat .env)"` (6000 characters, 18000 bytes) is deny under
+  # LC_ALL=C.UTF-8 and **allow under LC_ALL=C and allow with no locale set**,
+  # while the SDK denies - shell-ALLOW / SDK-DENY on the default substrate with
+  # the secret really read. An ASCII control of the same CHARACTER count denies
+  # everywhere, which is what isolates it to the unit rather than the length.
+  #
+  # BYTES, and the reason is COST, not `_blen`'s reason. `_blen` argues bytes
+  # because bytes >= characters means it SKIPS more often and skipping there
+  # never adds a deny. Here skipping is the FAIL-OPEN direction, so that
+  # argument does not transfer and characters look safer - but characters are
+  # unaffordable: a 16384-CHARACTER multibyte quote-dense command is ~49 KB of
+  # text, and measured end to end on dependency-gate it costs **74.4 s against
+  # the 60 s fail-closed ceiling** (the same payload under LC_ALL=C, i.e.
+  # byte-truncated, costs 6.7 s). Characters would trade a divergence for an
+  # unoverridable deny. So the walk is pinned to BYTES on BOTH substrates: the
+  # two now agree in EVERY locale, the 60 s ceiling stays intact, and today's
+  # UTF-8-locale over-denial goes away with it.
+  #
+  # AND IT IS A TRADE, NOT A FREE WIN. A UTF-8-locale install LOSES the band
+  # from _SUBST_SCANMAX BYTES up to _SUBST_SCANMAX CHARACTERS: measured, 8000 x
+  # U+4E2D of padding (24018 bytes) was DENIED under LC_ALL=C.UTF-8 before this
+  # and is ALLOWED after, while ambient-with-no-locale and LC_ALL=C allowed it
+  # either way. That band is given up to buy one verdict in every locale, and
+  # the alternative is worse in both directions at once (see the cost note).
+  #
+  # THE RESIDUAL, which is now AGREEING rather than divergent: multibyte
+  # padding past _SUBST_SCANMAX BYTES hides a substitution from both walkers.
+  # That is the same class as the ASCII padding residual above, reached sooner
+  # per character; it is ledgered, not hidden.
+  _cs_btrunc "$_s" "$_SUBST_SCANMAX"; _s="$_CS_TRUNC_R"
   # [B5 review] A heredoc BODY is not shell code. Inside an UNQUOTED `<<EOF`
   # body a line-leading `#` is ordinary text and bash STILL expands `$(...)`,
   # so reading it as a comment INVENTS one bash does not have and drops a live

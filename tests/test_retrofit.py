@@ -2042,8 +2042,8 @@ def retrofit_digest_full(yaml_text):
 # Shared hook header, so every retrofit hook body moves; retrofit emits no
 # `gates.py`. Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "8d170a792c7e599c5a05c66d5d571c58d684f65a6e9b5799d75e86c047abea14",
-    "agent": "5a214a068c67e653972c102e2d3714da3fc59782b7ad1bb9c87aff1939f3d0a9",
+    "service": "2acb315c875de372321833cfce8cf4a2034677a9b3b6b0f36318c2ab528262c2",
+    "agent": "670089065922161f5c60419457b0e74ee199b475d0753d39692273ef585929ca",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
