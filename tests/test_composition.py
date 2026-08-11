@@ -192,6 +192,27 @@ check("the carried segment tail is shell-only",
       "_CS_TAIL" not in _sdk and "def _invoker_at(toks):" in _sdk,
       "_CS_TAIL exists because bash has no cheap way back to the last "
       "separator; the SDK indexes tokens and needs no counterpart")
+# [X-36y] BOTH per-run quote walks - `_cs_scan` and `_xp_park`'s phase 2 -
+# consume through the same _CS_WIN front window as _cs_subst_scan. The
+# property pinned is the ABSENCE of the pre-window spelling in EITHER brace
+# form: `${_s#*"$_q"}` (single-brace, `_cs_scan`) and `${{_s#*"$_q"}}`
+# (f-string, `_xp_park`) each re-slice the whole remainder per quoted run and
+# are quadratic in the distance to the quote (0.016 s at 1 KB -> 2.60 s at
+# 16 KB, 50 reps). `_xp_park` runs it on the WHOLE command, so it was the
+# LARGEST of the three walks (7.3 s at 8 KB vs `_cs_scan`'s post-window
+# 1.3 s), and windowing only `_cs_scan` left quote-dense 32 KB over the 60 s
+# ceiling. Pinned as a SOURCE property because the cost is invisible to a
+# verdict: 557 boundary-corpus commands (`_cs_scan`) and 582 (`_xp_park`)
+# emit byte-identical output either way. `_xp_park`'s phase 1 (a distinct
+# quadratic in the backslash COUNT) is deliberately still un-windowed and
+# NOT pinned here - bslash_dense 32 KB sits at 55 s, under the ceiling.
+check("both per-run quote walks consume through the shared front window",
+      '_w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"' in _tmpl
+      and '_w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"' in _tmpl
+      and '_rest="${_s#*"$_q"}"' not in _tmpl
+      and '_rest="${{_s#*"$_q"}}"' not in _tmpl,
+      "re-slicing the whole remainder once per quoted run is what a 16 KB "
+      "quote-dense command turns into 75 s of dependency-gate wall clock")
 
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.

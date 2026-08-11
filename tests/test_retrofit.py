@@ -2025,9 +2025,16 @@ def retrofit_digest_full(yaml_text):
 # the carried-tail invariant asserted on every one - but it lands in the shared
 # hook header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
 # Counts unchanged: service 79, agent 93.
+# [no. 53 X-36y, pre-commit] the per-run tail re-slice `${_s#*"$_q"}` in
+# `_cs_scan` and in `_xp_park`'s phase 2 - the SECOND quadratic of B4's class -
+# now consumes the same 1024-character front WINDOW. COST ONLY: 557 commands
+# emit byte-identical `cmd_segments` output and 582 emit byte-identical
+# `_xp_park` output pre/post. It lands in the shared hook header, so every
+# retrofit hook body moves. Retrofit emits no `gates.py`. Counts unchanged:
+# service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "9c878fed4defa04936018808623c0eb47e6b879dbdd22913eaaa0313fb0d33e6",
-    "agent": "a100852fcb0dfa111e78753e8ee96ffb5309eb2221fc8a1820c6389f143ba01b",
+    "service": "7994aba7bb3b9ebea7f991d415cd79019c3eb52c3eea7507e4e56ae5a9c2b9bd",
+    "agent": "0e83cafa4ab75a33c6e963ba7f63f66b254cf8eb4cd1d8f5ab9430a53973676c",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

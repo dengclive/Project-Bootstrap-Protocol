@@ -3465,6 +3465,48 @@ print("\n== X-45: the carried segment tail ==")
 for _g, _cmd, _want, _lbl in _X45:
     differential(_g, bash(_cmd), _want, _lbl)
 
+# X-36y -- THE WINDOWED QUOTE WALK.
+#
+# `_cs_scan` used to re-slice the whole remainder per quoted run
+# (`${_s#*"$_q"}` is quadratic in the distance to the quote: 0.016 s at 1 KB
+# -> 2.60 s at 16 KB, 50 reps), which put dependency-gate past its 60 s
+# fail-closed ceiling on a 16 KB quote-dense command. It now consumes a
+# _CS_WIN front window, exactly as _cs_subst_scan has since B4; output is
+# pinned byte-identical over 557 boundary-straddling commands plus the
+# inherited x45 corpus.
+#
+# THESE ROWS ARE FENCES, NOT DECORATION. Each was checked against seven
+# deliberately-WRONG builds of the window and flips its verdict on at least
+# one (x36y_fences):
+#   * row 1 flips under "pre-window bottom break" - leftover window text
+#     after the last closer is dropped when the tail is already empty;
+#   * row 2 flips under "tail not reassembled" - a quote-free remainder
+#     longer than one window loses everything past the window;
+#   * row 3 flips under "run chunk dropped" AND "opener kept" - a quoted
+#     invoker argument spanning the boundary loses its first window chunk;
+#   * row 4 flips under "stuck look-ahead" AND "opener kept" AND the
+#     pre-window bottom break - the first quote sits past byte 1024.
+# The same shapes on secrets-gate flip on NO wrong build (`_sg_pass` does not
+# walk with `_cs_scan`) and are deliberately not included. Two further wrong
+# builds (refill off-by-one, closer off-by-one) flip no verdict anywhere and
+# are fenced by the byte-identity corpus instead.
+_X36Y_PAD = "x" * 1030
+_X36Y = [
+    ("dependency-gate", 'echo "run" ; pip install evil', "deny",
+     "X-36y fence: text after the last closer, tail already empty"),
+    ("dependency-gate", "echo " + _X36Y_PAD + " ; pip install evil", "deny",
+     "X-36y fence: quote-free remainder longer than one window"),
+    ("dependency-gate", 'sh -c "pip install evil ; : ' + _X36Y_PAD + '"',
+     "deny",
+     "X-36y fence: quoted invoker argument spans the window boundary"),
+    ("dependency-gate",
+     "echo " + _X36Y_PAD + ' "q" ; sh -c "pip install evil"', "deny",
+     "X-36y fence: first quote past the first window"),
+]
+print("\n== X-36y: the windowed quote walk ==")
+for _g, _cmd, _want, _lbl in _X36Y:
+    differential(_g, bash(_cmd), _want, _lbl)
+
 # --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the

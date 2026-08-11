@@ -2751,7 +2751,19 @@ EXPECTED_DIGESTS = {
         # body. dependency-gate on the 6010 B Csq shape: 62.4 s -> 7.5 s,
         # which is the 60 s fail-closed crossing item 1 introduced, closed.
         # Count still 57.
-        "2be43f0d07dcc587c712b050cfdd6dd8e9e92c38de7e6b04c0cf0c532cda441e",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the SECOND quadratic of
+        # this class, the per-run tail re-slice `${_s#*"$_q"}` that both
+        # `_cs_scan` and `_xp_park`'s phase 2 ran once per quoted run. Both now
+        # consume the same _CS_WIN front window B4 gave `_cs_subst_scan`.
+        # SHELL-ONLY and cost-only: 557 boundary-straddling commands emit
+        # byte-identical `cmd_segments` output and 582 emit byte-identical
+        # `_xp_park` output pre/post, so `gates.py` does NOT move - only the
+        # shared header, hence every hook body. dependency-gate on 16 KB
+        # quote-dense: 77 s (over the 60 s ceiling) -> 9.6 s. `_xp_park`'s
+        # phase 1 (a distinct quadratic in the backslash count) is left
+        # un-windowed and filed separately; bslash_dense 32 KB is 55 s, under
+        # the ceiling. Count still 57.
+        "f2903f9ac9c15f0411830996d236f0e3f00fc30e7e8b9268008a0be5caf8e70f",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2925,7 +2937,11 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only, so every hook body moves and `gates.py` does not.
         # Count still 69.
-        "6dd2dea7eaeedc9928ba17857a3213381e1e8dde97f963231c05814bb7745665",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the windowed `_cs_scan`
+        # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
+        # header only, so every hook body moves and `gates.py` does not.
+        # Count still 69.
+        "6dbf2fb11ba3faee7583e8b2b7db3c8088eadb8420790bd279122e2f879504e8",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3046,7 +3062,11 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only; the three design-steering artifacts are untouched.
         # Count still 59.
-        "3ee287601d0cfaaf9e6f06efa9cc633adc76dc396974f85e3a0c8b4bb7b7f386",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the windowed `_cs_scan`
+        # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
+        # header only; the three design-steering artifacts are untouched -
+        # verified per-file, not assumed. Count still 59.
+        "bf00232d3c15e626fd8209453c01a798dc21868328bf9e5f4c4c413d302e6f1a",
 }
 
 EXPECTED_ACTION_COUNTS = {

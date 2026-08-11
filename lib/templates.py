@@ -1146,6 +1146,9 @@ _SUBST_MAXLEN=8192
 # byte is FOUND does not. That is also why the SDK twin has no counterpart to
 # it: `_subst_inners` walks an index over an immutable string and is already
 # O(n), so this is the shell paying to reach the parity the SDK had for free.
+# [X-36y] `_cs_scan` carries the same window for the same reason - its
+# per-run `${_s#*"$_q"}` re-slice was the second quadratic of this class -
+# and its SDK twins (`shlex.split`, `_shell_segments`) index too.
 _CS_WIN=1024
 _cs_esc_park(){                 # \\x -> sentinel, so quotes cannot be forged
   _CS_R="$1"
@@ -1907,23 +1910,69 @@ _cs_isinv(){
   done
 }
 _cs_scan(){
-  local _s _pre _q _rest _run _pd _ps _tok _rem _spl
-  _s="$1"
+  local _s _w _more _pd _ps _pre _q _run _seg _tok _rem _spl
+  _s="$1"; _w=""; _more=0
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
-  # operators in the UNQUOTED stretches only. Run-at-a-time, not
-  # character-at-a-time: a per-character loop is O(n^2) under bash's
-  # substring expansion, and F-937 is what that costs on a large command.
+  # operators in the UNQUOTED stretches only. [X-36y] Window at a time, with
+  # the same _CS_WIN front window as _cs_subst_scan and for the same reason:
+  # `${_s#*"$_q"}` REBUILDS the remainder and is quadratic in the distance to
+  # the quote (50 reps, LC_ALL=C, quote at the far end: 0.016 s at 1 KB,
+  # 2.60 s at 16 KB), and paid once per quoted run it put dependency-gate
+  # past its 60 s fail-closed ceiling on a 16 KB quote-dense command
+  # (2/4/8/16 KB: 1.2 / 4.1 / 16.1 / 77.0 s, timeout at 32 KB). So every
+  # splitting expansion below runs on the window `_w`, never on the tail
+  # `_s`: the tail is re-sliced once per _CS_WIN characters consumed, and
+  # `_more` - does the tail still hold a quote? - is computed once per
+  # re-slice rather than once per window. A quote is a single character, so
+  # no lookahead can straddle a refill boundary, and which byte is FOUND
+  # never changes - only which byte is examined first. The X-36y corpus pins
+  # the output byte-identical to the un-windowed walk's.
   while : ; do
-    case "$_s" in *[\\"\\']*) ;; *) _cs_ops "$_s"; break ;; esac
-    _pd="${_s%%\\"*}"; _ps="${_s%%\\'*}"
-    if [ "${#_pd}" -le "${#_ps}" ]; then _q='"'; _pre="$_pd"
-    else _q="'"; _pre="$_ps"; fi
-    _cs_ops "$_pre"
-    _rest="${_s#*"$_q"}"
-    case "$_rest" in
-      *"$_q"*) _run="${_rest%%"$_q"*}"; _s="${_rest#*"$_q"}" ;;
-      *)       _run="$_rest"; _s="" ;;   # unterminated quote: take the rest
-    esac
+    # Find the OPENER. On exit _q names the quote kind and _w starts just
+    # past the opener - or _q is empty and the remainder, reassembled into
+    # _s, holds no quote at all.
+    _q=""
+    while : ; do
+      if [ -z "$_w" ]; then
+        [ -z "$_s" ] && break
+        _w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        case "$_s" in *[\\"\\']*) _more=1 ;; *) _more=0 ;; esac
+      fi
+      case "$_w" in
+        *[\\"\\']*)
+          _pd="${_w%%\\"*}"; _ps="${_w%%\\'*}"
+          if [ "${#_pd}" -le "${#_ps}" ]; then _q='"'; _pre="$_pd"
+          else _q="'"; _pre="$_ps"; fi
+          _cs_ops "$_pre"
+          _w="${_w:$(( ${#_pre} + 1 ))}"
+          break ;;
+        *)
+          # No quote in this window. If the tail still holds one this is
+          # plain unquoted text; otherwise the hunt is over.
+          if [ "$_more" = 1 ]; then _cs_ops "$_w"; _w=""; continue; fi
+          _s="$_w$_s"; _w=""
+          break ;;
+      esac
+    done
+    if [ -z "$_q" ]; then _cs_ops "$_s"; break; fi
+    # Collect the run to the closing _q. An exhausted window is appended
+    # whole and refilled; a run that outlives the tail is the unterminated
+    # quote, which takes the rest exactly as the un-windowed walk did.
+    _run=""
+    while : ; do
+      case "$_w" in
+        *"$_q"*)
+          _seg="${_w%%"$_q"*}"; _run="$_run$_seg"
+          _w="${_w:$(( ${#_seg} + 1 ))}"
+          break ;;
+        *)
+          _run="$_run$_w"; _w=""
+          [ -z "$_s" ] && break
+          _w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+          case "$_s" in *[\\"\\']*) _more=1 ;; *) _more=0 ;; esac
+          ;;
+      esac
+    done
     # An invoker's argument is a command line: segment it too. Additive, so
     # the run also stays part of its own segment. [round-4 D5] The run is
     # UN-parked one level before it is handed on, which is what shell quote
@@ -1950,7 +1999,7 @@ _cs_scan(){
       *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}" ;;
       *) _CS_TAIL="$_CS_TAIL$_run" ;;
     esac
-    if [ -z "$_s" ]; then break; fi
+    if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
   done
   # [round-4 D5, third reproduction] `sh -c pip\\ install\\ evil` has NO quoted
   # run to recurse into - the argument is one shell word held together by
@@ -4057,7 +4106,7 @@ _XP_PK=""
 _XP_R=""
 _xp_park(){{
   local _s="$1" _o="" _h="" _t="" _c="" _pre="" _q="" _rest="" _run=""
-  local _pd="" _ps=""
+  local _pd="" _ps="" _w="" _seg="" _more=0
   # The sentinels are ours; a command carrying one raw could otherwise
   # forge a non-split. Same scrub cmd_segments performs, same reason.
   _s="${{_s//$'\\001'/ }}"
@@ -4082,28 +4131,71 @@ _xp_park(){{
     esac
     _s="${{_t:1}}"
   done
-  _s="$_o"; _o=""
-  # Run-at-a-time, like _cs_scan: a per-character loop is O(n^2) under
-  # bash's substring expansion, and F-937 is what that costs.
+  _s="$_o"; _o=""; _w=""; _more=0
+  # [X-36y] Phase 2 carries the same _CS_WIN front window as _cs_scan and
+  # _cs_subst_scan, for the same reason: `${{_s#*"$_q"}}` re-slices the whole
+  # remainder per quoted run and is quadratic in the distance to the quote,
+  # and _xp_park runs it on the WHOLE command (not just an invoker argument),
+  # so on a quote-dense command it was the LARGEST of the three quote walks -
+  # 7.3 s at 8 KB against _cs_scan's post-window 1.3 s, measured with the
+  # emitted-hook profiler. Every splitting expansion runs on the window `_w`;
+  # the tail `_s` is re-sliced once per _CS_WIN characters. Unquoted text is
+  # emitted to `_o` verbatim exactly as `_pre` was, a run is collected across
+  # refills, and a run that outlives the tail is the unterminated quote this
+  # walk REFUSES (rc=1, empty _XP_PK) rather than guesses at. A quote is one
+  # character, so no refill can split it; the parked output is byte-identical
+  # to the un-windowed walk's (x36y_xppark parity). Phase 1 above is a
+  # DISTINCT quadratic in the backslash COUNT and is deliberately left
+  # un-windowed - bslash_dense 32 KB sits at 55 s, under the ceiling, and it
+  # is filed separately, not folded in here.
   while : ; do                        # phase 2: quoted runs
-    case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) ;; *) _o="$_o$_s"; break ;; esac
-    _pd="${{_s%%"$_XP_DQC"*}}"; _ps="${{_s%%"$_XP_SQC"*}}"
-    if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q="$_XP_DQC"; _pre="$_pd"
-    else _q="$_XP_SQC"; _pre="$_ps"; fi
-    _o="$_o$_pre"
-    _rest="${{_s#*"$_q"}}"
-    case "$_rest" in
-      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _s="${{_rest#*"$_q"}}" ;;
-      # An unterminated quote has no shell parse, so it is REFUSED rather
-      # than guessed at - the F8 posture, applied to the one input this
-      # parser genuinely cannot model.
-      *) _XP_PK=""; return 1 ;;
-    esac
+    # Find the nearer opener across windows; on exit _q names the quote kind
+    # and _w starts just past it, or _q is empty and _s holds no quote.
+    _q=""
+    while : ; do
+      if [ -z "$_w" ]; then
+        [ -z "$_s" ] && break
+        _w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"
+        case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) _more=1 ;; *) _more=0 ;; esac
+      fi
+      case "$_w" in
+        *"$_XP_DQC"*|*"$_XP_SQC"*)
+          _pd="${{_w%%"$_XP_DQC"*}}"; _ps="${{_w%%"$_XP_SQC"*}}"
+          if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q="$_XP_DQC"; _pre="$_pd"
+          else _q="$_XP_SQC"; _pre="$_ps"; fi
+          _o="$_o$_pre"
+          _w="${{_w:$(( ${{#_pre}} + 1 ))}}"
+          break ;;
+        *)
+          if [ "$_more" = 1 ]; then _o="$_o$_w"; _w=""; continue; fi
+          _o="$_o$_w$_s"; _s=""; _w=""
+          break ;;
+      esac
+    done
+    [ -z "$_q" ] && break
+    # Collect the run to the closing _q across refills. A run that outlives
+    # the tail has no closing quote at all: REFUSE, the F8 posture applied to
+    # the one input this parser genuinely cannot model.
+    _run=""
+    while : ; do
+      case "$_w" in
+        *"$_q"*)
+          _seg="${{_w%%"$_q"*}}"; _run="$_run$_seg"
+          _w="${{_w:$(( ${{#_seg}} + 1 ))}}"
+          break ;;
+        *)
+          _run="$_run$_w"; _w=""
+          if [ -z "$_s" ]; then _XP_PK=""; return 1; fi
+          _w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"
+          case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) _more=1 ;; *) _more=0 ;; esac
+          ;;
+      esac
+    done
     _run="${{_run//;/"$_XP_SEMI"}}"; _run="${{_run//&/"$_XP_AMP"}}"
     _run="${{_run//|/"$_XP_BAR"}}"
     _run="${{_run//$'\\n'/"$_XP_NL"}}"
     _o="$_o$_q$_run$_q"
-    if [ -z "$_s" ]; then break; fi
+    if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
   done
   _XP_PK="$_o"
   return 0
