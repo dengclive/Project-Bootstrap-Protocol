@@ -2032,9 +2032,14 @@ def retrofit_digest_full(yaml_text):
 # `_xp_park` output pre/post. It lands in the shared hook header, so every
 # retrofit hook body moves. Retrofit emits no `gates.py`. Counts unchanged:
 # service 79, agent 93.
+# [no. 54 B3 re-land, pre-commit] the prefix cap is retired for a flat delimiter
+# budget (8192, charged on the invariant five) plus a 16384 cost backstop,
+# closing the ~8 KB padding bypass on both substrates. Lands in the shared hook
+# header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
+# Counts unchanged: service 79, agent 93.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "7994aba7bb3b9ebea7f991d415cd79019c3eb52c3eea7507e4e56ae5a9c2b9bd",
-    "agent": "0e83cafa4ab75a33c6e963ba7f63f66b254cf8eb4cd1d8f5ab9430a53973676c",
+    "service": "42235a28ef3be9f2ffde5a742389a75c48d6d5fe27bf62e3083d98591838394b",
+    "agent": "ced037c241a345793b7f1392d7e4a5e5cc46a6c9b62ea892c4e4201119eec118",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

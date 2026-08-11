@@ -487,7 +487,17 @@ _EXPAND_DEPTH = 3
 # hit its fail-closed timeout while the other completes on a large command (the
 # X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
 _SUBST_BUDGET = 8192
-_SUBST_SCANMAX = 65536
+# [B3 re-land] 16384, not the first attempt's 65536. That value was sized by a
+# sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
+# bytes while varying only the walk's reach - but gate cost is the RE-SCAN of
+# the lifted inner, so it scales with the INNER. Re-measured with the padding
+# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s fail-closed
+# ceiling; 16384 costs 30.9 s. The shell twin carries the identical number and
+# test_composition compares the two directly - an unequal pair is the X-36l
+# exhaustion-divergence hazard, and it is not theoretical: measured with the
+# shell at 16384 and this side still at 65536, `echo "<20000 x>$(cat .env)"` is
+# shell-allow / SDK-deny.
+_SUBST_SCANMAX = 16384
 # [B3] The characters `_subst_inners` charges its budget for, and the SHELL
 # twin's `case` in _cs_subst_scan is spelled from the same five. They are the
 # only ones in both walkers' dispatch UNCONDITIONALLY; `#`, `}`, `(` and `)`

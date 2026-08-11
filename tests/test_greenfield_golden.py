@@ -2763,7 +2763,20 @@ EXPECTED_DIGESTS = {
         # phase 1 (a distinct quadratic in the backslash count) is left
         # un-windowed and filed separately; bslash_dense 32 KB is 55 s, under
         # the ceiling. Count still 57.
-        "f2903f9ac9c15f0411830996d236f0e3f00fc30e7e8b9268008a0be5caf8e70f",
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        "c7af73c0e29b71aaa613b7a8d1569903a976f8947f50da921de042d52ef44f56",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2941,7 +2954,20 @@ EXPECTED_DIGESTS = {
         # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
         # header only, so every hook body moves and `gates.py` does not.
         # Count still 69.
-        "6dbf2fb11ba3faee7583e8b2b7db3c8088eadb8420790bd279122e2f879504e8",
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        "09378aa13846e2b80db7c7c38f8cc17c988e0e2896b497b889cfddcacf42aff2",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3066,7 +3092,20 @@ EXPECTED_DIGESTS = {
         # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
         # header only; the three design-steering artifacts are untouched -
         # verified per-file, not assumed. Count still 59.
-        "bf00232d3c15e626fd8209453c01a798dc21868328bf9e5f4c4c413d302e6f1a",
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        "d986759e9dbad9eb9053cfb9e646f48070dd2f5d847900d2a79be206940f34a1",
 }
 
 EXPECTED_ACTION_COUNTS = {

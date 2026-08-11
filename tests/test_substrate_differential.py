@@ -3529,27 +3529,33 @@ _B3 = [
     # --- THE BYPASS ITSELF: benign padding, uncharged, must now be walked --- #
     ("secrets-gate", 'echo "' + "x" * 8300 + '$(cat .env)"', "deny",
      "B3: 8300 B of padding no longer pushes the sub out of reach (X-44)"),
-    ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "deny",
-     "B3: 20 KB of padding - well past the old 8192 prefix cap"),
-    ("secrets-gate", 'echo "' + "x" * 60000 + '$(cat .env)"', "deny",
-     "B3: 60 KB of padding, just inside the cost backstop"),
+    ("secrets-gate", 'echo "' + "x" * 12000 + '$(cat .env)"', "deny",
+     "B3: 12 KB of padding - well past the old 8192 prefix cap"),
+    ("secrets-gate", 'echo "' + "x" * 15000 + '$(cat .env)"', "deny",
+     "B3: 15 KB of padding, just inside the 16384 cost backstop"),
     # --- X-44 GROUND 2, the net regression that reverted the first attempt:
     #     5000 `}` then padding, with the sub at ~byte 5006 - INSIDE the 8192
     #     the old prefix cap guaranteed. `}` is not charged now, so it survives.
     ("secrets-gate", "echo " + "}" * 5000 + " " + _SUB, "deny",
      "B3: 5000 unquoted `}` do not spend budget - X-44 ground 2"),
     # --- UNCHARGED families at multiples of the budget: must NEVER stop ----- #
-    ("secrets-gate", "echo " + "}" * (4 * _W) + " " + _SUB, "deny",
-     "B3: 4x the budget in `}` - uncharged, walk continues"),
-    ("secrets-gate", "echo " + "a" * (4 * _W) + " " + _SUB, "deny",
-     "B3: 4x the budget in plain padding - uncharged"),
-    ("secrets-gate", "echo a" + "a#" * (2 * _W) + " " + _SUB, "deny",
+    # [B3 re-land] These were 4x the budget (32768) when the backstop was
+    # 65536. At the shipped 16384 such a shape is TRUNCATED, so it could no
+    # longer tell "`}` is uncharged" from "the walk stopped" - and with only
+    # those, all three brace-charging mutations survive, i.e. no fence against
+    # the defect that reverted X-44. W+64 exhausts an 8192 budget if the family
+    # were charged, and sits at ~8.3 KB, comfortably inside 16384.
+    ("secrets-gate", "echo " + "}" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: budget-exhausting run of `}` - uncharged, walk continues"),
+    ("secrets-gate", "echo " + "a" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: budget-exhausting run of plain padding - uncharged"),
+    ("secrets-gate", "echo a" + "a#" * (_W // 2) + " " + _SUB, "deny",
      "B3: mid-word `#` is uncharged and does not open a comment"),
     # --- CR: B5 folds _CMD_CTLWS into _hd, and _hd must NOT select the
     #     charging set. One CR would otherwise change what the shell charges
     #     with no SDK counterpart - X-44 ground 4, half two.
-    ("secrets-gate", "echo x\r" + "}" * (2 * _W) + " " + _SUB, "deny",
-     "B3: a CR in the command does not change what is charged"),
+    ("secrets-gate", "echo x\r" + "}" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: a CR does not change what is charged (budget-exhausting run)"),
     ("secrets-gate", "echo x\r" + "$" * 8190 + " " + _SUB, "allow",
      "B3: ...and does not change it on the CHARGED side either"),
     # --- BACKTICK, AND THIS ROW IS A FENCE FOR X-44 GROUND 4, HALF ONE.
@@ -3571,7 +3577,7 @@ _B3 = [
     # loop charges nothing, ~10002 when it charges one more per pair.
     ("secrets-gate", 'echo "' + "`x`" * 5000 + '$(cat .env)"', "deny",
      "B3 fence: QUOTED backticks - the balance loop charges nothing"),
-    ("secrets-gate", "echo " + "`x`" * (4 * _W) + " " + _SUB, "allow",
+    ("secrets-gate", "echo " + "`x`" * (_W // 2 + 64) + " " + _SUB, "allow",
      "B3: ...and enough of them DO exhaust it, on both substrates alike"),
     # --- THE BOUNDARY, sharp and identical on both substrates. The payload
     #     spends one charge on the opening `"` and one on the `$` of `$(`, so
@@ -3587,8 +3593,9 @@ _B3 = [
     #     and on this gate a timeout is a deny nobody can override.
     ("secrets-gate", "echo " + "'" * (_W + 10) + " " + _SUB, "allow",
      "B3 residual: ~8 KB of charging characters still exhausts the budget"),
-    ("secrets-gate", 'echo "' + "x" * 70000 + '$(cat .env)"', "allow",
-     "B3 residual: padding past _SUBST_SCANMAX returns to prefix-cap behaviour"),
+    ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "allow",
+     "B3 residual: padding past the 16384 backstop returns to prefix-cap "
+     "behaviour - the hole moves from ~8 KB to ~16 KB, it does not close"),
 ]
 print("\n== B3: the charging boundary ==")
 for _g, _cmd, _want, _lbl in _B3:

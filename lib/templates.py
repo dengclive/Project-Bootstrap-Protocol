@@ -1142,22 +1142,45 @@ _CS_SUBST_R=""
 # the 8192 the cap had guaranteed.
 _SUBST_BUDGET=8192
 # _SUBST_SCANMAX is the COST bound: benign padding is free under the budget, so
-# without it a `}`-dense or `#`-dense command is walked end to end. Chosen by
-# MEASUREMENT, not argument - dependency-gate end to end on 128 KB payloads,
-# worst of four uncharged-dense shapes:
-#     backstop  8192 (the old cap)   36.5 s
-#     backstop 65536                 46.0 s   <- chosen, 14 s of headroom
-#     backstop 131072                57.4 s   <- rejected, 2.6 s of headroom
-# against a 60 s fail-closed ceiling where added cost IS over-denial. 256 KB
-# commands sit at 141 s and are over the ceiling ALREADY at the old cap; that is
-# the segmenters' own quadratic (X-36y), which no bound here reaches.
+# without it a `}`-dense or `#`-dense command is walked end to end.
+#
+# CHOSEN BY MEASUREMENT - AND THE METHODOLOGY IS THE LOAD-BEARING PART. The
+# first attempt sized this at 65536 from a sweep that padded OUTSIDE the
+# substitution, which held the LIFTED INNER at a constant 16 bytes and varied
+# only how far the walk reached. That measures the wrong thing: gate cost is the
+# RE-SCAN of what the walk lifts (X-45), so it scales with the INNER's length,
+# not with the walk's reach. 65536 looked like it had 14 s of headroom and in
+# fact TIMED OUT, which is what parked the first attempt. Re-measured here with
+# the padding INSIDE the substitution - `echo "$(` + `'('`-dense inner + `)"`,
+# dependency-gate end to end, worst case inner == backstop, on the post-X-36y
+# tree (cost plateaus once the inner exceeds the backstop, so inner == backstop
+# IS the worst case):
+#                          inner == backstop   inner == 2x backstop
+#     backstop  8192 (old cap)     9.4 s              11.1 s
+#     backstop 16384              30.9 s              36.8 s   <- CHOSEN
+#     backstop 20480              46.0 s              55.1 s   <- rejected
+#     backstop 24576              64.8 s              77.4 s   <- over
+#     backstop 32768             111.5 s             TIMEOUT
+#     backstop 65536             TIMEOUT             TIMEOUT   <- attempt 1
+# against a 60 s fail-closed ceiling where added cost IS over-denial. The true
+# crossing sits between 20480 and 24576; the numbers are machine-dependent and
+# are a BAND, not a constant, so re-measure before raising this.
+#
+# WHY NOT 20480, WHICH ALSO "FITS": its worst case leaves 14 s and its plateau
+# leaves 4.9 s. Attempt 1 rejected 131072 for having 2.6 s of headroom and
+# ACCEPTED 65536 for having 14 s - and 65536 times out in reality. A margin that
+# thin against a machine-dependent, fail-CLOSED ceiling is how this was got
+# wrong the first time, so the choice here is the one with ~29 s.
+# And 8192 is not merely cheaper, it is USELESS: the bypass this exists to close
+# needs the walk to reach a substitution sitting at ~8300 bytes.
 #
 # SAY THE RESIDUAL PLAINLY: padding beyond this returns to the old prefix-cap
-# behaviour. The hole moves from ~8 KB to ~64 KB; it does not close. Neither
-# does the charging-character floor - ~8192 bytes of \\ " ' ` $ still exhaust the
-# budget - and no bound of this shape closes either; only an unbounded walk
-# does, and that is a timeout, which on this gate is a deny nobody can override.
-_SUBST_SCANMAX=65536
+# behaviour. The hole moves from ~8 KB to ~16 KB; it does not close - measured,
+# `echo "<20000 x>$(cat .env)"` is allow on both substrates. Neither does the
+# charging-character floor - ~8192 bytes of \\ " ' ` $ still exhaust the budget -
+# and no bound of this shape closes either; only an unbounded walk does, and
+# that is a timeout, which on this gate is a deny nobody can override.
+_SUBST_SCANMAX=16384
 # [B4] The walk's WINDOW, and the reason there is one. bash has no string
 # cursor: `${_s:1}` and `${_s#"$_pre"}` REBUILD the remainder, so consuming one
 # delimiter costs O(remaining) and a delimiter-dense command is QUADRATIC.
