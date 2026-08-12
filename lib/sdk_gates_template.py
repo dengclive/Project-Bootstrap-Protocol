@@ -3484,7 +3484,7 @@ def _format_lint_gate(config):
 # counting set BYTES in the byte prefix is identical to what bash counts in the
 # same prefix under the C locale, multibyte padding included.
 _CMD_MAXLEN = 81920
-_CMD_MAXJUMP = 4096
+_CMD_MAXJUMP = 8191
 _JUMP_BYTES = b"()\\\"'`$"
 
 
@@ -3520,8 +3520,11 @@ def _cost_guard(input_data):
             f"limit: it cannot be scanned inside this hook's timeout, and a "
             f"gate that runs out of time is SKIPPED rather than obeyed, so it "
             f"is refused instead of allowed unscanned")
-    prefix = enc[:_SUBST_SCANMAX]
-    jumps = sum(prefix.count(bytes((b,))) for b in _JUMP_BYTES)
+    # [X-50] THE WHOLE COMMAND, not a prefix - the prefix form was a live
+    # bypass of this guard (17 KB of clean padding then 9000 quoted runs scores
+    # zero in the prefix and costs the shell 62.72 s). Shell parity: the twin
+    # counts the whole string too.
+    jumps = sum(enc.count(bytes((b,))) for b in _JUMP_BYTES)
     if jumps > _CMD_MAXJUMP:
         return _deny(
             f"command holds {jumps} shell delimiters in its first "

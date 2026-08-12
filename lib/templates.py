@@ -1056,17 +1056,37 @@ _read_cmd(){
 # safe to scope the WHOLE function that way here because the only glob inside
 # is the bracket below, so nothing else can change meaning.
 _CMD_MAXLEN=81920
-_CMD_MAXJUMP=4096
+# [X-50] 8191, and BOTH bounds on this number are load-bearing.
+# LOWER: it must exceed the benign maximum, which is 4813 jump targets for a
+# 64 KB heredoc of this repo's own test suite and 4802 for 64 KB of pretty
+# JSON - whole-command counts, since that is what is measured now.
+# UPPER: it must stay STRICTLY BELOW `_SUBST_BUDGET` (8192). Every charging
+# character is a jump target, so a cap under the budget is what keeps budget
+# exhaustion unreachable - which is what makes X-43 and both X-49 budget
+# spellings unreachable rather than merely unfixed. test_composition pins it.
+# 8191 is the largest value satisfying both.
+# COST AT THE CAP, run-dense shape: 4000 jumps 9.14 s, 8000 jumps 20.92 s,
+# 12000 jumps 35.24 s - so ~21 s against the 60 s ceiling. That is a SMALLER
+# margin than the 4096 prefix version appeared to give, because that appearance
+# was the bypass.
+_CMD_MAXJUMP=8191
 _cost_guard(){
   local _g="${1:-}" _gp _gj
   local LC_ALL=C
   if [ "${#_g}" -gt "$_CMD_MAXLEN" ]; then
     hook_fail "command is ${#_g} bytes, over the ${_CMD_MAXLEN}-byte gate limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
   fi
-  # Only the first _SUBST_SCANMAX bytes matter for the walk - past that it
-  # truncates - so the density test reads the same prefix the walk does.
-  _gp="${_g:0:$_SUBST_SCANMAX}"
-  _gj="${_gp//[^()\\\\\\"\\'\\`\\$]/}"
+  # [X-50] THE WHOLE COMMAND, NOT A PREFIX - and the prefix version was a LIVE
+  # BYPASS of this very guard, shipped in f67f828. It sampled only the first
+  # `_SUBST_SCANMAX` bytes on the reasoning that this is what the substitution
+  # WALK reads. That is true of the walk and false of everything else:
+  # `_cs_scan` and the segmenters read the ENTIRE command, so density past the
+  # sampled prefix still costs. Measured on the shipped guard: 17 KB of clean
+  # padding followed by 9000 short quoted runs scores ZERO in the sampled
+  # prefix, passes both caps, and takes 62.72 s - past the 60 s ceiling, so
+  # the hook is killed and the command RUNS. Counting the whole string closes
+  # it, at the cost of one expansion over the command instead of over 16 KB.
+  _gj="${_g//[^()\\\\\\"\\'\\`\\$]/}"
   if [ "${#_gj}" -gt "$_CMD_MAXJUMP" ]; then
     hook_fail "command holds ${#_gj} shell delimiters in its first $_SUBST_SCANMAX bytes, over the $_CMD_MAXJUMP limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
   fi
