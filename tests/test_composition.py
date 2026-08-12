@@ -311,6 +311,29 @@ check("the D20 install-head candidate does not re-copy per token",
 # re-marshalling the whole array at every completer, and `i` is a one-character
 # INSTALL_VERB that is itself a completer - so `i i i ...` is attacker-supplied,
 # carries zero jump targets, and sent a shape main clears at 24.38 s to 171.88 s.
+# [X-52] THE MEMO'S TWO SOUNDNESS CONDITIONS, PINNED - both were got wrong once.
+# (1) It is cleared where the tail RESTARTS and never where it GROWS. There are
+#     exactly three restart sites: the two `##*$_CS_SEP` branches and
+#     cmd_segments' per-event reset. Clearing at an APPEND branch instead would
+#     restore the old O(runs x tail) cost silently, with every test still green.
+check("the invoker memo is cleared at every tail RESTART and only there",
+      _tmpl.count('_CS_INVMEMO=""') == 4      # declaration + three restarts
+      and '_CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO=""' in _tmpl
+      and '_CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO=""' in _tmpl
+      and '_CS_TAIL=""; _CS_INVMEMO=""' in _tmpl,
+      "a memo surviving a segment break answers for the WRONG segment; one "
+      "cleared on append throws away the whole optimisation")
+# (2) A decision taken on the TRAILING word is not cacheable, because
+#     `_cs_scan` appends each quoted run to `_CS_TAIL` and a run can EXTEND that
+#     word rather than start a new one - `sud` classifies `other`, then `"o"`
+#     arrives and it is `sudo`, an invoker. The first cut of the memo missed
+#     this and the #54 X-36q PART-QUOTED WRAPPER differential row caught it
+#     (shell=allow / sdk=deny / want=deny, the forbidden direction).
+check("the invoker memo is never written from a decision on the trailing word",
+      _tmpl.count('[ "$_lastw" = "0" ] && _CS_INVMEMO=') == 2
+      and 'if [ "$_w" = "$_tail" ]; then _lastw=1; else _lastw=0; fi' in _tmpl,
+      "a quoted run can EXTEND the trailing word, so a decision taken on it is "
+      "not stable under a longer tail")
 check("the candidate join folds rather than re-joins",
       _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
                   'else _cand="$_cand $_CJ"; fi') == 2,

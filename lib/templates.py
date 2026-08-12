@@ -1251,6 +1251,40 @@ _CS_EXTRA=""
 # (this line, _cs_ops, _cs_scan, cmd_segments' per-event reset) and the
 # invariant `_CS_TAIL == ${_CS_BUF##*$_CS_SEP}` is what makes the swap sound.
 _CS_TAIL=""
+# [X-52] `_cs_isinv`'s answer, MEMOISED PER SEGMENT - and the invariant that
+# makes it sound is that within a segment `_CS_TAIL` only ever GROWS.
+#
+# The walk decides one of two ways. It can decide ON A TOKEN: an `inv` word
+# (true) or an `other` word with no wrapper seen (false). Or it decides by
+# EXHAUSTION, having run out of words with `_seen=1`; a later token could still
+# be an invoker, so that answer is never cached.
+#
+# "GROWS" MEANS THE TAIL GETS LONGER, NOT THAT ITS WORDS ARE FINAL - and the
+# first cut of this memo got that wrong and was caught by the #54 X-36q
+# PART-QUOTED WRAPPER row (`su"do" ...`, shell=allow / sdk=deny / want=deny).
+# `_cs_scan` appends each quoted run to `_CS_TAIL`, and a run can EXTEND THE
+# TRAILING WORD rather than start a new one: `sud` classifies `other`, then
+# `"o"` arrives and the word is `sudo`, an invoker. So a decision taken on the
+# trailing word is NOT stable and must not be cached. `_lastw` marks exactly
+# that case - the word is the whole remaining tail with nothing behind it - and
+# only decisions on a word with a separator after it, which no later append can
+# reach, are memoised.
+#
+# WHY IT IS WORTH THE STATE. `_cs_isinv` runs ONCE PER QUOTED RUN [X-45], so
+# every cost this walk carries is multiplied by the run count, and FIVE
+# successive attempts to make the walk itself cheap enough each left a shape
+# where that multiplication still crossed the 60 s ceiling - the last on a TWO
+# BYTE difference (`! ` x3 -> x4 took dependency-gate from 27.31 s to 136.72 s
+# while main went 27.31 -> 30.23). Memoising removes the multiplication instead
+# of shrinking its factor, which is why it is here rather than a sixth
+# heuristic on when to split.
+#
+# CLEARED WHERE THE TAIL RESTARTS, NEVER WHERE IT GROWS: the two
+# `##*$_CS_SEP` branches (a new segment begins) and `cmd_segments_real`'s
+# per-event reset. The two APPEND branches deliberately leave it alone - that
+# is the whole optimisation, and clearing there would restore the old cost
+# silently.
+_CS_INVMEMO=""
 # [round-4 D17] `_CS_INVOKERS` used to live here: emitted into every hook,
 # ZERO call sites, and already drifted (it was missing `su`). A second, silent
 # invoker list whose only effect was to make the count of them look smaller.
@@ -1429,7 +1463,7 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   # tail restarts after the last of them; the `##` here runs on the short `_t`,
   # never on the accumulated buffer.
   case "$_t" in
-    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}" ;;
+    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO="" ;;
     *) _CS_TAIL="$_CS_TAIL$_t" ;;
   esac
   return 0
@@ -2283,7 +2317,8 @@ _cs_isinv(){
   # exit path exactly, and the array is built only for the walks that really do
   # run long - which is where X-52's shapes live and where linear-vs-quadratic
   # is worth a whole-tail pass.
-  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0 _lz=0
+  if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi
+  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0 _lz=0 _lastw=0
   # Safe for the callees: `_cs_head_kind`, `_cs_inv_word` and `_xp_iw` match
   # with `case` on quoted words and perform no word splitting of their own.
   local IFS=' '
@@ -2299,6 +2334,9 @@ _cs_isinv(){
       _tail="${_tail#"${_tail%%[![:space:]]*}"}"
       _w="${_tail%%[[:space:]]*}"
       [ -z "$_w" ] && return 1
+      # Is this the TRAILING word? If so it is not provably complete - see the
+      # memo note - because the next quoted run can EXTEND it.
+      if [ "$_w" = "$_tail" ]; then _lastw=1; else _lastw=0; fi
     else
       # ARRAY PHASE - the remainder, split once. Reached only after the walk
       # has already stepped through `_CS_LAZYMAX` head-transparent tokens, so
@@ -2306,6 +2344,8 @@ _cs_isinv(){
       [ "$_ai" -ge "$_an" ] && return 1
       _w="${_words[$_ai]}"
       _ai=$((_ai + 1))
+      # last element AND nothing unsplit behind it -> the trailing word
+      if [ "$_ai" -ge "$_an" ] && [ -z "$_tail" ]; then _lastw=1; else _lastw=0; fi
     fi
     # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
     # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is
@@ -2349,10 +2389,17 @@ _cs_isinv(){
       esac
     fi
     case "$_k" in
-      inv) return 0 ;;
+      inv) [ "$_lastw" = "0" ] && _CS_INVMEMO=0
+           return 0 ;;
       wrap) _seen=1 ;;
       skip|flag) ;;              # transparent; never the command word
-      *) [ "$_seen" = "1" ] || return 1 ;;
+      # Decided ON A TOKEN, so a longer tail cannot change it - memo it. The
+      # two exhaustion returns above deliberately do NOT, because with
+      # `_seen=1` a later token could still be an invoker.
+      *) if [ "$_seen" != "1" ]; then
+           [ "$_lastw" = "0" ] && _CS_INVMEMO=1
+           return 1
+         fi ;;
     esac
     # Still walking. Consume the token the lazy way - AFTER classifying, exactly
     # as the original did, so a walk that ends here pays one whole-tail
@@ -2479,7 +2526,7 @@ _cs_scan(){
     # one pattern test on a short string and removes the assumption rather than
     # documenting it.
     case "$_run" in
-      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}" ;;
+      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO="" ;;
       *) _CS_TAIL="$_CS_TAIL$_run" ;;
     esac
     if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
@@ -2555,7 +2602,7 @@ cmd_segments_real(){
   _s="${_s//$_CS_SEP/ }"; _s="${_s//$_CS_WS/ }"
   _s="${_s//$_CS_ESC/ }"; _s="${_s//$_CS_EDQ/ }"
   _s="${_s//$_CS_ESQ/ }"; _s="${_s//$_CS_ESP/ }"
-  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""
+  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""; _CS_INVMEMO=""
   # [item 1] Lift double-quoted command substitutions BEFORE the scan and seed
   # the recursion queue with them; the loop below re-scans each (invoker rule
   # re-applied) exactly as it does an invoker's quoted argument. `_s` is the RAW
