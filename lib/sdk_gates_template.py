@@ -3491,7 +3491,11 @@ _JUMP_BYTES = b"()\\\"'`$"
 def _cost_guard(input_data):
     """`None` if the command is cheap enough to gate, else a deny decision.
 
-    Two conditions because there are two independent cost terms, and neither
+    Two conditions, and they are NOT all of them - this guard is PARTIAL.
+    TOKEN COUNT is a third cost term it does not measure (X-52, open): a
+    command of 40000 `! ` tokens has ZERO jump targets, sits under the length
+    cap, and costs the shell 139.58 s against a 60 s ceiling. What these two
+    close is the length and density classes. Neither
     predicate catches the other's class (measured on a benign corpus of this
     repo's own files against the adversarial shapes):
 

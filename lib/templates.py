@@ -1021,7 +1021,22 @@ _read_cmd(){
 # walk's parity constraints, so it can count `(` and `)` - exactly what the
 # reverted attempt could not.
 #
-# TWO CONDITIONS, BECAUSE THERE ARE TWO INDEPENDENT COST TERMS. Measured across
+# TWO CONDITIONS, AND THEY ARE NOT ALL OF THEM - THIS GUARD IS PARTIAL.
+# An earlier version of this comment said "two INDEPENDENT cost terms" as
+# though the list were complete. It is not, and the counter-example was found
+# by adversarial review of the PR that shipped it: TOKEN COUNT is a third
+# term, `_cs_isinv` is quadratic in it, and `!` / `{` / `A=1` are
+# head-transparent so the walk never exits early. Reproduced at HEAD:
+#     "! " x 40000  + pip install evilpkg   80019 B, ZERO jump targets, 139.58 s
+#     "A=1 " x 20475 + pip install evilpkg  81919 B, ZERO jump targets,  76.76 s
+# Both pass BOTH conditions below and both run past the 60 s ceiling, so the
+# hook is cancelled and the command runs. That is X-52, it is OPEN, and this
+# guard does not close it. What the two conditions below DO close is the
+# length and density classes, which is why this ships as a disclosed partial
+# mitigation rather than as a fix. The replacement is a deterministic
+# per-event WORK COUNTER - bound the work actually done instead of guessing
+# which proxy tracks it, since the proxy has now been evaded twice.
+# Measured across
 # a benign corpus (this repo's own files as heredocs, long argument lists, real
 # substitutions) and the adversarial shapes:
 #   DENSITY  jump targets in the first _SUBST_SCANMAX bytes, which is one walk
