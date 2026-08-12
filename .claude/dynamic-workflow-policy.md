@@ -266,6 +266,31 @@ when running one."* A fleet driving commands through a fixture's hooks re-enters
 the gate tax the grant claims exemption from. **The exemption is a property of
 this tree, not of the word "internal."**
 
+**BREACHED ONCE, 2026-07-30ish, LOGGED AS AN EXCEPTION — ruled 2026-08-12.**
+The X-36y adversarial review fanned out agents that drove commands through
+fixture hooks, 53 invocations. The artifact it produced was sound and landed
+(21d82e3); the METHOD was prohibited. Ruled a violation, recorded here, **no
+amendment**: permitting it would be a fifth permitted use under §8 and would
+have to be argued past `bin/run-tests`' own pollution detector, which is the
+concrete basis for this rule rather than an analogy.
+
+**THE COMPLIANT SHAPE, NOW PRESCRIBED RATHER THAN FOLKLORE.** Every review since
+that breach has used it, and it is not a limitation — PR #64's review used it to
+find a reproduced, merge-blocking bypass in a fix that the whole suite called
+green:
+
+* **Fan out READ-ONLY lenses over the DIFF.** No agent runs a gate, installs a
+  project, executes an emitted hook, or runs a suite. Say this in the prompt;
+  agents will otherwise reach for execution to settle a question.
+* **An agent that cannot answer without executing says so** and marks the
+  finding as needing execution. It does not execute.
+* **The ORCHESTRATOR reproduces every candidate serially, at width 1**, before
+  acting on it. This is DW-A1's ratification and it is where fan-out's cost
+  actually lands (§6 is the throttle).
+* **Budget the ratification, not the fan-out.** Dedupe across lenses BEFORE
+  spending verification, and report anything past the cap as explicitly
+  unverified rather than dropping it.
+
 ### DW-P5 — A workflow never decides a merge.
 
 Fan-out produces claims. A human ratifies them. This is the standing rule for

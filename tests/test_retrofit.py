@@ -2025,9 +2025,32 @@ def retrofit_digest_full(yaml_text):
 # the carried-tail invariant asserted on every one - but it lands in the shared
 # hook header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
 # Counts unchanged: service 79, agent 93.
+# [no. 53 X-36y, pre-commit] the per-run tail re-slice `${_s#*"$_q"}` in
+# `_cs_scan` and in `_xp_park`'s phase 2 - the SECOND quadratic of B4's class -
+# now consumes the same 1024-character front WINDOW. COST ONLY: 557 commands
+# emit byte-identical `cmd_segments` output and 582 emit byte-identical
+# `_xp_park` output pre/post. It lands in the shared hook header, so every
+# retrofit hook body moves. Retrofit emits no `gates.py`. Counts unchanged:
+# service 79, agent 93.
+# [no. 54 B3 re-land, pre-commit] the prefix cap is retired for a flat delimiter
+# budget (8192, charged on the invariant five) plus a 16384 cost backstop,
+# closing the ~8 KB padding bypass on both substrates. Lands in the shared hook
+# header, so every retrofit hook body moves. Retrofit emits no `gates.py`.
+# Counts unchanged: service 79, agent 93.
+# [no. 55 X-46, pre-commit] the B3 budget is lifted to the scan cap when
+# `_CMD_CTLWS` is set, closing the one-CR shell-ALLOW / SDK-DENY divergence.
+# Shared hook header, so every retrofit hook body moves; retrofit emits no
+# `gates.py`. Counts unchanged: service 79, agent 93.
+# [freeze-exception no. 56-61, 2026-08-12] X-51's cost guard, then X-50's
+# norm_cmd fix (two-level accumulation). `_cost_guard`
+# lands in the shared `_HOOK_HEADER` and is called from `_read_cmd`, so every
+# emitted hook moves. COUNTS ARE UNCHANGED (service 79 / agent 93) - this adds a
+# refusal path, not an action. A PreToolUse hook that exceeds its timeout is
+# CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
+# whose cost crossed 60 s.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "9c878fed4defa04936018808623c0eb47e6b879dbdd22913eaaa0313fb0d33e6",
-    "agent": "a100852fcb0dfa111e78753e8ee96ffb5309eb2221fc8a1820c6389f143ba01b",
+    "service": "261ea1f75fc2ac64382e65f2cb7cf9fe71ea4ffdb531a19d64bca00510df5e0f",
+    "agent": "7337b8f12225cf2fa41651f6f28e66a1d77911994087fcbb2c2ce7947fe07f84",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

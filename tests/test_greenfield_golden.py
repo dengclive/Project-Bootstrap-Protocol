@@ -2751,7 +2751,70 @@ EXPECTED_DIGESTS = {
         # body. dependency-gate on the 6010 B Csq shape: 62.4 s -> 7.5 s,
         # which is the 60 s fail-closed crossing item 1 introduced, closed.
         # Count still 57.
-        "2be43f0d07dcc587c712b050cfdd6dd8e9e92c38de7e6b04c0cf0c532cda441e",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the SECOND quadratic of
+        # this class, the per-run tail re-slice `${_s#*"$_q"}` that both
+        # `_cs_scan` and `_xp_park`'s phase 2 ran once per quoted run. Both now
+        # consume the same _CS_WIN front window B4 gave `_cs_subst_scan`.
+        # SHELL-ONLY and cost-only: 557 boundary-straddling commands emit
+        # byte-identical `cmd_segments` output and 582 emit byte-identical
+        # `_xp_park` output pre/post, so `gates.py` does NOT move - only the
+        # shared header, hence every hook body. dependency-gate on 16 KB
+        # quote-dense: 77 s (over the 60 s ceiling) -> 9.6 s. `_xp_park`'s
+        # phase 1 (a distinct quadratic in the backslash count) is left
+        # un-windowed and filed separately; bslash_dense 32 KB is 55 s, under
+        # the ceiling. Count still 57.
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        # [freeze-exception no. 55, 2026-08-11] X-46 - the B3 budget is lifted
+        # to the scan cap whenever `_CMD_CTLWS` is set. Turning the `#` rule off
+        # for a CR/VT/FF-bearing command makes the SHELL traverse comment bodies
+        # its SDK twin skips, and B3 billed those unilaterally-walked characters
+        # to the shell alone - so 8200 charged characters inside a comment
+        # exhausted the shell's budget and not the SDK's, and ONE CR turned
+        # deny/deny into shell-ALLOW / SDK-DENY with bash reading the secret.
+        # Shell-only and deny-direction FOR THE BUDGET: a larger budget only
+        # lets this walker lift more than it did before. It does NOT make the
+        # shell a superset of the SDK - `_hd=1` also TOKENISES the comment body
+        # and an unbalanced quote there captures the walker (X-48, older than
+        # B3). The lift is keyed on `_hd`, not on `_CMD_CTLWS`, because the
+        # heredoc trigger reproduces the same divergence. The SDK is NOT
+        # mirrored: doing so was tried and reverted, because the two walkers
+        # truncate over different text (bytes vs code points, X-47) and the
+        # mirror created a forbidden-direction split of its own - so `gates.py`
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
+        # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
+        # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
+        # measurement, those sizes being past the cap. Global worst case
+        # unchanged. Counts unchanged. The comment block was then
+        # corrected in the same exception: an earlier draft claimed the fix
+        # made the shell's lifted set a SUPERSET of the SDK's, which review
+        # showed is false - `_hd=1` also TOKENISES the comment body, and an
+        # unbalanced quote there captures the walker (X-48, older than B3).
+        # [freeze-exception no. 56-61, 2026-08-12] X-51's cost guard, then
+        # X-50's norm_cmd fix (two-level accumulation).
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "a0c724446050f45289b9ad1cec1797653b1b03e9a7aa857cde7c9bcc38e39248",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -2925,7 +2988,61 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only, so every hook body moves and `gates.py` does not.
         # Count still 69.
-        "6dd2dea7eaeedc9928ba17857a3213381e1e8dde97f963231c05814bb7745665",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the windowed `_cs_scan`
+        # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
+        # header only, so every hook body moves and `gates.py` does not.
+        # Count still 69.
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        # [freeze-exception no. 55, 2026-08-11] X-46 - the B3 budget is lifted
+        # to the scan cap whenever `_CMD_CTLWS` is set. Turning the `#` rule off
+        # for a CR/VT/FF-bearing command makes the SHELL traverse comment bodies
+        # its SDK twin skips, and B3 billed those unilaterally-walked characters
+        # to the shell alone - so 8200 charged characters inside a comment
+        # exhausted the shell's budget and not the SDK's, and ONE CR turned
+        # deny/deny into shell-ALLOW / SDK-DENY with bash reading the secret.
+        # Shell-only and deny-direction FOR THE BUDGET: a larger budget only
+        # lets this walker lift more than it did before. It does NOT make the
+        # shell a superset of the SDK - `_hd=1` also TOKENISES the comment body
+        # and an unbalanced quote there captures the walker (X-48, older than
+        # B3). The lift is keyed on `_hd`, not on `_CMD_CTLWS`, because the
+        # heredoc trigger reproduces the same divergence. The SDK is NOT
+        # mirrored: doing so was tried and reverted, because the two walkers
+        # truncate over different text (bytes vs code points, X-47) and the
+        # mirror created a forbidden-direction split of its own - so `gates.py`
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
+        # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
+        # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
+        # measurement, those sizes being past the cap. Global worst case
+        # unchanged. Counts unchanged. The comment block was then
+        # corrected in the same exception: an earlier draft claimed the fix
+        # made the shell's lifted set a SUPERSET of the SDK's, which review
+        # showed is false - `_hd=1` also TOKENISES the comment body, and an
+        # unbalanced quote there captures the walker (X-48, older than B3).
+        # [freeze-exception no. 56, 2026-08-12] X-51 - the cost guard.
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "74c2403b4fa7c8ba74754c581ed602b7497d28ba4c5ab7ded143e1e74afc998f",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3046,7 +3163,61 @@ EXPECTED_DIGESTS = {
         # and the guarded basename (see the `default` note). Shared header
         # only; the three design-steering artifacts are untouched.
         # Count still 59.
-        "3ee287601d0cfaaf9e6f06efa9cc633adc76dc396974f85e3a0c8b4bb7b7f386",
+        # [freeze-exception no. 53, 2026-08-11] X-36y - the windowed `_cs_scan`
+        # and `_xp_park` phase-2 quote walks (see the `default` note). Shared
+        # header only; the three design-steering artifacts are untouched -
+        # verified per-file, not assumed. Count still 59.
+        # [freeze-exception no. 54, 2026-08-11] B3 re-land - the substitution
+        # walk's PREFIX CAP is retired for a flat delimiter BUDGET
+        # (`_SUBST_BUDGET` 8192, charged only on the invariant five
+        # `\ " ' ` $`, only in the outer dispatch) plus a cost-only
+        # `_SUBST_SCANMAX` backstop of 16384. Closes the ~8 KB ordinary-padding
+        # bypass of item 1 on BOTH substrates: `echo "<8300 x>$(cat .env)"` was
+        # allow/allow with the secret read and is now deny/deny, measured at
+        # 8300 / 12000 / 15000 B of padding. The backstop is 16384 and NOT the
+        # first attempt's 65536, which still TIMES OUT even after X-36y (32768
+        # costs 111 s against a 60 s fail-closed ceiling); the residual is
+        # stated rather than hidden - the padding hole moves from ~8 KB to
+        # ~16 KB, it does not close. Shell AND SDK both move, so `gates.py`
+        # moves too. Counts unchanged.
+        # [freeze-exception no. 55, 2026-08-11] X-46 - the B3 budget is lifted
+        # to the scan cap whenever `_CMD_CTLWS` is set. Turning the `#` rule off
+        # for a CR/VT/FF-bearing command makes the SHELL traverse comment bodies
+        # its SDK twin skips, and B3 billed those unilaterally-walked characters
+        # to the shell alone - so 8200 charged characters inside a comment
+        # exhausted the shell's budget and not the SDK's, and ONE CR turned
+        # deny/deny into shell-ALLOW / SDK-DENY with bash reading the secret.
+        # Shell-only and deny-direction FOR THE BUDGET: a larger budget only
+        # lets this walker lift more than it did before. It does NOT make the
+        # shell a superset of the SDK - `_hd=1` also TOKENISES the comment body
+        # and an unbalanced quote there captures the walker (X-48, older than
+        # B3). The lift is keyed on `_hd`, not on `_CMD_CTLWS`, because the
+        # heredoc trigger reproduces the same divergence. The SDK is NOT
+        # mirrored: doing so was tried and reverted, because the two walkers
+        # truncate over different text (bytes vs code points, X-47) and the
+        # mirror created a forbidden-direction split of its own - so `gates.py`
+        # does NOT move: the SDK mirror was re-applied after X-47 and reverted
+        # again, because the two walks bound different DOMAINS (whole command
+        # vs per segment, X-49) and the mirror manufactured a forbidden-
+        # direction split on pure ASCII. Cost:
+        # 1.83 s -> 12.07 s on the discriminating shape (under the scan cap,
+        # charge-dense); the earlier "within noise at 32/48/64 KB" was a null
+        # measurement, those sizes being past the cap. Global worst case
+        # unchanged. Counts unchanged. The comment block was then
+        # corrected in the same exception: an earlier draft claimed the fix
+        # made the shell's lifted set a SUPERSET of the SDK's, which review
+        # showed is false - `_hd=1` also TOKENISES the comment body, and an
+        # unbalanced quote there captures the walker (X-48, older than B3).
+        # [freeze-exception no. 56, 2026-08-12] X-51 - the cost guard.
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "3a9b157c7a4556fd11ab05323181935b65847097ff648938d94fa64f490ff1ba",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -13,6 +13,7 @@ which is exactly how a sampled sweep misses this class.
 Run: python3 tests/test_composition.py
 """
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -148,10 +149,72 @@ check("SDK _subst_inners is defined once and wired into BOTH candidate paths",
       and "_subst_inners(seg)" in _sdk        # _expand_invoker_args (dep/verb)
       and "_subst_inners(cmd)" in _sdk,        # _segment_candidates (secrets)
       "the secrets path skips _expand_invoker_args; wiring one site is D8")
-check("the substitution walk's length bound agrees across substrates",
-      "_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk,
-      "same cap or one substrate times out (fail-closed) while the other "
-      "completes (allow) on a large command - the X-36l divergence")
+# [B3] Was `"_SUBST_MAXLEN=8192" in _tmpl and "_SUBST_MAXLEN = 8192" in _sdk`.
+# That spelling carried a THIRD copy of the number - it asked whether each
+# substrate matched the TEST, not whether the two matched EACH OTHER - and the
+# rename is what made it break loudly instead of passing against a constant that
+# no longer means what it says. Read both numbers out and compare them directly.
+#
+# The BEHAVIOURAL half of this lives in test_substrate_differential's "B3: the
+# charging boundary" block, which needs a rendered install this file does not
+# have: source equality cannot show that the two walkers stop at the same
+# CHARACTER, only that they were given the same allowance.
+def _const(text, name):
+    m = re.search(r"^%s\s*=\s*(\d+)" % re.escape(name), text, re.M)
+    return int(m.group(1)) if m else None
+
+
+for _n in ("_SUBST_BUDGET", "_SUBST_SCANMAX", "_CMD_MAXLEN", "_CMD_MAXJUMP"):
+    _t, _s = _const(_tmpl, _n), _const(_sdk, _n)
+    check("%s agrees across substrates" % _n,
+          _t is not None and _t == _s,
+          f"shell={_t} sdk={_s} - a split here means one substrate times out "
+          "(fail-closed deny) while the other completes (allow) on a large "
+          "command, which is the X-36l divergence")
+
+# [B3] The non-regression precondition, in one line. Exhausting the budget needs
+# _SUBST_BUDGET charging characters and each consumes at least one byte, so the
+# walk always reaches at least byte _SUBST_BUDGET - which is exactly what the old
+# prefix cap guaranteed. That argument only holds while the cost backstop is not
+# the SMALLER of the two; if _SUBST_SCANMAX ever drops below _SUBST_BUDGET it
+# silently becomes the real bound and the guarantee is gone.
+check("the cost backstop cannot undercut the budget",
+      _const(_tmpl, "_SUBST_SCANMAX") >= _const(_tmpl, "_SUBST_BUDGET"),
+      "_SUBST_SCANMAX < _SUBST_BUDGET makes the length cap the effective bound "
+      "and drops the 'always reaches byte _SUBST_BUDGET' guarantee")
+
+# [X-51] THE GUARD'S RELATIONSHIP TO THE BUDGET, ASSERTED RATHER THAN LEFT AS A
+# COINCIDENCE - because THREE known defects currently rest on it. `_CMD_MAXJUMP`
+# caps delimiters in the first `_SUBST_SCANMAX` bytes, every charging character
+# is one of those delimiters, and exhausting `_SUBST_BUDGET` needs more charges
+# than the cap allows. So while MAXJUMP < BUDGET the budget cannot be driven to
+# exhaustion through a gate at all, which is what makes X-43 and X-49's two
+# budget spellings UNREACHABLE (they are asserted as plain deny rows in the
+# differential, with their walks still unrepaired underneath).
+#
+# RAISING MAXJUMP ABOVE THE BUDGET SILENTLY RE-OPENS ALL THREE. It is a
+# tempting change - it is exactly what would re-arm B3's gate-level fences,
+# which this guard disarmed - and it was measured and rejected: a cap of 10240
+# costs 33.3 s of the 60 s ceiling against 16.3 s at 4096, i.e. a 1.8x margin
+# for a bound whose failure mode is a BYPASS. If that trade is ever revisited,
+# this check is the place it has to be argued.
+check("the cost guard's density cap stays below the substitution budget",
+      _const(_tmpl, "_CMD_MAXJUMP") < _const(_tmpl, "_SUBST_BUDGET"),
+      "_CMD_MAXJUMP >= _SUBST_BUDGET makes budget exhaustion reachable again "
+      "and re-opens X-43 and both X-49 budget spellings")
+
+# [B3] The charging set is the whole parity argument, so pin its MEMBERSHIP on
+# both substrates. `#`, `}`, `(` and `)` must stay OUT: each is conditional in
+# both walkers and the conditions differ, which is where the first attempt's two
+# parity bugs came from (backlog X-44).
+check("the SDK charging set is exactly the invariant five",
+      '_SUBST_CHARGED = ("\\\\\\\\", \'"\', "\'", "`", "$")' in _sdk,
+      "adding `#`/`}` makes heredoc state select the charging set, and B5 folds "
+      "_CMD_CTLWS into it - one CR would change what the shell charges")
+check("the shell charges the same five, in the outer dispatch",
+      "_bg=$((_bg - 1))" in _tmpl and _tmpl.count("_bg=$((_bg - 1))") == 1,
+      "exactly one charge site, in the outer walk; charging inside either "
+      "balance loop bills the shell 2 per backtick sub and the SDK 1")
 # [B4] _CS_WIN is deliberately SHELL-ONLY, and that asymmetry is pinned so it
 # is not "corrected" into the SDK. _SUBST_MAXLEN above must agree across
 # substrates because it decides WHICH substitutions are walked; _CS_WIN decides
@@ -192,6 +255,27 @@ check("the carried segment tail is shell-only",
       "_CS_TAIL" not in _sdk and "def _invoker_at(toks):" in _sdk,
       "_CS_TAIL exists because bash has no cheap way back to the last "
       "separator; the SDK indexes tokens and needs no counterpart")
+# [X-36y] BOTH per-run quote walks - `_cs_scan` and `_xp_park`'s phase 2 -
+# consume through the same _CS_WIN front window as _cs_subst_scan. The
+# property pinned is the ABSENCE of the pre-window spelling in EITHER brace
+# form: `${_s#*"$_q"}` (single-brace, `_cs_scan`) and `${{_s#*"$_q"}}`
+# (f-string, `_xp_park`) each re-slice the whole remainder per quoted run and
+# are quadratic in the distance to the quote (0.016 s at 1 KB -> 2.60 s at
+# 16 KB, 50 reps). `_xp_park` runs it on the WHOLE command, so it was the
+# LARGEST of the three walks (7.3 s at 8 KB vs `_cs_scan`'s post-window
+# 1.3 s), and windowing only `_cs_scan` left quote-dense 32 KB over the 60 s
+# ceiling. Pinned as a SOURCE property because the cost is invisible to a
+# verdict: 557 boundary-corpus commands (`_cs_scan`) and 582 (`_xp_park`)
+# emit byte-identical output either way. `_xp_park`'s phase 1 (a distinct
+# quadratic in the backslash COUNT) is deliberately still un-windowed and
+# NOT pinned here - bslash_dense 32 KB sits at 55 s, under the ceiling.
+check("both per-run quote walks consume through the shared front window",
+      '_w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"' in _tmpl
+      and '_w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"' in _tmpl
+      and '_rest="${_s#*"$_q"}"' not in _tmpl
+      and '_rest="${{_s#*"$_q"}}"' not in _tmpl,
+      "re-slicing the whole remainder once per quoted run is what a 16 KB "
+      "quote-dense command turns into 75 s of dependency-gate wall clock")
 
 # The three categories are disjoint where they must be and overlapping where
 # they must be: a DUAL word is in both membership sets by construction.

@@ -473,15 +473,38 @@ _CS_WS = "\\002"
 # round-4 probe corpus: a fourth level needs four nested quoting contexts,
 # which no reachable spelling produces.
 _EXPAND_DEPTH = 3
-# [item 1] The length past which the quote-aware command-substitution walk
-# (_subst_inners) stops lifting `$(...)`/backtick bodies out of a double-quoted
-# run. Fail-closed: the run itself is still flattened and scanned, so a
-# substitution beyond the bound is simply not ADDITIONALLY re-parsed; it never
-# becomes an allow the walk would otherwise deny. The shell twin
-# (_SUBST_MAXLEN in the header) carries the SAME number so neither substrate can
-# hit its fail-closed timeout while the other completes on a large command
-# (the X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
-_SUBST_MAXLEN = 8192
+# [item 1] What bounds the quote-aware command-substitution walk
+# (_subst_inners) when it lifts `$(...)`/backtick bodies out of a double-quoted
+# run. Fail-closed either way: the run itself is still flattened and scanned, so
+# a substitution beyond a bound is simply not ADDITIONALLY re-parsed; it never
+# becomes an allow the walk would otherwise deny.
+#
+# [B3] This was ONE number, `_SUBST_MAXLEN`, used as a prefix cap - which made
+# whether a substitution got walked depend on how much text PRECEDED it, i.e. on
+# something the attacker writes (backlog X-44). It is now a flat semantic BUDGET
+# plus a cost-only length backstop. The shell twins (`_SUBST_BUDGET` /
+# `_SUBST_SCANMAX` in the header) carry the SAME numbers so neither substrate can
+# hit its fail-closed timeout while the other completes on a large command (the
+# X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
+_SUBST_BUDGET = 8192
+# [B3 re-land] 16384, not the first attempt's 65536. That value was sized by a
+# sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
+# bytes while varying only the walk's reach - but gate cost is the RE-SCAN of
+# the lifted inner, so it scales with the INNER. Re-measured with the padding
+# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s fail-closed
+# ceiling; 16384 costs 30.9 s. The shell twin carries the identical number and
+# test_composition compares the two directly - an unequal pair is the X-36l
+# exhaustion-divergence hazard, and it is not theoretical: measured with the
+# shell at 16384 and this side still at 65536, `echo "<20000 x>$(cat .env)"` is
+# shell-allow / SDK-deny.
+_SUBST_SCANMAX = 16384
+# [B3] The characters `_subst_inners` charges its budget for, and the SHELL
+# twin's `case` in _cs_subst_scan is spelled from the same five. They are the
+# only ones in both walkers' dispatch UNCONDITIONALLY; `#`, `}`, `(` and `)`
+# are all conditional and the conditions differ between substrates, which is
+# where the first attempt's two parity bugs came from. See the shell's charge
+# site for the full argument.
+_SUBST_CHARGED = ("\\\\", '"', "'", "`", "$")
 _SECRETS_OPS = ";&|()<>\\n"
 _CMD_OPS = ";&|()`\\n"
 
@@ -961,12 +984,46 @@ def _subst_inners(seg):
         INERT (`echo "\\$(cat .env)"` prints a literal `$(...)`), so the walk
         skips a backslash-and-its-successor as a pair - which also makes an even
         run of backslashes leave the opener live.
-    Bounded: over _SUBST_MAXLEN characters the walk stops (fail-closed - the
-    surrounding run is still flattened and scanned; a substitution past the
-    bound simply is not additionally lifted). The shell twin carries the same
-    bound so neither substrate can time out while the other completes.
+    [B3] TWO BOUNDS, both matching the shell twin's number. `_SUBST_BUDGET` is
+    the semantic one: one unit per `_SUBST_CHARGED` character met in THIS loop,
+    and the walk stops when it runs out. It is FLAT - not derived from
+    len(seg) - precisely because this function is called on the command, on each
+    SEGMENT and on each TOKEN while the shell twin is not, so any length-derived
+    budget would hand the two substrates different allowances for the same text.
+    `_SUBST_SCANMAX` is the cost one, a plain prefix bound for input made
+    entirely of characters nothing charges.
+
+    The walk therefore always reaches at least byte `_SUBST_BUDGET` (each charge
+    consumes >= 1 character), which is what the old prefix cap guaranteed, and
+    padding beyond `_SUBST_SCANMAX` returns to the old prefix-cap behaviour -
+    the hole moves from ~8 KB to ~64 KB, it does not close.
     """
-    seg = seg[:_SUBST_MAXLEN]     # bound the WHOLE walk (openers AND the paren
+    # [X-47] BYTES, not code points, so this agrees with the shell twin in
+    # EVERY locale. `seg[:N]` counts code points; the shell's `${_s:0:N}` counts
+    # whatever the ambient locale says. That split was measured live -
+    # 6000 x U+4E2D of padding is shell-ALLOW / SDK-DENY with no locale set -
+    # and the unit chosen is BYTES because characters are unaffordable: a
+    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s fail-closed
+    # ceiling. `surrogatepass` for `budget_len`'s reason - a command arrives
+    # through JSON and a lone surrogate must weigh the same here as it does to
+    # bash rather than crash a PreToolUse hook. The decode is trimmed back to a
+    # whole character because a byte cut can land mid-sequence; the shell keeps
+    # those trailing bytes and this side drops them, and an incomplete sequence
+    # cannot open or close a substitution, so no arm of either walk can see the
+    # difference.
+    _sb = seg.encode("utf-8", "surrogatepass")
+    if len(_sb) > _SUBST_SCANMAX:
+        _sb = _sb[:_SUBST_SCANMAX]
+        while _sb:
+            try:
+                seg = _sb.decode("utf-8", "surrogatepass")
+                break
+            except UnicodeDecodeError:
+                _sb = _sb[:-1]
+        else:
+            seg = ""
+                                  # bound the WHOLE walk (openers AND the paren
+    budget = _SUBST_BUDGET
     out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
     wstart = True                 # `#` opens a comment only at a WORD START
     # [B5 review] A heredoc BODY is not shell code: inside an UNQUOTED `<<EOF`
@@ -977,9 +1034,35 @@ def _subst_inners(seg):
     # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
     # computed there on the same already-truncated string.
     heredoc = "<<" in seg.replace("<<<", "")
+    # [X-46 / X-49] THE MIRROR IS STILL NOT SAFE, AND THE REASON MOVED. It was
+    # first reverted because the two walkers truncated over different UNITS;
+    # X-47 pinned both to UTF-8 bytes and it was re-applied - and measured
+    # WRONG a second time, for a different reason: they truncate over different
+    # DOMAINS. The shell runs its walk ONCE, on the whole command, and byte-
+    # truncates there; this side runs again on EVERY SEGMENT, each with its own
+    # window starting at its own offset 0. So a segment beginning past the
+    # shell's cap is untruncated HERE and invisible THERE, its `<<` sets this
+    # flag and not `_hd`, and the mirror hands this side a budget the shell
+    # never gets. Measured, pure ASCII, locale-independent:
+    # `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + `"$(cat .env)"` is
+    # allow/allow without the mirror and shell-ALLOW / SDK-DENY with it - the
+    # forbidden direction, manufactured by the parity fix. The control with
+    # `axxb` in place of `a<<b` is allow/allow either way, which is what pins it
+    # to the flag rather than to the length. Blocked on X-49.
     bd = 0                        # unquoted `${...}` nesting depth
     while i < n:                  # the shell twin's O(n^2) walk cannot time out
         ch = seg[i]              # while this O(n) one completes (parity by cap)
+        # [B3] THE CHARGE, and it sits HERE - at the top of the OUTER loop,
+        # before any arm - so it bills exactly the characters the shell twin's
+        # jump set stops on, in every quote state, once each. The balance loops
+        # below are separate `while`s this line never runs for, which is what
+        # keeps the backtick loop's off-by-one (it exits ON the closing backtick
+        # and skips it, while the shell CONSUMES it) from becoming a 2-vs-1
+        # charging split.
+        if ch in _SUBST_CHARGED:
+            budget -= 1
+            if budget <= 0:
+                break
         if ch == "\\\\" and i + 1 < n and quote != "'":
             # A backslash-NEWLINE pair is a LINE CONTINUATION - bash deletes it,
             # so the word-start state before it survives it. Clearing wstart
@@ -3381,14 +3464,122 @@ def _format_lint_gate(config):
     return format_lint_gate
 
 
+# [X-51] THE COST GUARD'S SDK HALF. Shell parity: `_cost_guard` in the header,
+# called from `_read_cmd`, with the SAME two numbers.
+#
+# THIS SIDE HAS NO COST PROBLEM AND STILL NEEDS THE GUARD. The payloads that
+# push a shell gate past its timeout cost this module 0.10-0.45 s, because it
+# walks in Python rather than in bash. The guard is here for PARITY, which is
+# this repo's central invariant: without it the same command is shell-DENY (the
+# guard fired) and SDK-allow, a divergence manufactured by the fix itself. That
+# has happened twice already on the X-46 mirror; it is not happening a third
+# time.
+#
+# BYTES, matching the shell's `local LC_ALL=C` scoping exactly. `len(str)` counts
+# code points and the shell's `${#var}` counts whatever the locale says, so the
+# comparison is done on the UTF-8 ENCODING on both sides - X-47's split, not
+# re-opened here. `surrogatepass` for `_budget_len`'s reason: a command arrives
+# through JSON and a lone surrogate must weigh what it weighs to bash rather
+# than crash a PreToolUse hook. Every member of the jump set is ASCII, so
+# counting set BYTES in the byte prefix is identical to what bash counts in the
+# same prefix under the C locale, multibyte padding included.
+_CMD_MAXLEN = 81920
+_CMD_MAXJUMP = 8191
+_JUMP_BYTES = b"()\\\"'`$"
+
+
+def _cost_guard(input_data):
+    """`None` if the command is cheap enough to gate, else a deny decision.
+
+    Two conditions, and they are NOT all of them - this guard is PARTIAL.
+    TOKEN COUNT is a third cost term it does not measure (X-52, open): a
+    command of 40000 `! ` tokens has ZERO jump targets, sits under the length
+    cap, and costs the shell 139.58 s against a 60 s ceiling. What these two
+    close is the length and density classes. Neither
+    predicate catches the other's class (measured on a benign corpus of this
+    repo's own files against the adversarial shapes):
+
+      LENGTH   total bytes. No substitution bound touches it - a 256 KB `-m`
+               argument costs the shell 87 s and a 256 KB heredoc 142 s with no
+               `$(` anywhere. Benign max 65556, cap 81920.
+      DENSITY  jump-target bytes in the first `_SUBST_SCANMAX` bytes, one walk
+               iteration each. Benign max 1306, the >30 s shapes start at
+               16379, cap 4096.
+    """
+    # THROUGH `_cmd_spellings`, NOT a second `.get("command")`. This module
+    # holds exactly ONE read site and tests/test_issue_fixes.py pins it there
+    # (a second reader gets an un-normalized string and re-opens the whole P4
+    # class). `_unf` is the raw spelling and is `""` precisely when the fold
+    # changed nothing, so `_unf or _norm` reconstructs the RAW command - which
+    # is what the shell half guards (`_cost_guard "$_rc_raw"`), so the two
+    # measure the same string.
+    _norm, _unf, _ = _cmd_spellings(input_data)
+    raw = _unf or _norm
+    if not raw:
+        return None
+    enc = raw.encode("utf-8", "surrogatepass")
+    if len(enc) > _CMD_MAXLEN:
+        return _deny(
+            f"command is {len(enc)} bytes, over the {_CMD_MAXLEN}-byte gate "
+            f"limit: it cannot be scanned inside this hook's timeout, and a "
+            f"gate that runs out of time is SKIPPED rather than obeyed, so it "
+            f"is refused instead of allowed unscanned")
+    # [X-50] THE WHOLE COMMAND, not a prefix - the prefix form was a live
+    # bypass of this guard (17 KB of clean padding then 9000 quoted runs scores
+    # zero in the prefix and costs the shell 62.72 s). Shell parity: the twin
+    # counts the whole string too.
+    jumps = sum(enc.count(bytes((b,))) for b in _JUMP_BYTES)
+    if jumps > _CMD_MAXJUMP:
+        return _deny(
+            f"command holds {jumps} shell delimiters in its first "
+            f"{_SUBST_SCANMAX} bytes, over the {_CMD_MAXJUMP} limit: it cannot "
+            f"be scanned inside this hook's timeout, and a gate that runs out "
+            f"of time is SKIPPED rather than obeyed, so it is refused instead "
+            f"of allowed unscanned")
+    return None
+
+
+def _with_cost_guard(factory):
+    """Apply `_cost_guard` in front of every gate, at ONE site.
+
+    Wrapping the factory table rather than editing each gate is deliberate: the
+    shell half is a single call inside `_read_cmd`, and five separate per-gate
+    copies here is precisely the shape D3 records going wrong (one copy not
+    growing with the others). Gates whose tool carries no `command` - tdd-gate
+    on Write, format-lint-gate on PostToolUse - read an empty string and the
+    guard returns None, so this is inert for them rather than special-cased.
+    """
+    def _factory(config):
+        inner = factory(config)
+
+        async def _guarded(input_data, tool_use_id, context):
+            blocked = _cost_guard(input_data)
+            if blocked is not None:
+                return blocked
+            return await inner(input_data, tool_use_id, context)
+        # KEEP THE INNER CLOSURE'S IDENTITY. tests/test_sdk_gates.py's F7 check
+        # identifies the gate wired onto a surface by `hooks[0].__name__`, and
+        # that check exists because its predecessor asserted a symbol that never
+        # existed and was unconditionally true. A wrapper that renamed every
+        # gate to `_guarded` would blind it again - the same failure, one layer
+        # out. Copied by hand rather than with functools.wraps to avoid adding
+        # an import to the emitted module.
+        _guarded.__name__ = inner.__name__
+        _guarded.__qualname__ = getattr(inner, "__qualname__", inner.__name__)
+        return _guarded
+    return _factory
+
+
 _GATE_FACTORIES = {
-    "secrets-gate": _secrets_gate,
-    "spec-gate-commit": _spec_gate_commit,
-    "dependency-gate": _dependency_gate,
-    "test-gate": _test_gate,
-    "eval-gate": _eval_gate,
-    "tdd-gate": _tdd_gate,
-    "format-lint-gate": _format_lint_gate,
+    name: _with_cost_guard(factory) for name, factory in {
+        "secrets-gate": _secrets_gate,
+        "spec-gate-commit": _spec_gate_commit,
+        "dependency-gate": _dependency_gate,
+        "test-gate": _test_gate,
+        "eval-gate": _eval_gate,
+        "tdd-gate": _tdd_gate,
+        "format-lint-gate": _format_lint_gate,
+    }.items()
 }
 # PRIMARY event/matcher per gate - mirrors templates.HOOK_EVENT_MAP, which is
 # the shell suite's settings.json wiring. One entry per gate, exactly as the

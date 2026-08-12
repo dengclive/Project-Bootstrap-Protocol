@@ -1884,9 +1884,12 @@ for _c, _want in (('echo "git commit"', "allow"),
 # changing or a count changing, not both at once. The pin is a tripwire
 # against accident, not against intent.
 
-check(f"known-defect ledger holds exactly 0 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 0,
-      "a row was added or removed without updating this count")
+# [X-46] The count pin MOVED TO THE END OF THE FILE. It used to sit here, which
+# was correct while every `ledger()` call was in the block above; the X-43 row
+# armed with the B3 charging boundary is ~1700 lines further down, so evaluated
+# here the pin counted a PREFIX of the ledger and read 0. A tripwire that runs
+# before the thing it counts is the inert-ledger failure this block's own note
+# is about, one level up.
 
 # --------------------------------------------------------------------------- #
 # The tables themselves -- an equality assertion, not a getattr default.
@@ -3465,6 +3468,303 @@ print("\n== X-45: the carried segment tail ==")
 for _g, _cmd, _want, _lbl in _X45:
     differential(_g, bash(_cmd), _want, _lbl)
 
+# X-36y -- THE WINDOWED QUOTE WALK.
+#
+# `_cs_scan` used to re-slice the whole remainder per quoted run
+# (`${_s#*"$_q"}` is quadratic in the distance to the quote: 0.016 s at 1 KB
+# -> 2.60 s at 16 KB, 50 reps), which put dependency-gate past its 60 s
+# fail-closed ceiling on a 16 KB quote-dense command. It now consumes a
+# _CS_WIN front window, exactly as _cs_subst_scan has since B4; output is
+# pinned byte-identical over 557 boundary-straddling commands plus the
+# inherited x45 corpus.
+#
+# THESE ROWS ARE FENCES, NOT DECORATION. Each was checked against seven
+# deliberately-WRONG builds of the window and flips its verdict on at least
+# one (x36y_fences):
+#   * row 1 flips under "pre-window bottom break" - leftover window text
+#     after the last closer is dropped when the tail is already empty;
+#   * row 2 flips under "tail not reassembled" - a quote-free remainder
+#     longer than one window loses everything past the window;
+#   * row 3 flips under "run chunk dropped" AND "opener kept" - a quoted
+#     invoker argument spanning the boundary loses its first window chunk;
+#   * row 4 flips under "stuck look-ahead" AND "opener kept" AND the
+#     pre-window bottom break - the first quote sits past byte 1024.
+# The same shapes on secrets-gate flip on NO wrong build (`_sg_pass` does not
+# walk with `_cs_scan`) and are deliberately not included. Two further wrong
+# builds (refill off-by-one, closer off-by-one) flip no verdict anywhere and
+# are fenced by the byte-identity corpus instead.
+_X36Y_PAD = "x" * 1030
+_X36Y = [
+    ("dependency-gate", 'echo "run" ; pip install evil', "deny",
+     "X-36y fence: text after the last closer, tail already empty"),
+    ("dependency-gate", "echo " + _X36Y_PAD + " ; pip install evil", "deny",
+     "X-36y fence: quote-free remainder longer than one window"),
+    ("dependency-gate", 'sh -c "pip install evil ; : ' + _X36Y_PAD + '"',
+     "deny",
+     "X-36y fence: quoted invoker argument spans the window boundary"),
+    ("dependency-gate",
+     "echo " + _X36Y_PAD + ' "q" ; sh -c "pip install evil"', "deny",
+     "X-36y fence: first quote past the first window"),
+]
+print("\n== X-36y: the windowed quote walk ==")
+for _g, _cmd, _want, _lbl in _X36Y:
+    differential(_g, bash(_cmd), _want, _lbl)
+
+# --------------------------------------------------------------------------- #
+# B3 -- THE CHARGING BOUNDARY, and the behavioural half of what
+# test_composition can only assert on source.
+#
+# `_SUBST_MAXLEN` was a PREFIX CAP, so whether a substitution got walked
+# depended on how much text PRECEDED it - which the attacker writes.
+# `echo "<8300 x>$(cat .env)"` was allow/allow with the canary read, on BOTH
+# substrates, which is exactly why no row here could catch it: a differential
+# pins AGREEMENT, and the two substrates agreed. These rows' `want` therefore
+# comes from what BASH does, not from what the gates did.
+#
+# The bound is now a FLAT budget charged only on \\ " ' ` $ in the outer walk,
+# plus a cost-only length backstop. The first attempt at this passed 4034 rows
+# and was reverted anyway, because every row it added used `$`-DENSE padding and
+# neither parity bug is visible there. So these rows cover EVERY charging family
+# and both uncharged families, straddling the boundary.
+_W = 8192
+_SUB = '"$(cat .env)"'
+_B3 = [
+    # --- THE BYPASS ITSELF: benign padding, uncharged, must now be walked --- #
+    ("secrets-gate", 'echo "' + "x" * 8300 + '$(cat .env)"', "deny",
+     "B3: 8300 B of padding no longer pushes the sub out of reach (X-44)"),
+    ("secrets-gate", 'echo "' + "x" * 12000 + '$(cat .env)"', "deny",
+     "B3: 12 KB of padding - well past the old 8192 prefix cap"),
+    ("secrets-gate", 'echo "' + "x" * 15000 + '$(cat .env)"', "deny",
+     "B3: 15 KB of padding, just inside the 16384 cost backstop"),
+    # --- X-44 GROUND 2, the net regression that reverted the first attempt:
+    #     5000 `}` then padding, with the sub at ~byte 5006 - INSIDE the 8192
+    #     the old prefix cap guaranteed. `}` is not charged now, so it survives.
+    ("secrets-gate", "echo " + "}" * 5000 + " " + _SUB, "deny",
+     "B3: 5000 unquoted `}` do not spend budget - X-44 ground 2"),
+    # --- UNCHARGED families at multiples of the budget: must NEVER stop ----- #
+    # [B3 re-land] These were 4x the budget (32768) when the backstop was
+    # 65536. At the shipped 16384 such a shape is TRUNCATED, so it could no
+    # longer tell "`}` is uncharged" from "the walk stopped" - and with only
+    # those, all three brace-charging mutations survive, i.e. no fence against
+    # the defect that reverted X-44. W+64 exhausts an 8192 budget if the family
+    # were charged, and sits at ~8.3 KB, comfortably inside 16384.
+    ("secrets-gate", "echo " + "}" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: budget-exhausting run of `}` - uncharged, walk continues"),
+    ("secrets-gate", "echo " + "a" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: budget-exhausting run of plain padding - uncharged"),
+    ("secrets-gate", "echo a" + "a#" * (_W // 2) + " " + _SUB, "deny",
+     "B3: mid-word `#` is uncharged and does not open a comment"),
+    # --- CR: B5 folds _CMD_CTLWS into _hd, and _hd must NOT select the
+    #     charging set. One CR would otherwise change what the shell charges
+    #     with no SDK counterpart - X-44 ground 4, half two.
+    ("secrets-gate", "echo x\r" + "}" * (_W + 64) + " " + _SUB, "deny",
+     "B3 fence: a CR does not change what is charged (budget-exhausting run)"),
+    # [X-46] The CHARGED-side twin of the row above used to assert
+    #     shell==sdk==allow here. That is no longer true and the change is
+    #     DELIBERATE: X-46 lifts the shell's budget to the scan cap whenever
+    #     `_CMD_CTLWS` is set, so the shell no longer exhausts on this input and
+    #     lifts the substitution - which is what BASH does, so the shell is now
+    #     the CORRECT substrate. The SDK still exhausts because it has no
+    #     `_CMD_CTLWS` counterpart at all (X-43). The pair is therefore a
+    #     shell-DENY / SDK-ALLOW residual, the tolerated over-denial direction
+    #     and the exact inverse of the X-46 defect, so it is LEDGERED against
+    #     X-43 below rather than asserted equal here.
+    # --- BACKTICK, AND THIS ROW IS A FENCE FOR X-44 GROUND 4, HALF ONE.
+    #     The SDK's balance loop exits ON the closing backtick and skips it
+    #     (`i = j + 1`) while the shell CONSUMES it, so charging inside the
+    #     loops bills shell 2 per pair and SDK 1. Neither charges there now, so
+    #     a pair costs exactly 2 in the outer walk on both.
+    #     2048 pairs = 4096 charges, well inside the budget -> the sub is
+    #     reached -> deny. Under the 2-per-pair bug the same input would spend
+    #     8192 and stop, i.e. ALLOW. The count is picked so the two answers
+    #     differ.
+    ("secrets-gate", "echo " + "`x`" * (_W // 4) + " " + _SUB, "deny",
+     "B3 fence: a backtick pair costs 2 charges, not 4 (X-44 ground 4)"),
+    # ...and the QUOTED spelling, which is the only one that reaches the dquote
+    # balance loop at all. The unquoted row above is handled by the outer
+    # dispatch's default arm on both substrates, so it CANNOT see a charge
+    # added inside that loop - built as a wrong fix, it survived the unquoted
+    # row and was caught only by this one. 5000 pairs = ~5002 charges when the
+    # loop charges nothing, ~10002 when it charges one more per pair.
+    ("secrets-gate", 'echo "' + "`x`" * 5000 + '$(cat .env)"', "deny",
+     "B3 fence: QUOTED backticks - the balance loop charges nothing"),
+    ("secrets-gate", "echo " + "`x`" * (_W // 2 + 64) + " " + _SUB, "deny",
+     "B3 + X-51: budget-exhausting, but the COST GUARD refuses it first"),
+    # --- THE BOUNDARY, sharp and identical on both substrates. The payload
+    #     spends one charge on the opening `"` and one on the `$` of `$(`, so
+    #     8189 is the last count that still lifts.
+    ("secrets-gate", "echo " + "$" * 8189 + " " + _SUB, "deny",
+     "B3 fence: 8189 charges - the last that still reaches the sub"),
+    ("secrets-gate", "echo " + "$" * 8190 + " " + _SUB, "deny",
+     "B3 + X-51: 8190 charges - the COST GUARD refuses it before the budget"),
+    # --- THE RESIDUAL, PINNED RATHER THAN HIDDEN. ~8 KB of charging characters
+    #     still hides a substitution, and padding past the backstop still does
+    #     too. Both are ledgered `allow` deliberately; a flat budget cannot
+    #     close either, and only an unbounded walk would - which is a timeout,
+    #     and on this gate a timeout is a deny nobody can override.
+    ("secrets-gate", "echo " + "'" * (_W + 10) + " " + _SUB, "deny",
+     "B3 residual CLOSED by X-51: ~8 KB of charging characters is refused"),
+    ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "allow",
+     "B3 residual: padding past the 16384 backstop returns to prefix-cap "
+     "behaviour - the hole moves from ~8 KB to ~16 KB, it does not close"),
+    # --- X-46: ONE CR MUST NOT SWITCH THE BUDGET PROTECTION OFF.
+    #     `_join_cont` sets `_CMD_CTLWS`, which sets `_hd=1`, which drops `#`
+    #     from the jump set - so the shell walks comment bodies its SDK twin
+    #     SKIPS (`_subst_inners` derives its flag from `<<` alone; X-43). Before
+    #     the fix those unilaterally-walked characters were BILLED to the shell
+    #     alone, so 8200 charged characters inside a comment exhausted the
+    #     shell's budget and not the SDK's: the pair below was deny/deny WITHOUT
+    #     the CR and shell-ALLOW / SDK-DENY WITH it, one character apart, with
+    #     bash reading the secret on the third line. The `want` comes from BASH:
+    #     line 3 is outside the comment and runs in both spellings.
+    #     These two rows are only meaningful AS A PAIR - the CR-free row alone
+    #     passes on the broken build.
+    ("secrets-gate",
+     "echo a b\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 control: comment-borne charges, NO CR - the `#` rule skips the body"),
+    ("secrets-gate",
+     "echo a\rb\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: ONE CR must not let comment-borne charges exhaust the budget"),
+    # [X-46 round 3] THE OTHER TRIGGER. `_hd` is set by `<<` as well as by
+    #     `_CMD_CTLWS`, and an earlier draft lifted the budget only for the
+    #     latter on the reasoning that the heredoc case "already had parity
+    #     because both substrates set their flag". Measured false: this walker
+    #     runs once on the WHOLE command while `_subst_inners` runs again per
+    #     SEGMENT with its own `heredoc = "<<" in seg`, and `\n` is a separator -
+    #     so the `<<` line and the comment line are different segments, the
+    #     SDK's flag is false for the comment one, and only the shell was billed.
+    #     Both spellings below were shell-ALLOW / SDK-DENY before the lift was
+    #     re-keyed onto `_hd`. The arithmetic one carries no heredoc at all.
+    ("secrets-gate",
+     "echo $((1<<2))\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: an arithmetic `<<` must not let comment charges exhaust it"),
+    ("secrets-gate",
+     "cat <<EOF\nx\nEOF\necho x # " + "$" * 8200 + '\necho "$(cat .env)"', "deny",
+     "X-46 fence: a REAL heredoc opener - same trigger, same requirement"),
+    # [X-46 round 4] THE MIRROR. Lifting the budget on the SHELL alone made the
+    #     `<<` trigger diverge the other way: `<<` sets the flag on BOTH
+    #     substrates from the same string, so a shell-only lift left them
+    #     breaking at different characters and turned this agreeing allow/allow
+    #     into shell-DENY / SDK-ALLOW. `_subst_inners` now mirrors the lift on
+    #     that shared trigger (and ONLY that one - `_CMD_CTLWS` has no SDK
+    #     counterpart and stays ledgered as X-43). The control carries no `<<`
+    #     and must stay allow/allow: it is what proves the rows below are about
+    #     the trigger and not about the padding.
+    ("secrets-gate", 'echo "axxb" ' + "$" * 8192 + ' "$(cat .env)"', "deny",
+     "X-46 control + X-51: the COST GUARD refuses 8192 delimiters outright, so "
+     "this agrees by REFUSAL now rather than by shared residual"),
+]
+# [X-48] The QUOTE-STATE half of the one-CR class, which X-46's budget fix does
+# NOT reach and which is older than B3 (identical on the pre-B3 tree). `_hd=1`
+# tokenises the comment body, so the apostrophe in `don't` puts this walker in
+# single-quote state across the newline and the `$(` on line 3 is never lifted;
+# the SDK skips the body and lifts it. The CR-free control is asserted deny/deny
+# above the ledger call so the PAIR stays meaningful: without it, a build that
+# broke the control would still look healthy here.
+differential("secrets-gate",
+             bash("echo a b\necho x # don't\necho \"$(cat .env)\""), "deny",
+             "X-48 control: apostrophe in a comment, NO CR - still lifted")
+ledger("secrets-gate",
+       bash("echo a\rb\necho x # don't\necho \"$(cat .env)\""),
+       ("allow", "deny"), ("deny", "deny"), "X-48",
+       "one CR + an unbalanced quote in a comment captures the shell walk in "
+       "single-quote state, so it lifts nothing while the SDK lifts normally")
+
+# [X-43, X-51] UNREACHABLE, NOT REPAIRED - and the distinction is the whole
+# point of keeping the row's payload here as an asserting check rather than
+# deleting it. X-43's mechanism needs the SDK's _SUBST_BUDGET (8192 charges) to
+# EXHAUST, which needs >8192 charging characters inside the first
+# _SUBST_SCANMAX bytes. X-51's cost guard caps delimiters in exactly that
+# prefix at _CMD_MAXJUMP (4096), and every charging character is a delimiter,
+# so the budget can no longer be driven to exhaustion through a gate AT ALL.
+# The walk is unchanged and still wrong; nothing can reach it. RELAXING
+# _CMD_MAXJUMP ABOVE _SUBST_BUDGET RE-OPENS THIS - that is why the numbers'
+# relationship is asserted below rather than left as a coincidence.
+differential("secrets-gate", bash("echo x\r" + "$" * 8190 + " " + _SUB),
+             "deny",
+             "X-43 unreachable under X-51: the cost guard refuses the payload "
+             "before either budget can exhaust")
+
+# [X-46 / X-49] The `<<` budget lift stays SHELL-ONLY. Mirroring it into the SDK
+# was tried twice and reverted twice: first because the two walks truncated over
+# different UNITS (X-47, now fixed), then because they truncate over different
+# DOMAINS (X-49 - whole command vs per segment), which X-47 does not touch. With
+# the mirror, a segment past the shell's cap gets an SDK budget the shell never
+# gets, and `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + a substitution
+# goes allow/allow -> shell-ALLOW / SDK-DENY. Ledgered against X-49.
+# Same story as X-43 above: both spellings need 8192 charges to land, and the
+# cost guard refuses anything over 4096 delimiters in that prefix. The DOMAIN
+# asymmetry these two were filed against is NOT fixed - it is still live at
+# sizes under the caps, which is what the pure-ASCII row further down still
+# proves and why X-49 stays open.
+differential("secrets-gate", bash('echo "a<<b" ' + "$" * 8192 + ' "$(cat .env)"'),
+             "deny",
+             "X-49 budget spelling, unreachable under X-51's cost guard")
+differential("secrets-gate", bash("echo $((1<<2)) " + "$" * 8192 + ' "$(cat .env)"'),
+             "deny",
+             "X-49 arithmetic-shift spelling, unreachable under X-51's guard")
+# X-49 itself, in its plainest form: PURE ASCII, so it cannot be read as a
+# leftover of X-47's unit split. The control has no second segment.
+differential("secrets-gate",
+             bash('echo "' + "x" * 4000 + '"' + chr(10) + 'echo "$(cat .env)"'),
+             "deny", "X-49 control: second segment inside the shell's cap")
+ledger("secrets-gate",
+       bash('echo "' + "x" * 18000 + '"' + chr(10) + 'echo "$(cat .env)"'),
+       ("allow", "deny"), ("deny", "deny"), "X-49",
+       "the shell bounds the WHOLE command and the SDK bounds each SEGMENT, so "
+       "a segment past the cap is scanned by one walker only")
+
+# [X-47] THE BACKSTOP'S UNIT, FENCED ACROSS LOCALES. `${_s:0:N}` counts bytes
+# under LC_ALL=C or no locale and CHARACTERS under a UTF-8 one, while the SDK
+# sliced code points - so the SAME command got DIFFERENT verdicts depending on
+# an environment variable, and the enforcing substrate was the permissive one.
+# Both are pinned to UTF-8 BYTES now. This drives the shell under every locale
+# the machine actually has and requires the verdict to be constant AND to match
+# the SDK. An ASCII control of the same CHARACTER count is included because it
+# is what isolates a failure to the UNIT rather than to the length.
+try:
+    _x47_locs = ["C"] + sorted({_l.strip() for _l in subprocess.run(
+        ["locale", "-a"], capture_output=True).stdout.decode(
+            "utf-8", "replace").splitlines()
+        if _l.strip().lower().replace("-", "").endswith("utf8")})[:2]
+except OSError:
+    _x47_locs = ["C"]
+print("\n== X-47: the substitution backstop's unit, across locales ==")
+print("   locales: %r" % (_x47_locs,))
+for _lbl, _x47cmd, _x47want in (
+        ("multibyte padding INSIDE the byte window",
+         'echo "' + "\u4e2d" * 4000 + '$(cat .env)"', "deny"),
+        ("ASCII control, same CHARACTER count",
+         'echo "' + "x" * 4000 + '$(cat .env)"', "deny"),
+        ("multibyte padding PAST it - agreeing residual",
+         'echo "' + "\u4e2d" * 6000 + '$(cat .env)"', "allow"),
+        # the band GIVEN UP by choosing bytes: 8000 x U+4E2D is 24018 bytes but
+        # only 8018 characters, so a UTF-8-locale install used to DENY this and
+        # now allows it. Pinned so the loss is a recorded decision rather than
+        # something that drifts back and forth with an environment variable.
+        ("the band a UTF-8 install gives up - deliberately allowed now",
+         'echo "' + "\u4e2d" * 8000 + '$(cat .env)"', "allow")):
+    _x47_seen = set()
+    for _loc in _x47_locs:
+        _e = dict(os.environ); _e["LC_ALL"] = _loc
+        _e["CLAUDE_PROJECT_DIR"] = PROJ
+        _pp = subprocess.run(
+            [BASH, os.path.join(PROJ, ".claude", "hooks", "secrets-gate.sh")],
+            input=json.dumps(bash(_x47cmd)), capture_output=True, text=True,
+            env=_e, cwd=PROJ)
+        _x47_seen.add({0: "allow", 2: "deny"}.get(_pp.returncode,
+                                                 "rc=%d" % _pp.returncode))
+    _x47_sdk = sdk_verdict("secrets-gate", bash(_x47cmd))
+    check("[secrets-gate] X-47: verdict is locale-invariant and matches the "
+          "SDK (%s): %s" % (_x47want, _lbl),
+          _x47_seen == {_x47want} and _x47_sdk == _x47want,
+          "shell across %r gave %r, sdk=%s, want=%s"
+          % (_x47_locs, sorted(_x47_seen), _x47_sdk, _x47want))
+
+print("\n== B3: the charging boundary ==")
+for _g, _cmd, _want, _lbl in _B3:
+    differential(_g, bash(_cmd), _want, _lbl)
+
 # --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the
@@ -3569,6 +3869,10 @@ if _r_armed.returncode == 0:
 
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
+
+check(f"known-defect ledger holds exactly 2 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 2,
+      "a row was added or removed without updating this count")
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

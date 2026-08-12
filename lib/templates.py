@@ -986,6 +986,125 @@ _read_cmd(){
     if [ "$_CMD_RESOLVED" = "$_rc_folded" ] || [ "$_CMD_RESOLVED" = "$_rc_raw" ]
     then _CMD_RESOLVED=""; fi
   fi
+  _cost_guard "$_rc_raw"
+  return 0
+}
+
+# [X-51] THE COST GUARD. A gate that runs out of time is SKIPPED, not obeyed, so
+# a command too expensive to gate must be REFUSED rather than allowed unscanned.
+#
+# WHY THIS IS NOT PARANOIA - the bypass was executed end to end. A PreToolUse
+# hook that exceeds its declared `timeout` is CANCELLED, and only exit code 2
+# blocks a tool call; a cancelled process exits 124/137/143, never 2. Verified
+# live against Claude Code, not read off a doc: a hook that sleeps past
+# `timeout: 2` and would then `exit 2` is killed and the command RUNS, while the
+# same hook allowed to finish blocks it. So `pip install evilpkg` behind 128 KB
+# of padding still REACHES rc=2 - at 59.97 s - and is killed at the emitted
+# `timeout: 60` while every other Bash gate allows it. The deny never arrives.
+# `FAIL_CLOSED=1` does not help: it governs what this hook does on ITS OWN
+# error, and says nothing about what the harness does when it kills the hook.
+#
+# WHY HERE, AND NOT INSIDE THE WALK. A first attempt put an event-global budget
+# in `_cs_subst_scan` and denied from there. It failed twice over, both measured:
+#   * the walk's CHARGE SET deliberately excludes `(`/`)` and charges nothing in
+#     either balance loop (parity: charging there bills the shell 2 per backtick
+#     substitution and the SDK 1) - so the 16 KB worst case spent 24 of 8192
+#     charges and the budget never bound the shape that actually costs;
+#   * `hook_fail`'s `exit` CANNOT ESCAPE `done < <(cmd_segments ...)`, which is a
+#     process substitution. The subshell died, the consuming loop saw no
+#     segments, and the gate ALLOWED - the deny became the bypass it was meant
+#     to stop.
+# Both vanish here: `_read_cmd` runs in the PARENT of every command-bearing gate
+# (six of them route through it), so `hook_fail` exits for real and gets the
+# posture right for free - blocking gates exit 2, advisory ones degrade without
+# blocking. And a guard that never decides WHAT is lifted is not bound by the
+# walk's parity constraints, so it can count `(` and `)` - exactly what the
+# reverted attempt could not.
+#
+# TWO CONDITIONS, AND THEY ARE NOT ALL OF THEM - THIS GUARD IS PARTIAL.
+# An earlier version of this comment said "two INDEPENDENT cost terms" as
+# though the list were complete. It is not, and the counter-example was found
+# by adversarial review of the PR that shipped it: TOKEN COUNT is a third
+# term, `_cs_isinv` is quadratic in it, and `!` / `{` / `A=1` are
+# head-transparent so the walk never exits early. Reproduced at HEAD:
+#     "! " x 40000  + pip install evilpkg   80019 B, ZERO jump targets, 139.58 s
+#     "A=1 " x 20475 + pip install evilpkg  81919 B, ZERO jump targets,  76.76 s
+# Both pass BOTH conditions below and both run past the 60 s ceiling, so the
+# hook is cancelled and the command runs. That is X-52, it is OPEN, and this
+# guard does not close it. What the two conditions below DO close is the
+# length and density classes, which is why this ships as a disclosed partial
+# mitigation rather than as a fix. The replacement is a deterministic
+# per-event WORK COUNTER - bound the work actually done instead of guessing
+# which proxy tracks it, since the proxy has now been evaded twice.
+# Measured across
+# a benign corpus (this repo's own files as heredocs, long argument lists, real
+# substitutions) and the adversarial shapes:
+#   DENSITY  jump targets in the first _SUBST_SCANMAX bytes, which is one walk
+#            iteration each. Benign max 1306; the shapes that cost >30 s start
+#            at 16379. Cap 4096 sits 3.1x above benign and 4x below the attack.
+#   LENGTH   total bytes. Untouched by any substitution bound - `git commit -m
+#            '<256KB>'` costs 87 s and a 256 KB heredoc 142 s with NO `$(`
+#            anywhere. Benign max 65556; cap 81920.
+# Neither alone separates - each catches only its own class, which is why both
+# are here and why a single length cap was rejected.
+#
+# SIZED, WITH THE WORST CASE UNDER THE CAPS MEASURED RATHER THAN ASSUMED:
+#     worst LENGTH shape at the cap            17.26 s
+#     crafted worst under BOTH caps            16.24 s
+#     benign 64 KB heredoc (must pass, does)   11.81 s
+# ~3.5x margin under the 60 s ceiling. SAY THE RESIDUAL PLAINLY: that margin is
+# eaten by the LENGTH term, not by the walk - a benign 64 KB heredoc already
+# costs 11.8 s - so a machine ~3.5x slower than the sizing one crosses anyway.
+# Closing that is X-50 (make the length term cheaper), not a tighter cap; a
+# tighter cap would start denying ordinary file writes.
+#
+# THE COST OF THE GUARD ITSELF IS TWO PARAMETER EXPANSIONS AND NO LOOP. The
+# substring and the delete-complement both run at C speed inside bash.
+#
+# BOTH NUMBERS ARE BYTES, PINNED, AND THAT IS X-47's LESSON APPLIED RATHER THAN
+# RE-LEARNED. `${#var}` and `${var:0:n}` are NOT byte counts and not character
+# counts either - they are whichever the AMBIENT LOCALE says, bytes under
+# `LC_ALL=C` and characters under a UTF-8 one, while the SDK mirror counts with
+# Python. Leaving it to the environment is exactly how X-47 put a substrate
+# SPLIT behind an environment variable. `local LC_ALL=C` is scoped to this
+# function and restored on return, the `_blen` / `_cs_btrunc` pattern; it is
+# safe to scope the WHOLE function that way here because the only glob inside
+# is the bracket below, so nothing else can change meaning.
+_CMD_MAXLEN=81920
+# [X-50] 8191, and BOTH bounds on this number are load-bearing.
+# LOWER: it must exceed the benign maximum, which is 4813 jump targets for a
+# 64 KB heredoc of this repo's own test suite and 4802 for 64 KB of pretty
+# JSON - whole-command counts, since that is what is measured now.
+# UPPER: it must stay STRICTLY BELOW `_SUBST_BUDGET` (8192). Every charging
+# character is a jump target, so a cap under the budget is what keeps budget
+# exhaustion unreachable - which is what makes X-43 and both X-49 budget
+# spellings unreachable rather than merely unfixed. test_composition pins it.
+# 8191 is the largest value satisfying both.
+# COST AT THE CAP, run-dense shape: 4000 jumps 9.14 s, 8000 jumps 20.92 s,
+# 12000 jumps 35.24 s - so ~21 s against the 60 s ceiling. That is a SMALLER
+# margin than the 4096 prefix version appeared to give, because that appearance
+# was the bypass.
+_CMD_MAXJUMP=8191
+_cost_guard(){
+  local _g="${1:-}" _gp _gj
+  local LC_ALL=C
+  if [ "${#_g}" -gt "$_CMD_MAXLEN" ]; then
+    hook_fail "command is ${#_g} bytes, over the ${_CMD_MAXLEN}-byte gate limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
+  fi
+  # [X-50] THE WHOLE COMMAND, NOT A PREFIX - and the prefix version was a LIVE
+  # BYPASS of this very guard, shipped in f67f828. It sampled only the first
+  # `_SUBST_SCANMAX` bytes on the reasoning that this is what the substitution
+  # WALK reads. That is true of the walk and false of everything else:
+  # `_cs_scan` and the segmenters read the ENTIRE command, so density past the
+  # sampled prefix still costs. Measured on the shipped guard: 17 KB of clean
+  # padding followed by 9000 short quoted runs scores ZERO in the sampled
+  # prefix, passes both caps, and takes 62.72 s - past the 60 s ceiling, so
+  # the hook is killed and the command RUNS. Counting the whole string closes
+  # it, at the cost of one expansion over the command instead of over 16 KB.
+  _gj="${_g//[^()\\\\\\"\\'\\`\\$]/}"
+  if [ "${#_gj}" -gt "$_CMD_MAXJUMP" ]; then
+    hook_fail "command holds ${#_gj} shell delimiters in its first $_SUBST_SCANMAX bytes, over the $_CMD_MAXJUMP limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
+  fi
   return 0
 }
 
@@ -1030,14 +1149,30 @@ _read_cmd(){
 # norm_cmd "<cmd>" -> whitespace-normalized, one line per input line, each
 # padded with single spaces so `case` patterns can token-match.
 norm_cmd(){
-  local _s="${1:-}" _line _out=""
+  # [X-50] TWO-LEVEL ACCUMULATION, and it is B4's fix applied where B4 did not
+  # reach. `_out="$_out …"` in a per-LINE loop re-copies everything accumulated
+  # so far on every line, which is O(total^2): measured on the emitted function,
+  # 0.01 / 0.04 / 0.15 s at 16 / 32 / 64 KB - 3.3x per doubling, where linear
+  # would be 2x. B4 hit the identical shape inside the walk ("appending each
+  # lifted body to one growing string is O(total) per substitution") and fixed
+  # it with a small buffer flushed into the big one; the shared path never got
+  # the same treatment, and this function sits under `cmd_segments`, which
+  # dependency-gate alone calls FOUR times per event.
+  #
+  # `_buf` is bounded by `_CS_WIN`, so each append costs O(_CS_WIN) instead of
+  # O(total), and the flush runs total/_CS_WIN times. Semantics are untouched:
+  # the same bytes are appended in the same order and `_buf` is flushed on the
+  # ONE path out, below the loop.
+  local _s="${1:-}" _line _out="" _buf=""
   _s="${_s//$'\\t'/ }"; _s="${_s//$'\\r'/ }"
   _s="${_s//$'\\v'/ }"; _s="${_s//$'\\f'/ }"
   while [ "$_s" != "${_s//  / }" ]; do _s="${_s//  / }"; done
   while IFS= read -r _line; do
     _line="${_line# }"; _line="${_line% }"
-    _out="$_out $_line "$'\\n'
+    _buf="$_buf $_line "$'\\n'
+    if [ "${#_buf}" -gt "$_CS_WIN" ]; then _out="$_out$_buf"; _buf=""; fi
   done <<< "$_s"
+  _out="$_out$_buf"
   printf '%s' "$_out"
   return 0
 }
@@ -1111,15 +1246,76 @@ _CS_TAIL=""
 # `basename` regression F-937. Setting a global is 0.2 ms. Every helper on this
 # path is written this way; do not "simplify" one back into a subshell.
 _CS_R=""
-# [item 1] The quote-aware command-substitution walk's output (SEP-joined inner
-# command lines) and the length past which it stops scanning for openers.
-# Fail-closed and bounded like _xp_iw: a substitution beyond _SUBST_MAXLEN is
-# not additionally lifted (the surrounding run is still flattened and scanned).
-# The SDK twin (_SUBST_MAXLEN in sdk_gates_template) carries the SAME number so
-# neither substrate can hit its timeout while the other completes on a large
-# command; test_composition asserts the two literals agree.
+# [item 1] The quote-aware command-substitution walk's output: SEP-joined inner
+# command lines.
 _CS_SUBST_R=""
-_SUBST_MAXLEN=8192
+# [B3] TWO BOUNDS, because the old single `_SUBST_MAXLEN` was doing two jobs
+# badly. It was a PREFIX CAP - the walk saw `${_s:0:8192}` - so whether a
+# substitution was walked depended on how much text PRECEDED it, which the
+# attacker writes: `echo "<8300 x>$(cat .env)"` was allow/allow with the canary
+# read on BOTH substrates (backlog X-44). Both agreeing is why no differential
+# row could ever catch it.
+#
+# _SUBST_BUDGET is the SEMANTIC bound and it is FLAT - deliberately not scaled
+# by length. The first attempt at this scaled it, and that recreated the very
+# defect it retired: the SDK twin runs per command AND per segment AND per
+# token, so a length-derived budget hands a short segment the full allowance on
+# one substrate and a shrunken one on the other. One number, two denominators,
+# again. Flat means every call on every substrate gets exactly this, whatever
+# it was handed.
+#
+# It is charged ONLY on the five characters below and ONLY in the outer walk's
+# dispatch - see the charge site in _cs_subst_scan for why that set and no
+# other, and why neither balance loop charges anything.
+#
+# THE NON-REGRESSION ARGUMENT, which is what makes this safe to swap in:
+# exhausting a budget of W needs W charging characters, and each one consumes at
+# least one byte, so the walk ALWAYS reaches at least byte W. With W equal to
+# the old cap, nothing the prefix cap guaranteed was walked stops being walked.
+# The first attempt failed exactly here - it charged `}`, so 5000 braces
+# exhausted a shrunken budget and hid a substitution at byte 5006, well inside
+# the 8192 the cap had guaranteed.
+_SUBST_BUDGET=8192
+# _SUBST_SCANMAX is the COST bound: benign padding is free under the budget, so
+# without it a `}`-dense or `#`-dense command is walked end to end.
+#
+# CHOSEN BY MEASUREMENT - AND THE METHODOLOGY IS THE LOAD-BEARING PART. The
+# first attempt sized this at 65536 from a sweep that padded OUTSIDE the
+# substitution, which held the LIFTED INNER at a constant 16 bytes and varied
+# only how far the walk reached. That measures the wrong thing: gate cost is the
+# RE-SCAN of what the walk lifts (X-45), so it scales with the INNER's length,
+# not with the walk's reach. 65536 looked like it had 14 s of headroom and in
+# fact TIMED OUT, which is what parked the first attempt. Re-measured here with
+# the padding INSIDE the substitution - `echo "$(` + `'('`-dense inner + `)"`,
+# dependency-gate end to end, worst case inner == backstop, on the post-X-36y
+# tree (cost plateaus once the inner exceeds the backstop, so inner == backstop
+# IS the worst case):
+#                          inner == backstop   inner == 2x backstop
+#     backstop  8192 (old cap)     9.4 s              11.1 s
+#     backstop 16384              30.9 s              36.8 s   <- CHOSEN
+#     backstop 20480              46.0 s              55.1 s   <- rejected
+#     backstop 24576              64.8 s              77.4 s   <- over
+#     backstop 32768             111.5 s             TIMEOUT
+#     backstop 65536             TIMEOUT             TIMEOUT   <- attempt 1
+# against a 60 s fail-closed ceiling where added cost IS over-denial. The true
+# crossing sits between 20480 and 24576; the numbers are machine-dependent and
+# are a BAND, not a constant, so re-measure before raising this.
+#
+# WHY NOT 20480, WHICH ALSO "FITS": its worst case leaves 14 s and its plateau
+# leaves 4.9 s. Attempt 1 rejected 131072 for having 2.6 s of headroom and
+# ACCEPTED 65536 for having 14 s - and 65536 times out in reality. A margin that
+# thin against a machine-dependent, fail-CLOSED ceiling is how this was got
+# wrong the first time, so the choice here is the one with ~29 s.
+# And 8192 is not merely cheaper, it is USELESS: the bypass this exists to close
+# needs the walk to reach a substitution sitting at ~8300 bytes.
+#
+# SAY THE RESIDUAL PLAINLY: padding beyond this returns to the old prefix-cap
+# behaviour. The hole moves from ~8 KB to ~16 KB; it does not close - measured,
+# `echo "<20000 x>$(cat .env)"` is allow on both substrates. Neither does the
+# charging-character floor - ~8192 bytes of \\ " ' ` $ still exhaust the budget -
+# and no bound of this shape closes either; only an unbounded walk does, and
+# that is a timeout, which on this gate is a deny nobody can override.
+_SUBST_SCANMAX=16384
 # [B4] The walk's WINDOW, and the reason there is one. bash has no string
 # cursor: `${_s:1}` and `${_s#"$_pre"}` REBUILD the remainder, so consuming one
 # delimiter costs O(remaining) and a delimiter-dense command is QUADRATIC.
@@ -1137,7 +1333,7 @@ _SUBST_MAXLEN=8192
 # pre-B4 curve that reaches the same 0.73 s at 32 KB. bash offers no cursor
 # that avoids this - `${_s:$_i:$_CS_WIN}` walks to `_i` under a multibyte
 # locale, which is the same term again.
-# It is a COST bound and NOT a semantic one - unlike _SUBST_MAXLEN above, it
+# It is a COST bound and NOT a semantic one - unlike _SUBST_BUDGET above, it
 # cannot hide a substitution. The window is a PREFIX of the remainder, so the
 # first delimiter in it is the first delimiter overall; a window carrying none
 # is dropped whole and the search continues in the next; and the refill keeps
@@ -1146,7 +1342,22 @@ _SUBST_MAXLEN=8192
 # byte is FOUND does not. That is also why the SDK twin has no counterpart to
 # it: `_subst_inners` walks an index over an immutable string and is already
 # O(n), so this is the shell paying to reach the parity the SDK had for free.
+# [X-36y] `_cs_scan` carries the same window for the same reason - its
+# per-run `${_s#*"$_q"}` re-slice was the second quadratic of this class -
+# and its SDK twins (`shlex.split`, `_shell_segments`) index too.
 _CS_WIN=1024
+_CS_TRUNC_R=""
+_cs_btrunc(){                   # $1 truncated to the first $2 BYTES
+  # `local LC_ALL=C` is scoped to THIS function and restored on return, exactly
+  # as `_blen` does it, so no `case` glob and no bracket range anywhere else in
+  # the walk changes meaning - only this one substring becomes byte-indexed.
+  # A byte cut can land mid-character; the tail it leaves is an incomplete
+  # sequence, which cannot open or close a substitution, so it is inert to
+  # every arm of the walk.
+  local LC_ALL=C
+  _CS_TRUNC_R="${1:0:$2}"
+  return 0
+}
 _cs_esc_park(){                 # \\x -> sentinel, so quotes cannot be forged
   _CS_R="$1"
   case "$_CS_R" in *\\\\*) ;; *) return 0 ;; esac
@@ -1211,16 +1422,55 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
 # INERT. Unquoted `$(...)` is left to _cs_ops' `(`/`)` breaks; a bare sub that
 # runs its own output is Class B (download-then-run), handled elsewhere.
 # Chunk-based (jumps delimiter to delimiter) so a substitution with a long body
-# stays O(n); bounded by _SUBST_MAXLEN. Mirrors the SDK _subst_inners exactly
+# stays O(n); bounded by _SUBST_BUDGET (semantic) and _SUBST_SCANMAX (cost).
+# Mirrors the SDK _subst_inners exactly
 # (tests/test_composition and the substrate differential pin the two together).
 _cs_subst_scan(){
   # [B4] `_w` is the front WINDOW and `_s` the tail past it; together they are
   # always exactly the unconsumed remainder. `_ib` is the inner accumulator's
   # small half - see the balance loop.
-  local _s="$1" _q="" _pre _c _w="" _ib _rb="" _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0
+  local _s="$1" _q="" _pre _c _w="" _ib _rb="" _depth _inner _q2 _ws=1 _lc _hd=0 _hdt _bd=0 _bg
   _CS_SUBST_R=""
   case "$_s" in *'$('*|*'`'*) ;; *) return 0 ;; esac
-  _s="${_s:0:$_SUBST_MAXLEN}"
+  # [B3] The budget is per CALL and FLAT, so it does not matter that this
+  # function and its SDK twin are reached different numbers of times per event.
+  _bg=$_SUBST_BUDGET
+  # [X-47] THE BACKSTOP'S UNIT, PINNED - the same disease `_blen` exists for,
+  # one walker further in. `${_s:0:N}` is NOT a byte count and not a character
+  # count either: it is whichever the AMBIENT LOCALE says, bytes under LC_ALL=C
+  # or no locale at all, characters under a UTF-8 one. The SDK twin slices
+  # Python code points. Leaving it to the environment put a substrate SPLIT
+  # behind an environment variable, measured on a stock install: `echo "` +
+  # 6000 x U+4E2D + `$(cat .env)"` (6000 characters, 18000 bytes) is deny under
+  # LC_ALL=C.UTF-8 and **allow under LC_ALL=C and allow with no locale set**,
+  # while the SDK denies - shell-ALLOW / SDK-DENY on the default substrate with
+  # the secret really read. An ASCII control of the same CHARACTER count denies
+  # everywhere, which is what isolates it to the unit rather than the length.
+  #
+  # BYTES, and the reason is COST, not `_blen`'s reason. `_blen` argues bytes
+  # because bytes >= characters means it SKIPS more often and skipping there
+  # never adds a deny. Here skipping is the FAIL-OPEN direction, so that
+  # argument does not transfer and characters look safer - but characters are
+  # unaffordable: a 16384-CHARACTER multibyte quote-dense command is ~49 KB of
+  # text, and measured end to end on dependency-gate it costs **74.4 s against
+  # the 60 s fail-closed ceiling** (the same payload under LC_ALL=C, i.e.
+  # byte-truncated, costs 6.7 s). Characters would trade a divergence for an
+  # unoverridable deny. So the walk is pinned to BYTES on BOTH substrates: the
+  # two now agree in EVERY locale, the 60 s ceiling stays intact, and today's
+  # UTF-8-locale over-denial goes away with it.
+  #
+  # AND IT IS A TRADE, NOT A FREE WIN. A UTF-8-locale install LOSES the band
+  # from _SUBST_SCANMAX BYTES up to _SUBST_SCANMAX CHARACTERS: measured, 8000 x
+  # U+4E2D of padding (24018 bytes) was DENIED under LC_ALL=C.UTF-8 before this
+  # and is ALLOWED after, while ambient-with-no-locale and LC_ALL=C allowed it
+  # either way. That band is given up to buy one verdict in every locale, and
+  # the alternative is worse in both directions at once (see the cost note).
+  #
+  # THE RESIDUAL, which is now AGREEING rather than divergent: multibyte
+  # padding past _SUBST_SCANMAX BYTES hides a substitution from both walkers.
+  # That is the same class as the ASCII padding residual above, reached sooner
+  # per character; it is ledgered, not hidden.
+  _cs_btrunc "$_s" "$_SUBST_SCANMAX"; _s="$_CS_TRUNC_R"
   # [B5 review] A heredoc BODY is not shell code. Inside an UNQUOTED `<<EOF`
   # body a line-leading `#` is ordinary text and bash STILL expands `$(...)`,
   # so reading it as a comment INVENTS one bash does not have and drops a live
@@ -1237,7 +1487,73 @@ _cs_subst_scan(){
   # ...and off as well when `_join_cont` turned a CR/VT/FF into a blank in this
   # command: the blank it produced is indistinguishable from a typed one, so a
   # word start here may be an artefact rather than something bash would see.
+  #
+  # [X-46] AND WHEN THAT HAPPENS THE BUDGET IS LIFTED TO THE SCAN CAP, which is
+  # the whole fix. Turning the `#` rule off makes THIS walker traverse comment
+  # bodies that its SDK twin skips - `_subst_inners` derives its flag from `<<`
+  # alone and has no `_CMD_CTLWS` counterpart at all (X-43). Before B3 that
+  # asymmetry was harmless and deliberately shell-STRICTER: the shell lifted
+  # substitutions out of comment bodies and the SDK did not. B3 made walking
+  # cost BUDGET, which inverted it - the characters only this side examines were
+  # billed only to this side, so 8192 charged characters inside a comment
+  # exhausted the shell's budget while the SDK's stayed intact, and the same
+  # command became shell-ALLOW / SDK-DENY with bash reading the secret. One CR
+  # anywhere in the command was enough to switch B3's protection off.
+  #
+  # Note the exclusion of `#`/`}` from the CHARGING SET does not reach this:
+  # `_hd` selects what is charged not through the `case` but through whether the
+  # comment body is WALKED AT ALL.
+  #
+  # Lifting the budget rather than suppressing the charge keeps this small and
+  # one-directional FOR THE BUDGET: a larger budget can only make this walker
+  # lift more than the same walker lifted before, so it cannot manufacture an
+  # allow. `_SUBST_SCANMAX` still bounds the walk and each charge consumes at
+  # least one character, so a budget equal to that cap can never bind first:
+  # this is "no semantic budget, cost bound unchanged", not "unbounded".
+  #
+  # COST, MEASURED PROPERLY THE SECOND TIME. An earlier draft claimed "within
+  # noise at 32/48/64 KB" - a NULL measurement, because those sizes are past
+  # `_SUBST_SCANMAX` and the walk is truncated before the budget is consulted,
+  # so no budget value could have changed them. It is the same error the
+  # backstop note above records being burned by once. The discriminating shape
+  # is UNDER the cap and charge-dense: `echo "a<<b" ` + 8192 `$` + a `'('`-dense
+  # substitution (16310 characters) measures 1.83 s without the lift and
+  # 12.07 s with it - the X-45 re-scan of what the walk now newly lifts. The
+  # GLOBAL worst case is unchanged (~31 s at inner == backstop, because the lift
+  # only raises the budget to the cap that already bounded the walk), so this is
+  # bounded and measured, not free.
+  #
+  # WHAT THIS DOES NOT BUY, stated because an earlier draft of this comment
+  # claimed it and it is FALSE: it does NOT make the shell's lifted set a
+  # superset of the SDK's on CTLWS-bearing commands. `_hd=1` has a SECOND
+  # effect this line cannot reach - the comment body is not merely charged, it
+  # is TOKENISED, so `'` and `"` inside it update `_q` even though bash never
+  # tokenises a comment at all. An odd `'` in a comment therefore captures this
+  # walker in single-quote state across the newline, the `$(` arm becomes
+  # unreachable, and the shell lifts NOTHING while the SDK - which skips the
+  # body outright - lifts normally. That is shell-lifts-LESS, the forbidden
+  # direction, reachable by the same single CR. It is **X-48**, it is OLDER than
+  # B3 (measured identical on the pre-B3 tree), and no budget value closes it.
+  # Both triggers are covered for the same reason: whenever the `#` rule is off
+  # THIS walker traverses a comment body, and whether its SDK twin does so for
+  # the same text depends on the twin's PER-SEGMENT flag, which cannot be
+  # assumed to agree.
   [ "${_CMD_CTLWS:-0}" = 1 ] && _hd=1
+  # THE LIFT IS ON `_hd`, NOT ON ITS TRIGGER. An earlier draft scoped it to
+  # `_CMD_CTLWS` on the reasoning that the heredoc trigger "already had parity
+  # because both substrates set their flag". That is FALSE and was measured so:
+  # this walker runs ONCE on the WHOLE command, while `_subst_inners` runs again
+  # on every SEGMENT with its own `heredoc = "<<" in seg`, and a NEWLINE is a
+  # separator, so the line carrying `<<` and the line carrying the comment are
+  # DIFFERENT segments - the SDK's flag is false for the comment segment, so it
+  # takes its `#`
+  # arm, skips the body and spends nothing, while this walker has `_hd=1` for
+  # the whole command and is billed for every charged character in that body.
+  # Measured on a stock install: `echo $((1<<2))` (an arithmetic left shift, no
+  # heredoc at all) or a real `cat <<EOF` in front of the same
+  # 8200-charges-in-a-comment payload is shell=ALLOW / SDK=DENY, byte-for-byte
+  # the X-46 mechanism with `<<` in place of the CR.
+  [ "$_hd" = 1 ] && _bg=$_SUBST_SCANMAX
   while : ; do
     # [B4] REFILL. Top the window up whenever it holds fewer than two
     # characters, so every two-character lookahead below (`\\<newline>`, `$(`,
@@ -1272,10 +1588,12 @@ _cs_subst_scan(){
     #     unquoted, `#` word-start  0.79 s -> 0.58 s
     #     quoted `#`-dense          0.25 s -> 0.25 s
     # The bound is now _CS_WIN per `#` rather than "the walk stops at
-    # _SUBST_MAXLEN". That matters for the queued B3: B3 replaces the prefix
-    # cap with a delimiter budget, so the OLD sentence would have become false
-    # silently. This one survives B3 - a windowed iteration costs O(_CS_WIN)
-    # whatever bounds the walk's reach.
+    # _SUBST_MAXLEN". That mattered for B3, which has since LANDED and did
+    # exactly what this predicted - replaced the prefix cap with a delimiter
+    # budget, so the OLD sentence would have become false silently. This one
+    # survived it: a windowed iteration costs O(_CS_WIN) whatever bounds the
+    # walk's reach, and `#` is not in B3's charging set, so the budget does not
+    # shorten this loop either.
     if [ -z "$_q" ] && [ "$_hd" = 0 ]; then
       _pre="${_w%%[\\\\\\"\\'\\`\\$#\\}]*}"
     else
@@ -1323,6 +1641,30 @@ _cs_subst_scan(){
       _w="$_w${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
     fi
     _c="${_w:0:1}"
+    # [B3] THE CHARGE. Exactly the five characters that are in BOTH branches of
+    # the jump set above, and in the SDK twin's dispatch, UNCONDITIONALLY.
+    # Everything else is conditional and every condition differs between the two
+    # walkers, which is how the first attempt shipped two parity bugs:
+    #   * `#` and `}` are EXCLUDED. They enter the jump set only while
+    #     `[ -z "$_q" ] && [ "$_hd" = 0 ]`; the SDK reaches its `}` arm on
+    #     `quote != '"'` and its `#` arm on `not heredoc and not bd` - different
+    #     predicates over different state. Charging either would make `_hd`
+    #     select the CHARGING SET, and B5 folds `_CMD_CTLWS` into `_hd`, so one
+    #     CR in the command would change what the shell charges with no SDK
+    #     counterpart.
+    #   * `(` and `)` are EXCLUDED. They appear only inside the balance loops,
+    #     never in the outer jump set.
+    # NEITHER BALANCE LOOP CHARGES ANYTHING, and that is also structural rather
+    # than a matching pair of edits that can drift: their exits are not 1:1. The
+    # SDK's backtick loop exits ON the closing backtick and skips it with
+    # `i = j + 1` (its loop runs while the char is not the closing one), while
+    # the twin below CONSUMES it - so charging inside the loops would bill the
+    # shell 2 per backtick substitution and the SDK 1.
+    case "$_c" in
+      \\\\|'"'|"'"|'`'|'$')
+        _bg=$((_bg - 1))
+        [ "$_bg" -le 0 ] && break ;;
+    esac
     if [ "$_c" = "\\\\" ]; then
       # [B5 review] A backslash-NEWLINE pair is a LINE CONTINUATION: bash
       # deletes it outright, so the word-start state before it is the state
@@ -1907,23 +2249,69 @@ _cs_isinv(){
   done
 }
 _cs_scan(){
-  local _s _pre _q _rest _run _pd _ps _tok _rem _spl
-  _s="$1"
+  local _s _w _more _pd _ps _pre _q _run _seg _tok _rem _spl
+  _s="$1"; _w=""; _more=0
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
-  # operators in the UNQUOTED stretches only. Run-at-a-time, not
-  # character-at-a-time: a per-character loop is O(n^2) under bash's
-  # substring expansion, and F-937 is what that costs on a large command.
+  # operators in the UNQUOTED stretches only. [X-36y] Window at a time, with
+  # the same _CS_WIN front window as _cs_subst_scan and for the same reason:
+  # `${_s#*"$_q"}` REBUILDS the remainder and is quadratic in the distance to
+  # the quote (50 reps, LC_ALL=C, quote at the far end: 0.016 s at 1 KB,
+  # 2.60 s at 16 KB), and paid once per quoted run it put dependency-gate
+  # past its 60 s fail-closed ceiling on a 16 KB quote-dense command
+  # (2/4/8/16 KB: 1.2 / 4.1 / 16.1 / 77.0 s, timeout at 32 KB). So every
+  # splitting expansion below runs on the window `_w`, never on the tail
+  # `_s`: the tail is re-sliced once per _CS_WIN characters consumed, and
+  # `_more` - does the tail still hold a quote? - is computed once per
+  # re-slice rather than once per window. A quote is a single character, so
+  # no lookahead can straddle a refill boundary, and which byte is FOUND
+  # never changes - only which byte is examined first. The X-36y corpus pins
+  # the output byte-identical to the un-windowed walk's.
   while : ; do
-    case "$_s" in *[\\"\\']*) ;; *) _cs_ops "$_s"; break ;; esac
-    _pd="${_s%%\\"*}"; _ps="${_s%%\\'*}"
-    if [ "${#_pd}" -le "${#_ps}" ]; then _q='"'; _pre="$_pd"
-    else _q="'"; _pre="$_ps"; fi
-    _cs_ops "$_pre"
-    _rest="${_s#*"$_q"}"
-    case "$_rest" in
-      *"$_q"*) _run="${_rest%%"$_q"*}"; _s="${_rest#*"$_q"}" ;;
-      *)       _run="$_rest"; _s="" ;;   # unterminated quote: take the rest
-    esac
+    # Find the OPENER. On exit _q names the quote kind and _w starts just
+    # past the opener - or _q is empty and the remainder, reassembled into
+    # _s, holds no quote at all.
+    _q=""
+    while : ; do
+      if [ -z "$_w" ]; then
+        [ -z "$_s" ] && break
+        _w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+        case "$_s" in *[\\"\\']*) _more=1 ;; *) _more=0 ;; esac
+      fi
+      case "$_w" in
+        *[\\"\\']*)
+          _pd="${_w%%\\"*}"; _ps="${_w%%\\'*}"
+          if [ "${#_pd}" -le "${#_ps}" ]; then _q='"'; _pre="$_pd"
+          else _q="'"; _pre="$_ps"; fi
+          _cs_ops "$_pre"
+          _w="${_w:$(( ${#_pre} + 1 ))}"
+          break ;;
+        *)
+          # No quote in this window. If the tail still holds one this is
+          # plain unquoted text; otherwise the hunt is over.
+          if [ "$_more" = 1 ]; then _cs_ops "$_w"; _w=""; continue; fi
+          _s="$_w$_s"; _w=""
+          break ;;
+      esac
+    done
+    if [ -z "$_q" ]; then _cs_ops "$_s"; break; fi
+    # Collect the run to the closing _q. An exhausted window is appended
+    # whole and refilled; a run that outlives the tail is the unterminated
+    # quote, which takes the rest exactly as the un-windowed walk did.
+    _run=""
+    while : ; do
+      case "$_w" in
+        *"$_q"*)
+          _seg="${_w%%"$_q"*}"; _run="$_run$_seg"
+          _w="${_w:$(( ${#_seg} + 1 ))}"
+          break ;;
+        *)
+          _run="$_run$_w"; _w=""
+          [ -z "$_s" ] && break
+          _w="${_s:0:$_CS_WIN}"; _s="${_s:$_CS_WIN}"
+          case "$_s" in *[\\"\\']*) _more=1 ;; *) _more=0 ;; esac
+          ;;
+      esac
+    done
     # An invoker's argument is a command line: segment it too. Additive, so
     # the run also stays part of its own segment. [round-4 D5] The run is
     # UN-parked one level before it is handed on, which is what shell quote
@@ -1950,7 +2338,7 @@ _cs_scan(){
       *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}" ;;
       *) _CS_TAIL="$_CS_TAIL$_run" ;;
     esac
-    if [ -z "$_s" ]; then break; fi
+    if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
   done
   # [round-4 D5, third reproduction] `sh -c pip\\ install\\ evil` has NO quoted
   # run to recurse into - the argument is one shell word held together by
@@ -2003,7 +2391,7 @@ _cs_scan(){
   fi
   return 0
 }
-cmd_segments(){
+cmd_segments_real(){
   local _s _seg _extra _depth
   _s="$(norm_cmd "${1:-}")"
   # The sentinels are ours; a command containing one would otherwise be able
@@ -2049,6 +2437,48 @@ cmd_segments(){
     [ -z "$_seg" ] && continue
     printf ' %s \\n' "$_seg"
   done <<< "$_CS_BUF"
+  return 0
+}
+
+# [X-50] cmd_segments MEMOISED, and the cache has to live in the PARENT.
+#
+# THE PROBLEM THIS SOLVES. Every consumer reads segments through
+# `done < <(cmd_segments "$X")`, and a process substitution is a SUBSHELL, so
+# a cache written by the producer dies with it - the same subshell boundary
+# that made X-51's first attempt fail open. Measured on X-51's binding worst
+# case: dependency-gate calls this TWICE per event with the SAME 81900-byte
+# argument, segmenting 160 KB to learn one answer, at ~4.35 s a call.
+#
+# A subshell INHERITS its parent's variables, though, even if it cannot write
+# back. So the parent warms the cache once with `_cs_seg_warm` and every later
+# call - from inside any subshell - hits it for free. One computation instead
+# of two.
+#
+# WHY THE WARM IS NOT UNCONDITIONAL, which is the trap here: secrets-gate makes
+# ZERO cmd_segments calls (it uses `_sg_pass`), so warming from the shared
+# `_read_cmd` would ADD a full segmentation to a gate that never needed one.
+# The warm therefore sits next to the code that actually segments.
+#
+# The key is the whole argument string, so a caller passing a DIFFERENT
+# spelling simply misses and pays what it paid before - no wrong answer is
+# reachable, only a lost saving.
+_CS_SEG_KEY=""
+_CS_SEG_OUT=""
+_CS_SEG_SET=0
+cmd_segments(){
+  if [ "$_CS_SEG_SET" = "1" ] && [ "$1" = "$_CS_SEG_KEY" ]; then
+    # `$( )` strips every trailing newline, so the warm stored the body
+    # without its final one; restore exactly one, and print NOTHING for an
+    # empty result so a caller cannot read a phantom empty segment.
+    if [ -n "$_CS_SEG_OUT" ]; then printf '%s\n' "$_CS_SEG_OUT"; fi
+    return 0
+  fi
+  cmd_segments_real "$1"
+}
+_cs_seg_warm(){
+  _CS_SEG_OUT="$(cmd_segments_real "$1")"
+  _CS_SEG_KEY="$1"
+  _CS_SEG_SET=1
   return 0
 }
 
@@ -3129,7 +3559,28 @@ _sg_scan(){{
     _sg_raw "$_pre"
     _rest="${{_l#*"$_q"}}"
     case "$_rest" in
-      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest#*"$_q"}}" ;;
+      # [X-50] `_l` BY INDEX, NOT BY PATTERN - 0.956 s of _sg_pass's 1.07 s at
+      # 64 KB was this one line, found with a DEBUG-trap line profile rather
+      # than by reading. Both halves are quadratic, but they are not equal:
+      # measured standalone at 8/16/32 KB, `${{_rest%%"$_q"*}}` costs
+      # 1281/4373/16200 us per rep while `${{_rest#*"$_q"}}` costs
+      # 14131/55707/223921 - the REMAINDER is 14x dearer than the prefix.
+      #
+      # `_run` is already everything before the first `$_q`, so the remainder is
+      # `_rest` minus `${{#_run}}` characters minus the quote: a SUBSTRING, with
+      # no pattern matching at all. Measured 964807 -> 65549 us per rep at
+      # 64 KB, a 14.7x cut, and `_sg_pass` end to end 1.05 s -> 0.15 s.
+      #
+      # SAFE ONLY BECAUSE OF THE `case` GUARD ABOVE, which is the one thing to
+      # check before copying this shape elsewhere: the two forms DIFFER when
+      # `$_q` is absent (`#*"$_q"` yields the whole string, the substring yields
+      # ""), and this arm is reached only when `*"$_q"*` matched. The
+      # no-quote case is the arm below, which is untouched. Verified equal on
+      # `abc'def'ghi`, `'lead`, `trail'`, `'` and `a''b`.
+      #
+      # `${{#_run}}` and `${{_rest:N}}` count in the SAME unit as each other in
+      # every locale, so this introduces no X-47 split.
+      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest:${{#_run}}+1}}" ;;
       # [round-4 P4, finding 15] The fold is FLAGGED, not merely taken: the
       # push below re-splits it on whitespace so an end-anchored pattern can
       # still reach a secret path hidden in its tail (see _sg_push).
@@ -4057,7 +4508,7 @@ _XP_PK=""
 _XP_R=""
 _xp_park(){{
   local _s="$1" _o="" _h="" _t="" _c="" _pre="" _q="" _rest="" _run=""
-  local _pd="" _ps=""
+  local _pd="" _ps="" _w="" _seg="" _more=0
   # The sentinels are ours; a command carrying one raw could otherwise
   # forge a non-split. Same scrub cmd_segments performs, same reason.
   _s="${{_s//$'\\001'/ }}"
@@ -4082,28 +4533,71 @@ _xp_park(){{
     esac
     _s="${{_t:1}}"
   done
-  _s="$_o"; _o=""
-  # Run-at-a-time, like _cs_scan: a per-character loop is O(n^2) under
-  # bash's substring expansion, and F-937 is what that costs.
+  _s="$_o"; _o=""; _w=""; _more=0
+  # [X-36y] Phase 2 carries the same _CS_WIN front window as _cs_scan and
+  # _cs_subst_scan, for the same reason: `${{_s#*"$_q"}}` re-slices the whole
+  # remainder per quoted run and is quadratic in the distance to the quote,
+  # and _xp_park runs it on the WHOLE command (not just an invoker argument),
+  # so on a quote-dense command it was the LARGEST of the three quote walks -
+  # 7.3 s at 8 KB against _cs_scan's post-window 1.3 s, measured with the
+  # emitted-hook profiler. Every splitting expansion runs on the window `_w`;
+  # the tail `_s` is re-sliced once per _CS_WIN characters. Unquoted text is
+  # emitted to `_o` verbatim exactly as `_pre` was, a run is collected across
+  # refills, and a run that outlives the tail is the unterminated quote this
+  # walk REFUSES (rc=1, empty _XP_PK) rather than guesses at. A quote is one
+  # character, so no refill can split it; the parked output is byte-identical
+  # to the un-windowed walk's (x36y_xppark parity). Phase 1 above is a
+  # DISTINCT quadratic in the backslash COUNT and is deliberately left
+  # un-windowed - bslash_dense 32 KB sits at 55 s, under the ceiling, and it
+  # is filed separately, not folded in here.
   while : ; do                        # phase 2: quoted runs
-    case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) ;; *) _o="$_o$_s"; break ;; esac
-    _pd="${{_s%%"$_XP_DQC"*}}"; _ps="${{_s%%"$_XP_SQC"*}}"
-    if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q="$_XP_DQC"; _pre="$_pd"
-    else _q="$_XP_SQC"; _pre="$_ps"; fi
-    _o="$_o$_pre"
-    _rest="${{_s#*"$_q"}}"
-    case "$_rest" in
-      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _s="${{_rest#*"$_q"}}" ;;
-      # An unterminated quote has no shell parse, so it is REFUSED rather
-      # than guessed at - the F8 posture, applied to the one input this
-      # parser genuinely cannot model.
-      *) _XP_PK=""; return 1 ;;
-    esac
+    # Find the nearer opener across windows; on exit _q names the quote kind
+    # and _w starts just past it, or _q is empty and _s holds no quote.
+    _q=""
+    while : ; do
+      if [ -z "$_w" ]; then
+        [ -z "$_s" ] && break
+        _w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"
+        case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) _more=1 ;; *) _more=0 ;; esac
+      fi
+      case "$_w" in
+        *"$_XP_DQC"*|*"$_XP_SQC"*)
+          _pd="${{_w%%"$_XP_DQC"*}}"; _ps="${{_w%%"$_XP_SQC"*}}"
+          if [ "${{#_pd}}" -le "${{#_ps}}" ]; then _q="$_XP_DQC"; _pre="$_pd"
+          else _q="$_XP_SQC"; _pre="$_ps"; fi
+          _o="$_o$_pre"
+          _w="${{_w:$(( ${{#_pre}} + 1 ))}}"
+          break ;;
+        *)
+          if [ "$_more" = 1 ]; then _o="$_o$_w"; _w=""; continue; fi
+          _o="$_o$_w$_s"; _s=""; _w=""
+          break ;;
+      esac
+    done
+    [ -z "$_q" ] && break
+    # Collect the run to the closing _q across refills. A run that outlives
+    # the tail has no closing quote at all: REFUSE, the F8 posture applied to
+    # the one input this parser genuinely cannot model.
+    _run=""
+    while : ; do
+      case "$_w" in
+        *"$_q"*)
+          _seg="${{_w%%"$_q"*}}"; _run="$_run$_seg"
+          _w="${{_w:$(( ${{#_seg}} + 1 ))}}"
+          break ;;
+        *)
+          _run="$_run$_w"; _w=""
+          if [ -z "$_s" ]; then _XP_PK=""; return 1; fi
+          _w="${{_s:0:$_CS_WIN}}"; _s="${{_s:$_CS_WIN}}"
+          case "$_s" in *"$_XP_DQC"*|*"$_XP_SQC"*) _more=1 ;; *) _more=0 ;; esac
+          ;;
+      esac
+    done
     _run="${{_run//;/"$_XP_SEMI"}}"; _run="${{_run//&/"$_XP_AMP"}}"
     _run="${{_run//|/"$_XP_BAR"}}"
     _run="${{_run//$'\\n'/"$_XP_NL"}}"
     _o="$_o$_q$_run$_q"
-    if [ -z "$_s" ]; then break; fi
+    if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
   done
   _XP_PK="$_o"
   return 0
@@ -4427,6 +4921,8 @@ pipe_stage_writes(){{
 _D20CMD="${{CMD//>|/>}}"
 _D20CMD="${{_D20CMD//&>/> }}"
 _D20CMD="${{_D20CMD//>&/> }}"
+# [X-50] Warm the segment cache for the spelling BOTH D20 passes below use.
+_cs_seg_warm "$_D20CMD"
 _dl_files=""
 # [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
 #
