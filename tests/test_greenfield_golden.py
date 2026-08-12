@@ -2824,14 +2824,20 @@ EXPECTED_DIGESTS = {
         # against a 60 s ceiling - the hook is cancelled and the install RUNS.
         # THREE quadratic loops removed, each found by profiling AFTER the
         # previous one stopped dominating - reading the code found none of them:
-        #   1. `_cs_isinv`'s per-token tail rebuild. The head is taken
-        #      LAZILY and only a continuing walk pays a whole-tail split.
+        #   1. `_cs_isinv`'s per-token tail rebuild. The walk steps
+        #      `_CS_LAZYMAX` (4) tokens LAZILY, exactly as the original did,
+        #      and only a walk still going after that splits the remainder.
         #      91.16 s -> 0.90 s on the 40000-token walk in isolation.
-        #      The first cut split EAGERLY on every call, which was a WORSE
-        #      bypass than the bug - `_cs_isinv` runs once per quoted run, so
-        #      an `echo` head with 4090 single-quoted runs (inside both caps)
-        #      went 33.51 s -> 146.80 s. Caught by adversarial review,
-        #      reproduced at width 1, fixed; now 0.98-1.00x of main there.
+        #      THE BOUND TOOK THREE ROUNDS AND EACH WRONG VALUE WAS ITS OWN
+        #      BYPASS, all caught by adversarial review and reproduced at
+        #      width 1: splitting EAGERLY on every call sent an `echo` head
+        #      with 4090 runs 33.51 s -> 146.80 s; switching after the HEAD
+        #      sent a `!` head with 2000 runs 22.93 s -> 30.79 s; windowing
+        #      the split only reached 30.79 s, because `${_tail:$_CS_WIN}`
+        #      copies the remainder anyway. At 4 every head class measures
+        #      0.88-0.92x of main. NONE of this was visible to the suite,
+        #      the differential or the boundary corpus - they measure
+        #      verdicts and every one of these is a COST property.
         #   2. dependency-gate's install-head candidate (`_cand="$_cand $_UQW"`),
         #      45.5% of the gate's runtime once (1) was linear. Accumulates into
         #      an array joined only at completer tokens. 47.5 s -> 5.7 s.
@@ -2845,6 +2851,11 @@ EXPECTED_DIGESTS = {
         #   X-36y bash5.2 x 9216           35.5 s -> 2.79 s
         #   benign sudo rm <4000 files>    10.69 s -> 1.7 s
         # ~10x margin under the ceiling, against no. 51's ~3.5x.
+        # THE COST CLASS IS NOT CLOSED, ONLY THIS TERM IS: a WRAPPER
+        # head sets `_seen=1`, the `*)` arm stops ending the walk, and
+        # `sudo` + 2000 quoted runs runs to the end of the tail on
+        # every run - main TIMES OUT at 1200 s, this tip takes
+        # 150.95 s, still past the ceiling. Filed as X-54.
         #
         # VERDICTS ARE UNCHANGED - this is a COST fix, and that is what makes
         # it a bytes-only exception. Walk step counts are identical at every
@@ -2861,10 +2872,10 @@ EXPECTED_DIGESTS = {
         # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
         # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
         # skill, no steering artifact:
-        #   +6466  every hook - the shared header's two walk rewrites
-        #   +9259  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   +9214  every hook - the shared header's two walk rewrites
+        #   +12926  dependency-gate - the header plus `_cparts` / `_cjoin`
         #   gates.py - docstring only, no executable change
-        "957bfb8c7662357aa66fe89c17c70dd475ae0ed228a03a8488ac95700e803225",
+        "ea4a6b5d9e44dbcb8248dff14823cab56cbc84b93757f0e181e28e6505b9577b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3094,7 +3105,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "1c481c1f334728727d0581127d3399327e1f16bd63f4e97719afafba32883962",
+        "c11c3942c4fde98c51769428a83c9338cdccc41e09734194cc18b9cffbda8935",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3272,7 +3283,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "f966524d9dc4f9343f6a8b001cbd0f5bc1728ea5e87bef248a18b3b6dc7fa4cd",
+        "95d8139efeb1c9ea84c8c9b693585778c11b9dc44161ec1f71b23b3ad8281f97",
 }
 
 EXPECTED_ACTION_COUNTS = {

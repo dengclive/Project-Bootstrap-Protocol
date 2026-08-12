@@ -1033,9 +1033,14 @@ _read_cmd(){
 # hook was cancelled and the command ran. That was X-52.
 #
 # [X-52, FIXED 2026-08-12] THAT TERM WAS REMOVED RATHER THAN BOUNDED, AND NOT
-# BY THIS GUARD. The quadratic was the walk's per-token tail rebuild; splitting
-# once into an array makes it linear and the same shapes now DENY in 5.7 s and
-# 5.3 s - a 10.2x margin where there was a bypass. See `_cs_isinv`. A third
+# BY THIS GUARD. The quadratic was the walk's per-token tail rebuild; the walk
+# now steps `_CS_LAZYMAX` tokens lazily and splits the remainder only if it is
+# still going, and the same shapes DENY in 6.2 s and 5.5 s - a ~10x margin where
+# there was a bypass. See `_cs_isinv`. THIS DID NOT CLOSE THE COST CLASS: a
+# WRAPPER head keeps the walk running to the end of the tail on every quoted
+# run, and `sudo` + 2000 runs is still 150.95 s here against a main that times
+# out above 1200 s - filed as X-54, and these two caps do not catch it either
+# (80004 B, 4000 jumps, inside both). A third
 # CONDITION here was the other candidate and was rejected on measurement: the
 # benign `sudo rm <4000 files>` already costs 4003 walk steps against the
 # attack's 40000, a 10x separation that leaves under 2x margin - the same trade
@@ -1356,6 +1361,19 @@ _SUBST_SCANMAX=16384
 # per-run `${_s#*"$_q"}` re-slice was the second quadratic of this class -
 # and its SDK twins (`shlex.split`, `_shell_segments`) index too.
 _CS_WIN=1024
+# [X-52] How many tokens the invoker walk steps through LAZILY before it splits
+# the remainder into an array. Both bounds are load-bearing and both were paid
+# for with a regression.
+# LOWER: it must exceed the walk length of a head-transparent token followed by
+# an ordinary word, because that shape - `! 'run' 'run' ...` - ends on token TWO
+# and `_cs_isinv` runs once per quoted run, so switching before then costs
+# O(runs x tail) and crossed the 60 s ceiling at 4090 runs inside both caps.
+# UPPER: every lazy step is a whole-tail expansion, so a large value re-opens
+# the very quadratic this closes; at _CS_LAZYMAX the worst case is that many
+# expansions before the split makes the rest linear.
+# 4 clears the two-token shape with room for a wrapper chain (`sudo -u root`)
+# and keeps the pre-split cost at four expansions.
+_CS_LAZYMAX=4
 _CS_TRUNC_R=""
 _cs_btrunc(){                   # $1 truncated to the first $2 BYTES
   # `local LC_ALL=C` is scoped to THIS function and restored on return, exactly
@@ -2240,7 +2258,11 @@ _cs_isinv(){
   # splits them, which also exposes them to pathname expansion, and a command
   # holding `*.txt` would otherwise be replaced by the directory listing.
   # Saved and restored because a caller may already be inside a `set -f`
-  # region. `${_words+...}` keeps an EMPTY array legal under `set -u`.
+  # region. The array is read by INDEX behind an `_ai -ge _an` bound rather than
+  # iterated, so an empty split needs no `${_words+...}` guard: `_an` is 0, the
+  # bound returns before any element is touched, and `set -u` never sees an
+  # unset subscript. `_cjoin`'s call sites, which DO expand an array into an
+  # argument list, still carry that guard.
   #
   # THE FIRST TOKEN IS TAKEN LAZILY AND THE SPLIT IS PAID ONLY IF THE WALK
   # ACTUALLY CONTINUES. This is not an optimisation, it is the difference
@@ -2261,19 +2283,26 @@ _cs_isinv(){
   # exit path exactly, and the array is built only for the walks that really do
   # run long - which is where X-52's shapes live and where linear-vs-quadratic
   # is worth a whole-tail pass.
-  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0
+  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0 _lz=0
   # Safe for the callees: `_cs_head_kind`, `_cs_inv_word` and `_xp_iw` match
   # with `case` on quoted words and perform no word splitting of their own.
   local IFS=' '
   while : ; do
     if [ "$_ai" -lt 0 ]; then
       # LAZY PHASE - the head, straight off the raw tail, exactly as before.
+      # The word is NOT consumed here. The original consumed it only AFTER the
+      # classification, so a walk that ends on the head paid one whole-tail
+      # expansion and not two; consuming here would have added a second on the
+      # exit path, which is the path every ordinary command takes. The consume
+      # moved to the phase switch at the bottom, which runs only when the walk
+      # actually continues.
       _tail="${_tail#"${_tail%%[![:space:]]*}"}"
       _w="${_tail%%[[:space:]]*}"
       [ -z "$_w" ] && return 1
-      _tail="${_tail#"$_w"}"
     else
-      # ARRAY PHASE - the remainder, split once.
+      # ARRAY PHASE - the remainder, split once. Reached only after the walk
+      # has already stepped through `_CS_LAZYMAX` head-transparent tokens, so
+      # the shapes that get here are the ones that genuinely run long.
       [ "$_ai" -ge "$_an" ] && return 1
       _w="${_words[$_ai]}"
       _ai=$((_ai + 1))
@@ -2325,18 +2354,41 @@ _cs_isinv(){
       skip|flag) ;;              # transparent; never the command word
       *) [ "$_seen" = "1" ] || return 1 ;;
     esac
-    # Still walking. Pay for the split ONCE, on what is left after the head,
-    # and take every later token from the array. Reached only by a
-    # head-transparent token - `!`, `{`, `A=1`, a wrapper word or a flag - which
-    # is precisely the class X-52 is about and never the ordinary command.
+    # Still walking. Consume the token the lazy way - AFTER classifying, exactly
+    # as the original did, so a walk that ends here pays one whole-tail
+    # expansion and not two - and switch to the array only once the walk has
+    # proved it is going to run.
+    #
+    # WHY A COUNT AND NOT "SWITCH IMMEDIATELY". Switching after the head was the
+    # THIRD cost regression this function has had, and the review caught it:
+    # `! 'r0' 'r1' ... 'r1999'` is 80001 B with 4000 jumps, inside both X-51
+    # caps. `!` is head-transparent, so the walk left the lazy phase at once,
+    # paid a whole-tail normalise plus split, then read ONE array element - the
+    # first quoted run, which classifies `other` with no wrapper seen and ENDS
+    # the walk. `_cs_isinv` runs once per quoted run and `_CS_TAIL` only resets
+    # at a segment break, so that is O(runs x tail): measured 23.00 s on main
+    # against 30.79 s here, a 1.34x REGRESSION that crosses the 60 s ceiling at
+    # n=4090 on a shape main clears. Windowing the split was tried first and
+    # only got it to 30.79 s, because `${_tail:$_CS_WIN}` copies the remainder
+    # anyway.
+    #
+    # Stepping `_CS_LAZYMAX` tokens lazily before switching makes THAT shape
+    # never switch at all - it ends on token two - so the cost is exactly the
+    # original's. A walk that really does run long pays at most
+    # `_CS_LAZYMAX` whole-tail expansions before the split makes the rest
+    # linear, which is what closes X-52's `"! " x 40000`.
     if [ "$_ai" -lt 0 ]; then
-      _t="${_tail//[[:space:]]/ }"
-      _f=0; case "$-" in *f*) _f=1 ;; esac
-      set -f
-      _words=( $_t )
-      [ "$_f" = "1" ] || set +f
-      _an=${#_words[@]}
-      _ai=0
+      _tail="${_tail#"$_w"}"
+      _lz=$((_lz + 1))
+      if [ "$_lz" -ge "$_CS_LAZYMAX" ]; then
+        _t="${_tail//[[:space:]]/ }"
+        _f=0; case "$-" in *f*) _f=1 ;; esac
+        set -f
+        _words=( $_t )
+        [ "$_f" = "1" ] || set +f
+        _an=${#_words[@]}
+        _ai=0
+      fi
     fi
   done
 }

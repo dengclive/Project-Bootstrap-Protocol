@@ -222,6 +222,11 @@ check("the shell charges the same five, in the outer dispatch",
 # cursor for. `_subst_inners` walks an index over an immutable string, is
 # already O(n), and giving it a window would add a second boundary to keep in
 # step for no gain.
+check("the lazy-phase bound is shell-only and is not zero",
+      "_CS_LAZYMAX=4" in _tmpl and "_CS_LAZYMAX" not in _sdk,
+      "it decides when the shell swaps representation, never a verdict; an SDK "
+      "twin would be a boundary to keep in sync for a number the SDK cannot "
+      "observe. Zero or one re-opens the O(runs x tail) regression")
 check("the walk's cost window is shell-only",
       "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
       "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "
@@ -262,7 +267,8 @@ check("the invoker walk consumes its head lazily and splits only the remainder",
       _tmpl.count('_tail="${_tail#"$_w"}"') == 1
       and '[ "$_ai" -lt 0 ]' in _tmpl
       and "_words=( $_t )" in _tmpl
-      and '_t="${_tail//[[:space:]]/ }"' in _tmpl,
+      and '_t="${_tail//[[:space:]]/ }"' in _tmpl
+      and '[ "$_lz" -ge "$_CS_LAZYMAX" ]' in _tmpl,
       "a per-token rebuild is quadratic in tokens (the X-52 bypass); an EAGER "
       "whole-tail split is quadratic in quoted runs (the bypass the first cut "
       "of the fix introduced). Both halves are needed")
