@@ -3491,11 +3491,16 @@ _JUMP_BYTES = b"()\\\"'`$"
 def _cost_guard(input_data):
     """`None` if the command is cheap enough to gate, else a deny decision.
 
-    Two conditions, and they are NOT all of them - this guard is PARTIAL.
-    TOKEN COUNT is a third cost term it does not measure (X-52, open): a
-    command of 40000 `! ` tokens has ZERO jump targets, sits under the length
-    cap, and costs the shell 139.58 s against a 60 s ceiling. What these two
-    close is the length and density classes. Neither
+    Two conditions, and this guard does not claim they are all of them.
+    TOKEN COUNT was a third cost term it does not measure (X-52): a command of
+    40000 `! ` tokens has ZERO jump targets, sits under the length cap, and
+    cost the shell 139.58 s against a 60 s ceiling. FIXED 2026-08-12 by
+    removing the term rather than adding a condition here - the shell walk's
+    per-token tail rebuild was quadratic and now splits once into an array, so
+    the same shapes DENY in 5.7 s. Nothing changed on THIS side: the fix is a
+    shell cost property, it moves no verdict, and this module was already
+    paying 0.10-0.45 s for those shapes. What these two close is the length and
+    density classes. Neither
     predicate catches the other's class (measured on a benign corpus of this
     repo's own files against the adversarial shapes):
 

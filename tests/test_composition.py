@@ -234,12 +234,61 @@ check("the walk's cost window is shell-only",
 # holding the raw command's segments. Pinned as a SOURCE property because the
 # cost is invisible to a verdict: every one of the 1570 corpus commands emits
 # byte-identical segments either way.
+# [X-52] The SPELLING changed when the walk was linearised - it reads
+# `$_CS_TAIL` into the normalised `_t` now, not into `_tail` - but the property
+# is the same one and the negative half is unchanged: whatever it reads, it must
+# not be re-derived from the accumulated buffer.
 check("_cs_isinv reads the carried segment tail, not the whole buffer",
       "_cs_isinv(){" in _tmpl
-      and 'local _tail="$_CS_TAIL"' in _tmpl
+      and '_t="${_CS_TAIL//[[:space:]]/ }"' in _tmpl
       and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
       "re-deriving the tail per quoted run is what put dependency-gate at "
       "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
+# [X-52] THE TWO QUADRATIC ACCUMULATIONS, PINNED GONE. Both are invisible to
+# every verdict - the 4092-row differential is byte-identical across the change
+# - so only a source pin can keep them out. Reintroducing either is what put
+# `"! " x 40000 + pip install evilpkg` at 139.58 s against a 60 s ceiling, where
+# the hook is CANCELLED and the install runs: the deny never arrives.
+#   the walk   `_tail="${_tail#"$_w"}"` rebuilt the whole remainder per token,
+#              making _cs_isinv O(tokens x length). 91.16 s -> 0.90 s at 40000.
+#   the D20    `_cand="$_cand $_UQW"` re-copied the candidate per token. A
+#   candidate  DEBUG-trap profile put 45.5% of the gate's runtime on it once the
+#              walk was linear. dependency-gate 47.5 s -> 5.7 s.
+check("the invoker walk does not rebuild its tail per token",
+      '_tail="${_tail#"$_w"}"' not in _tmpl
+      and "_words=( $_t )" in _tmpl,
+      "the per-token tail rebuild is quadratic and is the X-52 bypass; the "
+      "walk splits once into an array instead")
+# THE SECOND COPY, in `_cs_scan`'s post-loop token walk. It was the identical
+# expression on a different variable, so fixing only the first left 80% of
+# dependency-gate's runtime in place on `bash5.2 ` x 9216 (an X-36y shape):
+# 27.17 s until this one landed, 2.79 s after. Pinned separately because the
+# two are easy to fix one at a time and the profile only reveals the second
+# once the first is gone.
+check("_cs_scan's post-loop token walk does not rebuild its remainder",
+      '_rem="${_rem#"$_tok"}"' not in _tmpl
+      and "_rtoks=( $_rem )" in _tmpl,
+      "the same quadratic rebuild as the invoker walk, on `_rem`")
+# ONE append survives, in the UNGUARDED FALLBACK loop, and that is deliberate.
+# The fallback re-matches at EVERY token rather than only at completers, so its
+# cost is the per-token `[[ =~ ]]` over a growing string - O(total^2) whatever
+# the string is built with, and an array join per token would be the same order
+# for more code. It is also unreachable while the #45 D1 census in
+# tests/test_issue_fixes.py holds: every HEAD match ends on a completer, so the
+# guarded loop tests that prefix first and breaks. Pinned at ONE so the guarded
+# loop cannot quietly regain the append; if the census property is ever broken,
+# this fallback becomes reachable and quadratic and must be revisited then.
+check("the D20 install-head candidate does not re-copy per token",
+      _tmpl.count('_cand="$_cand $_UQW"') == 1
+      and '_cparts+=("$_UQW")' in _tmpl,
+      "appending to one growing string per token is O(total^2) - the same "
+      "shape B4 fixed in the walk and X-50 in norm_cmd")
+# The array join is only equivalent to the ` `-append it replaced while the
+# separator is a single space, and `"${arr[*]}"` takes it from IFS.
+check("the candidate join fixes its own separator",
+      "_cjoin(){" in _tmpl and "local IFS=' '" in _tmpl,
+      "a bare \"${_cparts[*]}\" would depend on nothing in the emitted script "
+      "ever reassigning IFS, an invariant no test states")
 # Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
 # unsound. There are four; a fifth added later without a tail update is the
 # way this breaks, so the count is pinned rather than described.

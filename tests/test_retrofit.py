@@ -2048,9 +2048,21 @@ def retrofit_digest_full(yaml_text):
 # refusal path, not an action. A PreToolUse hook that exceeds its timeout is
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
+# [freeze-exception no. 62, 2026-08-12] X-52 - THREE quadratic loops removed:
+# `_cs_isinv`'s per-token tail rebuild (it was O(tokens x length), and `!` /
+# `{` / `A=1` are head-transparent so it never exited early), the identical
+# rebuild in `_cs_scan`'s post-loop token walk, and dependency-gate's
+# install-head candidate accumulating into an array. All land in bodies every
+# emitted hook embeds. COUNTS ARE UNCHANGED (service 79 / agent 93): this
+# changes what the walk COSTS and not one verdict - the 4092-row differential
+# passes untouched, and `.claude/sdk_gates/gates.py` differs only in the
+# `_cost_guard` docstring (executable AST identical, verified). `"! " x 40000
+# + pip install evilpkg` went from a 139.58 s bypass to DENY in 5.8 s. See
+# freeze-exception no. 52 in tests/test_greenfield_golden.py for the per-file
+# measurement.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "261ea1f75fc2ac64382e65f2cb7cf9fe71ea4ffdb531a19d64bca00510df5e0f",
-    "agent": "7337b8f12225cf2fa41651f6f28e66a1d77911994087fcbb2c2ce7947fe07f84",
+    "service": "ed562673abe2c949efa87be79fe316446b562a59c8e855a8ca49cd8df25282c5",
+    "agent": "e488e3cbb1e2ea35a47b590a12e40b4ac0ea640c4e68b804a4619dd93948c5a5",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

@@ -2814,7 +2814,51 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "a0c724446050f45289b9ad1cec1797653b1b03e9a7aa857cde7c9bcc38e39248",
+        # [freeze-exception no. 52, 2026-08-12] X-52 — THE THIRD COST TERM,
+        # CLOSED BY REMOVING IT RATHER THAN BOUNDING IT. `_cs_isinv` rebuilt
+        # the whole remaining tail once per token (`_tail="${_tail#"$_w"}"`),
+        # so the invoker walk was O(tokens x length) while doing linear work.
+        # `!` / `{` / `A=1` are head-transparent, so the walk never exits
+        # early: `"! " x 40000 + pip install evilpkg` is 80019 B with ZERO
+        # jump targets, passes BOTH of no. 51's caps, and cost 139.58 s
+        # against a 60 s ceiling - the hook is cancelled and the install RUNS.
+        # THREE quadratic loops removed, each found by profiling AFTER the
+        # previous one stopped dominating - reading the code found none of them:
+        #   1. `_cs_isinv`'s per-token tail rebuild. Splits once into an array.
+        #      91.16 s -> 0.90 s on the 40000-token walk in isolation.
+        #   2. dependency-gate's install-head candidate (`_cand="$_cand $_UQW"`),
+        #      45.5% of the gate's runtime once (1) was linear. Accumulates into
+        #      an array joined only at completer tokens. 47.5 s -> 5.7 s.
+        #   3. the SECOND copy of (1) at the end of `_cs_scan` (`_rem`), 80% of
+        #      the runtime once (2) was fixed. 27.17 s -> 2.79 s on `bash5.2 `
+        #      x 9216 - an X-36y shape, which is why that row only moved 1.3x
+        #      until this one landed.
+        #   bang-40000     139.58 s bypass -> DENY 5.8 s
+        #   assign-20475    76.76 s bypass -> DENY 5.3 s
+        #   X-36y brace-40KB / bang-40KB   35.7 s -> 2.3 s (both DENY)
+        #   X-36y bash5.2 x 9216           35.5 s -> 2.79 s
+        #   benign sudo rm <4000 files>    10.69 s -> 1.7 s
+        # ~10x margin under the ceiling, against no. 51's ~3.5x.
+        #
+        # VERDICTS ARE UNCHANGED - this is a COST fix, and that is what makes
+        # it a bytes-only exception. Walk step counts are identical at every
+        # size (40003 vs 40003), the 4092-row differential passes untouched,
+        # and `.claude/sdk_gates/gates.py` differs ONLY in the `_cost_guard`
+        # docstring - its executable AST is identical with docstrings stripped,
+        # verified rather than asserted. So unlike no. 51 there is no mirrored
+        # constant and no new parity surface. A per-event WORK COUNTER was the
+        # other candidate and was rejected on measurement: benign
+        # `sudo rm <4000 files>` already costs 4003 walk steps against the
+        # attack's 40000, a 10x separation leaving under 2x margin.
+        #
+        # PER-FILE, v2.7.4-vs-worktree PLAN ACTIONS, measured on THIS tree:
+        # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
+        # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
+        # skill, no steering artifact:
+        #   +4482  every hook - the shared header's two walk rewrites
+        #   +6349  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   gates.py - docstring only, no executable change
+        "0a4b60ce9f9ad7e31527854beeeb25cc1b2a0eb2e46d6c41334ff63e80d762bb",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3042,7 +3086,9 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "74c2403b4fa7c8ba74754c581ed602b7497d28ba4c5ab7ded143e1e74afc998f",
+        # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
+        # Same shared-header change; every plan-action body embeds it.
+        "215464dfd878ea00511da0690367dbe4dee1065f13559dbddb84feb84fd6e475",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3217,7 +3263,10 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "3a9b157c7a4556fd11ab05323181935b65847097ff648938d94fa64f490ff1ba",
+        # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
+        # The three frozen design artifacts are again unchanged, verified
+        # per-file, and the count is still 59.
+        "c385f0c7e5aa5b8556a5a2dd40cfaca4f8e1a4fb019766dd209eb1b8f929d734",
 }
 
 EXPECTED_ACTION_COUNTS = {
