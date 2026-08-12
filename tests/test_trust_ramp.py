@@ -272,7 +272,22 @@ st, es = tr.parse(shipped)
 check("shipped .claude/trust-ramp.md parses", True)
 check("shipped ledger starts at R0", st["current_rung"] == "R0",
       st["current_rung"])
-check("shipped ledger has no entries yet", es == [], f"{len(es)} entries")
+# [X-51 session] This used to assert `es == []`, i.e. "no entries yet". That was
+# a pin on the ledger never having been USED, so it was guaranteed to fail the
+# first time it was, which is not a defect worth a red suite. What is worth
+# pinning is that the shipped ledger still PARSES and that its size does not
+# drift silently - the same reason the differential pins its open-row count.
+# Backfilled 2026-08-11 with the seven runs of that session; DW-A2 makes one
+# run one entry, so this number moves only when real work is logged.
+check("shipped ledger parses to the expected number of entries",
+      len(es) == 7, f"{len(es)} entries")
+check("every shipped entry carries an outcome the vocabulary knows",
+      all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
+      str([e["outcome"] for e in es]))
+# A blank `**Outcome:**` is a hard parse error by design (the ramp must measure
+# evidence, not logging diligence), so this also proves none was written blank.
+check("the shipped ledger's declared rung is what its entries earn",
+      st["current_rung"] == "R0", st["current_rung"])
 check("every gate's rungs are known",
       all(g["from_rung"] in tr.RUNGS for g in tr.GATES.values()))
 check("every rung above R0 has a gate",

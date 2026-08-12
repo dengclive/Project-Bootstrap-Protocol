@@ -97,3 +97,31 @@ protocol's own `learnings/mode-selection.md` block (`Recommendation:` /
 `Chosen:` / `Felt right?:`) merges in without a format change.
 
 <!-- entries below -->
+
+## x36y-quote-reslice-window — R0 — 2026-08-11
+**Outcome:** harmful
+**Notes:** Adversarial review fan-out over the X-36y diff. DW-P4 BREACH: agents drove commands through fixture hooks, 53 invocations, a prohibited method. The artifact itself is sound (quote_dense 32 KB TIMEOUT -> 25.5 s, landed 21d82e3); graded on the METHOD, not the output. Outcome agent-proposed, operator-delegated, not independently rebuilt (DW-A1).
+
+## section-y-thesis-reverify — R0 — 2026-08-11
+**Outcome:** clean
+**Notes:** Read-only fleet over two owner theses; verdict-only, no code diff. BOTH REFUTED as stated, and the refutations were written into the rows so they are not re-raised. 44a96cf. Outcome agent-proposed, operator-delegated (DW-A1).
+
+## backlog-row-evidence-rebuild — R0 — 2026-08-11
+**Outcome:** clean
+**Notes:** Read-only fleet rebuilding evidence for X-40/X-38/X-39/X-32f. Found 3 of 4 recorded reproductions STALE - the defect was in previously-recorded evidence and this run is what caught it. 22fa2fd. Outcome agent-proposed, operator-delegated (DW-A1).
+
+## b3-flat-delimiter-budget — R0 — 2026-08-11
+**Outcome:** corrected
+**Notes:** B3 re-land. First landing sized the backstop at 65536 from a NULL MEASUREMENT (padding outside the substitution, so the lifted inner never varied); it times out and reached the tree as a commit. Caught by the next review round, re-landed at a measured 16384. Corrected rather than harmful because it never reached main and the operator did not have to intervene - but note this grades my own error. 7075aba -> 3ce1a6a. Outcome agent-proposed, operator-delegated (DW-A1).
+
+## b3-reland-adversarial-review — R0 — 2026-08-11
+**Outcome:** clean
+**Notes:** Read-only fleet over the B3 diff, orchestrator reproducing serially at width 1 - the DW-P4-compliant shape. Found X-46 and X-47, both live secret reads, in a tree whose full suite was green. a0fbb98. Outcome agent-proposed, operator-delegated (DW-A1).
+
+## x46-comment-budget-lift — R0 — 2026-08-11
+**Outcome:** corrected
+**Notes:** X-46 budget half. First cut keyed the lift on the wrong trigger (an arithmetic $((1<<2)) reproduced the whole defect) and asserted a superset relation that is false; both caught by review BEFORE the commit, and the SDK mirror was reverted. 7dc031e. Outcome agent-proposed, operator-delegated (DW-A1).
+
+## x47-backstop-unit — R0 — 2026-08-11
+**Outcome:** clean
+**Notes:** X-47. Both truncations pinned to UTF-8 bytes, unit chosen by measurement rather than inherited from _blen's rationale (which inverts here). The lost UTF-8-locale band was measured and disclosed rather than hidden. c129aa4. Outcome agent-proposed, operator-delegated (DW-A1).
