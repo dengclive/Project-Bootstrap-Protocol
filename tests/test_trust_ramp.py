@@ -281,7 +281,7 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # for PR #64's adversarial review; DW-A2 makes one run one entry, so this
 # number moves only when real work is logged.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 8, f"{len(es)} entries")
+      len(es) == 16, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

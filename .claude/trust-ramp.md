@@ -127,5 +127,37 @@ protocol's own `learnings/mode-selection.md` block (`Recommendation:` /
 **Notes:** X-47. Both truncations pinned to UTF-8 bytes, unit chosen by measurement rather than inherited from _blen's rationale (which inverts here). The lost UTF-8-locale band was measured and disclosed rather than hidden. c129aa4. Outcome agent-proposed, operator-delegated (DW-A1).
 
 ## pr64-adversarial-review — R0 — 2026-08-12
-**Outcome:** corrected
-**Notes:** Dynamic workflow, 14 agents: 6 read-only lenses over the PR #64 diff, then refute-by-default verification of the top 8 after a dedupe barrier. DW-P4-COMPLIANT SHAPE: every agent read-only (Read/Grep/read-only git), explicitly forbidden from executing any hook, gate, installer or suite; the orchestrator reproduced serially at width 1 afterwards, which is what DW-A1 requires and is how the headline finding was confirmed rather than believed. 26 raw findings, 25 after dedupe, 8 verified, 8 SURVIVED - the panel refuted nothing, which was treated as a warning sign and checked rather than accepted. OUTCOME GRADED ON THE WORK REVIEWED, NOT THE RUN: the run performed well, but what it found is that MY X-51 cost guard - already committed, pushed, and described in PR #64 as closing the bypass - has a live bypass of its own. Reproduced at HEAD: '! ' x 40000 + 'pip install evilpkg' is 80019 bytes with ZERO jump targets, passes both caps, and takes 139.58 s against a 60 s ceiling, so the hook is cancelled, exit 124 does not block, and the install runs. 'A=1 ' x 20475 does the same at 76.76 s. Token count is a THIRD cost term the guard does not measure, and this repo's own X-36y/X-36v-w rows - on the same branch, still marked open - already recorded that band. I sized the caps without reading them. GRADED corrected BECAUSE nothing wrong reached main and the process caught it before merge; the argument for HARMFUL is real and recorded here rather than omitted - a security bypass did get past my own review, into a commit and a PR whose description claimed the class was closed. Operator may amend. Outcome agent-proposed, operator-delegated, not independently rebuilt (DW-A1).
+**Outcome:** clean
+**Notes:** [RE-GRADED 2026-08-12 corrected -> clean] DW-A2 grades the RUN's output - "a wrong finding that reached the tree is harmful, exactly as it would be from a single agent". This run's findings were CORRECT and nothing wrong reached the tree from it, so `clean` is what its own criterion gives. The first grading applied DW-A2 to the work REVIEWED rather than to the run; the defect it found is logged separately as `x51-cost-guard`, harmful.  Dynamic workflow, 14 agents: 6 read-only lenses over the PR #64 diff, then refute-by-default verification of the top 8 after a dedupe barrier. DW-P4-COMPLIANT SHAPE: every agent read-only (Read/Grep/read-only git), explicitly forbidden from executing any hook, gate, installer or suite; the orchestrator reproduced serially at width 1 afterwards, which is what DW-A1 requires and is how the headline finding was confirmed rather than believed. 26 raw findings, 25 after dedupe, 8 verified, 8 SURVIVED - the panel refuted nothing, which was treated as a warning sign and checked rather than accepted. OUTCOME GRADED ON THE WORK REVIEWED, NOT THE RUN: the run performed well, but what it found is that MY X-51 cost guard - already committed, pushed, and described in PR #64 as closing the bypass - has a live bypass of its own. Reproduced at HEAD: '! ' x 40000 + 'pip install evilpkg' is 80019 bytes with ZERO jump targets, passes both caps, and takes 139.58 s against a 60 s ceiling, so the hook is cancelled, exit 124 does not block, and the install runs. 'A=1 ' x 20475 does the same at 76.76 s. Token count is a THIRD cost term the guard does not measure, and this repo's own X-36y/X-36v-w rows - on the same branch, still marked open - already recorded that band. I sized the caps without reading them. GRADED corrected BECAUSE nothing wrong reached main and the process caught it before merge; the argument for HARMFUL is real and recorded here rather than omitted - a security bypass did get past my own review, into a commit and a PR whose description claimed the class was closed. Operator may amend. Outcome agent-proposed, operator-delegated, not independently rebuilt (DW-A1).
+
+## x49-cost-pass — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo, no agents. Priced X-49's deny direction with a PROTOTYPE against the emitted hooks rather than an extrapolation: it closes X-49 and breaches the 60 s ceiling at two segments (82.28 s), and a smaller window does not rescue it. Ruled the direction out on measurement. b156a20.
+
+## x51-fail-open-discovery — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. Settled the harness question live against Claude Code: a PreToolUse hook that exceeds its timeout is CANCELLED and the call PROCEEDS. Overturned an assumption three shipped sizing decisions rested on, and filed X-50/X-51 with the full measured bypass chain. 7b05a60.
+
+## x51-cost-guard — R0 — 2026-08-12
+**Outcome:** harmful
+**Notes:** Solo. THE GUARD SHIPPED WITH TWO BYPASSES OF ITS OWN. (1) the density arm sampled only the first _SUBST_SCANMAX bytes, so 17 KB of clean padding + 9000 quoted runs scored ZERO and took 61.40 s - found by me during X-50 and fixed in 0933c5c; (2) TOKEN COUNT is a third cost term it never measured - '! ' x 40000 + an install is 80019 B, zero jump targets, 139.58 s - found by the PR #64 adversarial review and reproduced at width 1. Graded HARMFUL rather than corrected because a security bypass got past my own review into a commit AND into a PR whose description claimed the class closed; it differs from the B3 precedent (graded corrected) in that B3's was a mis-sized perf backstop caught before any external claim was made. Nothing reached main. This repo's own X-36y/X-36v-w rows already recorded the token-count band and I did not read them - a methodology failure, not a missed constant. f67f828.
+
+## x50-norm-cmd — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. norm_cmd's per-line accumulator was quadratic; two-level buffer, 2.65x off a 64 KB heredoc. Reported honestly that it does NOT move X-51's binding worst case, which is single-line. 06980a4.
+
+## x50-sg-scan-remainder — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. DEBUG-trap line profile put 0.956 s of _sg_pass's 1.07 s on one line; took the quote-split remainder by INDEX instead of by pattern, 6.7x. Two earlier candidates were built, measured (1.0x and 3x WORSE) and discarded rather than shipped. 6fe2506.
+
+## x50-cmd-segments-memo — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. Instrumented call counts before designing: 2 runtime calls, same argument. Parent-side memo via subshell inheritance, 1.38x on X-51's worst case, and deliberately NOT warmed from _read_cmd so secrets-gate (zero calls) is not charged for it. 85b8748.
+
+## x50-density-cap-whole-command — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. Found and closed the prefix-sampling bypass in my own guard while investigating whether _cs_scan was worth fixing (it is not - 0.4% of the worst case). Count over the whole command, cap 4096 -> 8191, both bounds load-bearing. Also corrected the margin figure I had reported: 5.1x was measured against a bypassable guard, the real number is ~2.9x. 0933c5c.
+
+## x52-claims-corrected — R0 — 2026-08-12
+**Outcome:** clean
+**Notes:** Solo. After the review reproduced the token-count bypass, corrected every overclaim rather than the code: the 'two INDEPENDENT cost terms' comment on both substrates and the X-51 row's . Filed X-52 at the same severity, including the admission that the band was already in this repo's own backlog. c29c2d3.
