@@ -289,6 +289,19 @@ check("the candidate join fixes its own separator",
       "_cjoin(){" in _tmpl and "local IFS=' '" in _tmpl,
       "a bare \"${_cparts[*]}\" would depend on nothing in the emitted script "
       "ever reassigning IFS, an invariant no test states")
+# The append it replaced tested `[ -z "$_cand" ]`, which DROPPED a leading
+# empty token (`_uqw` reduces `''` and `""` to the empty string) while KEEPING
+# an interior one as a doubled separator. A plain `_cparts+=(...)` reproduces
+# the interior case and breaks the leading one - `'' pip install evilpkg`
+# joins to " pip install evilpkg" - which currently still matches only because
+# `HEAD` is anchored `^ *`. That is an anchor edit away from a silent verdict
+# change, and no verdict reveals it today, so it is pinned at the source.
+# NB the doubled braces: this block is inside an f-string in lib/templates.py,
+# so the SOURCE spells `${{#_cparts[@]}}` and emits `${#_cparts[@]}`.
+check("the candidate accumulation drops leading empties like the append did",
+      '[ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]' in _tmpl,
+      "without the guard a leading `''` token shifts the candidate by one "
+      "space and the gate relies on HEAD's `^ *` to absorb it")
 # Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
 # unsound. There are four; a fifth added later without a tail update is the
 # way this breaks, so the count is pinned rather than described.

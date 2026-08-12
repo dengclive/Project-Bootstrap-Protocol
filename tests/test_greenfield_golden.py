@@ -2856,9 +2856,9 @@ EXPECTED_DIGESTS = {
         # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
         # skill, no steering artifact:
         #   +4482  every hook - the shared header's two walk rewrites
-        #   +6349  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   +7275  dependency-gate - the header plus `_cparts` / `_cjoin`
         #   gates.py - docstring only, no executable change
-        "0a4b60ce9f9ad7e31527854beeeb25cc1b2a0eb2e46d6c41334ff63e80d762bb",
+        "53955b7824514b5ec80987667b4f59b7ff1ac3f245677066c475b2d35116ec40",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3088,7 +3088,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "215464dfd878ea00511da0690367dbe4dee1065f13559dbddb84feb84fd6e475",
+        "2f23c261b2e9db37fe733d24e5f5b19adceee47ab10fcd0252ee06bd131bd601",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3266,7 +3266,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "c385f0c7e5aa5b8556a5a2dd40cfaca4f8e1a4fb019766dd209eb1b8f929d734",
+        "d6e7dcac8161143812f091dd695bc703c0fdcf96ad731b1a2447e0e99991bb5e",
 }
 
 EXPECTED_ACTION_COUNTS = {

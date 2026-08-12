@@ -5590,10 +5590,23 @@ while IFS= read -r nseg; do
   # the loop is linear in the shapes that have no completer - which is exactly
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
+  #
+  # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
+  # the append's behaviour, not a choice made here. `_uqw` reduces a token to
+  # the EMPTY string for `''` and `""`, and the append it replaced tested
+  # `[ -z "$_cand" ]`: an empty leading token left `_cand` empty, so the next
+  # token became the whole candidate with NO leading space, while an empty
+  # INTERIOR token appended a bare separator and doubled the space. A plain
+  # `_cparts+=("$_UQW")` reproduces the interior case and breaks the leading one
+  # (`'' pip install evilpkg` joined to " pip install evilpkg"), which survives
+  # only because `HEAD` happens to be anchored `^ *`. Relying on that is one
+  # anchor edit away from a silent change, so the condition is reproduced here
+  # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
+  # `set -u`.
   _cparts=()
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
-    _cparts+=("$_UQW")
+    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then _cparts+=("$_UQW"); fi
     _ckey "$_UQW"
     case "$_CKEY" in
       @@COMPLETER_CASE@@)
