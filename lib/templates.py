@@ -2241,16 +2241,43 @@ _cs_isinv(){
   # holding `*.txt` would otherwise be replaced by the directory listing.
   # Saved and restored because a caller may already be inside a `set -f`
   # region. `${_words+...}` keeps an EMPTY array legal under `set -u`.
-  local _w _b _e _seen=0 _k _words _t _f
+  #
+  # THE FIRST TOKEN IS TAKEN LAZILY AND THE SPLIT IS PAID ONLY IF THE WALK
+  # ACTUALLY CONTINUES. This is not an optimisation, it is the difference
+  # between a fix and a new bypass, and the first cut of this change got it
+  # wrong. `_cs_isinv` runs ONCE PER QUOTED RUN [X-45], and the overwhelmingly
+  # common answer is decided by the head alone: `echo`/`ls`/`git` classify
+  # `other` with no wrapper seen, which ENDS the walk at token one. Normalising
+  # and splitting the whole tail up front made every one of those calls pay
+  # O(tail) - so N quoted runs cost O(N x tail) and the quadratic came straight
+  # back in a different place. Measured, dependency-gate, shapes UNDER BOTH
+  # X-51 caps (an `echo` head with N single-quoted runs, 2 jumps each):
+  #        N=2000  80004 B  4000 jumps   17.94 s -> 48.05 s
+  #        N=3000  81004 B  6000 jumps   25.77 s -> 89.51 s   PAST THE CEILING
+  #        N=4090  81804 B  8180 jumps   33.52 s -> 146.80 s  PAST THE CEILING
+  # i.e. the eager version was a WORSE bypass than the one it fixed, on a shape
+  # the old code cleared at 33.52 s. Found by adversarial review, reproduced
+  # serially at width 1. Taking the head lazily restores the old cost on the
+  # exit path exactly, and the array is built only for the walks that really do
+  # run long - which is where X-52's shapes live and where linear-vs-quadratic
+  # is worth a whole-tail pass.
+  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0
   # Safe for the callees: `_cs_head_kind`, `_cs_inv_word` and `_xp_iw` match
   # with `case` on quoted words and perform no word splitting of their own.
   local IFS=' '
-  _t="${_CS_TAIL//[[:space:]]/ }"
-  _f=0; case "$-" in *f*) _f=1 ;; esac
-  set -f
-  _words=( $_t )
-  [ "$_f" = "1" ] || set +f
-  for _w in ${_words+"${_words[@]}"}; do
+  while : ; do
+    if [ "$_ai" -lt 0 ]; then
+      # LAZY PHASE - the head, straight off the raw tail, exactly as before.
+      _tail="${_tail#"${_tail%%[![:space:]]*}"}"
+      _w="${_tail%%[[:space:]]*}"
+      [ -z "$_w" ] && return 1
+      _tail="${_tail#"$_w"}"
+    else
+      # ARRAY PHASE - the remainder, split once.
+      [ "$_ai" -ge "$_an" ] && return 1
+      _w="${_words[$_ai]}"
+      _ai=$((_ai + 1))
+    fi
     # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
     # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is
     # its own basename, so ask first and pay only when there is a path to
@@ -2298,11 +2325,20 @@ _cs_isinv(){
       skip|flag) ;;              # transparent; never the command word
       *) [ "$_seen" = "1" ] || return 1 ;;
     esac
+    # Still walking. Pay for the split ONCE, on what is left after the head,
+    # and take every later token from the array. Reached only by a
+    # head-transparent token - `!`, `{`, `A=1`, a wrapper word or a flag - which
+    # is precisely the class X-52 is about and never the ordinary command.
+    if [ "$_ai" -lt 0 ]; then
+      _t="${_tail//[[:space:]]/ }"
+      _f=0; case "$-" in *f*) _f=1 ;; esac
+      set -f
+      _words=( $_t )
+      [ "$_f" = "1" ] || set +f
+      _an=${#_words[@]}
+      _ai=0
+    fi
   done
-  # [X-52] Words exhausted. The old walk reached this through the `[ -z "$_w" ]`
-  # test at the top of the loop; the array cannot produce an empty word, so the
-  # same answer is given by falling out of the `for`.
-  return 1
 }
 _cs_scan(){
   local _s _w _more _pd _ps _pre _q _run _seg _tok _rem _spl _rtoks _rf _roifs
@@ -4427,7 +4463,14 @@ _uqw(){{
 _CJ=""
 _cjoin(){{
   local IFS=' '
-  _CJ="$*"
+  # `${{*-}}`, not `$*`: the call sites guard the ARRAY with
+  # `${{_cparts+...}}` so an empty array is legal under `set -u`, and an empty
+  # array means this function is entered with ZERO positional parameters. Bash
+  # 5.x expands `"$*"` to the empty string there, but the `-` default form
+  # makes it explicit rather than resting on a version behaviour the emitted
+  # scripts pin no floor for (the shebang is bare `env bash`). Identical output
+  # for every non-empty argument list.
+  _CJ="${{*-}}"
 }}
 _XP_CW=""
 _xp_cw(){{
@@ -5234,7 +5277,13 @@ _xp_run_scan(){{
     # IFS whitespace INSIDE a token - `cmd_segments` substitutes the $_CS_WS
     # sentinel for in-quote spaces, which is what `set -- $_seg` twelve lines
     # above already depends on - IFS is never assigned globally in this hook
-    # (only as `IFS= read` command prefixes and one `local IFS=/`), and
+    # AT A POINT THIS CODE CAN OBSERVE. The enumeration, kept current because
+    # the guarantee is the enumeration: `IFS= read` command prefixes; one
+    # `local IFS=/`; `local IFS=' '` in `_cs_isinv` and in `_cjoin` [X-52],
+    # both function-scoped and neither on this call path; and ONE genuine global
+    # assignment, `IFS=' '` in `_cs_scan`'s post-loop split [X-52], whose window
+    # is a single array assignment restored on the next statement and which
+    # cannot reach here either. And
     # `set -f` is on at the call site, so no operand can glob-expand on the
     # way back. It is captured AFTER the shift so it is the tail, not the
     # command word.

@@ -234,13 +234,9 @@ check("the walk's cost window is shell-only",
 # holding the raw command's segments. Pinned as a SOURCE property because the
 # cost is invisible to a verdict: every one of the 1570 corpus commands emits
 # byte-identical segments either way.
-# [X-52] The SPELLING changed when the walk was linearised - it reads
-# `$_CS_TAIL` into the normalised `_t` now, not into `_tail` - but the property
-# is the same one and the negative half is unchanged: whatever it reads, it must
-# not be re-derived from the accumulated buffer.
 check("_cs_isinv reads the carried segment tail, not the whole buffer",
       "_cs_isinv(){" in _tmpl
-      and '_t="${_CS_TAIL//[[:space:]]/ }"' in _tmpl
+      and 'local _tail="$_CS_TAIL"' in _tmpl
       and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
       "re-deriving the tail per quoted run is what put dependency-gate at "
       "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
@@ -254,11 +250,22 @@ check("_cs_isinv reads the carried segment tail, not the whole buffer",
 #   the D20    `_cand="$_cand $_UQW"` re-copied the candidate per token. A
 #   candidate  DEBUG-trap profile put 45.5% of the gate's runtime on it once the
 #              walk was linear. dependency-gate 47.5 s -> 5.7 s.
-check("the invoker walk does not rebuild its tail per token",
-      '_tail="${_tail#"$_w"}"' not in _tmpl
-      and "_words=( $_t )" in _tmpl,
-      "the per-token tail rebuild is quadratic and is the X-52 bypass; the "
-      "walk splits once into an array instead")
+# THE WALK IS A HYBRID AND BOTH HALVES ARE LOAD-BEARING. Pinning "no tail
+# rebuild at all" was WRONG and this check said so for one commit: the eager
+# version it described paid a whole-tail normalise plus a full array build on
+# EVERY call, and `_cs_isinv` runs once per quoted run, so an `echo` head with
+# 4090 single-quoted runs - inside both X-51 caps - went 33.52 s -> 146.80 s,
+# a WORSE bypass than the one being fixed. So: exactly ONE `#`-rebuild, for the
+# HEAD only, behind the lazy-phase guard; and the array for the remainder,
+# built only after a head-transparent token has already been seen.
+check("the invoker walk consumes its head lazily and splits only the remainder",
+      _tmpl.count('_tail="${_tail#"$_w"}"') == 1
+      and '[ "$_ai" -lt 0 ]' in _tmpl
+      and "_words=( $_t )" in _tmpl
+      and '_t="${_tail//[[:space:]]/ }"' in _tmpl,
+      "a per-token rebuild is quadratic in tokens (the X-52 bypass); an EAGER "
+      "whole-tail split is quadratic in quoted runs (the bypass the first cut "
+      "of the fix introduced). Both halves are needed")
 # THE SECOND COPY, in `_cs_scan`'s post-loop token walk. It was the identical
 # expression on a different variable, so fixing only the first left 80% of
 # dependency-gate's runtime in place on `bash5.2 ` x 9216 (an X-36y shape):
@@ -267,8 +274,11 @@ check("the invoker walk does not rebuild its tail per token",
 # once the first is gone.
 check("_cs_scan's post-loop token walk does not rebuild its remainder",
       '_rem="${_rem#"$_tok"}"' not in _tmpl
-      and "_rtoks=( $_rem )" in _tmpl,
-      "the same quadratic rebuild as the invoker walk, on `_rem`")
+      and "_rtoks=( $_rem )" in _tmpl
+      and '_rem="${_CS_TAIL//[[:space:]]/ }"' in _tmpl,
+      "the same quadratic rebuild as the invoker walk, on `_rem` - and the "
+      "same `[[:space:]]` normalisation, without which splitting on IFS alone "
+      "stops separating `sh<U+2003>-c` and the walk fails OPEN")
 # ONE append survives, in the UNGUARDED FALLBACK loop, and that is deliberate.
 # The fallback re-matches at EVERY token rather than only at completers, so its
 # cost is the per-token `[[ =~ ]]` over a growing string - O(total^2) whatever
@@ -280,13 +290,19 @@ check("_cs_scan's post-loop token walk does not rebuild its remainder",
 # this fallback becomes reachable and quadratic and must be revisited then.
 check("the D20 install-head candidate does not re-copy per token",
       _tmpl.count('_cand="$_cand $_UQW"') == 1
-      and '_cparts+=("$_UQW")' in _tmpl,
+      and ('_uqw "${{_NTOKS[$_hi]}}"\n'
+           '    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; '
+           'then _cparts+=("$_UQW"); fi') in _tmpl,
       "appending to one growing string per token is O(total^2) - the same "
       "shape B4 fixed in the walk and X-50 in norm_cmd")
 # The array join is only equivalent to the ` `-append it replaced while the
 # separator is a single space, and `"${arr[*]}"` takes it from IFS.
+# NOT `"_cjoin(){" in _tmpl and "local IFS=\' \'" in _tmpl` - that pair is
+# satisfied by `_cs_isinv`'s OWN `local IFS`, which the same commit added, so it
+# would pass with `_cjoin` reverted to a bare `"${_cparts[*]}"`. Pin the body.
 check("the candidate join fixes its own separator",
-      "_cjoin(){" in _tmpl and "local IFS=' '" in _tmpl,
+      "_cjoin(){{\n  local IFS=' '" in _tmpl
+      and _tmpl.count('_CJ="${{*-}}"') == 1,
       "a bare \"${_cparts[*]}\" would depend on nothing in the emitted script "
       "ever reassigning IFS, an invariant no test states")
 # The append it replaced tested `[ -z "$_cand" ]`, which DROPPED a leading

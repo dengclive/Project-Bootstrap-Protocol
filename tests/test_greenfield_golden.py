@@ -2824,8 +2824,14 @@ EXPECTED_DIGESTS = {
         # against a 60 s ceiling - the hook is cancelled and the install RUNS.
         # THREE quadratic loops removed, each found by profiling AFTER the
         # previous one stopped dominating - reading the code found none of them:
-        #   1. `_cs_isinv`'s per-token tail rebuild. Splits once into an array.
+        #   1. `_cs_isinv`'s per-token tail rebuild. The head is taken
+        #      LAZILY and only a continuing walk pays a whole-tail split.
         #      91.16 s -> 0.90 s on the 40000-token walk in isolation.
+        #      The first cut split EAGERLY on every call, which was a WORSE
+        #      bypass than the bug - `_cs_isinv` runs once per quoted run, so
+        #      an `echo` head with 4090 single-quoted runs (inside both caps)
+        #      went 33.51 s -> 146.80 s. Caught by adversarial review,
+        #      reproduced at width 1, fixed; now 0.98-1.00x of main there.
         #   2. dependency-gate's install-head candidate (`_cand="$_cand $_UQW"`),
         #      45.5% of the gate's runtime once (1) was linear. Accumulates into
         #      an array joined only at completer tokens. 47.5 s -> 5.7 s.
@@ -2855,10 +2861,10 @@ EXPECTED_DIGESTS = {
         # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
         # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
         # skill, no steering artifact:
-        #   +4482  every hook - the shared header's two walk rewrites
-        #   +7275  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   +6466  every hook - the shared header's two walk rewrites
+        #   +9259  dependency-gate - the header plus `_cparts` / `_cjoin`
         #   gates.py - docstring only, no executable change
-        "53955b7824514b5ec80987667b4f59b7ff1ac3f245677066c475b2d35116ec40",
+        "957bfb8c7662357aa66fe89c17c70dd475ae0ed228a03a8488ac95700e803225",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3088,7 +3094,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "2f23c261b2e9db37fe733d24e5f5b19adceee47ab10fcd0252ee06bd131bd601",
+        "1c481c1f334728727d0581127d3399327e1f16bd63f4e97719afafba32883962",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3266,7 +3272,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "d6e7dcac8161143812f091dd695bc703c0fdcf96ad731b1a2447e0e99991bb5e",
+        "f966524d9dc4f9343f6a8b001cbd0f5bc1728ea5e87bef248a18b3b6dc7fa4cd",
 }
 
 EXPECTED_ACTION_COUNTS = {

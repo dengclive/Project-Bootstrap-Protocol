@@ -3496,8 +3496,8 @@ def _cost_guard(input_data):
     40000 `! ` tokens has ZERO jump targets, sits under the length cap, and
     cost the shell 139.58 s against a 60 s ceiling. FIXED 2026-08-12 by
     removing the term rather than adding a condition here - the shell walk's
-    per-token tail rebuild was quadratic and now splits once into an array, so
-    the same shapes DENY in 5.7 s. Nothing changed on THIS side: the fix is a
+    per-token tail rebuild was quadratic; the head is now taken lazily and only
+    a continuing walk pays a whole-tail split, so the same shapes DENY in 6.0 s. Nothing changed on THIS side: the fix is a
     shell cost property, it moves no verdict, and this module was already
     paying 0.10-0.45 s for those shapes. What these two close is the length and
     density classes. Neither
