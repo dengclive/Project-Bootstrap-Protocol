@@ -331,7 +331,9 @@ check("the invoker memo is cleared at every tail RESTART and only there",
 #     (shell=allow / sdk=deny / want=deny, the forbidden direction).
 check("the invoker memo is never written from a decision on the trailing word",
       _tmpl.count('[ "$_lastw" = "0" ] && _CS_INVMEMO=') == 2
-      and 'if [ "$_w" = "$_tail" ]; then _lastw=1; else _lastw=0; fi' in _tmpl,
+      # `${_tail:${#_w}:1}` and not `[ "$_w" = "$_tail" ]`: the equality test is
+      # O(tail) on every lazy token, which cost the `sudo` shape 150.95 -> 161.84 s
+      and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
       "not stable under a longer tail")
 check("the candidate join folds rather than re-joins",

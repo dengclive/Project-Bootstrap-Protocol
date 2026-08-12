@@ -2872,10 +2872,10 @@ EXPECTED_DIGESTS = {
         # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
         # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
         # skill, no steering artifact:
-        #   +12709  every hook - the shared header's two walk rewrites
-        #   +17451  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   +13110  every hook - the shared header's two walk rewrites
+        #   +17852  dependency-gate - the header plus `_cparts` / `_cjoin`
         #   gates.py - docstring only, no executable change
-        "7a45b8d87d99868c9451bef29735641089410e5f8678049d775adf2c72de3dfe",
+        "470a6e86dadd7f6bb0357987557792b0040edfffbe6e646a6b6b09a82688d415",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3105,7 +3105,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "723006fb42bc5c625b4fab96d8b853c331df3e4269fb357086a893c439a1636a",
+        "0c4f30eb7aa44edfd30fa5dad10d4f06e4ab0107f2530e248c46caf04271f1e2",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3283,7 +3283,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "76874ac31733d9760504bf473b79b2033a923a7e4a9fc5bc6598c3a171a0185f",
+        "f78ed9f33800ad7cd4ff8730e8fbf0318e4a105c2ca87fb91c670389f140be13",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -2061,8 +2061,8 @@ def retrofit_digest_full(yaml_text):
 # freeze-exception no. 52 in tests/test_greenfield_golden.py for the per-file
 # measurement.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "63a1f00e74a36e02f2117f2c165c3a37a0ee5e5cf70cdd91c45ac5882c31b8e6",
-    "agent": "005ce92a5b7aa14e69b4b6808cbf11a52cb7aafa693ec8e1faacfda085c93715",
+    "service": "8944424f68876f350a36a85fe85f045030877c384ca4b26a4b88e3a6110643f9",
+    "agent": "ae31f20bab5298a6ae31e762fd723546f600949065a3d86e00b80c42f7cd9b2b",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

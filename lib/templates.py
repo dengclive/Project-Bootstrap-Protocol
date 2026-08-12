@@ -2336,7 +2336,13 @@ _cs_isinv(){
       [ -z "$_w" ] && return 1
       # Is this the TRAILING word? If so it is not provably complete - see the
       # memo note - because the next quoted run can EXTEND it.
-      if [ "$_w" = "$_tail" ]; then _lastw=1; else _lastw=0; fi
+      #
+      # `${_tail:${#_w}:1}`, NOT `[ "$_w" = "$_tail" ]`. The equality test
+      # compares against the WHOLE tail and is therefore O(tail) on every lazy
+      # token, which is the same mistake this function has now made five times
+      # over: it cost the `sudo` shape 150.95 s -> 161.84 s. Both the length and
+      # the one-character slice are bounded by the WORD, which is short.
+      if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi
     else
       # ARRAY PHASE - the remainder, split once. Reached only after the walk
       # has already stepped through `_CS_LAZYMAX` head-transparent tokens, so
