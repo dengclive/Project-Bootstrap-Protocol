@@ -5707,12 +5707,26 @@ while IFS= read -r nseg; do
   _cparts=()
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
-    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then _cparts+=("$_UQW"); fi
+    if [ -n "$_UQW" ] || [ -n "$_cand" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
+      _cparts+=("$_UQW")
+    fi
     _ckey "$_UQW"
     case "$_CKEY" in
       @@COMPLETER_CASE@@)
+        # FOLD ONLY WHAT IS PENDING, then clear. Re-joining the WHOLE array at
+        # every completer marshals it into an argument list each time, which is
+        # strictly worse than the append it replaced when EVERY token is a
+        # completer - `i` is a one-character INSTALL_VERB that is itself one, so
+        # `i i i ...` is entirely attacker-supplied with zero jump targets.
+        # Measured: `i` x 20000 (40000 B, under both caps) went 24.38 s on main
+        # to 171.88 s re-joining, i.e. a shape main CLEARS turned into a 7x
+        # ceiling breach. Folding the pending elements keeps the completer-dense
+        # case at the old append's cost (one pending element, then an O(len)
+        # append) while the completer-FREE case - X-52's own padding - still
+        # never joins at all inside the loop.
         _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-        _cand="$_CJ"
+        if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
+        _cparts=()
         if [[ "$_cand" =~ $HEAD ]]; then
           head_txt="$_cand"
           # [#43 review, F9] One expansion, not an append loop that
@@ -5727,9 +5741,10 @@ while IFS= read -r nseg; do
   # Unconditional would re-join on the break path too, where `_cand` is already
   # the matched prefix and must not be overwritten - hence the `head_txt` test,
   # which is the same found/not-found signal F9 established.
-  if [ -z "$head_txt" ]; then
+  if [ -z "$head_txt" ] && [ "${{#_cparts[@]}}" -gt 0 ]; then
     _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-    _cand="$_CJ"
+    if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
+    _cparts=()
   fi
   # `_cand` now holds the whole reduced segment when the guard found nothing,
   # so ONE match decides whether the guard could have missed anything.

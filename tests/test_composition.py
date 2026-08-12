@@ -296,9 +296,10 @@ check("_cs_scan's post-loop token walk does not rebuild its remainder",
 # this fallback becomes reachable and quadratic and must be revisited then.
 check("the D20 install-head candidate does not re-copy per token",
       _tmpl.count('_cand="$_cand $_UQW"') == 1
-      and ('_uqw "${{_NTOKS[$_hi]}}"\n'
-           '    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; '
-           'then _cparts+=("$_UQW"); fi') in _tmpl,
+      and '_cparts+=("$_UQW")' in _tmpl
+      # the fold clears the pending elements, so a completer-DENSE segment
+      # marshals one element per join instead of the whole array every time
+      and _tmpl.count("_cparts=()") == 3,
       "appending to one growing string per token is O(total^2) - the same "
       "shape B4 fixed in the walk and X-50 in norm_cmd")
 # The array join is only equivalent to the ` `-append it replaced while the
@@ -306,6 +307,15 @@ check("the D20 install-head candidate does not re-copy per token",
 # NOT `"_cjoin(){" in _tmpl and "local IFS=\' \'" in _tmpl` - that pair is
 # satisfied by `_cs_isinv`'s OWN `local IFS`, which the same commit added, so it
 # would pass with `_cjoin` reverted to a bare `"${_cparts[*]}"`. Pin the body.
+# [X-52] The join must FOLD into `_cand`, never REPLACE it. Replacing means
+# re-marshalling the whole array at every completer, and `i` is a one-character
+# INSTALL_VERB that is itself a completer - so `i i i ...` is attacker-supplied,
+# carries zero jump targets, and sent a shape main clears at 24.38 s to 171.88 s.
+check("the candidate join folds rather than re-joins",
+      _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
+                  'else _cand="$_cand $_CJ"; fi') == 2,
+      "one fold inside the loop and one after it; `_cand=\"$_CJ\"` alone "
+      "re-joins the whole array per completer token")
 check("the candidate join fixes its own separator",
       "_cjoin(){{\n  local IFS=' '" in _tmpl
       and _tmpl.count('_CJ="${{*-}}"') == 1,
@@ -321,7 +331,8 @@ check("the candidate join fixes its own separator",
 # NB the doubled braces: this block is inside an f-string in lib/templates.py,
 # so the SOURCE spells `${{#_cparts[@]}}` and emits `${#_cparts[@]}`.
 check("the candidate accumulation drops leading empties like the append did",
-      '[ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]' in _tmpl,
+      ('[ -n "$_UQW" ] || [ -n "$_cand" ] '
+       '|| [ "${{#_cparts[@]}}" -gt 0 ]') in _tmpl,
       "without the guard a leading `''` token shifts the candidate by one "
       "space and the gate relies on HEAD's `^ *` to absorb it")
 # Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
