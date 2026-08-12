@@ -2356,7 +2356,7 @@ _cs_scan(){
   fi
   return 0
 }
-cmd_segments(){
+cmd_segments_real(){
   local _s _seg _extra _depth
   _s="$(norm_cmd "${1:-}")"
   # The sentinels are ours; a command containing one would otherwise be able
@@ -2402,6 +2402,48 @@ cmd_segments(){
     [ -z "$_seg" ] && continue
     printf ' %s \\n' "$_seg"
   done <<< "$_CS_BUF"
+  return 0
+}
+
+# [X-50] cmd_segments MEMOISED, and the cache has to live in the PARENT.
+#
+# THE PROBLEM THIS SOLVES. Every consumer reads segments through
+# `done < <(cmd_segments "$X")`, and a process substitution is a SUBSHELL, so
+# a cache written by the producer dies with it - the same subshell boundary
+# that made X-51's first attempt fail open. Measured on X-51's binding worst
+# case: dependency-gate calls this TWICE per event with the SAME 81900-byte
+# argument, segmenting 160 KB to learn one answer, at ~4.35 s a call.
+#
+# A subshell INHERITS its parent's variables, though, even if it cannot write
+# back. So the parent warms the cache once with `_cs_seg_warm` and every later
+# call - from inside any subshell - hits it for free. One computation instead
+# of two.
+#
+# WHY THE WARM IS NOT UNCONDITIONAL, which is the trap here: secrets-gate makes
+# ZERO cmd_segments calls (it uses `_sg_pass`), so warming from the shared
+# `_read_cmd` would ADD a full segmentation to a gate that never needed one.
+# The warm therefore sits next to the code that actually segments.
+#
+# The key is the whole argument string, so a caller passing a DIFFERENT
+# spelling simply misses and pays what it paid before - no wrong answer is
+# reachable, only a lost saving.
+_CS_SEG_KEY=""
+_CS_SEG_OUT=""
+_CS_SEG_SET=0
+cmd_segments(){
+  if [ "$_CS_SEG_SET" = "1" ] && [ "$1" = "$_CS_SEG_KEY" ]; then
+    # `$( )` strips every trailing newline, so the warm stored the body
+    # without its final one; restore exactly one, and print NOTHING for an
+    # empty result so a caller cannot read a phantom empty segment.
+    if [ -n "$_CS_SEG_OUT" ]; then printf '%s\n' "$_CS_SEG_OUT"; fi
+    return 0
+  fi
+  cmd_segments_real "$1"
+}
+_cs_seg_warm(){
+  _CS_SEG_OUT="$(cmd_segments_real "$1")"
+  _CS_SEG_KEY="$1"
+  _CS_SEG_SET=1
   return 0
 }
 
@@ -4844,6 +4886,8 @@ pipe_stage_writes(){{
 _D20CMD="${{CMD//>|/>}}"
 _D20CMD="${{_D20CMD//&>/> }}"
 _D20CMD="${{_D20CMD//>&/> }}"
+# [X-50] Warm the segment cache for the spelling BOTH D20 passes below use.
+_cs_seg_warm "$_D20CMD"
 _dl_files=""
 # [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
 #
