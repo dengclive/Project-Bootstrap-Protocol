@@ -280,8 +280,14 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # Backfilled 2026-08-11 with the seven runs of that session, +1 on 2026-08-12
 # for PR #64's adversarial review; DW-A2 makes one run one entry, so this
 # number moves only when real work is logged.
+# +5 on 2026-08-13 for the X-52 session: three dynamic-workflow review rounds
+# (one of which returned SIX nulls and is logged as a run that did not run,
+# because §5 makes an uncounted null indistinguishable from a clean result) and
+# two solo blocks, X-52's fix and X-49's cost re-measurement. Logged late - the
+# session ran nine commits and four workflows before any entry was written,
+# which is the same omission 9041acf exists to correct.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 16, f"{len(es)} entries")
+      len(es) == 21, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
