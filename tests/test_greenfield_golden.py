@@ -2804,7 +2804,7 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        # [freeze-exception no. 56/57, 2026-08-12] X-51's cost guard, then
+        # [freeze-exception no. 56/57/58, 2026-08-12] X-51's cost guard, then
         # X-50's norm_cmd fix (two-level accumulation).
         # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
         # from `_read_cmd`, so EVERY emitted hook moves. Counts are
@@ -2814,7 +2814,7 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "d39c10407f8435a779623949a4dcf3c61bea3fe909c04c05dd96b60853665eec",
+        "84149934f82097b49a774f7b5e5a1c235ac68e2b65f2c73c3a569bae140914e9",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3042,7 +3042,7 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "62bdfe5196a25a26cfb3f58926997934da0aafd9018aaae192d852b3c7d19d49",
+        "1582be4729bc55ba24ee114faa7105fa65271cb793f7ecc401e888477d4ef4a5",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3217,7 +3217,7 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "6a7c72cde5cbb9dfc6b7741db543810ad8adc9eeafe1be9fd4317badb50b970a",
+        "89704e7c4a880591bd9a6c1fcdbd7bdd06c116e270f51e9b85c7d5eac4804ace",
 }
 
 EXPECTED_ACTION_COUNTS = {

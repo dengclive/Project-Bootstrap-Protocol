@@ -2041,7 +2041,7 @@ def retrofit_digest_full(yaml_text):
 # `_CMD_CTLWS` is set, closing the one-CR shell-ALLOW / SDK-DENY divergence.
 # Shared hook header, so every retrofit hook body moves; retrofit emits no
 # `gates.py`. Counts unchanged: service 79, agent 93.
-# [freeze-exception no. 56/57, 2026-08-12] X-51's cost guard, then X-50's
+# [freeze-exception no. 56/57/58, 2026-08-12] X-51's cost guard, then X-50's
 # norm_cmd fix (two-level accumulation). `_cost_guard`
 # lands in the shared `_HOOK_HEADER` and is called from `_read_cmd`, so every
 # emitted hook moves. COUNTS ARE UNCHANGED (service 79 / agent 93) - this adds a
@@ -2049,8 +2049,8 @@ def retrofit_digest_full(yaml_text):
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "daa83e77aa767bd0d99e17a8afaf6cfa13a96fd19277d21bdd6c72cfb66ce8e1",
-    "agent": "8b34ba28faea3add7a38d9b842dd15b472f81560377f8417973db522267d1d9f",
+    "service": "9ebfbcb0406e25446523bf41605f66fba9d507f9a1049c1db1bc980940e60279",
+    "agent": "19dd35bac4d3dcc4fc5cadf40a7b14a01f01f265120fdc6d944aad0dab34c69c",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

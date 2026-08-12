@@ -3482,7 +3482,28 @@ _sg_scan(){{
     _sg_raw "$_pre"
     _rest="${{_l#*"$_q"}}"
     case "$_rest" in
-      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest#*"$_q"}}" ;;
+      # [X-50] `_l` BY INDEX, NOT BY PATTERN - 0.956 s of _sg_pass's 1.07 s at
+      # 64 KB was this one line, found with a DEBUG-trap line profile rather
+      # than by reading. Both halves are quadratic, but they are not equal:
+      # measured standalone at 8/16/32 KB, `${{_rest%%"$_q"*}}` costs
+      # 1281/4373/16200 us per rep while `${{_rest#*"$_q"}}` costs
+      # 14131/55707/223921 - the REMAINDER is 14x dearer than the prefix.
+      #
+      # `_run` is already everything before the first `$_q`, so the remainder is
+      # `_rest` minus `${{#_run}}` characters minus the quote: a SUBSTRING, with
+      # no pattern matching at all. Measured 964807 -> 65549 us per rep at
+      # 64 KB, a 14.7x cut, and `_sg_pass` end to end 1.05 s -> 0.15 s.
+      #
+      # SAFE ONLY BECAUSE OF THE `case` GUARD ABOVE, which is the one thing to
+      # check before copying this shape elsewhere: the two forms DIFFER when
+      # `$_q` is absent (`#*"$_q"` yields the whole string, the substring yields
+      # ""), and this arm is reached only when `*"$_q"*` matched. The
+      # no-quote case is the arm below, which is untouched. Verified equal on
+      # `abc'def'ghi`, `'lead`, `trail'`, `'` and `a''b`.
+      #
+      # `${{#_run}}` and `${{_rest:N}}` count in the SAME unit as each other in
+      # every locale, so this introduces no X-47 split.
+      *"$_q"*) _run="${{_rest%%"$_q"*}}"; _l="${{_rest:${{#_run}}+1}}" ;;
       # [round-4 P4, finding 15] The fold is FLAGGED, not merely taken: the
       # push below re-splits it on whitespace so an end-anchored pattern can
       # still reach a secret path hidden in its tail (see _sg_push).
