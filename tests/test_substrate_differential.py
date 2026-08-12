@@ -3588,22 +3588,22 @@ _B3 = [
     # loop charges nothing, ~10002 when it charges one more per pair.
     ("secrets-gate", 'echo "' + "`x`" * 5000 + '$(cat .env)"', "deny",
      "B3 fence: QUOTED backticks - the balance loop charges nothing"),
-    ("secrets-gate", "echo " + "`x`" * (_W // 2 + 64) + " " + _SUB, "allow",
-     "B3: ...and enough of them DO exhaust it, on both substrates alike"),
+    ("secrets-gate", "echo " + "`x`" * (_W // 2 + 64) + " " + _SUB, "deny",
+     "B3 + X-51: budget-exhausting, but the COST GUARD refuses it first"),
     # --- THE BOUNDARY, sharp and identical on both substrates. The payload
     #     spends one charge on the opening `"` and one on the `$` of `$(`, so
     #     8189 is the last count that still lifts.
     ("secrets-gate", "echo " + "$" * 8189 + " " + _SUB, "deny",
      "B3 fence: 8189 charges - the last that still reaches the sub"),
-    ("secrets-gate", "echo " + "$" * 8190 + " " + _SUB, "allow",
-     "B3 fence: 8190 charges - budget exhausted, sub not lifted"),
+    ("secrets-gate", "echo " + "$" * 8190 + " " + _SUB, "deny",
+     "B3 + X-51: 8190 charges - the COST GUARD refuses it before the budget"),
     # --- THE RESIDUAL, PINNED RATHER THAN HIDDEN. ~8 KB of charging characters
     #     still hides a substitution, and padding past the backstop still does
     #     too. Both are ledgered `allow` deliberately; a flat budget cannot
     #     close either, and only an unbounded walk would - which is a timeout,
     #     and on this gate a timeout is a deny nobody can override.
-    ("secrets-gate", "echo " + "'" * (_W + 10) + " " + _SUB, "allow",
-     "B3 residual: ~8 KB of charging characters still exhausts the budget"),
+    ("secrets-gate", "echo " + "'" * (_W + 10) + " " + _SUB, "deny",
+     "B3 residual CLOSED by X-51: ~8 KB of charging characters is refused"),
     ("secrets-gate", 'echo "' + "x" * 20000 + '$(cat .env)"', "allow",
      "B3 residual: padding past the 16384 backstop returns to prefix-cap "
      "behaviour - the hole moves from ~8 KB to ~16 KB, it does not close"),
@@ -3650,8 +3650,9 @@ _B3 = [
     #     counterpart and stays ledgered as X-43). The control carries no `<<`
     #     and must stay allow/allow: it is what proves the rows below are about
     #     the trigger and not about the padding.
-    ("secrets-gate", 'echo "axxb" ' + "$" * 8192 + ' "$(cat .env)"', "allow",
-     "X-46 control: no `<<`, budget binds on BOTH, agreeing residual"),
+    ("secrets-gate", 'echo "axxb" ' + "$" * 8192 + ' "$(cat .env)"', "deny",
+     "X-46 control + X-51: the COST GUARD refuses 8192 delimiters outright, so "
+     "this agrees by REFUSAL now rather than by shared residual"),
 ]
 # [X-48] The QUOTE-STATE half of the one-CR class, which X-46's budget fix does
 # NOT reach and which is older than B3 (identical on the pre-B3 tree). `_hd=1`
@@ -3669,12 +3670,20 @@ ledger("secrets-gate",
        "one CR + an unbalanced quote in a comment captures the shell walk in "
        "single-quote state, so it lifts nothing while the SDK lifts normally")
 
-ledger("secrets-gate",
-       bash("echo x\r" + "$" * 8190 + " " + _SUB),
-       ("deny", "allow"), ("deny", "deny"), "X-43",
-       "a CR lifts the SHELL's budget (X-46) but the SDK has no _CMD_CTLWS "
-       "counterpart, so it still exhausts and does not lift - shell-stricter, "
-       "the tolerated direction; giving the SDK the flag closes it")
+# [X-43, X-51] UNREACHABLE, NOT REPAIRED - and the distinction is the whole
+# point of keeping the row's payload here as an asserting check rather than
+# deleting it. X-43's mechanism needs the SDK's _SUBST_BUDGET (8192 charges) to
+# EXHAUST, which needs >8192 charging characters inside the first
+# _SUBST_SCANMAX bytes. X-51's cost guard caps delimiters in exactly that
+# prefix at _CMD_MAXJUMP (4096), and every charging character is a delimiter,
+# so the budget can no longer be driven to exhaustion through a gate AT ALL.
+# The walk is unchanged and still wrong; nothing can reach it. RELAXING
+# _CMD_MAXJUMP ABOVE _SUBST_BUDGET RE-OPENS THIS - that is why the numbers'
+# relationship is asserted below rather than left as a coincidence.
+differential("secrets-gate", bash("echo x\r" + "$" * 8190 + " " + _SUB),
+             "deny",
+             "X-43 unreachable under X-51: the cost guard refuses the payload "
+             "before either budget can exhaust")
 
 # [X-46 / X-49] The `<<` budget lift stays SHELL-ONLY. Mirroring it into the SDK
 # was tried twice and reverted twice: first because the two walks truncated over
@@ -3683,13 +3692,17 @@ ledger("secrets-gate",
 # the mirror, a segment past the shell's cap gets an SDK budget the shell never
 # gets, and `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + a substitution
 # goes allow/allow -> shell-ALLOW / SDK-DENY. Ledgered against X-49.
-ledger("secrets-gate", bash('echo "a<<b" ' + "$" * 8192 + ' "$(cat .env)"'),
-       ("deny", "allow"), ("deny", "deny"), "X-49",
-       "`<<` lifts the SHELL's budget; mirroring it into the SDK is unsound "
-       "while the two walks bound different domains")
-ledger("secrets-gate", bash("echo $((1<<2)) " + "$" * 8192 + ' "$(cat .env)"'),
-       ("deny", "allow"), ("deny", "deny"), "X-49",
-       "same, via an arithmetic left shift - no heredoc anywhere")
+# Same story as X-43 above: both spellings need 8192 charges to land, and the
+# cost guard refuses anything over 4096 delimiters in that prefix. The DOMAIN
+# asymmetry these two were filed against is NOT fixed - it is still live at
+# sizes under the caps, which is what the pure-ASCII row further down still
+# proves and why X-49 stays open.
+differential("secrets-gate", bash('echo "a<<b" ' + "$" * 8192 + ' "$(cat .env)"'),
+             "deny",
+             "X-49 budget spelling, unreachable under X-51's cost guard")
+differential("secrets-gate", bash("echo $((1<<2)) " + "$" * 8192 + ' "$(cat .env)"'),
+             "deny",
+             "X-49 arithmetic-shift spelling, unreachable under X-51's guard")
 # X-49 itself, in its plainest form: PURE ASCII, so it cannot be read as a
 # leftover of X-47's unit split. The control has no second segment.
 differential("secrets-gate",
@@ -3857,8 +3870,8 @@ if _r_armed.returncode == 0:
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 
-check(f"known-defect ledger holds exactly 5 open rows (got {LEDGER_OPEN})",
-      LEDGER_OPEN == 5,
+check(f"known-defect ledger holds exactly 2 open rows (got {LEDGER_OPEN})",
+      LEDGER_OPEN == 2,
       "a row was added or removed without updating this count")
 
 print(f"\n{passed} passed, {failed} failed")

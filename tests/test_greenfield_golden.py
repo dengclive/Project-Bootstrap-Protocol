@@ -2804,7 +2804,16 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "fab1c188b4ae028ac3b8fddc48ee05041466b4b842ae602f8e713fa69e881599",
+        # [freeze-exception no. 56, 2026-08-12] X-51 - the cost guard.
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "0cc0725e56bcecd78ed7489ab034226fa891068f48ecd2155090e6835d4885d8",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3023,7 +3032,16 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "4d26810591fb1be81e56dfd2e5c00e254c9f567d179cdb2a384bd759497b1492",
+        # [freeze-exception no. 56, 2026-08-12] X-51 - the cost guard.
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "259e4271e73663c0f3891c8f478946ae462a795e1b45d5462b722260f1b1f45f",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3189,7 +3207,16 @@ EXPECTED_DIGESTS = {
         # made the shell's lifted set a SUPERSET of the SDK's, which review
         # showed is false - `_hd=1` also TOKENISES the comment body, and an
         # unbalanced quote there captures the walker (X-48, older than B3).
-        "0a7d8a5fb3ec6192bda2ad6bde64205121843483517448b38b0ed230768eac28",
+        # [freeze-exception no. 56, 2026-08-12] X-51 - the cost guard.
+        # `_cost_guard` lands in the shared `_HOOK_HEADER` and is called
+        # from `_read_cmd`, so EVERY emitted hook moves. Counts are
+        # unchanged (57/69/59, service 79 / agent 93): this adds a
+        # refusal path, no new action. Why it exists: a PreToolUse hook
+        # that exceeds its timeout is CANCELLED and the tool call
+        # PROCEEDS, so padding alone bypassed any gate whose cost
+        # crossed 60 s - proven live, `pip install evilpkg` behind
+        # 128 KB still reached rc=2 at 59.97 s and was killed first.
+        "c8b69c802f58ca47eac8cf0199135544c517237c417ee4071dec245610da323d",
 }
 
 EXPECTED_ACTION_COUNTS = {

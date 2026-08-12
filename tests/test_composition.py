@@ -164,7 +164,7 @@ def _const(text, name):
     return int(m.group(1)) if m else None
 
 
-for _n in ("_SUBST_BUDGET", "_SUBST_SCANMAX"):
+for _n in ("_SUBST_BUDGET", "_SUBST_SCANMAX", "_CMD_MAXLEN", "_CMD_MAXJUMP"):
     _t, _s = _const(_tmpl, _n), _const(_sdk, _n)
     check("%s agrees across substrates" % _n,
           _t is not None and _t == _s,
@@ -182,6 +182,26 @@ check("the cost backstop cannot undercut the budget",
       _const(_tmpl, "_SUBST_SCANMAX") >= _const(_tmpl, "_SUBST_BUDGET"),
       "_SUBST_SCANMAX < _SUBST_BUDGET makes the length cap the effective bound "
       "and drops the 'always reaches byte _SUBST_BUDGET' guarantee")
+
+# [X-51] THE GUARD'S RELATIONSHIP TO THE BUDGET, ASSERTED RATHER THAN LEFT AS A
+# COINCIDENCE - because THREE known defects currently rest on it. `_CMD_MAXJUMP`
+# caps delimiters in the first `_SUBST_SCANMAX` bytes, every charging character
+# is one of those delimiters, and exhausting `_SUBST_BUDGET` needs more charges
+# than the cap allows. So while MAXJUMP < BUDGET the budget cannot be driven to
+# exhaustion through a gate at all, which is what makes X-43 and X-49's two
+# budget spellings UNREACHABLE (they are asserted as plain deny rows in the
+# differential, with their walks still unrepaired underneath).
+#
+# RAISING MAXJUMP ABOVE THE BUDGET SILENTLY RE-OPENS ALL THREE. It is a
+# tempting change - it is exactly what would re-arm B3's gate-level fences,
+# which this guard disarmed - and it was measured and rejected: a cap of 10240
+# costs 33.3 s of the 60 s ceiling against 16.3 s at 4096, i.e. a 1.8x margin
+# for a bound whose failure mode is a BYPASS. If that trade is ever revisited,
+# this check is the place it has to be argued.
+check("the cost guard's density cap stays below the substitution budget",
+      _const(_tmpl, "_CMD_MAXJUMP") < _const(_tmpl, "_SUBST_BUDGET"),
+      "_CMD_MAXJUMP >= _SUBST_BUDGET makes budget exhaustion reachable again "
+      "and re-opens X-43 and both X-49 budget spellings")
 
 # [B3] The charging set is the whole parity argument, so pin its MEMBERSHIP on
 # both substrates. `#`, `}`, `(` and `)` must stay OUT: each is conditional in

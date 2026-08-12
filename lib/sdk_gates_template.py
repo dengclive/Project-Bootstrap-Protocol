@@ -3464,14 +3464,115 @@ def _format_lint_gate(config):
     return format_lint_gate
 
 
+# [X-51] THE COST GUARD'S SDK HALF. Shell parity: `_cost_guard` in the header,
+# called from `_read_cmd`, with the SAME two numbers.
+#
+# THIS SIDE HAS NO COST PROBLEM AND STILL NEEDS THE GUARD. The payloads that
+# push a shell gate past its timeout cost this module 0.10-0.45 s, because it
+# walks in Python rather than in bash. The guard is here for PARITY, which is
+# this repo's central invariant: without it the same command is shell-DENY (the
+# guard fired) and SDK-allow, a divergence manufactured by the fix itself. That
+# has happened twice already on the X-46 mirror; it is not happening a third
+# time.
+#
+# BYTES, matching the shell's `local LC_ALL=C` scoping exactly. `len(str)` counts
+# code points and the shell's `${#var}` counts whatever the locale says, so the
+# comparison is done on the UTF-8 ENCODING on both sides - X-47's split, not
+# re-opened here. `surrogatepass` for `_budget_len`'s reason: a command arrives
+# through JSON and a lone surrogate must weigh what it weighs to bash rather
+# than crash a PreToolUse hook. Every member of the jump set is ASCII, so
+# counting set BYTES in the byte prefix is identical to what bash counts in the
+# same prefix under the C locale, multibyte padding included.
+_CMD_MAXLEN = 81920
+_CMD_MAXJUMP = 4096
+_JUMP_BYTES = b"()\\\"'`$"
+
+
+def _cost_guard(input_data):
+    """`None` if the command is cheap enough to gate, else a deny decision.
+
+    Two conditions because there are two independent cost terms, and neither
+    predicate catches the other's class (measured on a benign corpus of this
+    repo's own files against the adversarial shapes):
+
+      LENGTH   total bytes. No substitution bound touches it - a 256 KB `-m`
+               argument costs the shell 87 s and a 256 KB heredoc 142 s with no
+               `$(` anywhere. Benign max 65556, cap 81920.
+      DENSITY  jump-target bytes in the first `_SUBST_SCANMAX` bytes, one walk
+               iteration each. Benign max 1306, the >30 s shapes start at
+               16379, cap 4096.
+    """
+    # THROUGH `_cmd_spellings`, NOT a second `.get("command")`. This module
+    # holds exactly ONE read site and tests/test_issue_fixes.py pins it there
+    # (a second reader gets an un-normalized string and re-opens the whole P4
+    # class). `_unf` is the raw spelling and is `""` precisely when the fold
+    # changed nothing, so `_unf or _norm` reconstructs the RAW command - which
+    # is what the shell half guards (`_cost_guard "$_rc_raw"`), so the two
+    # measure the same string.
+    _norm, _unf, _ = _cmd_spellings(input_data)
+    raw = _unf or _norm
+    if not raw:
+        return None
+    enc = raw.encode("utf-8", "surrogatepass")
+    if len(enc) > _CMD_MAXLEN:
+        return _deny(
+            f"command is {len(enc)} bytes, over the {_CMD_MAXLEN}-byte gate "
+            f"limit: it cannot be scanned inside this hook's timeout, and a "
+            f"gate that runs out of time is SKIPPED rather than obeyed, so it "
+            f"is refused instead of allowed unscanned")
+    prefix = enc[:_SUBST_SCANMAX]
+    jumps = sum(prefix.count(bytes((b,))) for b in _JUMP_BYTES)
+    if jumps > _CMD_MAXJUMP:
+        return _deny(
+            f"command holds {jumps} shell delimiters in its first "
+            f"{_SUBST_SCANMAX} bytes, over the {_CMD_MAXJUMP} limit: it cannot "
+            f"be scanned inside this hook's timeout, and a gate that runs out "
+            f"of time is SKIPPED rather than obeyed, so it is refused instead "
+            f"of allowed unscanned")
+    return None
+
+
+def _with_cost_guard(factory):
+    """Apply `_cost_guard` in front of every gate, at ONE site.
+
+    Wrapping the factory table rather than editing each gate is deliberate: the
+    shell half is a single call inside `_read_cmd`, and five separate per-gate
+    copies here is precisely the shape D3 records going wrong (one copy not
+    growing with the others). Gates whose tool carries no `command` - tdd-gate
+    on Write, format-lint-gate on PostToolUse - read an empty string and the
+    guard returns None, so this is inert for them rather than special-cased.
+    """
+    def _factory(config):
+        inner = factory(config)
+
+        async def _guarded(input_data, tool_use_id, context):
+            blocked = _cost_guard(input_data)
+            if blocked is not None:
+                return blocked
+            return await inner(input_data, tool_use_id, context)
+        # KEEP THE INNER CLOSURE'S IDENTITY. tests/test_sdk_gates.py's F7 check
+        # identifies the gate wired onto a surface by `hooks[0].__name__`, and
+        # that check exists because its predecessor asserted a symbol that never
+        # existed and was unconditionally true. A wrapper that renamed every
+        # gate to `_guarded` would blind it again - the same failure, one layer
+        # out. Copied by hand rather than with functools.wraps to avoid adding
+        # an import to the emitted module.
+        _guarded.__name__ = inner.__name__
+        _guarded.__qualname__ = getattr(inner, "__qualname__", inner.__name__)
+        return _guarded
+    return _factory
+
+
 _GATE_FACTORIES = {
-    "secrets-gate": _secrets_gate,
-    "spec-gate-commit": _spec_gate_commit,
-    "dependency-gate": _dependency_gate,
-    "test-gate": _test_gate,
-    "eval-gate": _eval_gate,
-    "tdd-gate": _tdd_gate,
-    "format-lint-gate": _format_lint_gate,
+    name: _with_cost_guard(factory) for name, factory in {
+        "secrets-gate": _secrets_gate,
+        "spec-gate-commit": _spec_gate_commit,
+        "dependency-gate": _dependency_gate,
+        "test-gate": _test_gate,
+        "eval-gate": _eval_gate,
+        "tdd-gate": _tdd_gate,
+        "format-lint-gate": _format_lint_gate,
+    }.items()
 }
 # PRIMARY event/matcher per gate - mirrors templates.HOOK_EVENT_MAP, which is
 # the shell suite's settings.json wiring. One entry per gate, exactly as the

@@ -986,6 +986,90 @@ _read_cmd(){
     if [ "$_CMD_RESOLVED" = "$_rc_folded" ] || [ "$_CMD_RESOLVED" = "$_rc_raw" ]
     then _CMD_RESOLVED=""; fi
   fi
+  _cost_guard "$_rc_raw"
+  return 0
+}
+
+# [X-51] THE COST GUARD. A gate that runs out of time is SKIPPED, not obeyed, so
+# a command too expensive to gate must be REFUSED rather than allowed unscanned.
+#
+# WHY THIS IS NOT PARANOIA - the bypass was executed end to end. A PreToolUse
+# hook that exceeds its declared `timeout` is CANCELLED, and only exit code 2
+# blocks a tool call; a cancelled process exits 124/137/143, never 2. Verified
+# live against Claude Code, not read off a doc: a hook that sleeps past
+# `timeout: 2` and would then `exit 2` is killed and the command RUNS, while the
+# same hook allowed to finish blocks it. So `pip install evilpkg` behind 128 KB
+# of padding still REACHES rc=2 - at 59.97 s - and is killed at the emitted
+# `timeout: 60` while every other Bash gate allows it. The deny never arrives.
+# `FAIL_CLOSED=1` does not help: it governs what this hook does on ITS OWN
+# error, and says nothing about what the harness does when it kills the hook.
+#
+# WHY HERE, AND NOT INSIDE THE WALK. A first attempt put an event-global budget
+# in `_cs_subst_scan` and denied from there. It failed twice over, both measured:
+#   * the walk's CHARGE SET deliberately excludes `(`/`)` and charges nothing in
+#     either balance loop (parity: charging there bills the shell 2 per backtick
+#     substitution and the SDK 1) - so the 16 KB worst case spent 24 of 8192
+#     charges and the budget never bound the shape that actually costs;
+#   * `hook_fail`'s `exit` CANNOT ESCAPE `done < <(cmd_segments ...)`, which is a
+#     process substitution. The subshell died, the consuming loop saw no
+#     segments, and the gate ALLOWED - the deny became the bypass it was meant
+#     to stop.
+# Both vanish here: `_read_cmd` runs in the PARENT of every command-bearing gate
+# (six of them route through it), so `hook_fail` exits for real and gets the
+# posture right for free - blocking gates exit 2, advisory ones degrade without
+# blocking. And a guard that never decides WHAT is lifted is not bound by the
+# walk's parity constraints, so it can count `(` and `)` - exactly what the
+# reverted attempt could not.
+#
+# TWO CONDITIONS, BECAUSE THERE ARE TWO INDEPENDENT COST TERMS. Measured across
+# a benign corpus (this repo's own files as heredocs, long argument lists, real
+# substitutions) and the adversarial shapes:
+#   DENSITY  jump targets in the first _SUBST_SCANMAX bytes, which is one walk
+#            iteration each. Benign max 1306; the shapes that cost >30 s start
+#            at 16379. Cap 4096 sits 3.1x above benign and 4x below the attack.
+#   LENGTH   total bytes. Untouched by any substitution bound - `git commit -m
+#            '<256KB>'` costs 87 s and a 256 KB heredoc 142 s with NO `$(`
+#            anywhere. Benign max 65556; cap 81920.
+# Neither alone separates - each catches only its own class, which is why both
+# are here and why a single length cap was rejected.
+#
+# SIZED, WITH THE WORST CASE UNDER THE CAPS MEASURED RATHER THAN ASSUMED:
+#     worst LENGTH shape at the cap            17.26 s
+#     crafted worst under BOTH caps            16.24 s
+#     benign 64 KB heredoc (must pass, does)   11.81 s
+# ~3.5x margin under the 60 s ceiling. SAY THE RESIDUAL PLAINLY: that margin is
+# eaten by the LENGTH term, not by the walk - a benign 64 KB heredoc already
+# costs 11.8 s - so a machine ~3.5x slower than the sizing one crosses anyway.
+# Closing that is X-50 (make the length term cheaper), not a tighter cap; a
+# tighter cap would start denying ordinary file writes.
+#
+# THE COST OF THE GUARD ITSELF IS TWO PARAMETER EXPANSIONS AND NO LOOP. The
+# substring and the delete-complement both run at C speed inside bash.
+#
+# BOTH NUMBERS ARE BYTES, PINNED, AND THAT IS X-47's LESSON APPLIED RATHER THAN
+# RE-LEARNED. `${#var}` and `${var:0:n}` are NOT byte counts and not character
+# counts either - they are whichever the AMBIENT LOCALE says, bytes under
+# `LC_ALL=C` and characters under a UTF-8 one, while the SDK mirror counts with
+# Python. Leaving it to the environment is exactly how X-47 put a substrate
+# SPLIT behind an environment variable. `local LC_ALL=C` is scoped to this
+# function and restored on return, the `_blen` / `_cs_btrunc` pattern; it is
+# safe to scope the WHOLE function that way here because the only glob inside
+# is the bracket below, so nothing else can change meaning.
+_CMD_MAXLEN=81920
+_CMD_MAXJUMP=4096
+_cost_guard(){
+  local _g="${1:-}" _gp _gj
+  local LC_ALL=C
+  if [ "${#_g}" -gt "$_CMD_MAXLEN" ]; then
+    hook_fail "command is ${#_g} bytes, over the ${_CMD_MAXLEN}-byte gate limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
+  fi
+  # Only the first _SUBST_SCANMAX bytes matter for the walk - past that it
+  # truncates - so the density test reads the same prefix the walk does.
+  _gp="${_g:0:$_SUBST_SCANMAX}"
+  _gj="${_gp//[^()\\\\\\"\\'\\`\\$]/}"
+  if [ "${#_gj}" -gt "$_CMD_MAXJUMP" ]; then
+    hook_fail "command holds ${#_gj} shell delimiters in its first $_SUBST_SCANMAX bytes, over the $_CMD_MAXJUMP limit: it cannot be scanned inside this hook's timeout, and a gate that runs out of time is SKIPPED rather than obeyed, so it is refused instead of allowed unscanned"
+  fi
   return 0
 }
 
