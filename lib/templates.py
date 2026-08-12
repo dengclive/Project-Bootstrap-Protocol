@@ -1114,14 +1114,30 @@ _cost_guard(){
 # norm_cmd "<cmd>" -> whitespace-normalized, one line per input line, each
 # padded with single spaces so `case` patterns can token-match.
 norm_cmd(){
-  local _s="${1:-}" _line _out=""
+  # [X-50] TWO-LEVEL ACCUMULATION, and it is B4's fix applied where B4 did not
+  # reach. `_out="$_out …"` in a per-LINE loop re-copies everything accumulated
+  # so far on every line, which is O(total^2): measured on the emitted function,
+  # 0.01 / 0.04 / 0.15 s at 16 / 32 / 64 KB - 3.3x per doubling, where linear
+  # would be 2x. B4 hit the identical shape inside the walk ("appending each
+  # lifted body to one growing string is O(total) per substitution") and fixed
+  # it with a small buffer flushed into the big one; the shared path never got
+  # the same treatment, and this function sits under `cmd_segments`, which
+  # dependency-gate alone calls FOUR times per event.
+  #
+  # `_buf` is bounded by `_CS_WIN`, so each append costs O(_CS_WIN) instead of
+  # O(total), and the flush runs total/_CS_WIN times. Semantics are untouched:
+  # the same bytes are appended in the same order and `_buf` is flushed on the
+  # ONE path out, below the loop.
+  local _s="${1:-}" _line _out="" _buf=""
   _s="${_s//$'\\t'/ }"; _s="${_s//$'\\r'/ }"
   _s="${_s//$'\\v'/ }"; _s="${_s//$'\\f'/ }"
   while [ "$_s" != "${_s//  / }" ]; do _s="${_s//  / }"; done
   while IFS= read -r _line; do
     _line="${_line# }"; _line="${_line% }"
-    _out="$_out $_line "$'\\n'
+    _buf="$_buf $_line "$'\\n'
+    if [ "${#_buf}" -gt "$_CS_WIN" ]; then _out="$_out$_buf"; _buf=""; fi
   done <<< "$_s"
+  _out="$_out$_buf"
   printf '%s' "$_out"
   return 0
 }
