@@ -2060,9 +2060,18 @@ def retrofit_digest_full(yaml_text):
 # + pip install evilpkg` went from a 139.58 s bypass to DENY in 5.8 s. See
 # freeze-exception no. 52 in tests/test_greenfield_golden.py for the per-file
 # measurement.
+# [freeze-exception no. 63, 2026-08-13] X-52 `_lastw` - and this one DOES move
+# verdicts, which is why no. 62's "not one verdict" sentence above must not be
+# read as covering it. The memo no. 62 shipped cached a decision on the
+# TRAILING word in `_cs_isinv`'s array phase, a live dependency-gate BYPASS
+# (`{ { { { s"h" -c 'pip install evilpkg'` was main=DENY / tip=ALLOW, and bash
+# runs it). Counts are still unchanged (service 79 / agent 93); the differential
+# grew 4092 -> 4104 rows to carry both directions of the defect. Full reasoning,
+# the cost table against bbf6434 rather than main, and the residual filed as
+# X-55 are in freeze-exception no. 63 in tests/test_greenfield_golden.py.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "8944424f68876f350a36a85fe85f045030877c384ca4b26a4b88e3a6110643f9",
-    "agent": "ae31f20bab5298a6ae31e762fd723546f600949065a3d86e00b80c42f7cd9b2b",
+    "service": "cc42cf22e889e41ab499e31772c4dc7985be797b51ca72d062ac28603483647a",
+    "agent": "6708161594769e5661c467e3a76e740f02554b82636abb2e63eddb6b32c47cfd",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

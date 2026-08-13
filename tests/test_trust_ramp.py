@@ -286,8 +286,12 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # two solo blocks, X-52's fix and X-49's cost re-measurement. Logged late - the
 # session ran nine commits and four workflows before any entry was written,
 # which is the same omission 9041acf exists to correct.
+# +1 on 2026-08-13 for x52-lastw-array-phase: the array-phase half of X-52's
+# memo guard, found by reading the unreviewed tail rather than by any test.
+# Graded `corrected` because the first fix for it was itself wrong and the
+# plan review caught it before it was committed.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 21, f"{len(es)} entries")
+      len(es) == 22, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

@@ -2875,7 +2875,55 @@ EXPECTED_DIGESTS = {
         #   +13110  every hook - the shared header's two walk rewrites
         #   +17852  dependency-gate - the header plus `_cparts` / `_cjoin`
         #   gates.py - docstring only, no executable change
-        "470a6e86dadd7f6bb0357987557792b0040edfffbe6e646a6b6b09a82688d415",
+        #
+        # [freeze-exception no. 63, 2026-08-13] X-52 `_lastw`, AND THIS ONE IS
+        # NOT A BYTES-ONLY EXCEPTION - READ IT AGAINST no. 52 ABOVE, WHICH IT
+        # PARTLY RETRACTS. No. 52 says "VERDICTS ARE UNCHANGED - this is a COST
+        # fix, and that is what makes it a bytes-only exception". That was true
+        # of the commits it covered and is NOT true of this one: the memo it
+        # shipped cached a decision taken on the TRAILING word in the array
+        # phase, which was a LIVE dependency-gate BYPASS, so this re-baseline
+        # MOVES VERDICTS on purpose and in the deny direction.
+        #
+        # WHAT MOVED, all ratified at width 1 before the fix was written:
+        #   `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }`
+        #        main=DENY / tip=ALLOW / fixed=DENY, and bash RUNS it (file
+        #        marker, not captured stdout). `su`/`bash`/`eval` spell the
+        #        same bypass; `! ! ! ! ` is a second head spelling.
+        #   `{ { { { sh"a" "pip install evilpkg"; }; }; }; }`
+        #        main=ALLOW / tip=DENY / fixed=ALLOW - the `inv` arm cached in
+        #        the OTHER direction, i.e. the tip OVER-denies. Tolerated
+        #        direction, still wrong, and no row covered it.
+        # The differential grew 4092 -> 4104 rows to carry both directions;
+        # every new row is shell==sdk, which no pre-fix measurement covered.
+        #
+        # COST, three trees, equal caps, each verified to BE the tree it
+        # claims. The memo is KEPT because it is load-bearing where it is
+        # sound - on a decider with a separator behind it, bbf6434 (the last
+        # REVIEWED commit) is >240 s KILLED and this is 39.26 s - and it is
+        # DISABLED only where it is not. The give-back is that unsound class
+        # returning to bbf6434's cost: >240 s and 75.56 s vs bbf6434's >240 s
+        # and 73.39 s, i.e. this fix introduces nothing there. That class is
+        # fail-open ON THE REVIEWED COMMIT ALREADY and is filed as X-55, not
+        # absorbed. Note for anyone re-costing this: `fixed <= main` is close
+        # to a THEOREM here (main's walk is O(N x L) per call, this is
+        # O(L + N) with the same call count), so main is the wrong baseline;
+        # bbf6434 is the right one.
+        #
+        # PER-FILE, tip-vs-worktree PLAN ACTIONS, measured on THIS tree:
+        # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
+        # 0 removed, 13 emitted hooks move:
+        #   +1324  every hook - the shared header, one line and its comment
+        #   gates.py BYTE-IDENTICAL - this is a shell-only fix, so unlike
+        #   no. 52 there is not even a docstring delta to explain
+        #
+        # NUMBERING: "no. 52" is used TWICE in this file for two different
+        # changes (X-45 dated 2026-08-10 and X-52 dated 2026-08-12), and
+        # :2807 uses the range "no. 56-61". 63 is the next free integer above
+        # 62 (tests/test_retrofit.py:2051). The duplicate is recorded rather
+        # than renumbered, because the number is a citation handle and
+        # rewriting one breaks whatever already cites it.
+        "f3e38860e99e67240c08e92d21104b5facb23baca479d374bbcb9b8cb6fea8c6",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3105,7 +3153,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "0c4f30eb7aa44edfd30fa5dad10d4f06e4ab0107f2530e248c46caf04271f1e2",
+        "b071c51d4e12fa4e4137a5aa2f52abbc852b676650e6a1fe8515757ed46a18a2",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3283,7 +3331,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "f78ed9f33800ad7cd4ff8730e8fbf0318e4a105c2ca87fb91c670389f140be13",
+        "4acac5e20ea443d7fb02f2621ae5e67f1be104952bc77dd15f39f86974765686",
 }
 
 EXPECTED_ACTION_COUNTS = {

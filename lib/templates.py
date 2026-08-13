@@ -2350,8 +2350,29 @@ _cs_isinv(){
       [ "$_ai" -ge "$_an" ] && return 1
       _w="${_words[$_ai]}"
       _ai=$((_ai + 1))
-      # last element AND nothing unsplit behind it -> the trailing word
-      if [ "$_ai" -ge "$_an" ] && [ -z "$_tail" ]; then _lastw=1; else _lastw=0; fi
+      # The last element IS the trailing word, unconditionally: the phase
+      # switch splits `${_tail//[[:space:]]/ }`, i.e. the WHOLE remainder, so
+      # nothing is ever left unsplit behind the array.
+      #
+      # THE FIRST SPELLING ALSO TESTED `[ -z "$_tail" ]` AND THAT CONJUNCT IS
+      # UNSATISFIABLE, so `_lastw` was always 0 here and this phase memoised
+      # exactly what the memo note forbids. `_tail` is NOT emptied at the phase
+      # switch (the split reads a copy), and `_an` is derived FROM `_tail`, so
+      # `_an >= 1` already implies `_tail` non-empty. It was a LIVE
+      # dependency-gate bypass, not a latent one:
+      # `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }` measured
+      # main=DENY / tip=ALLOW, and bash RUNS it (file marker). `{` is
+      # head-transparent AND is not a `_cs_ops` separator, so four of them
+      # reach the array phase inside ONE segment; `! ! ! ! ` is a second
+      # spelling, and `su`/`bash`/`eval` bypass the same way. Patching this one
+      # line restored deny with every control unchanged.
+      #
+      # THE #54 X-36q ROW CANNOT REACH IT and that is why the differential was
+      # green: `su"do" ...` has a SHORT head, so it decides in the lazy phase
+      # where the guard works. The array phase needs `_CS_LAZYMAX` transparent
+      # tokens in front, which no existing row had. Rows for both spellings are
+      # pinned now.
+      if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi
     fi
     # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
     # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is

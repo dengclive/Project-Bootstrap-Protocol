@@ -329,13 +329,50 @@ check("the invoker memo is cleared at every tail RESTART and only there",
 #     arrives and it is `sudo`, an invoker. The first cut of the memo missed
 #     this and the #54 X-36q PART-QUOTED WRAPPER differential row caught it
 #     (shell=allow / sdk=deny / want=deny, the forbidden direction).
+#     THIS PIN USED TO BE HALF VACUOUS AND THE MISSING HALF WAS A LIVE BYPASS.
+#     It counted the two WRITE guards and pinned the LAZY-phase test, and both
+#     of those were right - while the ARRAY-phase test next to them read
+#     `[ "$_ai" -ge "$_an" ] && [ -z "$_tail" ]`, whose second conjunct cannot
+#     ever be true (`_tail` is not emptied at the phase switch, and `_an` is
+#     derived FROM `_tail`, so `_an >= 1` implies it is non-empty). `_lastw`
+#     was therefore pinned to 0 in that phase and the memo cached exactly what
+#     condition (2) forbids: `{ { { { s"h" -c 'pip install evilpkg'` measured
+#     main=DENY / tip=ALLOW with bash really running it. Guarding the WRITES is
+#     not the property; the ARRAY-phase test reaching 1 is.
+#
+#     WHICH CONJUNCT ACTUALLY BITES, stated because the first draft of this pin
+#     got it wrong in the other direction. Evaluated against the PRE-FIX source,
+#     THREE of the four below were ALREADY TRUE: the write-guard count (2), the
+#     lazy-phase full text, and `count('_lastw=1') == 2` -- the buggy line
+#     `... && [ -z "$_tail" ]; then _lastw=1; ...` still contains `_lastw=1`, so
+#     a text count cannot express reachability however its comment is worded.
+#     Only the array-phase full text bites, because the buggy spelling reads
+#     `"$_an" ] && [` and is not a substring of it. The other THREE are
+#     REGRESSION pins on parts that are currently right, not evidence that the
+#     bug is gone. The BEHAVIOUR is carried by the differential rows, which are
+#     the only thing here that would have failed on the buggy tree.
+#
+#     A FIFTH CONJUNCT WAS TRIED AND DROPPED: `'[ -z "$_tail" ]' not in _tmpl`,
+#     as a tripwire against the dead conjunct returning. Its teeth depended on
+#     `_code_only` happening to strip the one surviving occurrence (a comment
+#     line in `_cs_isinv`), so a reflow onto a code line would have failed it
+#     with no behaviour change; and it banned an ordinary shell idiom across the
+#     whole emitted template. The array-phase full text above already fails if
+#     the conjunct comes back, which is the tripwire that was wanted.
 check("the invoker memo is never written from a decision on the trailing word",
       _tmpl.count('[ "$_lastw" = "0" ] && _CS_INVMEMO=') == 2
       # `${_tail:${#_w}:1}` and not `[ "$_w" = "$_tail" ]`: the equality test is
       # O(tail) on every lazy token, which cost the `sudo` shape 150.95 -> 161.84 s
-      and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl,
+      and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      # THE CONJUNCT THAT BITES. The array phase's last element is ALWAYS the
+      # trailing word, because the split consumes the whole remainder. A second
+      # conjunct testing `_tail` is DEAD - `_an` is derived from `_tail`, so
+      # `_an >= 1` already implies it non-empty - and silently disables this
+      # phase's guard, which was a live dependency-gate bypass.
+      and 'if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      and _tmpl.count('_lastw=1') == 2,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
-      "not stable under a longer tail")
+      "not stable under a longer tail - in EITHER phase of the walk")
 check("the candidate join folds rather than re-joins",
       _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
                   'else _cand="$_cand $_CJ"; fi') == 2,
