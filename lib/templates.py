@@ -1400,8 +1400,11 @@ _CS_WIN=1024
 # for with a regression.
 # LOWER: it must exceed the walk length of a head-transparent token followed by
 # an ordinary word - `! 'run' 'run' ...` ends on token TWO and `_cs_isinv` runs
-# once per quoted run. Sizing below that measured 22.93 s -> 30.79 s at 4090
-# runs, inside both caps.
+# once per quoted run. Sizing below that measured 22.93 s -> 30.79 s at 2000
+# runs, inside both caps. (2000, not 4090: the 4090-run figure belongs to the
+# EAGER-split shape, an `echo` head at 33.51 -> 146.80 s. An earlier draft of
+# this correction carried 4090 across from the sentence it was fixing and
+# attached it to the wrong measurement.)
 # CORRECTED 2026-08-13: this paragraph used to say switching before then "costs
 # O(runs x tail) and crossed the 60 s ceiling". THAT CLASS CLAIM IS RETRACTED -
 # 30.79 s is under the ceiling and the 1.34x is a CONSTANT. It was measured at
@@ -1414,7 +1417,9 @@ _CS_WIN=1024
 # 4f4588e: claiming a removed TERM for a constant-factor win is an error this
 # file has already made once and retracted.
 # A WRAPPER head is a different case - `_seen=1` keeps the walk running to the
-# end of the tail and the memo cannot help by construction. That is X-55, open.
+# end of the tail, which is X-54; and where the decider STAYS the trailing word
+# the memo cannot help by construction, which is X-55. Both open, and X-55 is
+# pre-existing at bbf6434 rather than introduced here.
 # UPPER: every lazy step is a whole-tail expansion, so a large value re-opens
 # the very quadratic this closes; at _CS_LAZYMAX the worst case is that many
 # expansions before the split makes the rest linear.
@@ -2475,10 +2480,16 @@ _cs_isinv(){
     # first quoted run, which classifies `other` with no wrapper seen and ENDS
     # the walk. `_cs_isinv` runs once per quoted run and `_CS_TAIL` only resets
     # at a segment break, so that is O(runs x tail): measured 23.00 s on main
-    # against 30.79 s here, a 1.34x REGRESSION that crosses the 60 s ceiling at
-    # n=4090 on a shape main clears. Windowing the split was tried first and
-    # only got it to 30.79 s, because `${_tail:$_CS_WIN}` copies the remainder
-    # anyway.
+    # against 30.79 s here, a 1.34x REGRESSION at n=2000. Windowing the split
+    # was tried first and only got it to 30.79 s, because `${_tail:$_CS_WIN}`
+    # copies the remainder anyway.
+    # CORRECTED 2026-08-13: this used to read "a 1.34x REGRESSION that crosses
+    # the 60 s ceiling at n=4090 on a shape main clears". BOTH HALVES WERE
+    # WRONG and both are retracted. 30.79 s is UNDER the 60 s ceiling, so this
+    # cut was never a bypass - only the EAGER split (`echo` head, 4090 runs,
+    # 146.80 s) ever crossed it, and n=4090 was carried over from that
+    # different shape. 1.34x is a constant, not a class change: main is
+    # O(runs x tail) on this shape too. See freeze-exception no. 66.
     #
     # Stepping `_CS_LAZYMAX` tokens lazily before switching makes THAT shape
     # never switch at all - it ends on token two - so the cost is exactly the

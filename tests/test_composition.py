@@ -226,7 +226,13 @@ check("the lazy-phase bound is shell-only and is not zero",
       "_CS_LAZYMAX=4" in _tmpl and "_CS_LAZYMAX" not in _sdk,
       "it decides when the shell swaps representation, never a verdict; an SDK "
       "twin would be a boundary to keep in sync for a number the SDK cannot "
-      "observe. Zero or one re-opens the O(runs x tail) regression")
+      # The class claim in this rationale is RETRACTED (2026-08-13, no. 66):
+      # zero or one costs a 1.34x CONSTANT (22.93 -> 30.79 s at 2000 runs,
+      # under the ceiling), not a re-opened O(runs x tail) term - the memo
+      # returns before the tail is copied, so the shape is O(1) per call at
+      # any bound. The pin is KEPT: the constant is real and the value is
+      # still the sized one.
+      "observe. Zero or one costs a 1.34x constant, not a class change")
 check("the walk's cost window is shell-only",
       "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
       "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "

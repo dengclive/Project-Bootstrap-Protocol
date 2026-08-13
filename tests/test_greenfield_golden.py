@@ -2828,13 +2828,17 @@ EXPECTED_DIGESTS = {
         #      `_CS_LAZYMAX` (4) tokens LAZILY, exactly as the original did,
         #      and only a walk still going after that splits the remainder.
         #      91.16 s -> 0.90 s on the 40000-token walk in isolation.
-        #      THE BOUND TOOK THREE ROUNDS AND EACH WRONG VALUE WAS ITS OWN
-        #      BYPASS, all caught by adversarial review and reproduced at
-        #      width 1: splitting EAGERLY on every call sent an `echo` head
-        #      with 4090 runs 33.51 s -> 146.80 s; switching after the HEAD
-        #      sent a `!` head with 2000 runs 22.93 s -> 30.79 s; windowing
-        #      the split only reached 30.79 s, because `${_tail:$_CS_WIN}`
-        #      copies the remainder anyway. At 4 every head class measured
+        #      THE BOUND TOOK THREE ROUNDS TO SIZE, all caught by adversarial
+        #      review and reproduced at width 1: splitting EAGERLY on every
+        #      call sent an `echo` head with 4090 runs 33.51 s -> 146.80 s;
+        #      switching after the HEAD sent a `!` head with 2000 runs
+        #      22.93 s -> 30.79 s; windowing the split only reached 30.79 s,
+        #      because `${_tail:$_CS_WIN}` copies the remainder anyway.
+        #      CORRECTED 2026-08-13: this used to open "AND EACH WRONG VALUE
+        #      WAS ITS OWN BYPASS". Only the FIRST was - 146.80 s crosses the
+        #      60 s ceiling, 30.79 s does not, so calling the other two
+        #      bypasses overstates them by the row's own definition of the
+        #      word. See no. 66. At 4 every head class measured
         #      0.88-0.92x of main - AT d526733, WHICH CONTAINS NO `_lastw` AT
         #      ALL, and not re-run since; see no. 65. NONE of this was
         #      visible to the suite,
@@ -2989,7 +2993,56 @@ EXPECTED_DIGESTS = {
         # `lib/templates.py` only and `lib/sdk_gates_template.py` is untouched.
         # Verdicts and the 4104-row differential are unaffected: no executable
         # line changed in either substrate.
-        "8c4b8a9a188efd8bf3d32f3a4efda369ecd2e37991747a0522418017fc1a729c",
+        #
+        # [freeze-exception no. 66, 2026-08-13] NO. 65's RETRACTION WAS ITSELF
+        # INCOMPLETE, AND THIS IS THE SWEEP THAT FINISHES IT. A second
+        # adversarial round found the class claim no. 65 retracts still live in
+        # THREE places, one of them shipped verbatim into the emitted hooks:
+        #   lib/templates.py (emitted header)  "a 1.34x REGRESSION that crosses
+        #       the 60 s ceiling at n=4090 on a shape main clears"
+        #   no. 52's block above              "EACH WRONG VALUE WAS ITS OWN
+        #       BYPASS"
+        #   tests/test_composition.py         "Zero or one re-opens the
+        #       O(runs x tail) regression"
+        # Only the EAGER split (`echo` head, 4090 runs, 146.80 s) ever crossed
+        # the ceiling. The other two cuts reached 30.79 s at 2000 runs, under
+        # it - a 1.34x constant against main's 22.93 s. All three now carry the
+        # retraction, verified by grep across the tracked tree rather than by
+        # inspection of the places I happened to remember.
+        #
+        # NO. 65 ALSO INTRODUCED A WRONG NUMBER, now fixed: its corrected
+        # sentence bound "22.93 -> 30.79 s" to 4090 runs. Two independent
+        # records (no. 52's block, and the X-52 backlog row) both say 2000; the
+        # 4090 belongs to the eager-split shape and was carried across from the
+        # sentence being corrected. The X-52 row's correction block also said
+        # "FOUR OF ITS CLAIMS ARE RETRACTED" when a fifth was standing in the
+        # same cell, and quoted the suite as 9667 when its own commit made it
+        # 9668. Both fixed. The lesson is recorded in the row: a retraction
+        # that is not driven by an exhaustive grep is a retraction that will be
+        # incomplete, and this branch has now proved that three times
+        # (441fe26, no. 65, and the X-54 row below).
+        #
+        # THE SDK SUBSTRATE MOVES THIS TIME, WHICH NO PREVIOUS X-52 EXCEPTION
+        # DID. lib/sdk_gates_template.py said flatly "it moves no verdict" -
+        # true of THAT module, false of the fix, since b1fcc85 was a live
+        # shell-side bypass. Scoped rather than deleted. Consequence:
+        # `.claude/sdk_gates/gates.py` is NO LONGER byte-identical -
+        # 26a35595423d77d6 -> c4cd1cae9a627b05. VERIFIED, NOT ASSERTED: the
+        # executable AST with docstrings stripped is unchanged at
+        # f71ec4a81bae9f826e39d06f361dac5f on both sides, so the parity surface
+        # is intact and only the docstring moved. That check is the reason this
+        # exception can claim what no. 52 claimed about gates.py while the
+        # bytes differ.
+        #
+        # WHAT MOVED, counted by rendering both trees and diffing rather than
+        # from memory: 12 of this fixture's 57 actions - the 11 hook bodies
+        # that embed the shared header, plus gates.py. Action count unchanged
+        # at 57. Verdicts and the 4104-row differential unaffected: no
+        # executable line changed in either substrate. (An earlier draft of
+        # this paragraph said "all 13 emitted hook bodies"; 13 is the
+        # full_autonomous fixture's count, not this one. Checked, not recalled
+        # - which is the whole subject of this exception.)
+        "15248167c9cd60e8892aaf686078c6a341633c6ca97627ca2cde55bd5fcd2e0d",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3219,7 +3272,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "6fdb44b2a7d3d2bb22cb4846e2cf8aa321328331767b9ed04ca87399c5c8a0f2",
+        "00fc7ddea505de55c3beae9bdf43aab03ad813f483b7bd7fcb06b24b6ccd756e",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3397,7 +3450,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "a2c469b7b4cf20b17a4059c595eb52d9acabc609b2fb2a7eab59839bdddbb4b5",
+        "b0a5cdb9e6240b1ea071bdcef22f8c2b03e02dd97944bba8bcd0da1d6f6ac729",
 }
 
 EXPECTED_ACTION_COUNTS = {

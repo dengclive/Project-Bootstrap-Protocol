@@ -2079,9 +2079,21 @@ def retrofit_digest_full(yaml_text):
 # untouched. Full reasoning, plus the provenance annotations added to no. 52's
 # now-stale cost figures, are in freeze-exception no. 65 in
 # tests/test_greenfield_golden.py.
+# [freeze-exception no. 66, 2026-08-13] no. 65's retraction was itself
+# incomplete; this is the sweep that finishes it. The retracted class claim was
+# still live in three places including the emitted header, no. 65 bound the
+# 22.93 -> 30.79 s measurement to the wrong run count (4090; it is 2000), and
+# `lib/sdk_gates_template.py`'s flat "it moves no verdict" is now scoped to that
+# module. THE SDK SUBSTRATE MOVES THIS TIME: `.claude/sdk_gates/gates.py` is no
+# longer byte-identical, but its executable AST with docstrings stripped is
+# unchanged (f71ec4a81bae9f826e39d06f361dac5f both sides, verified by rendering
+# and comparing rather than asserted), so the parity surface holds. Counts
+# unchanged (service 79 / agent 93); the 4104-row differential is untouched.
+# Full reasoning is in freeze-exception no. 66 in
+# tests/test_greenfield_golden.py.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "dda18445f0cdad69a9d94274179b089e1c357b150bc31635827a97b03ef9c450",
-    "agent": "664898a5dc82c0a0842f86245a183383bae1fe682f1506aee3de140a43a65cb7",
+    "service": "339bb192c6f92c41367f16ac82c42fb0fbbcc65cc4e374c8a3de61f351c064dd",
+    "agent": "2e622610220fd75d499bc433e95c674e3c122b9897ce13f7f381378997949bf8",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

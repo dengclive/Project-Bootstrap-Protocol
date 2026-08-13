@@ -3501,8 +3501,14 @@ def _cost_guard(input_data):
     so the same shapes DENY in 6.2 s. The COST CLASS is not closed - a wrapper
     head still runs the walk to the end of the tail on every quoted run (X-54,
     open) - but that is a shell cost property too and this side is unaffected. Nothing changed on THIS side: the fix is a
-    shell cost property, it moves no verdict, and this module was already
-    paying 0.10-0.45 s for those shapes. What these two close is the length and
+    shell cost property, THIS MODULE'S verdicts are unchanged, and it was
+    already paying 0.10-0.45 s for those shapes. CORRECTED 2026-08-13: this
+    used to say flatly "it moves no verdict", and scoped to the whole fix that
+    is FALSE - b1fcc85's memo was a live dependency-gate bypass on the SHELL
+    side (main=DENY / tip=ALLOW), fixed in 0d24cc3, and the differential grew
+    4092 -> 4104 rows to carry it. What survives is the narrow claim: the
+    Python substrate's own verdicts did not move, which is why the new rows
+    are all shell==sdk. See freeze-exception no. 66. What these two close is the length and
     density classes. Neither
     predicate catches the other's class (measured on a benign corpus of this
     repo's own files against the adversarial shapes):
