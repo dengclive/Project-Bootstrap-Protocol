@@ -2337,11 +2337,32 @@ _cs_isinv(){
       # Is this the TRAILING word? If so it is not provably complete - see the
       # memo note - because the next quoted run can EXTEND it.
       #
-      # `${_tail:${#_w}:1}`, NOT `[ "$_w" = "$_tail" ]`. The equality test
-      # compares against the WHOLE tail and is therefore O(tail) on every lazy
-      # token, which is the same mistake this function has now made five times
-      # over: it cost the `sudo` shape 150.95 s -> 161.84 s. Both the length and
-      # the one-character slice are bounded by the WORD, which is short.
+      # `${_tail:${#_w}:1}`, NOT `[ "$_w" = "$_tail" ]` - a ~3x CONSTANT-FACTOR
+      # win, and NOT the class change this comment used to claim.
+      #
+      # THE ORIGINAL CLAIM WAS "bounded by the WORD, which is short". THAT IS
+      # FALSE, and it was frozen into `test_composition` before anyone checked
+      # it. bash computes MB_STRLEN over the WHOLE variable before it slices,
+      # so a substring costs O(tail) REGARDLESS OF OFFSET. Measured on bare
+      # bash 5.3.15, 20000 reps, LC_ALL=C, no repo code involved:
+      #     len  20004   offset 4: 412 ms   offset len-1: 441 ms
+      #     len 200004   offset 4: 5321 ms  offset len-1: 5323 ms
+      # 10x the length is ~13x the time, and the offset makes no difference at
+      # all - which is the whole point. Same harness, slice vs equality:
+      #     len   1000     55 ms vs    92 ms
+      #     len  10000    231 ms vs   593 ms
+      #     len 100000   2548 ms vs  7703 ms
+      # Both are linear in the tail; the slice is ~3x cheaper. That is worth
+      # having and it is all it is: the `sudo` shape moved 161.84 -> 159.52 s,
+      # 1.4%, which is the size of a constant-factor win and not of a removed
+      # quadratic.
+      #
+      # SO DO NOT SUBTRACT THIS TERM WHEN SIZING THE LAZY PHASE. It is still
+      # one of several whole-tail passes paid per lazy token, it still grows
+      # with `_CS_TAIL`, and `_CS_TAIL` only resets at a segment break - which
+      # is exactly the growth X-54 and X-55 are about. Found by adversarial
+      # review of this commit's own claim, and reproduced before being written
+      # down.
       if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi
     else
       # ARRAY PHASE - the remainder, split once. Reached only after the walk

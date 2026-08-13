@@ -2070,8 +2070,8 @@ def retrofit_digest_full(yaml_text):
 # the cost table against bbf6434 rather than main, and the residual filed as
 # X-55 are in freeze-exception no. 63 in tests/test_greenfield_golden.py.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "cc42cf22e889e41ab499e31772c4dc7985be797b51ca72d062ac28603483647a",
-    "agent": "6708161594769e5661c467e3a76e740f02554b82636abb2e63eddb6b32c47cfd",
+    "service": "2c6b74148cdcd9f76ccbc90a63ea451cf3927c08fe3d01c5812d5676714b2b0d",
+    "agent": "5c4dc3fde432cb26120878c0c14c2a2cb63a2e0e319f034c05754497fc7aa59e",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

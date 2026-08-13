@@ -2923,7 +2923,25 @@ EXPECTED_DIGESTS = {
         # 62 (tests/test_retrofit.py:2051). The duplicate is recorded rather
         # than renumbered, because the number is a citation handle and
         # rewriting one breaks whatever already cites it.
-        "f3e38860e99e67240c08e92d21104b5facb23baca479d374bbcb9b8cb6fea8c6",
+        #
+        # [freeze-exception no. 64, 2026-08-13] COMMENT ONLY, ZERO EXECUTABLE
+        # CHANGE - and unlike no. 63 immediately above, that claim is the whole
+        # point of this one. `41cc941` justified the trailing-word test with
+        # "bounded by the WORD, which is short". Adversarial review of the PR
+        # tail said that is false and MEASUREMENT ON BARE BASH CONFIRMED IT:
+        # bash takes MB_STRLEN over the whole variable before slicing, so
+        # `${_tail:${#_w}:1}` costs the same at offset 4 as at offset len-1
+        # (412 vs 441 ms at 20 KB; 5321 vs 5323 ms at 200 KB) and is O(TAIL),
+        # not O(word). The spelling is KEPT - it is a real ~3x constant and the
+        # two forms are semantically equivalent - but the justification shipped
+        # into 13 emitted hooks was wrong, and `test_composition` had frozen it.
+        # Only comments move. Verdicts, action counts and the 4104-row
+        # differential are untouched, and gates.py is byte-identical.
+        # Recorded as its own exception rather than folded into no. 63 because
+        # a future reader auditing "why did a frozen artifact move" is owed the
+        # answer "a claim in a comment was wrong", which is a different answer
+        # from no. 63's "a guard was wrong".
+        "55339b5b1faa993132aaf76db1ebcee37faada878433340197a53152572bea23",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3153,7 +3171,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "b071c51d4e12fa4e4137a5aa2f52abbc852b676650e6a1fe8515757ed46a18a2",
+        "85467f8f11fbef4cb4a6cf81ccd7df782d969c4523d3af407d79b77635395198",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3331,7 +3349,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "4acac5e20ea443d7fb02f2621ae5e67f1be104952bc77dd15f39f86974765686",
+        "11380e52922e7e8af570922f31336a5b0036b3d58555b2d63409bd5040830a42",
 }
 
 EXPECTED_ACTION_COUNTS = {

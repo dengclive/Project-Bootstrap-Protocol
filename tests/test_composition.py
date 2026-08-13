@@ -361,8 +361,14 @@ check("the invoker memo is cleared at every tail RESTART and only there",
 #     the conjunct comes back, which is the tripwire that was wanted.
 check("the invoker memo is never written from a decision on the trailing word",
       _tmpl.count('[ "$_lastw" = "0" ] && _CS_INVMEMO=') == 2
-      # `${_tail:${#_w}:1}` and not `[ "$_w" = "$_tail" ]`: the equality test is
-      # O(tail) on every lazy token, which cost the `sudo` shape 150.95 -> 161.84 s
+      # `${_tail:${#_w}:1}` and not `[ "$_w" = "$_tail" ]`. THIS PIN'S ORIGINAL
+      # COMMENT SAID THE SLICE IS BOUNDED BY THE WORD. IT IS NOT - bash takes
+      # MB_STRLEN over the whole variable before slicing, so both spellings are
+      # O(tail) and the slice is a ~3x CONSTANT, measured on bare bash (offset 4
+      # and offset len-1 cost the same to within 1%). The pin is kept because the
+      # constant is real and because the two spellings are semantically
+      # equivalent, NOT because it removes a term - see `_cs_isinv` for the
+      # numbers and for why sizing the lazy phase must still count this pass.
       and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
       # THE CONJUNCT THAT BITES. The array phase's last element is ALWAYS the
       # trailing word, because the split consumes the whole remainder. A second
