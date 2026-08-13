@@ -121,7 +121,7 @@ Tessera dispatches a task by spawning `claude -p` as a subprocess in the project
 
 **Runtime floor:**
 
-- **[seam 1.0.0] Minimum Claude Code runtime ≥ v2.1.210** (pinned in `binds`). Below this, a `PreToolUse` gate-hook timeout is reported to the model as a user rejection and an unattended session stalls; at ≥ v2.1.210 the timeout fails closed (tool call blocked, model gets a timeout error). Worktree-entry consent (≥ v2.1.206) and exact-match hyphen matchers (≥ v2.1.195) are subsumed by this floor.
+- **[seam 1.0.0] Minimum Claude Code runtime ≥ v2.1.210** (pinned in `binds`). Below this, a `PreToolUse` gate-hook timeout is reported to the model as a user rejection and an unattended session stalls. **[Corrected 2026-08-13, X-51.]** This clause used to continue *"at ≥ v2.1.210 the timeout fails closed (tool call blocked, model gets a timeout error)"*. **That is false in the fail-OPEN direction, and this file is the authoritative home of the pin, so the error propagated from here into the PRD.** Measured live at v2.1.227: a cancelled hook exits 124/137/143, only exit 2 blocks a `PreToolUse` call, and the call proceeds — the deny never arrives. The floor is KEPT for the no-stall behaviour above; it buys no fail-closed guarantee, and no runtime currently does. Worktree-entry consent (≥ v2.1.206) and exact-match hyphen matchers (≥ v2.1.195) are subsumed by this floor.
 
 **Session isolation:**
 
