@@ -1,6 +1,7 @@
 # Production-readiness analysis — `main`
 
-**Subject:** `main` @ **560588c** · **Baseline:** annotated tag `v2.7.4` →
+**Subject:** `main` @ **053a367** (re-based 2026-08-13; the layers below were
+written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` →
 `d884a43`, which is where this analysis started and against which every delta
 below is measured.
 
@@ -11,7 +12,8 @@ what a change actually bought.
 
 | layer | subject | status |
 |---|---|---|
-| **CURRENT ASSESSMENT** (below) | `main` @ 560588c | **what is true today** |
+| **RE-BASE** (below) | `main` @ **053a367** | **what is true today** |
+| HISTORY — CURRENT ASSESSMENT | `main` @ 560588c | superseded by PR #64 and PR #65; retained as evidence, **not re-measured** |
 | HISTORY — REVISION 1 | branch `fix/item1-…` @ e47d827 | superseded, retained as evidence |
 | HISTORY — §§0–9 (2026-08-08) | tag `v2.7.4` @ d884a43 | superseded **as a description of `main`**; still exactly true of the tag |
 
@@ -34,7 +36,70 @@ install.
 
 ---
 
-## CURRENT ASSESSMENT — `main` @ 560588c · 2026-08-10
+## RE-BASE — `main` @ `053a367` · 2026-08-13
+
+> **READ THIS BEFORE THE SECTION BELOW IT.** Everything under "CURRENT
+> ASSESSMENT — `main` @ 560588c" is **superseded by two merges** — PR #64
+> (`d20860b`) and PR #65 (`053a367`) — and is retained as evidence, not as a
+> description of `main`. It has not been re-measured. Where it and this block
+> disagree, this block is current.
+
+**THE VERDICT DOES NOT CHANGE: `main` is not production ready.** C-1 alone
+settles it and is untouched by either merge — `git ls-files | grep -icE
+'^LICENSE|/LICENSE'` returns **0** on `053a367`, re-run today. No amount of gate
+work moves a verdict a missing legal grant already decides.
+
+**But one of the verdict's two supporting legs got WORSE, and this document was
+arguing it backwards.** The section below books the cost class as an
+availability problem — an over-denial, a performance footnote, "far inside the
+ceiling … and it is not a defect". That premise is **inverted**. X-51 established
+live against Claude Code that a `PreToolUse` hook cancelled at its declared
+`timeout` exits 124/137/143, that only exit **2** blocks, and that the tool call
+therefore **proceeds**. Crossing the ceiling is not a refused benign command; it
+is **the gate being skipped and the command running unscanned**. Every sentence
+below that treats cost as latency describes a bypass while calling it an
+over-denial. The mechanism and the two sound postures are in
+`docs/agentic-harness-security-kb.md` §4.11.
+
+**What #65 bought, and what it did not.** It removed a real token-count
+quadratic: the `"! " × 40000 + pip install evilpkg` shape went from a 139.58 s
+bypass to a deny in seconds. It did **not** close the class. X-54 and X-55 are
+`open`, fail-open, execution-relevant and **pre-existing** — measured at
+`bbf6434` and on `main`, neither introduced nor closed by #65. A wrapper head
+(`sudo`) plus 2000 quoted runs sits inside both shipped caps and still crosses
+the 60 s ceiling. Getting there cost six self-inflicted regressions, five of them
+fail-open, one of which (`b1fcc85`) was a live dependency-gate bypass that
+reached `origin` inside an open, mergeable PR and survived every check this repo
+has.
+
+**Counts, re-derived today by this document's own stated rule** (first backticked
+legend token in the row's last cell). The rule was validated before use: it
+reproduces the tag's **88** exactly.
+
+| | tag `v2.7.4` | `6f77ccc` | `560588c` | `d20860b` | **`053a367`** |
+|---|---|---|---|---|---|
+| backlog rows `open` | 88 | 88 | 94 | 100 | **105** |
+| suite checks | — | — | 9,601 | — | **9,668 / 0 (25 files)** |
+| `test_substrate_differential.py` rows | — | — | 4,051 | — | **4,104** |
+
+Two corrections that follow from that table. §5's "**93** `open` *(88 at the
+tag)*" was measured when `main` was `6f77ccc`; by `560588c` — the commit this
+document names as its own subject — it was already 94. And the count has risen
+across two merges that each *closed* holes, because closing a hole here reliably
+files its residuals: X-52 is `done` and filed X-53 … X-58 doing it.
+
+**WHAT IS NOT RE-MEASURED, STATED SO IT IS NOT MISTAKEN FOR CURRENT.** Every
+wall-clock figure below — the Csq table, the 0.16 → 7.64 s comparison, the
+"~48× slower" line, the per-head-class ratios — was taken on `560588c` or
+earlier, before B3 re-landed and before the X-52 lazy walk and per-segment memo
+existed. **A fresh head-class cost measurement on `053a367` is owed and has not
+been run.** It is owed in the backlog and in the security KB, and it is not
+claimed anywhere. Do not quote a cost number from the section below as a
+statement about `main`.
+
+---
+
+## SUPERSEDED — `main` @ 560588c · 2026-08-10
 
 **PR #62 merged.** `main` moved `6f77ccc` → **`560588c`**, and for the first
 time the item-1 work is *in* `main`. This revision therefore answers a
@@ -75,14 +140,28 @@ open, and one cost regression that was introduced and then paid back.
 
 *\* `Csq` = a **q**uote-dense **c**ommand **s**ubstitution — `echo "$(` followed by dense `'('` and a closing `)"`. It is the shape the 60 s crossing below lives on, and the one B3 was later parked over.*
 
-### The one genuinely new thing: a fail-closed crossing that item 1 INTRODUCED, and `main` has since paid back
+### The one genuinely new thing: a fail-OPEN crossing that item 1 INTRODUCED
+
+> **[Corrected 2026-08-13, X-51 — the heading and the paragraph below said
+> fail-CLOSED, which is the unsafe inversion.]** This subsection originally read
+> "a fail-closed crossing … and `main` has since paid back", and asserted that
+> **a hook that runs long is a DENY the operator cannot override**. That is
+> exactly backwards. `FAIL_CLOSED=1` governs what the hook does on *its own*
+> error; it says nothing about the harness killing it. A hook cancelled at its
+> declared `timeout` exits 124/137/143, only exit **2** blocks a `PreToolUse`
+> call, and so the call **PROCEEDS**: the crossing is a **BYPASS**, not an
+> over-denial. Verified live against Claude Code. The original text is kept
+> below because the *measurements* in it are real and still show what the change
+> cost — only their security direction was wrong. Read every "over-denial" in
+> this subsection as "the gate is skipped and the command runs unscanned".
 
 This is the finding worth carrying, and neither earlier pass could state it,
 because it did not exist at the tag and was not yet fixed on the branch.
 
 `dependency-gate` is emitted with `timeout: 60` and `FAIL_CLOSED=1`
 (`dependency-gate.sh:41`, verified on `main`'s stock install), so **a hook
-that runs long is a DENY the operator cannot override**. On a 6,010-byte
+that runs long is a DENY the operator cannot override** *(retracted — see the
+correction above; it is an ALLOW nobody chose)*. On a 6,010-byte
 quote-dense substitution the shell took **0.16 s at the tag** and **65.08 s at
 `e47d827`** — past that ceiling, while the SDK completed and allowed. Item 1
 bought Class A closure at the price of a benign-input over-denial *and* a
@@ -102,6 +181,18 @@ slower** on this shape (0.16 → 7.64 s). That is the standing price of walking
 into substitutions at all. It is far inside the ceiling, and it is not a
 defect — but it is not free either, and the next person raising any bound in
 this area needs to know the headroom is finite.
+
+> **[Corrected 2026-08-13.]** Two things above are no longer true of `main`.
+> **(1) "Far inside the ceiling … not a defect" is retracted.** Cost here is an
+> open, fail-open bypass class, not headroom: X-54 measures a wrapper head plus
+> 2000 quoted runs — inside *both* shipped caps — over the 60 s ceiling on
+> `main` and on the fix alike, and its quote-free sibling crosses with no
+> quoting and zero jump targets. Both X-54 and X-55 are `open` and
+> **pre-existing**. **(2) The 0.16 → 7.64 s pair is a `560588c` measurement**
+> and has not been re-taken; the cost path has changed five times since (X-36y's
+> window, B3's re-land, X-50's quadratics, X-51's guard, X-52's lazy walk and
+> memo). The "headroom is finite" instinct in the last clause was right — it was
+> just measuring the wrong quantity.
 
 ### Everything else — why C-1 … C-8 cannot have moved, and the check that proves it
 
