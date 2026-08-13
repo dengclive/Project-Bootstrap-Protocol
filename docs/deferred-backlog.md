@@ -453,7 +453,13 @@ reached.
 | **T3** | ADVERSARIAL-only — needs a crafted payload; **defer and DISCLOSE** | — |
 | **T4** | feature gap, not a risk — ship as unimplemented, say so | — |
 
-**T0 — `C-1`, no LICENSE.** An owner decision, ~30 minutes of work, and it alone
+**T0 — `C-1`, no LICENSE; and `A-6`, added after review.** `A-6`
+(`spec-gate-commit`'s predicate) matches T0's own definition and was in no tier
+at all: it blocks the FIRST CODE COMMIT of every adopting project, which is
+"blocks any use" by definition. Tier it, size it, or close it — but it cannot
+be absent.
+
+**`C-1`, no LICENSE.** An owner decision, ~30 minutes of work, and it alone
 holds the "not production ready" verdict in `docs/production-readiness.md`.
 Fixing it does not make the protocol ready; it stops a non-technical item from
 masking the real state.
@@ -492,8 +498,9 @@ follow:
 
 **Therefore `X-54` is PROMOTED T3 → T2** and the owed head-class cost
 measurement stops being evidence-gathering and becomes a **precondition of
-shipping autonomous mode**. `X-55` and `C-3` stay T3: both still require a
-decider or a payload an agent does not construct incidentally.
+shipping autonomous mode**. `X-55` stays T3: it still requires a decider
+shape an agent does not construct incidentally. **`C-3` does NOT stay T3 — see
+the promotion below; filing it there was this tiering's worst error.**
 
 **Dynamic workflows — newly tiered, T2.** The DW-P4 prohibition is what stops
 agents driving commands through fixture hooks, and the ledger records **two
@@ -508,9 +515,35 @@ mechanical control, and write the answer down.** Permitting dynamic workflows as
 a first-class use while their only safeguard is prose is the same
 false-assurance shape T1 exists to eliminate.
 
-**T3 — deferred WITH THE REASON RECORDED, not forgotten.** `X-55`, `C-3`, and
-the remaining padding/cost classes. Each needs a deliberately constructed
-payload or a specific decider shape. **They are `open` and stay `open`**;
+**T2 (cont.) — `C-3` (readiness), PROMOTED T3 → T2 2026-08-13 after adversarial
+review, and the correction is worth stating in full because the original tiering
+was wrong in the dangerous direction.** **DISAMBIGUATION FIRST: this is
+`docs/production-readiness.md`'s C-3, "Nothing protects the gate substrate from
+itself" — NOT this file's own cluster-C row C-3 ("Doc-citation normalization
+pass", :52).** The two namespaces collide and every earlier reference here was
+unglossed.
+
+It was filed T3 as "adversarial-only". **That is false of it.** Measured
+end-to-end with a positive control: the five-hook Bash chain denies `cat .env`,
+then `printf "exit 0" > .claude/hooks/secrets-gate.sh` is **allowed by all
+five**, secrets-gate becomes 6 bytes, and `cat .env` returns the canary — **and
+the same overwrite works through the Write tool.** One ordinary write, no
+payload, no density tuning, no decider shape. It is a TOTAL gate defeat and it
+is the cheapest item on this page to reach.
+
+Accident-reachability is not hypothetical here: this repo's own ledger records
+**two** cases of well-meaning agents violating an explicit prohibition —
+`.claude/trust-ramp.md` logs a DW-P4 breach (agents drove commands through
+fixture hooks, 53 invocations) and a later round where "several wrote diff files
+into the session scratchpad despite an explicit read-only prohibition stated
+twice". Neither agent was an adversary. **Honest limit: nobody has yet MEASURED
+an agent accidentally overwriting a live gate hook.** The case rests on one
+write sufficing (measured) plus two logged prohibition violations, not on an
+observed incident.
+
+**T3 — deferred WITH THE REASON RECORDED, not forgotten.** `X-55` and the
+remaining padding/cost classes. Each needs a deliberately constructed payload or
+a specific decider shape. **They are `open` and stay `open`**;
 deferring is a scope decision, not a claim they are fixed. If the threat model
 widens to include prompt injection, THESE BECOME BLOCKING IMMEDIATELY, because
 injected content makes command text attacker-controlled.

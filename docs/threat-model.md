@@ -4,6 +4,12 @@
 > review. If accepted, the substance belongs in the emitted `secrets.md`, the
 > emitted README and the PRD — the point of this document is worthless if it
 > stays in the repo and never reaches the operator it is written for.
+>
+> **REVISED after adversarial review, 2026-08-13.** The first draft made three
+> unqualified promises in its "what these gates are good at" list that open,
+> measured rows contradict, and omitted §3 — the largest limitation on the page
+> — entirely. A reassurance list is the worst place in a calibration document to
+> overclaim, and the review caught it before this reached anyone.
 
 ## The one-sentence version
 
@@ -29,15 +35,31 @@ The threat model is **an agent making a mistake**: a wrong command, a
 hallucinated package, a path it should not have touched, a plausible-looking
 install line from a README it just read.
 
-- `cat .env`, `cat secrets/prod.yaml` and their relatives are denied on the
-  `Bash` surface as well as through the file tools.
-- Unapproved dependency installs are denied.
-- The gates fail closed on **their own** errors — a missing parser, an
-  unwritable filesystem, malformed input.
-- Verdicts agree across both substrates on a 4104-row differential.
+**Every item below is qualified, and the qualifications are not decoration.** An
+earlier draft of this list stated them flat; open, measured rows contradict the
+flat versions, and a reassurance list in a calibration document is the worst
+possible place for an overclaim.
 
-This is the common case, it is most of what goes wrong day to day, and the gates
-handle it.
+- **Plain secret reads are denied** — `cat .env`, `cat secrets/prod.yaml` and
+  close relatives, on the `Bash` surface as well as through the file tools.
+  **NOT all spellings.** Open rows measure splits where the gates disagree or
+  allow: an escaped double quote in an invoker argument on end-anchored patterns
+  (`X-36u`), an unbalanced quote anywhere in the invoker head — which splits
+  **four** of the `PreToolUse` gates (`X-36x`), and two recursion defects in the
+  secrets walk (`X-38`, `X-39`). Read: it stops the obvious spellings, not every
+  spelling.
+- **Unapproved dependency installs are denied** — but the approved list is baked
+  in at emission time and the documented approval path is inert (`C-5`), so what
+  you configure later may not be what runs.
+- **The gates fail closed on THEIR OWN errors** — missing parser, unwritable
+  filesystem, malformed input. **They do NOT fail closed when the runtime kills
+  them**; see §1.
+- **Verdicts agree across the two substrates on the 4104 differential rows** —
+  that is agreement on the corpus, not a general equivalence claim, and several
+  open rows above are precisely where they diverge off-corpus.
+
+That is still the common case and still most of what goes wrong day to day. It
+is simply narrower than "these gates block secret reads."
 
 ## OUT OF SCOPE — say no to these, explicitly
 
@@ -78,21 +100,48 @@ of a bash tokenizer's cost curve with the model nowhere in them.
 If your agent reads untrusted content and can then run shell commands, treat
 these gates as advisory.
 
-### 3. Download-then-execute
+### 3. THE GATES DO NOT PROTECT THEMSELVES — one ordinary write neuters all of them
+
+**This is the largest limitation on the page and an earlier draft omitted it
+entirely.** Backlog `C-3` in `docs/production-readiness.md`:
+
+```
+printf "exit 0" > .claude/hooks/secrets-gate.sh     # ALLOWED by all five gates
+cat .env                                            # now returns the secret
+```
+
+The hook file becomes 6 bytes and every protection above is gone. **The same
+overwrite works through the Write tool.** `printf "{}" > .claude/settings.json`
+is allowed too. There is no payload here, nothing crafted — it is one ordinary
+file write, and it is the cheapest defeat available.
+
+Nothing prevents an agent doing this by accident. This repo's own ledger records
+two cases of well-meaning agents violating explicit prohibitions — driving
+commands through fixture hooks (53 invocations), and writing files into a
+directory a prohibition had twice declared read-only. Neither was an adversary.
+**No one has yet observed an agent overwriting a live gate hook**, so treat this
+as measured-mechanism, not measured-incident — but do not treat the gates as
+tamper-resistant, because they are not.
+
+If you take one operational precaution from this page: **make
+`.claude/hooks/**` and `.claude/settings.json` read-only to the agent by some
+means outside these gates**, because the gates cannot do it for you.
+
+### 4. Download-then-execute
 
 `curl <url> -o python3 ; ./python3` and its variants are **not** reliably caught
 (backlog `C-6` / `X-36r` / `X-36i`). This one is listed under out-of-scope but is
 tracked as accident-reachable — an agent can arrive at it unaided — and is
 prioritised accordingly.
 
-### 4. The SDK substrate
+### 5. The SDK substrate
 
 `.claude/sdk_gates/gates.py` has **never been executed against the real
 `claude_agent_sdk`** — only against a hand-written stub (`C-7`). **The shell
 substrate is the supported one.** If you set `gate_substrate: "sdk-callable"`,
 you are ahead of the evidence.
 
-### 5. Autonomous loops — STATUS CHANGED 2026-08-13, READ THIS ONE TWICE
+### 6. Autonomous loops — STATUS CHANGED 2026-08-13, READ THIS ONE TWICE
 
 `loop.sh`, `goal-loop.sh` and `auto.sh` are **guarded skeletons that dispatch
 nothing** (`C-2`). They carry the eligibility guards, sentinels and usage-limit
@@ -126,6 +175,9 @@ advisory rather than enforcing.
   and a code review.
 - **Do not** rely on them if your agent consumes untrusted content and can run
   shell commands.
+- **Do** make `.claude/hooks/**` and `.claude/settings.json` unwritable by the
+  agent through some mechanism outside these gates (§3). This is the single
+  highest-value thing you can do, because it is what everything else rests on.
 - **Do** keep them: catching most accidents is worth having, provided you are
   not miscalibrated about the rest — which is the entire purpose of this page.
 
