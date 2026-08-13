@@ -2962,8 +2962,9 @@ EXPECTED_DIGESTS = {
         # memo write by one call, on a tail still a few bytes long. Main is
         # O(runs x tail) on this shape too, which is why the ratio was small.
         # The constant 4 is KEPT and UNCHANGED - only its justification moves.
-        # A WRAPPER head is the genuinely different case (`_seen=1` keeps the
-        # walk running and the memo cannot help); that is X-55 and still open.
+        # A WRAPPER head is the genuinely different case: `_seen=1` keeps the
+        # walk running to the end of the tail (X-54), and where the decider
+        # stays the trailing word the memo cannot help (X-55). Both open.
         #
         # THIS IS THE THIRD INSTANCE OF ONE HABIT and the pattern is the point:
         # no. 64 (`${_tail:${#_w}:1}` claimed O(word), measured O(tail)), X-49's
@@ -3038,11 +3039,15 @@ EXPECTED_DIGESTS = {
         # from memory: 12 of this fixture's 57 actions - the 11 hook bodies
         # that embed the shared header, plus gates.py. Action count unchanged
         # at 57. Verdicts and the 4104-row differential unaffected: no
-        # executable line changed in either substrate. (An earlier draft of
-        # this paragraph said "all 13 emitted hook bodies"; 13 is the
-        # full_autonomous fixture's count, not this one. Checked, not recalled
-        # - which is the whole subject of this exception.)
-        "15248167c9cd60e8892aaf686078c6a341633c6ca97627ca2cde55bd5fcd2e0d",
+        # executable line changed in either substrate. Fixture hook counts are
+        # 11 / 15 / 11, as stated at the top of this entry; 13 is the ai-agent
+        # probe install and belongs to no fixture gated here.
+        #
+        # [no. 66, SECOND AMENDMENT] The emitted header said main measured
+        # 23.00 s on the `!` shape; every other record of that measurement,
+        # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
+        # 11 hook bodies move; gates.py is unchanged by this amendment.
+        "162962219b8371da9f382ae35adccd36110f2e1ae2064ed08585f4a0944d4a93",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3272,7 +3277,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "00fc7ddea505de55c3beae9bdf43aab03ad813f483b7bd7fcb06b24b6ccd756e",
+        "d4dc7df186e3cf6f56db38fcac45a9806327a0f2cabf6747f583ca9767dd2c91",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3450,7 +3455,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "b0a5cdb9e6240b1ea071bdcef22f8c2b03e02dd97944bba8bcd0da1d6f6ac729",
+        "ef02b2cfeaa581dbd23497d2e9db7b2d0ae2a9dafc7499a4971a24731772a88c",
 }
 
 EXPECTED_ACTION_COUNTS = {

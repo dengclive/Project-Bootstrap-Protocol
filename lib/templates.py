@@ -2479,7 +2479,7 @@ _cs_isinv(){
     # paid a whole-tail normalise plus split, then read ONE array element - the
     # first quoted run, which classifies `other` with no wrapper seen and ENDS
     # the walk. `_cs_isinv` runs once per quoted run and `_CS_TAIL` only resets
-    # at a segment break, so that is O(runs x tail): measured 23.00 s on main
+    # at a segment break, so that is O(runs x tail): measured 22.93 s on main
     # against 30.79 s here, a 1.34x REGRESSION at n=2000. Windowing the split
     # was tried first and only got it to 30.79 s, because `${_tail:$_CS_WIN}`
     # copies the remainder anyway.
