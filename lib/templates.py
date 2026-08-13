@@ -3995,9 +3995,14 @@ mapfile -t PATS <<'PAT_EOF'
 PAT_EOF
 # --- [round-4 D15] per-PATTERN derivation, done ONCE ------------------------
 #
-# This gate runs under a 60 s PreToolUse timeout that fails CLOSED, so its
-# cost is not latency - it is a HARD BLOCK on benign input, in the gate with
-# no override path. Measured at b1782ec with a 202-pattern config and benign
+# This gate runs under a 60 s PreToolUse timeout. [CORRECTED 2026-08-13, X-51]
+# This used to say the timeout "fails CLOSED, so its cost is not latency - it is
+# a HARD BLOCK on benign input". BOTH HALVES ARE WRONG, and the design argument
+# below was built on them: a cancelled hook exits 124/137/143, only exit 2
+# blocks, so crossing the ceiling SKIPS the gate and the command runs. The cost
+# is therefore a SECURITY property, not an availability one. The work below is
+# still worth doing - it just buys bypass-resistance, not benign-input relief.
+# Measured at b1782ec with a 202-pattern config and benign
 # many-short-lines input: linear at ~15-22 ms/line depending on the machine
 # (x1.99-2.05 per doubling), crossing 60 s somewhere between 2,600 and 4,000
 # lines. Both prior reports measured that ONE shape; the gate's own comment
@@ -4147,9 +4152,13 @@ for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
   # ordinary large Bash call - a heredoc writing a file, a generated script,
   # pasted data - spent SECONDS in this loop (measured: 22.9 s at 2000
   # lines, ~92% of it in these forks), and a ~150 KB one crossed the 60 s
-  # timeout this gate runs under. A PreToolUse timeout fails CLOSED, so the
-  # cost did not land as latency, it landed as a HARD BLOCK on benign input
-  # in the one gate with no override path - the "operator deletes the gate"
+  # timeout this gate runs under. [CORRECTED 2026-08-13, X-51] This used to add
+  # that "A PreToolUse timeout fails CLOSED, so the cost did not land as latency,
+  # it landed as a HARD BLOCK on benign input". It is the reverse: a cancelled
+  # hook is SKIPPED and the command runs, so crossing the ceiling is a bypass.
+  # The fork cost is still worth removing; the harm it avoids is an attacker
+  # spending the budget, not a benign block. Retained below: the "operator
+  # deletes the gate"
   # pressure this file keeps citing, arriving through performance.
   #
   # Pure parameter expansion, no fork, same semantics: strip trailing

@@ -3043,11 +3043,26 @@ EXPECTED_DIGESTS = {
         # 11 / 15 / 11, as this file records elsewhere (:2617); 13 is the
         # ai-agent probe install and belongs to no fixture gated here.
         #
+        # [freeze-exception no. 67, 2026-08-13] THE FAIL-OPEN CORRECTION,
+        # FINISHED. A code review found the 2026-08-13 sweep incomplete in the
+        # one direction that matters: the retracted sentence "A PreToolUse
+        # timeout fails CLOSED at the seam's runtime floor" was still live
+        # VERBATIM in lib/sdk_gates_template.py, and lib/templates.py was still
+        # making design trade-offs on the premise ("its cost is not latency - it
+        # is a HARD BLOCK on benign input"). Both EMITTED. Corrected in place;
+        # the design work they justify is still right, only the direction of the
+        # harm changes - it buys bypass-resistance, not benign-input relief.
+        # Also corrected outside this file: SEAM-CONTRACT:40, the machine-
+        # readable bind where the pin actually lives, which asserted the
+        # fail-closed rationale as CONFIRMED against the upstream changelog.
+        # Comment/docstring only in both substrates; no executable line changed.
+        # gates.py moves again (docstring).
+        #
         # [no. 66, AMENDMENT] The emitted header said main measured
         # 23.00 s on the `!` shape; every other record of that measurement,
         # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
         # 11 hook bodies move; gates.py is unchanged by this amendment.
-        "162962219b8371da9f382ae35adccd36110f2e1ae2064ed08585f4a0944d4a93",
+        "acb3d0e3bd388c05c5cb54b3a9b85923058a5e5e679057d7da95fe34ec3218b2",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3277,7 +3292,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "d4dc7df186e3cf6f56db38fcac45a9806327a0f2cabf6747f583ca9767dd2c91",
+        "fbcc7aea5a33e5d94cd90ec81bd465816809b088fa1a5072863208712e17750f",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3455,7 +3470,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "ef02b2cfeaa581dbd23497d2e9db7b2d0ae2a9dafc7499a4971a24731772a88c",
+        "604ffcee0ea1691d225d633cd1371e68373437ff6e6de179e7ea94d889335afd",
 }
 
 EXPECTED_ACTION_COUNTS = {

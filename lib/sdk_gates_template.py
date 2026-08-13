@@ -484,8 +484,11 @@ _EXPAND_DEPTH = 3
 # something the attacker writes (backlog X-44). It is now a flat semantic BUDGET
 # plus a cost-only length backstop. The shell twins (`_SUBST_BUDGET` /
 # `_SUBST_SCANMAX` in the header) carry the SAME numbers so neither substrate can
-# hit its fail-closed timeout while the other completes on a large command (the
-# X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
+# hit its runtime timeout while the other completes on a large command (the
+# X-36l exhaustion-divergence hazard). [CORRECTED 2026-08-13, X-51: "fail-closed
+# timeout" - a cancelled hook does not deny, it is skipped and the call proceeds.
+# The divergence hazard is unchanged; only the direction of the harm is.]
+# Asserted equal by test_composition.
 _SUBST_BUDGET = 8192
 # [B3 re-land] 16384, not the first attempt's 65536. That value was sized by a
 # sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
@@ -3640,8 +3643,12 @@ _GATE_EXTRA_MATCHERS = {
 # secrets-gate's superlinear tokenizer, and carries an install anchor with
 # nested quantifiers on top - and it had no ceiling on EITHER substrate, which
 # is what let a cubic scan run ~66 s here while the shell denied the same
-# command in ~1.2 s. A PreToolUse timeout fails CLOSED at the seam's runtime
-# floor, so the bound refuses a pathological command rather than allowing one.
+# command in ~1.2 s. [CORRECTED 2026-08-13, X-51] This used to read "A PreToolUse
+# timeout fails CLOSED at the seam's runtime floor, so the bound refuses a
+# pathological command rather than allowing one." IT IS THE OPPOSITE. A hook
+# cancelled at its declared timeout exits 124/137/143; only exit 2 blocks; the
+# call PROCEEDS. Crossing the ceiling is a BYPASS, not a refusal, so a timeout is
+# a budget the attacker spends - not a bound that saves you.
 # Shell parity (templates.TIMEOUTS).
 _GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0,
                   "secrets-gate": 60.0, "dependency-gate": 60.0}

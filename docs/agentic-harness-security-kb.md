@@ -42,7 +42,7 @@ assert the property, not equality against a corpus, and mutation-test the
 constant). Three rounds, each caught by an adversarial pass
 and none by a green suite. Post-tag material is marked **`[+2026-08-04]`**.
 
-All five post-tag patterns are new **classes**, not new members of the delta;
+All six post-tag patterns are new **classes**, not new members of the delta;
 the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
 and describe v2.5.0 → v2.6.0 only. So §4 now carries **eleven** patterns: five
 compiled from the delta, six added post-tag.
@@ -1301,6 +1301,14 @@ satisfy the old wording by writing `timeout: 60` and be exactly as bypassable,
 which is the state that shipped a live bypass in this repo. The two postures that
 actually work are in §4.11.
 
+**Declare one anyway — the requirement is necessary, just not sufficient.** A
+control with no declared timeout is killed at the platform default instead, so
+the budget still exists and is now invisible to review. This repo has that case
+on file: `eval-gate` declares no timeout at all and falls to the platform
+default, tracked as X-36y, and X-36l is closed precisely because
+`dependency-gate` joined both timeout tables. Declare it so the budget is
+auditable; then make the worst case fit inside it.
+
 **Corollary 3 — an optimisation's safety argument is not the same as the
 optimisation being safe.** **EXECUTED.** `[+2026-08-04]` The guard that fixed Corollary 2
 skipped the match at tokens that could not complete the pattern, and was
@@ -1327,8 +1335,11 @@ guards.
 
 ### 4.11 A gate that is correct but slow is a bypass `[+2026-08-13]`
 
-**EXECUTED.** Filed as X-51 and X-52 (both `done`); X-54 and X-55 remain `open`
-and fail-open. Merged as `053a367`.
+**EXECUTED, with the same deviation from §0 that §4.10 records, stated up front:**
+the figures here come from named commits, from harnesses kept outside the tree,
+and from live checks against Claude Code — not from a suite you can re-run from
+this repo. §8 says so again. Filed as X-51 and X-52 (both `done`); X-54 and X-55
+remain `open` and fail-open. Merged as `053a367`.
 
 This is a corollary of §4.10 in name only. §4.10 is about a verdict that is right
 for the wrong reason; this is about a verdict that is right and **never
@@ -1358,10 +1369,18 @@ call. Only two postures actually work:
 2. **Be provably fast on every admissible input** — which means a bound you have
    measured on adversary-shaped input, not on a corpus.
 
-**The concrete chain.** `pip install evilpkg` is denied by the dependency gate in
-0.02 s. Prepend 128 KB of quote-dense padding and the gate still *reaches* rc=2 —
-at **59.97 s** — but under its own emitted `timeout: 60` it is killed first. The
-verdict was always correct. It simply never arrived.
+**The concrete chain, with its provenance attached.** `pip install evilpkg` is
+denied by the dependency gate in 0.02 s. Prepend 128 KB of quote-dense padding
+and the gate still *reaches* rc=2 — at **59.97 s**, i.e. only just inside its
+emitted `timeout: 60`, with every other Bash gate allowing the same payload. That
+is the measurement that established the mechanism, and it is **historical**: it
+predates X-51's cost guard, and on `053a367` that exact shape is refused cheaply
+because 128 KB exceeds `_CMD_MAXLEN` (81920 B). Do not expect it to reproduce.
+
+The shape that still crosses on the current tree is **X-54's**: a wrapper head
+(`sudo`) plus 2000 quoted runs — 80004 B and 4000 jump targets, **inside both
+declared caps** — well past the 60 s ceiling. That is the honest present-tense
+example, and it is `open`.
 
 **Cost tracks DENSITY, not length.** At a fixed 8185 B, four densities measured
 **5.67 / 2.77 / 1.47 / 0.31 s** — 18x at identical length. Two consequences: a
@@ -1370,10 +1389,12 @@ payload *family* fixed. A harness here swapped a `'('`-dense inner for `printf`
 filler on the stated ground that cost tracks length; the swap was not
 cost-preserving and the numbers it produced did not mean what they said.
 
-**Padding under every declared cap still bypasses.** X-52's shape is 80019 bytes
-with **zero** jump targets — inside both shipped caps — and cost 139.58 s. A cap
-bounds the dimension it names; cost is a third dimension that neither length nor
-delimiter density measures.
+**Padding under every declared cap can still bypass — a cap bounds the dimension
+it names, and cost is a third dimension neither length nor delimiter density
+measures.** X-52's shape showed it: 80019 bytes, **zero** jump targets, inside
+both shipped caps, 139.58 s. That one is now `done` and denies in seconds, so it
+is the *proof of the principle*, not a live example. The live one is X-54 above,
+which is inside both caps and still crosses.
 
 **A memo on a security decision is sound only if its key captures everything the
 decision depends on.** The fix here memoised the invoker walk per segment. Its
@@ -1384,19 +1405,26 @@ answer was wrong for a longer tail. That was a live dependency-gate bypass:
 actually executing it.
 
 **Why nothing caught it, which is the part to keep.** Verdict tests cannot see
-cost. When that bypass was live, this repo's suite was **25 suites / 9668 checks
-/ 0 failed** and a **4104-row** shell-vs-SDK differential was green. They were not
-weak tests; they answer *"what verdict would this gate reach"*, and the harness
-asks a different question — *"does a verdict arrive before the deadline"*. No
-suite here applies the emitted `timeout` when it invokes a hook. A corpus is also
-structurally unable to help: every row in that differential had a short head and
-so never reached the phase where the bypass lived.
+cost. On the tree where that bypass was live the suite was **25 suites / 9667
+checks / 0 failed** and a **4092-row** shell-vs-SDK differential was green. They
+were not weak tests; they answer *"what verdict would this gate reach"*, and the
+harness asks a different question — *"does a verdict arrive before the
+deadline"*. No suite here applies the emitted `timeout` when it invokes a hook.
+The corpus was also structurally unable to help: every one of those 4092 rows had
+a short head, so none ever reached the walk phase where the bypass lived.
+
+Note the numbers carefully, because the temptation is to quote today's. The
+differential is **4104** rows now, and **12 of them exist precisely to reach that
+phase** — they were added by the fix, so citing 4104 as what failed to catch the
+bug would credit the corpus with coverage it only has *because* of the bug.
 
 **What did work:** constructing shapes from reasoning about which class the guard
 structurally cannot serve, rather than extrapolating from an existing payload;
 and **source pins** on the cost-critical structure, which fail on the
 reintroduced quadratic itself rather than on machine speed. A wall-clock
-assertion is the weaker instrument — the margin here would have been 2.6%.
+assertion is the weaker instrument here: the regression it would have to
+separate is 30.79 s against a 60 s ceiling, and this repo has already recorded
+its one timing check failing under load.
 
 ---
 
@@ -1673,11 +1701,15 @@ jq all rc=2. §4.6's remedy is the capability probe: parse a known
 literal, compare.                                                 (P-19)
 ```
 
-**Post-tag, 2026-08-13 — four MEASURED, OPEN, fail-open cost classes.** These
-postdate the P-19 block above and belong in this section because they are exactly
-what it exists to record: known, not yet closed, and cheap to rediscover the hard
-way. All are `docs/deferred-backlog.md` cluster X, and all are **pre-existing** —
-none was introduced by the X-52 fix, and none is closed by it.
+**Post-tag, 2026-08-13 — four OPEN rows from the cost work, and they are not all
+of the same standing.** Read the qualifiers; they are the point. **X-54 and X-55
+are MEASURED, open, fail-open cost classes.** **X-56 is a latent pinning gap —
+`open`, but explicitly NOT reproduced**, filed on reading rather than on a
+violation. **X-53 is not a cost class at all**: it is a substrate disagreement
+about word splitting, filed on a measured mechanism but **not** on a measured
+end-to-end verdict split. All four are `docs/deferred-backlog.md` cluster X, and
+all are **pre-existing** — none was introduced by the X-52 fix, and none is
+closed by it.
 
 ```
 A wrapper head plus quote-dense padding runs the invoker walk to the
@@ -1699,8 +1731,11 @@ words, and the shell's answer depends on the ambient locale.      (X-53)
 ```
 
 **Also owed and NOT run:** a fresh head-class cost measurement on the merged tree
-(`053a367`). Every cost figure in this document and in the backlog predates the
-per-segment memo or was taken on an earlier commit. See §4.11.
+(`053a367`) — a comparable pass across the head classes, taken together on one
+tree. Some individual post-memo figures do exist (X-54 records 150.95 s at the
+X-52 tip; X-55 records `>240 s KILLED` with the `_lastw` fix), but they were
+taken one shape at a time on different commits, which is why they disagree by up
+to 7% for one shape. See §4.11.
 
 ---
 
@@ -1727,7 +1762,7 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
 - [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
-- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and its worst case is **under the deadline the runtime will impose**. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook, while the other substrate denied in ~1.2 s. `[+2026-08-04]` **Declaring a timeout does NOT satisfy this** `[+2026-08-13]`: the declared value is the attacker's budget, its posture is fixed at ALLOW, and a team can write `timeout: 60` and be exactly as bypassable — which is the state that shipped a live bypass here. Either deny cheaply *before* the expensive work, or be provably fast on every admissible input. See §4.11.
+- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and its worst case is **under the deadline the runtime will impose**. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook, while the other substrate denied in ~1.2 s. `[+2026-08-04]` **Declare a timeout — and know that declaring it does NOT satisfy this** `[+2026-08-13]`: the declared value is the attacker's budget, its posture is fixed at ALLOW, and a team can write `timeout: 60` and be exactly as bypassable — which is the state that shipped a live bypass here. Declaring one is still required, because a control with none is killed at the platform default and the budget becomes invisible to review. Then either deny cheaply *before* the expensive work, or be provably fast on every admissible input. See §4.11.
 - [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`
 - [ ] **A document that makes checkable claims gets a verification pass, not just CI.** CI runs the suite; it cannot tell whether a sentence is true. Measured in this repo: a docs-only, CI-green change shipped guidance into this very file that a later round disproved, and a backlog row restated a PRE-FIX timing as present-tense. Prose asserting a number, a set membership, or "X does not appear in Y" is a claim to re-run, and the labels in §0 exist so a reader can tell which claims were. `[+2026-08-04]`
 - [ ] **Mutation-test the CONSTANT, not only the code.** A character set, word list or threshold the control keys on is shrunk deliberately and the suite must fail. Measured: removing two characters from such a set passed **1902 of 1902** checks with a live fail-open behind it. `[+2026-08-04]`
@@ -1784,7 +1819,7 @@ Post-tag sources `[+2026-07-31]`:
 
 Post-tag sources `[+2026-08-13]` — the cost class behind §4.11:
 
-- `docs/deferred-backlog.md` cluster **X**, rows **X-50 … X-58** — the class (X-50, X-51), the guard, its bypass, the fix (X-52, `done`) and its four open residuals (X-53 … X-57), plus X-58 on the rendering fault in this cluster's own table.
+- `docs/deferred-backlog.md` cluster **X**, rows **X-50 … X-58** — the class (X-50, X-51), the guard, its bypass, the fix (X-52, `done`) and its five open residuals (X-53, X-54, X-55, X-56, X-57), plus X-58 on the rendering fault in this cluster's own table.
 - **PR #65, merged as `053a367`** — 21 commits, and the account of six self-inflicted regressions, five of them fail-open, shipped and fixed in the course of one fix.
 - `.claude/trust-ramp.md`, the `x52-*` and `x49-*` entries — five `harmful` grades, and the record of *which instrument caught what*: review caught four regressions, ad-hoc wall-clock caught two, and the 9668-check suite caught none of them.
 - **The same honest deviation from §0 that §4.10 records applies here.** These figures come from named commits, harnesses in `.claude/checkpoints/x52-harnesses/` (gitignored), and live checks against Claude Code — not from a suite you can re-run from this repo. A fresh head-class measurement on `053a367` is owed and has not been taken.

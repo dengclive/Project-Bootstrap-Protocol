@@ -13,7 +13,7 @@ what a change actually bought.
 | layer | subject | status |
 |---|---|---|
 | **RE-BASE** (below) | `main` @ **053a367** | **what is true today** |
-| HISTORY — CURRENT ASSESSMENT | `main` @ 560588c | superseded by PR #64 and PR #65; retained as evidence, **not re-measured** |
+| HISTORY — SUPERSEDED ASSESSMENT | `main` @ 560588c | superseded by PR #64 and PR #65; retained as evidence, **not re-measured** |
 | HISTORY — REVISION 1 | branch `fix/item1-…` @ e47d827 | superseded, retained as evidence |
 | HISTORY — §§0–9 (2026-08-08) | tag `v2.7.4` @ d884a43 | superseded **as a description of `main`**; still exactly true of the tag |
 
@@ -38,8 +38,7 @@ install.
 
 ## RE-BASE — `main` @ `053a367` · 2026-08-13
 
-> **READ THIS BEFORE THE SECTION BELOW IT.** Everything under "CURRENT
-> ASSESSMENT — `main` @ 560588c" is **superseded by two merges** — PR #64
+> **READ THIS BEFORE THE SECTION BELOW IT.** Everything under "SUPERSEDED — `main` @ 560588c" is **superseded by two merges** — PR #64
 > (`d20860b`) and PR #65 (`053a367`) — and is retained as evidence, not as a
 > description of `main`. It has not been re-measured. Where it and this block
 > disagree, this block is current.
@@ -82,9 +81,13 @@ reproduces the tag's **88** exactly.
 | suite checks | — | — | 9,601 | — | **9,668 / 0 (25 files)** |
 | `test_substrate_differential.py` rows | — | — | 4,051 | — | **4,104** |
 
-Two corrections that follow from that table. §5's "**93** `open` *(88 at the
-tag)*" was measured when `main` was `6f77ccc`; by `560588c` — the commit this
-document names as its own subject — it was already 94. And the count has risen
+One correction that follows from that table, and one clarification. §5's "**93**
+`open`" was **never a `main` figure** — §5 says so plainly: the rule "reproduces
+… against `main` (88), and returns **93** on the branch", i.e. 93 counts
+`fix/item1-…` @ `e47d827`. That branch measurement was correct and is not being
+retracted. What *is* stale is the `main` half beside it: 88 was true at
+`6f77ccc`, but by `560588c` — the commit this document names as its own subject —
+`main` was already at 94. And the count has risen
 across two merges that each *closed* holes, because closing a hole here reliably
 files its residuals: X-52 is `done` and filed X-53 … X-58 doing it.
 
@@ -289,7 +292,7 @@ addressed in §7.
 ## 1. VERDICT — **not production ready** *(as measured at the TAG, 2026-08-08)*
 
 > **Still the verdict for `main` @ 560588c**, on different evidence — see the
-> CURRENT ASSESSMENT at the top. C-1 alone settles it either way.
+> RE-BASE block at the top. C-1 alone settles it either way.
 
 **Lens verdicts: 5 × not-ready, 1 × ready-with-caveats.** 11 critical findings,
 23 high, all measured.
@@ -905,7 +908,7 @@ and a motivated agent needs only padding.
    * **X-45 (`5969fa9`) is what actually closed the crossing**, and it is a row
      that did not exist when this section was written: B4 bounded the walk and
      the gate cost barely moved, because the cost was never the walk. Both are
-     in `main`; the shape is 65.08 s → 7.64 s (see the CURRENT ASSESSMENT above).
+     in `main`; the shape is 65.08 s → 7.64 s (see the SUPERSEDED assessment above, and the RE-BASE for what is current).
    * **B3 is BUILT and PARKED**, not queued — `wip/b3-flat-budget` (`395b955`).
      Its design is validated (0 walker divergences over 41 charging cases, six
      deliberately wrong builds each caught) but its cost backstop pushes benign
