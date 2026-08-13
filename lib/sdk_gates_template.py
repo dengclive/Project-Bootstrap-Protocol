@@ -494,7 +494,7 @@ _SUBST_BUDGET = 8192
 # sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
 # bytes while varying only the walk's reach - but gate cost is the RE-SCAN of
 # the lifted inner, so it scales with the INNER. Re-measured with the padding
-# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s fail-closed
+# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s
 # ceiling; 16384 costs 30.9 s. The shell twin carries the identical number and
 # test_composition compares the two directly - an unequal pair is the X-36l
 # exhaustion-divergence hazard, and it is not theoretical: measured with the
@@ -1006,7 +1006,7 @@ def _subst_inners(seg):
     # whatever the ambient locale says. That split was measured live -
     # 6000 x U+4E2D of padding is shell-ALLOW / SDK-DENY with no locale set -
     # and the unit chosen is BYTES because characters are unaffordable: a
-    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s fail-closed
+    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s
     # ceiling. `surrogatepass` for `budget_len`'s reason - a command arrives
     # through JSON and a lone surrogate must weigh the same here as it does to
     # bash rather than crash a PreToolUse hook. The decode is trimmed back to a
@@ -2859,7 +2859,7 @@ def _int_word(base):
     # is one definition to get right rather than a hand-written mirror of it
     # per site. A mirror is what #40 and #43-F1 each were.
     #
-    # BOUNDED, because this gate is FAIL-CLOSED behind a 60 s ceiling and the
+    # BOUNDED, because this gate runs behind a 60 s ceiling and the
     # run side calls the reduction once per scanned token. The old form
     # stripped ONE character at a time with a membership test after each
     # strip, so its cost grew with the WORD, not with the word set: measured
@@ -2877,7 +2877,7 @@ def _int_word(base):
     # is 0.74x-1.15x over six shapes at 5-80 KB, and head is FASTER on the
     # reducible-word shapes; but the prefixed-run shape is a constant +4-5%,
     # and near 100 KB of single-token command word that constant puts a ~4%
-    # length band on the far side of the 60 s fail-closed ceiling (measured:
+    # length band on the far side of the 60 s ceiling (measured:
     # base 59.2 s allow, head 61.8 s). So "nothing the base allowed is pushed
     # into the ceiling" is NOT claimed - it is false in that band. Nothing
     # realistic reaches it, and the cost there is the tokenizer's

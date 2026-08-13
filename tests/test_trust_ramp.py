@@ -301,10 +301,11 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # new false claims into the record and the next round found them - not for any
 # code. No gate-logic finding survived refutation in any round.
 # +1 for post-x52-docs-reassessment: merged PR #65, then re-based the readiness
-# analysis and the security KB onto it. Graded `clean` -- the counting rule was
-# validated against a known value before use, unverifiable figures were declined
-# rather than written, and the owed cost measurement is stated as owed rather
-# than fabricated.
+# analysis and the security KB onto it. Graded `harmful` -- it was logged `clean`
+# and RE-GRADED in 49b8924, because its own completeness claim ("four documents")
+# was false and the sweep behind it had left the retracted sentence live in
+# EMITTED code. Keep this comment in step with the ledger; a stale grade
+# description here is what a previous round caught.
 check("shipped ledger parses to the expected number of entries",
       len(es) == 25, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",

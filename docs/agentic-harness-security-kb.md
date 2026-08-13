@@ -1701,15 +1701,20 @@ jq all rc=2. §4.6's remedy is the capability probe: parse a known
 literal, compare.                                                 (P-19)
 ```
 
-**Post-tag, 2026-08-13 — four OPEN rows from the cost work, and they are not all
-of the same standing.** Read the qualifiers; they are the point. **X-54 and X-55
+**Post-tag, 2026-08-13 — the cost work left SIX open rows in cluster X
+(X-53 … X-58). Four are summarised here, and they are not all of the same
+standing; X-57 (the array-phase guard is more conservative than the invariant
+requires) and X-58 (this cluster's own table does not render) are tracked in the
+backlog rather than repeated.** Read the qualifiers; they are the point. **X-54 and X-55
 are MEASURED, open, fail-open cost classes.** **X-56 is a latent pinning gap —
 `open`, but explicitly NOT reproduced**, filed on reading rather than on a
 violation. **X-53 is not a cost class at all**: it is a substrate disagreement
 about word splitting, filed on a measured mechanism but **not** on a measured
-end-to-end verdict split. All four are `docs/deferred-backlog.md` cluster X, and
-all are **pre-existing** — none was introduced by the X-52 fix, and none is
-closed by it.
+end-to-end verdict split. All four are `docs/deferred-backlog.md` cluster X.
+**Three are pre-existing** — X-53, X-54 and X-55 each argue their own
+pre-existence, measured at `bbf6434` or on `main`. **X-56 is not**: it is a gap
+in what pins the invoker memo, and the memo did not exist before X-52, so the
+fix created the thing it fails to pin. None of the four is closed by X-52.
 
 ```
 A wrapper head plus quote-dense padding runs the invoker walk to the

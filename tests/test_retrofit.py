@@ -2111,8 +2111,8 @@ def retrofit_digest_full(yaml_text):
 # same exception, aligning the emitted header's "23.00 s" to the 22.93 s every
 # other record carries. One word; counts unchanged.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "0b7f9811a416a0d040219ca7cd0287fbbf0fe7271bf46e8c7e2398d8d99b7b6f",
-    "agent": "5778e3e5ab9f5a3b3d1c9e00e114d45c3cdd4ff3090676d14a701dcd65f77ffd",
+    "service": "92d23a6186664b5868c960928eaa91bcedfd89b81a6145c9e30008c49af00c2b",
+    "agent": "70b2ec41c86019b25675b5f741bcfbdf288e9ae03c616143e7c7bebbddfe2317",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

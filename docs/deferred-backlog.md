@@ -9,6 +9,17 @@ deferrals here; the source lists remain as historical record.
 **Snapshot:** `main @ 3c0a2de`, 2026-07-21 (after the 2.4.0 fold + closeout:
 PR #8/#9/#10 merged, PR #4 closed). None of the items below block 2.4.0.
 
+> **FILE-WIDE RETRACTION, 2026-08-13 (X-51).** Rows throughout this file describe
+> the 60 s `PreToolUse` budget as a **"fail-closed ceiling"** and read a crossing
+> as an over-denial — *"a refusal of a command v2.7.2 permitted"*. **That
+> characterisation is retracted everywhere it appears here.** A hook cancelled at
+> its declared `timeout` exits 124/137/143; only exit 2 blocks; the call
+> **proceeds**. Crossing the ceiling **skips the gate**, so every such crossing is
+> a **bypass**, not a refusal. The *measurements* in those rows stand and are not
+> re-stated — only their direction was wrong. Retracted once here rather than
+> edited into ~9 historical rows, so the record of what was measured when stays
+> intact. See `docs/agentic-harness-security-kb.md` §4.11.
+
 Status legend: `open` (actionable work) · `decision` (needs an owner call before
 work) · `no-action` (reviewed, judged fine as-is; listed so it isn't re-derived)
 · `done` (resolved; kept for provenance).

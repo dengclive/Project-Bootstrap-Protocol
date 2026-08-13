@@ -3058,11 +3058,31 @@ EXPECTED_DIGESTS = {
         # Comment/docstring only in both substrates; no executable line changed.
         # gates.py moves again (docstring).
         #
+        # [no. 67, AMENDMENT — the sweep was STILL incomplete, and the reason is
+        # mechanical.] A second review pass found 16 more sites in lib/. The
+        # earlier greps were LINE-BASED and these comments WRAP, so `fail-closed`
+        # and `timeout` sit on different lines and no line-oriented pattern can
+        # match them; one pattern was also case-sensitive and missed
+        # `FAIL-CLOSED`. Corrected by joining each file before searching. The
+        # sites were `lib/templates.py` x10, `lib/sdk_gates_template.py` x4 and
+        # `lib/cmdpos.py` x2 — all of the form "the 60 s fail-closed ceiling",
+        # several load-bearing ("added cost IS over-denial"). The false ADJECTIVE
+        # is stripped and every MEASUREMENT is kept verbatim: the numbers were
+        # never in question, only the direction of the harm.
+        # `lib/installer.py` also printed the false claim to the OPERATOR at
+        # install time; that string is now corrected and it is the
+        # highest-consequence instance, because a human reads it.
+        # Deliberately NOT edited: the ~35 historical measurement records in
+        # docs/changelog.md, docs/deferred-backlog.md and these test ledgers. The
+        # backlog carries ONE file-wide retraction instead; the changelog carries
+        # none, because it is cited BY LINE from a tracked file and a 9-line
+        # insert broke `test_doc_citations.py` — reverted rather than forced.
+        #
         # [no. 66, AMENDMENT] The emitted header said main measured
         # 23.00 s on the `!` shape; every other record of that measurement,
         # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
         # 11 hook bodies move; gates.py is unchanged by this amendment.
-        "acb3d0e3bd388c05c5cb54b3a9b85923058a5e5e679057d7da95fe34ec3218b2",
+        "b279b8e2ea331122f9a55613841c4ddd571091d4e3eff1f90281ea06bb8ef8dd",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3292,7 +3312,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "fbcc7aea5a33e5d94cd90ec81bd465816809b088fa1a5072863208712e17750f",
+        "cda4ae569407a962239b61c06e34d52a437396bbad6c02204a862dd00fa75007",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3470,7 +3490,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "604ffcee0ea1691d225d633cd1371e68373437ff6e6de179e7ea94d889335afd",
+        "23c6e251248e8748e95393ac30de5bccef7b2aba75a97fd32484c9ee82f7ea57",
 }
 
 EXPECTED_ACTION_COUNTS = {
