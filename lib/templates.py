@@ -1399,9 +1399,22 @@ _CS_WIN=1024
 # the remainder into an array. Both bounds are load-bearing and both were paid
 # for with a regression.
 # LOWER: it must exceed the walk length of a head-transparent token followed by
-# an ordinary word, because that shape - `! 'run' 'run' ...` - ends on token TWO
-# and `_cs_isinv` runs once per quoted run, so switching before then costs
-# O(runs x tail) and crossed the 60 s ceiling at 4090 runs inside both caps.
+# an ordinary word - `! 'run' 'run' ...` ends on token TWO and `_cs_isinv` runs
+# once per quoted run. Sizing below that measured 22.93 s -> 30.79 s at 4090
+# runs, inside both caps.
+# CORRECTED 2026-08-13: this paragraph used to say switching before then "costs
+# O(runs x tail) and crossed the 60 s ceiling". THAT CLASS CLAIM IS RETRACTED -
+# 30.79 s is under the ceiling and the 1.34x is a CONSTANT. It was measured at
+# d526733, BEFORE the per-segment memo landed. On this shape the memo is written
+# on the second call and every later call returns at `_cs_isinv`'s head, BEFORE
+# `local _tail=` - so it is O(1) per call at any lazy bound, and a smaller bound
+# only delays that write by one call, on a tail still a few bytes long. Main is
+# O(runs x tail) here too, which is why the ratio is small. The bound is KEPT
+# because the constant is real, but see `${_tail:${#_w}:1}` below and 41cc941 /
+# 4f4588e: claiming a removed TERM for a constant-factor win is an error this
+# file has already made once and retracted.
+# A WRAPPER head is a different case - `_seen=1` keeps the walk running to the
+# end of the tail and the memo cannot help by construction. That is X-55, open.
 # UPPER: every lazy step is a whole-tail expansion, so a large value re-opens
 # the very quadratic this closes; at _CS_LAZYMAX the worst case is that many
 # expansions before the split makes the rest linear.

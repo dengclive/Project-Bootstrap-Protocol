@@ -2834,8 +2834,10 @@ EXPECTED_DIGESTS = {
         #      with 4090 runs 33.51 s -> 146.80 s; switching after the HEAD
         #      sent a `!` head with 2000 runs 22.93 s -> 30.79 s; windowing
         #      the split only reached 30.79 s, because `${_tail:$_CS_WIN}`
-        #      copies the remainder anyway. At 4 every head class measures
-        #      0.88-0.92x of main. NONE of this was visible to the suite,
+        #      copies the remainder anyway. At 4 every head class measured
+        #      0.88-0.92x of main - AT d526733, WHICH CONTAINS NO `_lastw` AT
+        #      ALL, and not re-run since; see no. 65. NONE of this was
+        #      visible to the suite,
         #      the differential or the boundary corpus - they measure
         #      verdicts and every one of these is a COST property.
         #   2. dependency-gate's install-head candidate (`_cand="$_cand $_UQW"`),
@@ -2845,8 +2847,8 @@ EXPECTED_DIGESTS = {
         #      the runtime once (2) was fixed. 27.17 s -> 2.79 s on `bash5.2 `
         #      x 9216 - an X-36y shape, which is why that row only moved 1.3x
         #      until this one landed.
-        #   bang-40000     139.58 s bypass -> DENY 5.8 s
-        #   assign-20475    76.76 s bypass -> DENY 5.3 s
+        #   bang-40000     139.58 s bypass -> DENY 5.8 s  [c1c0945; see no. 65]
+        #   assign-20475    76.76 s bypass -> DENY 5.3 s  [c1c0945; see no. 65]
         #   X-36y brace-40KB / bang-40KB   35.7 s -> 2.3 s (both DENY)
         #   X-36y bash5.2 x 9216           35.5 s -> 2.79 s
         #   benign sudo rm <4000 files>    10.69 s -> 1.7 s
@@ -2941,7 +2943,53 @@ EXPECTED_DIGESTS = {
         # a future reader auditing "why did a frozen artifact move" is owed the
         # answer "a claim in a comment was wrong", which is a different answer
         # from no. 63's "a guard was wrong".
-        "55339b5b1faa993132aaf76db1ebcee37faada878433340197a53152572bea23",
+        #
+        # [freeze-exception no. 65, 2026-08-13] COMMENT ONLY AGAIN - AND IT IS
+        # THE SAME ERROR ONE CONSTANT OVER, WHICH IS WHY IT GETS ITS OWN NUMBER
+        # RATHER THAN AN AMENDMENT TO no. 64. `_CS_LAZYMAX`'s LOWER-bound
+        # paragraph justified the value with "switching before then costs
+        # O(runs x tail) and crossed the 60 s ceiling at 4090 runs inside both
+        # caps". Both halves are wrong. 30.79 s is UNDER the 60 s ceiling, and
+        # 30.79 against 22.93 is a 1.34x CONSTANT, not a class change. The
+        # figure was measured at d526733, BEFORE b1fcc85 added the per-segment
+        # memo: on that shape the memo is written on the second call and every
+        # later call returns at `_cs_isinv`'s head, ahead of `local _tail=`, so
+        # it is O(1) per call at ANY lazy bound. A smaller bound only delays the
+        # memo write by one call, on a tail still a few bytes long. Main is
+        # O(runs x tail) on this shape too, which is why the ratio was small.
+        # The constant 4 is KEPT and UNCHANGED - only its justification moves.
+        # A WRAPPER head is the genuinely different case (`_seen=1` keeps the
+        # walk running and the memo cannot help); that is X-55 and still open.
+        #
+        # THIS IS THE THIRD INSTANCE OF ONE HABIT and the pattern is the point:
+        # no. 64 (`${_tail:${#_w}:1}` claimed O(word), measured O(tail)), X-49's
+        # retracted 7.84 s margin (actually 157.58 s), and now this. Each
+        # claimed a REMOVED TERM for a constant-factor win, on a number measured
+        # against an earlier tree and never re-run. Found by an adversarial
+        # merge-readiness review of this PR, not by any test - no test can see a
+        # comment's truth value.
+        #
+        # ALSO CARRIED BY THIS EXCEPTION, and the reason it is not cosmetic to
+        # anyone auditing the ledger: no. 52's cost evidence above is now marked
+        # with its provenance instead of reading as current. "At 4 every head
+        # class measures 0.88-0.92x of main" is from d526733 and the
+        # bang-40000 / assign-20475 DENY figures are from c1c0945 - both BEFORE
+        # `_lastw` existed - and no. 63 re-costed only the memo-HIT class, so
+        # the stalest numbers were carrying the strongest claim. They are
+        # ANNOTATED, NOT DELETED: they remain the honest record of what was
+        # measured when. A fresh head-class pass on THIS tree is owed and is
+        # explicitly NOT claimed here. Note also that no. 52's "DENY 5.8 s /
+        # 5.3 s" and the emitted `lib/templates.py` header's "6.2 s and 5.5 s"
+        # are two values for the same two shapes, from different trees.
+        #
+        # WHAT MOVED, verified by rendering both trees and diffing rather than
+        # asserted: 11 hook bodies in this fixture, i.e. every hook embedding
+        # the shared header. Action count unchanged (57). `gates.py` is
+        # byte-identical (26a35595423d77d6 on both sides) - the edit is in
+        # `lib/templates.py` only and `lib/sdk_gates_template.py` is untouched.
+        # Verdicts and the 4104-row differential are unaffected: no executable
+        # line changed in either substrate.
+        "8c4b8a9a188efd8bf3d32f3a4efda369ecd2e37991747a0522418017fc1a729c",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3171,7 +3219,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "85467f8f11fbef4cb4a6cf81ccd7df782d969c4523d3af407d79b77635395198",
+        "6fdb44b2a7d3d2bb22cb4846e2cf8aa321328331767b9ed04ca87399c5c8a0f2",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3349,7 +3397,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "11380e52922e7e8af570922f31336a5b0036b3d58555b2d63409bd5040830a42",
+        "a2c469b7b4cf20b17a4059c595eb52d9acabc609b2fb2a7eab59839bdddbb4b5",
 }
 
 EXPECTED_ACTION_COUNTS = {

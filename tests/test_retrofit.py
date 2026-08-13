@@ -2069,9 +2069,19 @@ def retrofit_digest_full(yaml_text):
 # grew 4092 -> 4104 rows to carry both directions of the defect. Full reasoning,
 # the cost table against bbf6434 rather than main, and the residual filed as
 # X-55 are in freeze-exception no. 63 in tests/test_greenfield_golden.py.
+# [freeze-exception no. 65, 2026-08-13] COMMENT ONLY, no executable change and
+# no verdict change - the opposite of no. 63 above. `_CS_LAZYMAX`'s LOWER-bound
+# justification claimed that sizing below it "costs O(runs x tail) and crossed
+# the 60 s ceiling"; it does neither. 30.79 s is under the ceiling, the 1.34x
+# is a constant, and the number predates the per-segment memo that makes the
+# shape O(1) per call at any bound. The constant 4 is unchanged. Counts are
+# still unchanged (service 79 / agent 93) and the 4104-row differential is
+# untouched. Full reasoning, plus the provenance annotations added to no. 52's
+# now-stale cost figures, are in freeze-exception no. 65 in
+# tests/test_greenfield_golden.py.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "2c6b74148cdcd9f76ccbc90a63ea451cf3927c08fe3d01c5812d5676714b2b0d",
-    "agent": "5c4dc3fde432cb26120878c0c14c2a2cb63a2e0e319f034c05754497fc7aa59e",
+    "service": "dda18445f0cdad69a9d94274179b089e1c357b150bc31635827a97b03ef9c450",
+    "agent": "664898a5dc82c0a0842f86245a183383bae1fe682f1506aee3de140a43a65cb7",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

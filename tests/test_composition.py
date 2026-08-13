@@ -246,8 +246,16 @@ check("_cs_isinv reads the carried segment tail, not the whole buffer",
       "re-deriving the tail per quoted run is what put dependency-gate at "
       "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
 # [X-52] THE TWO QUADRATIC ACCUMULATIONS, PINNED GONE. Both are invisible to
-# every verdict - the 4092-row differential is byte-identical across the change
-# - so only a source pin can keep them out. Reintroducing either is what put
+# every verdict - the differential was byte-identical across the two commits
+# this comment was written for - so only a source pin can keep them out.
+# CORRECTION 2026-08-13: that is NOT the same claim as "this PR moved no
+# verdict", and the stronger reading is retracted. b1fcc85's memo shipped a
+# live dependency-gate bypass (`{ { { { s"h" -c 'pip install evilpkg'` was
+# main=DENY / tip=ALLOW, bash ran it), fixed in 0d24cc3, and the corpus grew
+# 4092 -> 4104 rows to carry both directions. An unchanged corpus proves the
+# corpus did not move, not that behaviour did not - every X-36q row has a
+# SHORT head, so none of them ever leaves the walk's lazy phase.
+# Reintroducing either is what put
 # `"! " x 40000 + pip install evilpkg` at 139.58 s against a 60 s ceiling, where
 # the hook is CANCELLED and the install runs: the deny never arrives.
 #   the walk   `_tail="${_tail#"$_w"}"` rebuilt the whole remainder per token,
@@ -311,6 +319,25 @@ check("the D20 install-head candidate does not re-copy per token",
 # re-marshalling the whole array at every completer, and `i` is a one-character
 # INSTALL_VERB that is itself a completer - so `i i i ...` is attacker-supplied,
 # carries zero jump targets, and sent a shape main clears at 24.38 s to 171.88 s.
+# [X-52] THE MEMO'S READ, WHICH NOTHING PINNED UNTIL 2026-08-13. `_CS_INVMEMO`
+# is read in exactly ONE place and deleting that single line disables the whole
+# memo. Reproduced at width 1 on a scratch tree with the line removed: THIS
+# suite 129/0 and test_substrate_differential.py 4104/0 - both of the suites
+# this work names as the memo's guards, fully green with the memo dead. Only the
+# opaque golden digests moved, and those also move on a comment reflow, so they
+# cannot tell `memo disabled` from `comment rewrapped` - this PR re-baselined
+# them three times under cost-only notes that would each have been literally
+# true of the deletion. The memo is not cosmetic: freeze-exception no. 63
+# records it as the difference between 39.26 s and `>240 s KILLED` on the
+# decider-in-tail class, i.e. between denying and failing open past the 60 s
+# ceiling. The read must also come BEFORE the tail copy - a hit that copies the
+# tail first is O(tail) per call and hands the whole class back.
+check("the invoker memo is READ, and read before the tail is copied",
+      _tmpl.count('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi') == 1
+      and (_tmpl.index('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi')
+           < _tmpl.index('local _tail="$_CS_TAIL"')),
+      "deleting the read disables the memo with every verdict test still green; "
+      "reading it after the tail copy restores O(runs x tail) on every hit")
 # [X-52] THE MEMO'S TWO SOUNDNESS CONDITIONS, PINNED - both were got wrong once.
 # (1) It is cleared where the tail RESTARTS and never where it GROWS. There are
 #     exactly three restart sites: the two `##*$_CS_SEP` branches and
