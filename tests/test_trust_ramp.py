@@ -289,9 +289,17 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # +1 on 2026-08-13 for x52-lastw-array-phase: the array-phase half of X-52's
 # memo guard, found by reading the unreviewed tail rather than by any test.
 # Graded `corrected` because the first fix for it was itself wrong and the
-# plan review caught it before it was committed.
+# plan review caught it before it was committed. NOTE: that grade is CONTESTED
+# and the checkpoint carries it as owed work - `corrected` is defined below as
+# "nothing wrong reached the tree", and b1fcc85 reached the tree, origin AND
+# PR #65, which by the same argument used to re-grade x49-cost-veto-superseded
+# makes it `harmful`.
+# +1 for x52-tail-review-and-corrections: six adversarial review rounds and the
+# corrections they forced. Graded `harmful` for the PUBLICATION-STATE error -
+# a live bypass sat in an open, mergeable PR while this session asserted
+# nothing was pushed - not for any of the code.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 22, f"{len(es)} entries")
+      len(es) == 23, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

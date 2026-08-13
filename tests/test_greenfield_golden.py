@@ -2883,7 +2883,7 @@ EXPECTED_DIGESTS = {
         # of the commits it covered and is NOT true of this one: the memo it
         # shipped cached a decision taken on the TRAILING word in the array
         # phase, which was a LIVE dependency-gate BYPASS, so this re-baseline
-        # MOVES VERDICTS on purpose and in the deny direction.
+        # MOVES VERDICTS on purpose. BOTH DIRECTIONS, and an earlier draft of this note said only 'the deny direction' while its own second bullet below records the opposite: the bypass rows go allow->DENY, and the `inv`-arm row goes tip=DENY -> ALLOW because the tip OVER-denied there.
         #
         # WHAT MOVED, all ratified at width 1 before the fix was written:
         #   `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }`
