@@ -3040,10 +3040,10 @@ EXPECTED_DIGESTS = {
         # that embed the shared header, plus gates.py. Action count unchanged
         # at 57. Verdicts and the 4104-row differential unaffected: no
         # executable line changed in either substrate. Fixture hook counts are
-        # 11 / 15 / 11, as stated at the top of this entry; 13 is the ai-agent
-        # probe install and belongs to no fixture gated here.
+        # 11 / 15 / 11, as this file records elsewhere (:2617); 13 is the
+        # ai-agent probe install and belongs to no fixture gated here.
         #
-        # [no. 66, SECOND AMENDMENT] The emitted header said main measured
+        # [no. 66, AMENDMENT] The emitted header said main measured
         # 23.00 s on the `!` shape; every other record of that measurement,
         # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
         # 11 hook bodies move; gates.py is unchanged by this amendment.

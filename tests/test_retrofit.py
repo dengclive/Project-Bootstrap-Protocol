@@ -2079,6 +2079,15 @@ def retrofit_digest_full(yaml_text):
 # untouched. Full reasoning, plus the provenance annotations added to no. 52's
 # now-stale cost figures, are in freeze-exception no. 65 in
 # tests/test_greenfield_golden.py.
+# [freeze-exception no. 64, 2026-08-13, LOGGED LATE 2026-08-13] 4f4588e moved
+# BOTH digests below and added no note here, though it added one to
+# tests/test_greenfield_golden.py:2933. Comment-only, no executable change:
+# 41cc941 justified the trailing-word test as "bounded by the WORD"; measurement
+# on bare bash shows `${_tail:${#_w}:1}` is O(TAIL), the spelling is kept as a
+# real ~3x constant, and only the wrong justification moved. Counts unchanged
+# (service 79 / agent 93). Logged retroactively because a re-baseline with no
+# entry is exactly what this ledger exists to prevent, and this file's own
+# header records eleven retrofit bodies moving unobserved once already.
 # [freeze-exception no. 66, 2026-08-13] no. 65's retraction was itself
 # incomplete; this is the sweep that finishes it. The retracted class claim was
 # still live in three places including the emitted header, no. 65 bound the
@@ -2091,6 +2100,9 @@ def retrofit_digest_full(yaml_text):
 # unchanged (service 79 / agent 93); the 4104-row differential is untouched.
 # Full reasoning is in freeze-exception no. 66 in
 # tests/test_greenfield_golden.py.
+# [no. 66, AMENDMENT] eb8994d moved both digests below a SECOND time under this
+# same exception, aligning the emitted header's "23.00 s" to the 22.93 s every
+# other record carries. One word; counts unchanged.
 EXPECTED_RETROFIT_DIGESTS = {
     "service": "3b43eea6cf32c92e13b744603f87d0a3321282f126709ecd28c049be720161e4",
     "agent": "6ca395bf75d35f5d8df380980ad6990b70176002c59f926763669413e1af13cb",
