@@ -701,7 +701,7 @@ _join_cont(){
 #
 # EMPTY, not a copy, when the two agree: every consumer skips an empty
 # spelling, so the commands that carry no continuation and no ANSI-C quote -
-# which is nearly all of them - pay nothing, and this gate's 60 s fail-CLOSED
+# which is nearly all of them - pay nothing, and this gate's 60 s
 # budget does not move.
 #
 # [X-36h] THIRD GLOBAL, `_CMD_RESOLVED`: WHAT THE *DECIDABLE* EXPANSIONS
@@ -741,7 +741,7 @@ _ansic_body(){
   # character at a time made this O(n^2) in bash's string slicing, and a
   # 10 KB PLAIN body inside `$'...'` - an ordinary long commit message or
   # printf format - went 0.39 s to 7.17 s, which walks a command that used
-  # to pass toward the 60 s fail-CLOSED ceiling. Chunking makes the
+  # to pass toward the 60 s ceiling. Chunking makes the
   # escape-free body a single pass. Measured after: 1.0x.
   local _b="${1-}" _out="" _hex _oct _ch _v _chunk
   while [ -n "$_b" ]; do
@@ -843,7 +843,7 @@ _param_default(){
   # - so a walk that keeps the whole command in `_rest` pays O(n) per `${` and
   # is O(n^2) overall. Measured on the emitted hook: 8000 `${aN:-vN}` tokens
   # (126 KB) spent 47.7 s in THIS FUNCTION, which carried a command that
-  # PASSED at v2.7.1 in 29.8 s over the 60 s fail-CLOSED PreToolUse timeout at
+  # PASSED at v2.7.1 in 29.8 s over the 60 s PreToolUse timeout at
   # 86.3 s - an allowed command turned into an unactionable timeout refusal,
   # the same failure the ANSI-C walk was chunked for one fix earlier. Slicing
   # a bounded window off the front and walking THAT makes every inner
@@ -1346,14 +1346,14 @@ _SUBST_BUDGET=8192
 #     backstop 24576              64.8 s              77.4 s   <- over
 #     backstop 32768             111.5 s             TIMEOUT
 #     backstop 65536             TIMEOUT             TIMEOUT   <- attempt 1
-# against a 60 s fail-closed ceiling where added cost IS over-denial. The true
+# against a 60 s ceiling where added cost IS BYPASS SURFACE. The true
 # crossing sits between 20480 and 24576; the numbers are machine-dependent and
 # are a BAND, not a constant, so re-measure before raising this.
 #
 # WHY NOT 20480, WHICH ALSO "FITS": its worst case leaves 14 s and its plateau
 # leaves 4.9 s. Attempt 1 rejected 131072 for having 2.6 s of headroom and
 # ACCEPTED 65536 for having 14 s - and 65536 times out in reality. A margin that
-# thin against a machine-dependent, fail-CLOSED ceiling is how this was got
+# thin against a machine-dependent ceiling is how this was got
 # wrong the first time, so the choice here is the one with ~29 s.
 # And 8192 is not merely cheaper, it is USELESS: the bypass this exists to close
 # needs the walk to reach a substitution sitting at ~8300 bytes.
@@ -1533,7 +1533,7 @@ _cs_subst_scan(){
   # argument does not transfer and characters look safer - but characters are
   # unaffordable: a 16384-CHARACTER multibyte quote-dense command is ~49 KB of
   # text, and measured end to end on dependency-gate it costs **74.4 s against
-  # the 60 s fail-closed ceiling** (the same payload under LC_ALL=C, i.e.
+  # the 60 s ceiling** (the same payload under LC_ALL=C, i.e.
   # byte-truncated, costs 6.7 s). Characters would trade a divergence for an
   # unoverridable deny. So the walk is pinned to BYTES on BOTH substrates: the
   # two now agree in EVERY locale, the 60 s ceiling stays intact, and today's
@@ -1651,7 +1651,7 @@ _cs_subst_scan(){
     # the comment rule can fire. `#` reaches that rule only while UNQUOTED (the
     # arm sits behind both quote tests), so carrying it in the jump set inside a
     # quoted run buys nothing and costs one loop iteration per `#`. Measured at
-    # 8 KB against dependency-gate's 60 s fail-closed ceiling, where added cost
+    # 8 KB against dependency-gate's 60 s ceiling, where added cost
     # IS over-denial:
     #     quoted `#`-dense        6.54 s -> 0.37 s   (pre-B5 0.37 s)
     #     unquoted, `#` at word start     0.29 s     (pre-B5 0.40 s)
@@ -1993,7 +1993,7 @@ _cs_subst_scan(){
 # to head is 0.74x-1.15x over six shapes at 5-80 KB, head being FASTER on the
 # reducible-word shapes; but the prefixed-run shape is a constant +4-5%, and
 # near 100 KB of single-token command word that constant puts a ~4% length
-# band on the far side of the 60 s fail-closed ceiling (measured: base 59.2 s
+# band on the far side of the 60 s ceiling (measured: base 59.2 s
 # allow, head 61.8 s). "Nothing base allowed is pushed into the ceiling" is
 # therefore NOT claimed; nothing realistic reaches that length, and the cost
 # there is the tokenizer's pre-existing quadratic rather than this reduction.
@@ -2159,7 +2159,7 @@ _xp_iw(){
 # one is driven by the NUMBER of recognised invoker tokens and this caps one
 # word's LENGTH.  Re-derived on this tree, dependency-gate on N repetitions of
 # `bash5.2`: 40 KB base 4.48 s -> 20.51 s, 64 KB 10.92 -> 51.98, and at 72 KB
-# / 9,216 tokens base 13.91 s ALLOW -> 65.40 s, PAST the 60 s fail-CLOSED
+# / 9,216 tokens base 13.91 s ALLOW -> 65.40 s, PAST the 60 s
 # timeout.  eval-gate, which declares no timeout and falls to the platform
 # default 60 s, is 2.94 -> 52.82 s at 100 KB and crosses just past it.  The
 # bound is measurably irrelevant to the shape: at 40 KB, 7-character words are
@@ -2520,7 +2520,7 @@ _cs_scan(){
   # `${_s#*"$_q"}` REBUILDS the remainder and is quadratic in the distance to
   # the quote (50 reps, LC_ALL=C, quote at the far end: 0.016 s at 1 KB,
   # 2.60 s at 16 KB), and paid once per quoted run it put dependency-gate
-  # past its 60 s fail-closed ceiling on a 16 KB quote-dense command
+  # past its 60 s ceiling on a 16 KB quote-dense command
   # (2/4/8/16 KB: 1.2 / 4.1 / 16.1 / 77.0 s, timeout at 32 KB). So every
   # splitting expansion below runs on the window `_w`, never on the tail
   # `_s`: the tail is re-sliced once per _CS_WIN characters consumed, and
@@ -3995,9 +3995,14 @@ mapfile -t PATS <<'PAT_EOF'
 PAT_EOF
 # --- [round-4 D15] per-PATTERN derivation, done ONCE ------------------------
 #
-# This gate runs under a 60 s PreToolUse timeout that fails CLOSED, so its
-# cost is not latency - it is a HARD BLOCK on benign input, in the gate with
-# no override path. Measured at b1782ec with a 202-pattern config and benign
+# This gate runs under a 60 s PreToolUse timeout. [CORRECTED 2026-08-13, X-51]
+# This used to say the timeout "fails CLOSED, so its cost is not latency - it is
+# a HARD BLOCK on benign input". BOTH HALVES ARE WRONG, and the design argument
+# below was built on them: a cancelled hook exits 124/137/143, only exit 2
+# blocks, so crossing the ceiling SKIPS the gate and the command runs. The cost
+# is therefore a SECURITY property, not an availability one. The work below is
+# still worth doing - it just buys bypass-resistance, not benign-input relief.
+# Measured at b1782ec with a 202-pattern config and benign
 # many-short-lines input: linear at ~15-22 ms/line depending on the machine
 # (x1.99-2.05 per doubling), crossing 60 s somewhere between 2,600 and 4,000
 # lines. Both prior reports measured that ONE shape; the gate's own comment
@@ -4147,9 +4152,13 @@ for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
   # ordinary large Bash call - a heredoc writing a file, a generated script,
   # pasted data - spent SECONDS in this loop (measured: 22.9 s at 2000
   # lines, ~92% of it in these forks), and a ~150 KB one crossed the 60 s
-  # timeout this gate runs under. A PreToolUse timeout fails CLOSED, so the
-  # cost did not land as latency, it landed as a HARD BLOCK on benign input
-  # in the one gate with no override path - the "operator deletes the gate"
+  # timeout this gate runs under. [CORRECTED 2026-08-13, X-51] This used to add
+  # that "A PreToolUse timeout fails CLOSED, so the cost did not land as latency,
+  # it landed as a HARD BLOCK on benign input". It is the reverse: a cancelled
+  # hook is SKIPPED and the command runs, so crossing the ceiling is a bypass.
+  # The fork cost is still worth removing; the harm it avoids is an attacker
+  # spending the budget, not a benign block. Retained below: the "operator
+  # deletes the gate"
   # pressure this file keeps citing, arriving through performance.
   #
   # Pure parameter expansion, no fork, same semantics: strip trailing

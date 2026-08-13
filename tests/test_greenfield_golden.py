@@ -3043,11 +3043,46 @@ EXPECTED_DIGESTS = {
         # 11 / 15 / 11, as this file records elsewhere (:2617); 13 is the
         # ai-agent probe install and belongs to no fixture gated here.
         #
+        # [freeze-exception no. 67, 2026-08-13] THE FAIL-OPEN CORRECTION,
+        # FINISHED. A code review found the 2026-08-13 sweep incomplete in the
+        # one direction that matters: the retracted sentence "A PreToolUse
+        # timeout fails CLOSED at the seam's runtime floor" was still live
+        # VERBATIM in lib/sdk_gates_template.py, and lib/templates.py was still
+        # making design trade-offs on the premise ("its cost is not latency - it
+        # is a HARD BLOCK on benign input"). Both EMITTED. Corrected in place;
+        # the design work they justify is still right, only the direction of the
+        # harm changes - it buys bypass-resistance, not benign-input relief.
+        # Also corrected outside this file: SEAM-CONTRACT:40, the machine-
+        # readable bind where the pin actually lives, which asserted the
+        # fail-closed rationale as CONFIRMED against the upstream changelog.
+        # Comment/docstring only in both substrates; no executable line changed.
+        # gates.py moves again (docstring).
+        #
+        # [no. 67, AMENDMENT — the sweep was STILL incomplete, and the reason is
+        # mechanical.] A second review pass found 16 more sites in lib/. The
+        # earlier greps were LINE-BASED and these comments WRAP, so `fail-closed`
+        # and `timeout` sit on different lines and no line-oriented pattern can
+        # match them; one pattern was also case-sensitive and missed
+        # `FAIL-CLOSED`. Corrected by joining each file before searching. The
+        # sites were `lib/templates.py` x10, `lib/sdk_gates_template.py` x4 and
+        # `lib/cmdpos.py` x2 — all of the form "the 60 s fail-closed ceiling",
+        # several load-bearing ("added cost IS over-denial"). The false ADJECTIVE
+        # is stripped and every MEASUREMENT is kept verbatim: the numbers were
+        # never in question, only the direction of the harm.
+        # `lib/installer.py` also printed the false claim to the OPERATOR at
+        # install time; that string is now corrected and it is the
+        # highest-consequence instance, because a human reads it.
+        # Deliberately NOT edited: the ~35 historical measurement records in
+        # docs/changelog.md, docs/deferred-backlog.md and these test ledgers. The
+        # backlog carries ONE file-wide retraction instead; the changelog carries
+        # none, because it is cited BY LINE from a tracked file and a 9-line
+        # insert broke `test_doc_citations.py` — reverted rather than forced.
+        #
         # [no. 66, AMENDMENT] The emitted header said main measured
         # 23.00 s on the `!` shape; every other record of that measurement,
         # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
         # 11 hook bodies move; gates.py is unchanged by this amendment.
-        "162962219b8371da9f382ae35adccd36110f2e1ae2064ed08585f4a0944d4a93",
+        "b279b8e2ea331122f9a55613841c4ddd571091d4e3eff1f90281ea06bb8ef8dd",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3277,7 +3312,7 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "d4dc7df186e3cf6f56db38fcac45a9806327a0f2cabf6747f583ca9767dd2c91",
+        "cda4ae569407a962239b61c06e34d52a437396bbad6c02204a862dd00fa75007",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3455,7 +3490,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "ef02b2cfeaa581dbd23497d2e9db7b2d0ae2a9dafc7499a4971a24731772a88c",
+        "23c6e251248e8748e95393ac30de5bccef7b2aba75a97fd32484c9ee82f7ea57",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -300,8 +300,14 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # PR #65. Graded `harmful` for a RATE - each of three correction commits put
 # new false claims into the record and the next round found them - not for any
 # code. No gate-logic finding survived refutation in any round.
+# +1 for post-x52-docs-reassessment: merged PR #65, then re-based the readiness
+# analysis and the security KB onto it. Graded `harmful` -- it was logged `clean`
+# and RE-GRADED in 49b8924, because its own completeness claim ("four documents")
+# was false and the sweep behind it had left the retracted sentence live in
+# EMITTED code. Keep this comment in step with the ledger; a stale grade
+# description here is what a previous round caught.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 24, f"{len(es)} entries")
+      len(es) == 25, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

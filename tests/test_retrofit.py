@@ -2100,12 +2100,19 @@ def retrofit_digest_full(yaml_text):
 # unchanged (service 79 / agent 93); the 4104-row differential is untouched.
 # Full reasoning is in freeze-exception no. 66 in
 # tests/test_greenfield_golden.py.
+# [freeze-exception no. 67, 2026-08-13] The fail-open correction, finished. A
+# code review found the retracted "A PreToolUse timeout fails CLOSED" sentence
+# still live verbatim in lib/sdk_gates_template.py and the same false premise
+# still carrying design trade-offs in lib/templates.py - both EMITTED. Comment
+# and docstring only, no executable line changed in either substrate; gates.py
+# moves again on the docstring. Full reasoning in no. 67 in
+# tests/test_greenfield_golden.py.
 # [no. 66, AMENDMENT] eb8994d moved both digests below a SECOND time under this
 # same exception, aligning the emitted header's "23.00 s" to the 22.93 s every
 # other record carries. One word; counts unchanged.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "3b43eea6cf32c92e13b744603f87d0a3321282f126709ecd28c049be720161e4",
-    "agent": "6ca395bf75d35f5d8df380980ad6990b70176002c59f926763669413e1af13cb",
+    "service": "92d23a6186664b5868c960928eaa91bcedfd89b81a6145c9e30008c49af00c2b",
+    "agent": "70b2ec41c86019b25675b5f741bcfbdf288e9ae03c616143e7c7bebbddfe2317",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

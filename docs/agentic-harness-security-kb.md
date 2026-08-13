@@ -42,10 +42,10 @@ assert the property, not equality against a corpus, and mutation-test the
 constant). Three rounds, each caught by an adversarial pass
 and none by a green suite. Post-tag material is marked **`[+2026-08-04]`**.
 
-All five post-tag patterns are new **classes**, not new members of the delta;
+All six post-tag patterns are new **classes**, not new members of the delta;
 the delta's own counts (fourteen defects, four fail-open, one RCE) are unchanged
-and describe v2.5.0 → v2.6.0 only. So §4 now carries **ten** patterns: five
-compiled from the delta, five added post-tag.
+and describe v2.5.0 → v2.6.0 only. So §4 now carries **eleven** patterns: five
+compiled from the delta, six added post-tag.
 
 This document exists because a harness that configures an AI coding agent is a
 **security product**, and this project shipped one whose gates did not gate. The
@@ -488,8 +488,12 @@ innocuous commands — "the archetypal *operator disables the gate* trainer."
 > **Generalizes to:** **know your runtime's control semantics before writing
 > controls, and encode them where they cannot be forgotten.** For Claude Code hooks
 > the three facts are: exit 2 blocks; any other non-zero is "hook error, tool
-> proceeds"; async severs the exit code entirely. Every harness has an equivalent
-> set. Then: **assert them.** A test that pipes a must-deny payload into the
+> proceeds"; async severs the exit code entirely. **A fourth belongs beside them
+> and is the one an adversary schedules** `[+2026-08-13]`: exceeding the hook's
+> declared `timeout` cancels it, and a cancelled process never exits 2 — so the
+> deny never arrives. The first three are properties of code you wrote; this one
+> is a property of the *input*, and cost is a function of what the agent supplies.
+> Every harness has an equivalent set. Then: **assert them.** A test that pipes a must-deny payload into the
 > deployed configuration and asserts the tool was actually rejected would have
 > caught this; no amount of reading the hook body ever would.
 >
@@ -807,11 +811,12 @@ by any test that checks emitted bytes.
 
 ## 4. Cross-cutting patterns — the part to keep
 
-Fourteen defects, ten recurring shapes — five from the v2.5.0 → v2.6.0 delta
-and five added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
+Fourteen defects, eleven recurring shapes — five from the v2.5.0 → v2.6.0 delta
+and six added post-tag (§4.6 from P0-3d; §4.7 from W-1; §4.8 and §4.9 from the
 five issues filed against 2.6.1; §4.10 from the four `dependency-gate` install
-bypasses fixed after v2.7.0 — issues #36, #40, #39, #41 — which contribute
-classes the delta contains no member of). **The defect count is the v2.5.0 →
+bypasses fixed after v2.7.0 — issues #36, #40, #39, #41; §4.11 from the X-51 /
+X-52 cost class, merged as `053a367` — which contribute classes the delta
+contains no member of). **The defect count is the v2.5.0 →
 v2.6.0 delta's and does not move when a post-tag shape is added.** If this
 document is read for one section, this is it.
 
@@ -1267,17 +1272,42 @@ percent, and the original figure was already right. **Re-measuring a
 number does not entitle you to a new decimal** — if the second reading
 does not distinguish a different claim, say the same number.
 
-No parse was wrong. The gate simply did not answer, and this gate had no entry
-in either timeout table — so what a hang becomes was left to a default nobody
-had chosen, while the *other* substrate denied the same command in about a
-second. That is the forbidden direction reached by exhaustion.
+No parse was wrong. The gate simply did not answer, while the *other* substrate
+denied the same command in about a second. That is the forbidden direction
+reached by exhaustion.
+
+**[Settled 2026-08-13, X-51.]** This paragraph used to add that the gate "had no
+entry in either timeout table — so what a hang becomes was left to a default
+nobody had chosen." **That question is closed, and the answer is the bad one.** A
+`PreToolUse` hook cancelled at its declared `timeout` is killed and exits
+124/137/143; only exit **2** blocks; so the call **PROCEEDS**. A crossing is not
+an over-denial — it is the gate being **skipped**. Leaving the question open is
+not free: it let three later rounds size cost caps against the wrong harm. The
+mechanism, and what to do instead, are in §4.11.
 
 **Rule:** measure a matcher's worst case on adversary-shaped input, not just its
 verdicts — `WRAPPER` plus a long run of assignments is the shape to try first
-against any anchored command-position regex. And every blocking control needs an
-explicit timeout with an explicit posture, because "how long may this take" is a
+against any anchored command-position regex. "How long may this take" is a
 security parameter: a control that can be made not to answer has an allow arm
 whether or not anyone wrote one.
+
+**[Corrected 2026-08-13, X-51/X-52.]** This rule used to prescribe that "every
+blocking control needs an explicit timeout with an explicit posture." **Declaring
+a timeout is not the fix and cannot be.** The posture of a runtime-imposed
+timeout is fixed at ALLOW and the control cannot override it, so the declared
+value is the *attacker's budget*, not the defender's safety net — raising it only
+moves the crossing and costs interactive latency on every call. A team can
+satisfy the old wording by writing `timeout: 60` and be exactly as bypassable,
+which is the state that shipped a live bypass in this repo. The two postures that
+actually work are in §4.11.
+
+**Declare one anyway — the requirement is necessary, just not sufficient.** A
+control with no declared timeout is killed at the platform default instead, so
+the budget still exists and is now invisible to review. This repo has that case
+on file: `eval-gate` declares no timeout at all and falls to the platform
+default, tracked as X-36y, and X-36l is closed precisely because
+`dependency-gate` joined both timeout tables. Declare it so the budget is
+auditable; then make the worst case fit inside it.
 
 **Corollary 3 — an optimisation's safety argument is not the same as the
 optimisation being safe.** **EXECUTED.** `[+2026-08-04]` The guard that fixed Corollary 2
@@ -1302,6 +1332,99 @@ fail-open sat behind it, which is how the gap was found at all.
 So: an equivalence test is the floor, not the ceiling. Prefer a census over an
 equality assertion, and prove the census bites by breaking the thing it
 guards.
+
+### 4.11 A gate that is correct but slow is a bypass `[+2026-08-13]`
+
+**EXECUTED, with the same deviation from §0 that §4.10 records, stated up front:**
+the figures here come from named commits, from harnesses kept outside the tree,
+and from live checks against Claude Code — not from a suite you can re-run from
+this repo. §8 says so again. Filed as X-51 and X-52 (both `done`); X-54 and X-55
+remain `open` and fail-open. Merged as `053a367`.
+
+This is a corollary of §4.10 in name only. §4.10 is about a verdict that is right
+for the wrong reason; this is about a verdict that is right and **never
+arrives**. It has its own mechanism, its own detection failure, and its own fix
+discipline, and conflating the two is what let a live bypass ship here.
+
+**The mechanism, verified live rather than inferred.** Crossing the declared
+`timeout` means the harness **cancels** the hook. A cancelled process exits
+124/137/143 — never 2. Only exit **2** blocks a `PreToolUse` call. So the deny
+never arrives and the call proceeds. The test that settles it: a hook that sleeps
+past a declared `timeout: 2` and would then `exit 2` is killed and the command
+runs (canary written); the identical hook allowed to finish blocks it (no
+canary).
+
+`FAIL_CLOSED=1` does not rescue this. It governs what the hook does on **its
+own** error and says nothing about the harness killing it from outside. An `ERR`
+trap does not fire either, for the same reason — the process is killed, it does
+not fail.
+
+**The headline corollary: the declared timeout is the attacker's budget, not the
+defender's safety net.** Its posture is fixed at ALLOW and your control cannot
+override it. Raising it moves the crossing and costs interactive latency on every
+call. Only two postures actually work:
+
+1. **Deny cheaply *before* the expensive work.** Order the gate so the common
+   deny is reached in O(1), and only then do anything proportional to input.
+2. **Be provably fast on every admissible input** — which means a bound you have
+   measured on adversary-shaped input, not on a corpus.
+
+**The concrete chain, with its provenance attached.** `pip install evilpkg` is
+denied by the dependency gate in 0.02 s. Prepend 128 KB of quote-dense padding
+and the gate still *reaches* rc=2 — at **59.97 s**, i.e. only just inside its
+emitted `timeout: 60`, with every other Bash gate allowing the same payload. That
+is the measurement that established the mechanism, and it is **historical**: it
+predates X-51's cost guard, and on `053a367` that exact shape is refused cheaply
+because 128 KB exceeds `_CMD_MAXLEN` (81920 B). Do not expect it to reproduce.
+
+The shape that still crosses on the current tree is **X-54's**: a wrapper head
+(`sudo`) plus 2000 quoted runs — 80004 B and 4000 jump targets, **inside both
+declared caps** — well past the 60 s ceiling. That is the honest present-tense
+example, and it is `open`.
+
+**Cost tracks DENSITY, not length.** At a fixed 8185 B, four densities measured
+**5.67 / 2.77 / 1.47 / 0.31 s** — 18x at identical length. Two consequences: a
+length cap is not a cost bound, and a before/after cost comparison must hold the
+payload *family* fixed. A harness here swapped a `'('`-dense inner for `printf`
+filler on the stated ground that cost tracks length; the swap was not
+cost-preserving and the numbers it produced did not mean what they said.
+
+**Padding under every declared cap can still bypass — a cap bounds the dimension
+it names, and cost is a third dimension neither length nor delimiter density
+measures.** X-52's shape showed it: 80019 bytes, **zero** jump targets, inside
+both shipped caps, 139.58 s. That one is now `done` and denies in seconds, so it
+is the *proof of the principle*, not a live example. The live one is X-54 above,
+which is inside both caps and still crosses.
+
+**A memo on a security decision is sound only if its key captures everything the
+decision depends on.** The fix here memoised the invoker walk per segment. Its
+first cut cached a decision taken on the **trailing word** — but a quoted run can
+*extend* that word (`s` + `"h"` is `sh`; `sud` + `o` is `sudo`), so the cached
+answer was wrong for a longer tail. That was a live dependency-gate bypass:
+`{ { { { s"h" -c 'pip install evilpkg'` went main=DENY / tip=ALLOW with bash
+actually executing it.
+
+**Why nothing caught it, which is the part to keep.** Verdict tests cannot see
+cost. On the tree where that bypass was live the suite was **25 suites / 9667
+checks / 0 failed** and a **4092-row** shell-vs-SDK differential was green. They
+were not weak tests; they answer *"what verdict would this gate reach"*, and the
+harness asks a different question — *"does a verdict arrive before the
+deadline"*. No suite here applies the emitted `timeout` when it invokes a hook.
+The corpus was also structurally unable to help: every one of those 4092 rows had
+a short head, so none ever reached the walk phase where the bypass lived.
+
+Note the numbers carefully, because the temptation is to quote today's. The
+differential is **4104** rows now, and **12 of them exist precisely to reach that
+phase** — they were added by the fix, so citing 4104 as what failed to catch the
+bug would credit the corpus with coverage it only has *because* of the bug.
+
+**What did work:** constructing shapes from reasoning about which class the guard
+structurally cannot serve, rather than extrapolating from an existing payload;
+and **source pins** on the cost-critical structure, which fail on the
+reintroduced quadratic itself rather than on machine speed. A wall-clock
+assertion is the weaker instrument here: the regression it would have to
+separate is 30.79 s against a 60 s ceiling, and this repo has already recorded
+its one timing check failing under load.
 
 ---
 
@@ -1578,6 +1701,47 @@ jq all rc=2. §4.6's remedy is the capability probe: parse a known
 literal, compare.                                                 (P-19)
 ```
 
+**Post-tag, 2026-08-13 — the cost work left SIX open rows in cluster X
+(X-53 … X-58). Four are summarised here, and they are not all of the same
+standing; X-57 (the array-phase guard is more conservative than the invariant
+requires) and X-58 (this cluster's own table does not render) are tracked in the
+backlog rather than repeated.** Read the qualifiers; they are the point. **X-54 and X-55
+are MEASURED, open, fail-open cost classes.** **X-56 is a latent pinning gap —
+`open`, but explicitly NOT reproduced**, filed on reading rather than on a
+violation. **X-53 is not a cost class at all**: it is a substrate disagreement
+about word splitting, filed on a measured mechanism but **not** on a measured
+end-to-end verdict split. All four are `docs/deferred-backlog.md` cluster X.
+**Three are pre-existing** — X-53, X-54 and X-55 each argue their own
+pre-existence, measured at `bbf6434` or on `main`. **X-56 is not**: it is a gap
+in what pins the invoker memo, and the memo did not exist before X-52, so the
+fix created the thing it fails to pin. None of the four is closed by X-52.
+
+```
+A wrapper head plus quote-dense padding runs the invoker walk to the
+end of the tail on every quoted run. `sudo` + 2000 runs is 80004 B /
+4000 jumps — INSIDE both shipped caps — and crosses the 60 s ceiling
+on main and on the fix alike. Its quote-free sibling `i` x 40000
+crosses at 79.72 s with no quoting and zero jump targets.        (X-54)
+
+A decider that STAYS the trailing word makes the walk O(runs x
+tokens), and the per-segment memo cannot help by construction —
+measured pre-existing at the last reviewed commit.               (X-55)
+
+Two of the invoker memo's three soundness invariants are pinned by
+nothing; a regression in either is fail-open and invisible to the
+verdict differential.                                            (X-56)
+
+The two substrates disagree about which characters separate shell
+words, and the shell's answer depends on the ambient locale.      (X-53)
+```
+
+**Also owed and NOT run:** a fresh head-class cost measurement on the merged tree
+(`053a367`) — a comparable pass across the head classes, taken together on one
+tree. Some individual post-memo figures do exist (X-54 records 150.95 s at the
+X-52 tip; X-55 records `>240 s KILLED` with the `_lastw` fix), but they were
+taken one shape at a time on different commits, which is why they disagree by up
+to 7% for one shape. See §4.11.
+
 ---
 
 ## 7. Reusable controls checklist
@@ -1603,7 +1767,7 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
 - [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
-- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and every blocking control has an explicit timeout with an explicit posture. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook with no timeout-table entry, while the other substrate denied in ~1.2 s. `[+2026-08-04]`
+- [ ] A control's **worst-case cost** is measured on adversary-shaped input, and its worst case is **under the deadline the runtime will impose**. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook, while the other substrate denied in ~1.2 s. `[+2026-08-04]` **Declare a timeout — and know that declaring it does NOT satisfy this** `[+2026-08-13]`: the declared value is the attacker's budget, its posture is fixed at ALLOW, and a team can write `timeout: 60` and be exactly as bypassable — which is the state that shipped a live bypass here. Declaring one is still required, because a control with none is killed at the platform default and the budget becomes invisible to review. Then either deny cheaply *before* the expensive work, or be provably fast on every admissible input. See §4.11.
 - [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`
 - [ ] **A document that makes checkable claims gets a verification pass, not just CI.** CI runs the suite; it cannot tell whether a sentence is true. Measured in this repo: a docs-only, CI-green change shipped guidance into this very file that a later round disproved, and a backlog row restated a PRE-FIX timing as present-tense. Prose asserting a number, a set membership, or "X does not appear in Y" is a claim to re-run, and the labels in §0 exist so a reader can tell which claims were. `[+2026-08-04]`
 - [ ] **Mutation-test the CONSTANT, not only the code.** A character set, word list or threshold the control keys on is shrunk deliberately and the suite must fail. Measured: removing two characters from such a set passed **1902 of 1902** checks with a live fail-open behind it. `[+2026-08-04]`
@@ -1613,7 +1777,7 @@ Derived from the above; ordered by how much each would have caught here.
 
 **Fail-closed**
 - [ ] Every dispatch has an explicit deny arm; no `case` falls through to allow.
-- [ ] Missing parser, oversized payload, unwritable filesystem, timeout, and malformed input each **deny**, each with a distinct reason.
+- [ ] Missing parser, oversized payload, unwritable filesystem, and malformed input each **deny**, each with a distinct reason. **Timeout is the exception and must be read as one** `[+2026-08-13]`: a deadline your control *owns* (its own `timeout` around a subprocess) routes to deny like the rest, but a deadline the **runtime** owns cannot — a cancelled hook exits 124/137/143, only exit 2 blocks, so it fails OPEN and no arm you write changes that. Make it unreachable instead of trying to route it. See §4.11.
 - [ ] Every dependency is probed for **function**, not presence — parse a known literal and compare. A shim, a broken dynamic link, a non-executable file of the right name, and a same-named different tool must all route to the same deny as an absent one; checking only that the dependency *exited clean* catches the first three and not the fourth. `[+2026-07-31]`
 - [ ] Fallback between redundant implementations triggers on **failure**, not only on absence — and "returned nothing" is never the same value as "could not run". `[+2026-07-31]`
 - [ ] Incidental work (logging, temp files, `mkdir`) cannot kill the process before the decision.
@@ -1657,6 +1821,13 @@ Post-tag sources `[+2026-07-31]`:
 - `docs/changelog.md`, the two 2026-07-31 in-version entries — the P0-3d fix (PR #22) and the autonomous-mode exit contract (PR #23).
 - `docs/deferred-backlog.md` clusters **O** and **P** — the wrapper round's residue, and the adversarial pass on its fix batch (45 claims raised, 23 refuted).
 - `tests/test_wrapper_behavior.py` — the suite that first executed an emitted wrapper; `P0-3b(ii)` in `tests/test_hook_behavior.py` — the broken-parser substrates.
+
+Post-tag sources `[+2026-08-13]` — the cost class behind §4.11:
+
+- `docs/deferred-backlog.md` cluster **X**, rows **X-50 … X-58** — the class (X-50, X-51), the guard, its bypass, the fix (X-52, `done`) and its five open residuals (X-53, X-54, X-55, X-56, X-57), plus X-58 on the rendering fault in this cluster's own table.
+- **PR #65, merged as `053a367`** — 21 commits, and the account of six self-inflicted regressions, five of them fail-open, shipped and fixed in the course of one fix.
+- `.claude/trust-ramp.md`, the `x52-*` and `x49-*` entries — five `harmful` grades, and the record of *which instrument caught what*: review caught four regressions, ad-hoc wall-clock caught two, and the 9668-check suite caught none of them.
+- **The same honest deviation from §0 that §4.10 records applies here.** These figures come from named commits, harnesses in `.claude/checkpoints/x52-harnesses/` (gitignored), and live checks against Claude Code — not from a suite you can re-run from this repo. A fresh head-class measurement on `053a367` is owed and has not been taken.
 
 All exit codes in §§1–5 were reproduced on 2026-07-30 against tags `v2.5.0`
 (`fc04c10`) and `v2.6.0` (`f6bded0`). Everything marked **`[+2026-07-31]`** was

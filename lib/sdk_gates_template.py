@@ -484,14 +484,17 @@ _EXPAND_DEPTH = 3
 # something the attacker writes (backlog X-44). It is now a flat semantic BUDGET
 # plus a cost-only length backstop. The shell twins (`_SUBST_BUDGET` /
 # `_SUBST_SCANMAX` in the header) carry the SAME numbers so neither substrate can
-# hit its fail-closed timeout while the other completes on a large command (the
-# X-36l exhaustion-divergence hazard). Asserted equal by test_composition.
+# hit its runtime timeout while the other completes on a large command (the
+# X-36l exhaustion-divergence hazard). [CORRECTED 2026-08-13, X-51: "fail-closed
+# timeout" - a cancelled hook does not deny, it is skipped and the call proceeds.
+# The divergence hazard is unchanged; only the direction of the harm is.]
+# Asserted equal by test_composition.
 _SUBST_BUDGET = 8192
 # [B3 re-land] 16384, not the first attempt's 65536. That value was sized by a
 # sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
 # bytes while varying only the walk's reach - but gate cost is the RE-SCAN of
 # the lifted inner, so it scales with the INNER. Re-measured with the padding
-# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s fail-closed
+# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s
 # ceiling; 16384 costs 30.9 s. The shell twin carries the identical number and
 # test_composition compares the two directly - an unequal pair is the X-36l
 # exhaustion-divergence hazard, and it is not theoretical: measured with the
@@ -1003,7 +1006,7 @@ def _subst_inners(seg):
     # whatever the ambient locale says. That split was measured live -
     # 6000 x U+4E2D of padding is shell-ALLOW / SDK-DENY with no locale set -
     # and the unit chosen is BYTES because characters are unaffordable: a
-    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s fail-closed
+    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s
     # ceiling. `surrogatepass` for `budget_len`'s reason - a command arrives
     # through JSON and a lone surrogate must weigh the same here as it does to
     # bash rather than crash a PreToolUse hook. The decode is trimmed back to a
@@ -2856,7 +2859,7 @@ def _int_word(base):
     # is one definition to get right rather than a hand-written mirror of it
     # per site. A mirror is what #40 and #43-F1 each were.
     #
-    # BOUNDED, because this gate is FAIL-CLOSED behind a 60 s ceiling and the
+    # BOUNDED, because this gate runs behind a 60 s ceiling and the
     # run side calls the reduction once per scanned token. The old form
     # stripped ONE character at a time with a membership test after each
     # strip, so its cost grew with the WORD, not with the word set: measured
@@ -2874,7 +2877,7 @@ def _int_word(base):
     # is 0.74x-1.15x over six shapes at 5-80 KB, and head is FASTER on the
     # reducible-word shapes; but the prefixed-run shape is a constant +4-5%,
     # and near 100 KB of single-token command word that constant puts a ~4%
-    # length band on the far side of the 60 s fail-closed ceiling (measured:
+    # length band on the far side of the 60 s ceiling (measured:
     # base 59.2 s allow, head 61.8 s). So "nothing the base allowed is pushed
     # into the ceiling" is NOT claimed - it is false in that band. Nothing
     # realistic reaches it, and the cost there is the tokenizer's
@@ -3640,8 +3643,12 @@ _GATE_EXTRA_MATCHERS = {
 # secrets-gate's superlinear tokenizer, and carries an install anchor with
 # nested quantifiers on top - and it had no ceiling on EITHER substrate, which
 # is what let a cubic scan run ~66 s here while the shell denied the same
-# command in ~1.2 s. A PreToolUse timeout fails CLOSED at the seam's runtime
-# floor, so the bound refuses a pathological command rather than allowing one.
+# command in ~1.2 s. [CORRECTED 2026-08-13, X-51] This used to read "A PreToolUse
+# timeout fails CLOSED at the seam's runtime floor, so the bound refuses a
+# pathological command rather than allowing one." IT IS THE OPPOSITE. A hook
+# cancelled at its declared timeout exits 124/137/143; only exit 2 blocks; the
+# call PROCEEDS. Crossing the ceiling is a BYPASS, not a refusal, so a timeout is
+# a budget the attacker spends - not a bound that saves you.
 # Shell parity (templates.TIMEOUTS).
 _GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0,
                   "secrets-gate": 60.0, "dependency-gate": 60.0}

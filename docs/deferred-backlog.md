@@ -9,6 +9,17 @@ deferrals here; the source lists remain as historical record.
 **Snapshot:** `main @ 3c0a2de`, 2026-07-21 (after the 2.4.0 fold + closeout:
 PR #8/#9/#10 merged, PR #4 closed). None of the items below block 2.4.0.
 
+> **FILE-WIDE RETRACTION, 2026-08-13 (X-51).** Rows throughout this file describe
+> the 60 s `PreToolUse` budget as a **"fail-closed ceiling"** and read a crossing
+> as an over-denial — *"a refusal of a command v2.7.2 permitted"*. **That
+> characterisation is retracted everywhere it appears here.** A hook cancelled at
+> its declared `timeout` exits 124/137/143; only exit 2 blocks; the call
+> **proceeds**. Crossing the ceiling **skips the gate**, so every such crossing is
+> a **bypass**, not a refusal. The *measurements* in those rows stand and are not
+> re-stated — only their direction was wrong. Retracted once here rather than
+> edited into ~9 historical rows, so the record of what was measured when stays
+> intact. See `docs/agentic-harness-security-kb.md` §4.11.
+
 Status legend: `open` (actionable work) · `decision` (needs an owner call before
 work) · `no-action` (reviewed, judged fine as-is; listed so it isn't re-derived)
 · `done` (resolved; kept for provenance).
@@ -419,6 +430,142 @@ both were refuted by rendering three real projects and counting bytes.
 | Y-1 | **REFUTED AT MAGNITUDE. The steering layer is 0.79% of what the installer emits, is read ON DEMAND, and its generic residue is ~90 tokens — there is no cost argument here to act on.** Measured, not assumed, by calling `installer.build_plan(resolve_config(...))` on this repo's own `bootstrap.config.yaml` and summing action bodies by prefix: hooks 12 files / 1,209,183 B (84.63%), `sdk_gates` 1 file / 193,277 B (13.53%), **steering 9 files / 11,329 B (0.79%)**, skills 4,045 B, agents 2,168 B, commands 1,669 B, `CLAUDE.md` 1,191 B; total 1,428,866 B. Maximum opt-in raises steering to 11 files / 23,446 B. Line-by-line classification puts ~350 B (default) to ~2,500 B (max opt-in) in the class the thesis targets — prose that only restates what a capable model already does — i.e. **0.024% to 0.17% of emitted bytes, ~90 to ~625 tokens.** The layer called redundant is 0.79%; the layer called durable is 98.2%. **AND THE COST IS NOT LEVIED PER SESSION:** steering is read on demand, not auto-loaded — `grep -rn 'additionalDirectories' lib/` is empty, there is no `@` import, and the emitted `CLAUDE.md` says only *"Thin by design. Steering lives in `.claude/steering/`. This file is the escalation contract, not a knowledge dump."* Unread steering costs zero tokens. **THE HISTORY CLAIM IS FALSE AS STATED:** grep finds ZERO changelog events of prose pruned because a capable model already knows it. What this repo actually has a history of is **DE-DUPLICATION and contradiction removal** (`docs/changelog.md`, the entry recording that the assumption-ledger and `telemetry.md` stated CONFLICTING drift thresholds, fixed by dropping the numbers and pointing at the ledger), which is a **grep-decidable** criterion, unlike genericity, which is undecidable and model-tier-dependent. There is also one documented case of removing prose causing the regression it existed to prevent, which had to be reverted. **THE D17 ANALOGY INVERTS ON ITS LOAD-BEARING HALF.** It is fair on *emitted everywhere and already drifted*; it fails on *zero consumers, free to delete* — dead code has no consumers, which is grep-decidable and was assertion-locked (`tests/test_composition.py:125-126`), whereas prose is always consumed and its redundancy is a judgement. **THE LAYER SPLIT ITSELF LEAKS, and this is the hardest counterexample:** on the RETROFIT path steering is a RUNTIME INPUT TO SECURITY-TIER GATES. `lib/templates.py:7120-7127` states the preamble *"Reads .retrofit-state.json, steering/spec-strategy.md's legacy allowlist, and hooks/rollout-schedule.md's ROLLOUT_WEEK marker AT RUNTIME, so updating those files changes hook behavior without re-running the installer"*; the `LEGACY_ALLOWLIST_BEGIN/END` block is awk-extracted at `:7173-7175` and consumed by spec-gate-commit and tdd-gate (`:7193-7203`, `:7249`, `:7300`, `:7346`). So *"steering is model-facing prose, gates are deterministic"* is false on that path, and a pruner reformatting those markers silently widens exemptions on three security-critical gates. Likewise *"gates never compensate for a model that doesn't know better"* is false for one ADVISORY hook: the drift-detector is ledgered as *"Compensates for: Context degradation"* (`lib/templates.py:2389`) with a model-tier re-validation trigger — the BLOCKING gates do not. **THE FAIL-OPEN CAVEAT IS RIGHT BUT NEEDS ITS SHARP FORM.** *"Worse than no gate"* is literally true only for the fail-SILENTLY-open case, and this repo has that in execution-proven form — **P-19**: a same-named `jq` wrapper that exits 0 turns secrets-gate on `cat .env` and dependency-gate on `pip install evil` from rc=2 to rc=0, re-verified at branch HEAD. For a partial-coverage gate the claim is rhetorically strong and technically false (it still blocks what it covers); the operative harm is FALSE CONFIDENCE, which this repo has documented as actually occurring, and the sharper wording already exists in `docs/agentic-harness-security-kb.md` (the passage on the operator having *less* safety than they believe). Related: the *"five fixes shipped a blocker past a green suite"* figure is UNDERSTATED — KB §5.1 records **seven consecutive fix commits**, each shipping a defect into the class it was fixing, none caught by the green suite, every one caught by the next independent review. **CORRECTION TO THE BRIEFING THIS ROW WAS OPENED WITH:** there are 9 greenfield steering files by default (product, tech, deps, secrets, structure, principles, ci-cd, tools, assumption-ledger) and 11 at max opt-in (+ telemetry, design); `spec-strategy.md` and `workflow-source-of-truth.md` are **RETROFIT-ONLY**, alongside three conditional retrofit files (contracts, migration, compliance) — 16 distinct across both modes, not the 8 originally listed. **IF ANYTHING IS EVER CUT** the criterion is DUPLICATION (two file:line locations stating the same rule), never *"a capable model already knows this"*, and this exclusion list is mandatory: (i) prose named by a gate refusal message or parity-pinned; (ii) prose machine-read at runtime by a gate (the spec-strategy allowlist above); (iii) a recorded lesson from an OBSERVED model failure (X-33 / X-33c); (iv) a prose-only security control with no gate behind it (the `design.md` trust boundary, `lib/templates.py:8419-8428`); (v) the operator-facing calibration record. The largest real duplication target is the design triad (`design.md` + design-review SKILL + design-review command, 253 lines / 14,499 B = 31% of the max prose surface, stating the trust boundary three times and the invariant checklist twice) — and that duplication is **deliberate and documented**, so cutting the mirrors re-opens a prompt-injection surface. **RECOMMENDATION: no pruning pass.** The steelman that survives is narrow: *the assumption-ledger mechanism already exists for exactly the staleness class this thesis worries about, and is scoped to numeric DEFAULTS rather than prose* — extending it is the only version of this idea with a decidable trigger. | `decision` — measured and declined; reopen only with a duplication-keyed proposal that respects the exclusion list |
 | Y-2 | **REFUTED AS ORTHOGONAL. Effort's baseline is set BY the model, effort is prescribed as a SUBSTITUTE for model tier, and the key the thesis proposes for effort is the key the MODEL axis already uses — so the two would be collinear, not independent.** Three refutations from the protocol's own Companion: (1) it states that xhigh effort is the DEFAULT for Opus 4.8, *"no separate flag needed"* — an axis whose zero point moves with the other axis is not orthogonal to it; (2) it prescribes falling back to *"Sonnet 5 (xhigh effort)"* for spec-review and code-review when Opus is constrained, *"compressed across fewer tiers"* — raising effort as compensation for lowering model is partial fungibility, which is coupling; (3) its stated model principle is *"match model strength to consequence-of-error x judgment-required, not to role prestige"* — **verbatim the key the thesis proposes for effort**, so the effort column would be a monotone function of the model column and carry near-zero incremental information. **THE PROPOSAL IS ALSO ALREADY SHIPPED WHERE IT MATTERS, AND A TEST FORBIDS THE REST.** The reviewer carries `model: opus` + `effort: high` on BOTH paths (`lib/templates.py:6045` greenfield, `:8079` retrofit), assertion-locked (`tests/test_installer.py:1414-1420`), and the changelog records it as KEEP-AND-LOCK, not a new capability. `tests/test_installer.py:1421-1424` **actively asserts effort appears ONLY on the reviewer**, so *"give each agent role an effort profile"* would delete a test written specifically to forbid that. The Companion's model table already annotates effort inline in four rows; exactly one of them reaches the wire as frontmatter. **THE TWO SURFACES ARE NOT PEERS.** MODEL is a real three-place operator surface — implementer / reviewer / integrator, values interpolated from `bootstrap.config.yaml` `workflow.{implementer,reviewer,integrator}_model` (sonnet / opus / inherit), assertion-locked at `tests/test_installer.py:1392-1400` plus the whole-plan SHA-256 golden. EFFORT is a single hardcoded literal at two sites with **no config key, no default, no validation and no operator surface**. **THE PHASE PREMISE IS WRONG:** the protocol's numbered Phases 0-10 are BOOTSTRAP-WIZARD phases and all three agents are created inside one of them (Phase 7); the only artifact binding roles to steps is the unnumbered per-task lifecycle, which binds implementer (gates 3-5) and reviewer (gate 6) and **never binds integrator at all**. So *"per-phase effort"* is not an extension of an existing mapping — the mapping would have to be built first. **THE MECHANICAL-STEPS EXAMPLE IS FALSIFIED BY THIS REPO.** Golden re-baselining is a numbered freeze-exception ritual whose record includes five consecutive re-baseline inventories *"written from intent and all five were wrong"*; renames have shipped parsing bugs; boilerplate emission is exactly where D17 lived. The tasks the thesis calls mechanical are among the highest-consequence here. **THE CONCRETE SAFETY HARM, and the reason this is not merely academic:** *"implementer = low effort"* would thin the artifacts four gates TRUST while changing no verdict and failing no test — the implementer authors the failing tests under TDD, and tdd-gate accepts an EMPTY file named `test_<stem>.py`, spec-gate-commit accepts any `tasks/*.md` that word-boundary-names the file, and iteration-summary-enforcement checks only non-emptiness. That is the false-confidence class in its purest form. Integrator is `model: inherit` because *"merge conflict complexity varies"*, which a fixed effort pin directly contradicts. **THE CATEGORY-ERROR CLAIM IS HALF RIGHT AND MUST BE STATED IN BOTH HALVES:** effort is irrelevant to what a gate DECIDES (verified exhaustively — see Y-3), but not to what a gate's decision is WORTH, because several gates' premises are artifacts the model writes; and the PRD twice calls the reviewer subagent part of the enforcement guarantees even though it is a model with an effort setting. Note also that frontmatter `model:` may not be honoured for nested spawns at all, which makes even the MODEL axis advisory at the platform level. **RECOMMENDATION: no change.** Close as measured-and-declined. If ever revisited, effort needs a key the model axis does NOT already use (e.g. openness of the search space, not consequence of error). Cost if taken anyway: delete or rewrite `tests/test_installer.py:1421-1424`, a three-fixture golden re-baseline, and new config keys with validation. | `decision` — coupled not orthogonal, already applied where it matters, no work proposed |
 | Y-3 | **THE ONE ACTIONABLE ITEM THIS PASS FOUND: the enforcement layer's independence from model and effort is TRUE, LOAD-BEARING AND UNPINNED.** Both theses lean on it (*"effort is irrelevant to the gate layer"*, *"a deterministic boundary"*), and it was VERIFIED BY EVIDENCE rather than assumed: across all 15 emitted `.claude/hooks/*.sh` and the 7 SDK gate factories in `gates.py` there are **zero LLM calls, zero model-identity reads and zero effort reads** — a strict non-comment scan for model / effort / opus / sonnet / haiku / subagent / frontmatter returns 4 hits, all inside docstrings or prose (`gates.py:320`, `:952` *"best-effort"*, `:2154`, `:2980`), and the only `claude_agent_sdk` reference is `from claude_agent_sdk import HookMatcher` (`gates.py:31`), a type import. **But nothing in the suite asserts it.** A future gate that branched on `$CLAUDE_MODEL`, on an agent identity, or on a frontmatter effort value would ship GREEN, and the property both theses rest on would be gone with no signal. **PROPOSED FENCE:** a structural test over the EMITTED surface asserting that no hook body and no `gates.py` factory references a model or effort identifier outside comments and docstrings — the sibling of the existing `_assert_tier_partition()` posture (`lib/installer.py:569-598`), which refuses to BUILD unless the tiers exactly partition the event map. **Done when:** the tripwire exists, PASSES on the current tree, FAILS on a deliberately planted `if [ "$CLAUDE_MODEL" = ... ]` in a hook body and on a planted frontmatter read, and does not trip on the 4 known benign prose occurrences. **STATE THE LIMIT PRECISELY, or the fence becomes its own false confidence:** it pins that a gate does not READ model or effort. It cannot pin that a gate's verdict is WORTH anything. Four gates are deterministic in the bytes of MODEL-AUTHORED, AGENT-WRITABLE files, and three were flipped from deny to allow during this census with a single agent-reachable write — spec-gate-commit (write any `tasks/*.md` naming the file), eval-gate (`touch .claude/.last-eval-pass`, already filed as **J-9**), tdd-gate (an EMPTY file named `test_<stem>.py`) — while iteration-summary-enforcement checks only that a model-written summary is non-empty and test-gate delegates its verdict to an arbitrary configured external program. Two further inputs sit outside *"command text plus config"* entirely and are worth their own rows if anyone wants them: **wall-clock time** (dependency-gate is superlinear and fail-CLOSED at 60 s, measured 0.27 s at 4 KB to 11.95 s at 32 KB, so the verdict is partly a function of machine speed) and **ambient locale** (`${#var}` counts bytes under C and characters under UTF-8; one shipped shell-ALLOW / SDK-DENY split came from exactly that, fixed at `_blen`, still latent at `_cs_inv_word`). | `open` — cheap, deny-direction, pins a property two theses and the layer split all depend on |
+
+## Priority tiers — 2026-08-13, written against a STATED threat model
+
+**THE THREAT MODEL, DECIDED BY THE OWNER 2026-08-13 AND LOAD-BEARING FOR EVERY
+TIER BELOW: these gates exist to catch an AGENT MISTAKE, not a motivated
+adversary.** Prompt injection and deliberately crafted payloads are **OUT OF
+SCOPE** and are documented as such rather than silently hoped away. Anything
+whose exploitation requires an attacker to author command text is deferrable
+under this model; anything a well-meaning agent can trip over on its own is not.
+
+**Sorting the backlog by discovery order is what made it look unshippable.**
+These tiers re-sort it by *what a user hits first*. A row's tier is about
+REACHABILITY UNDER THE STATED MODEL, not about how severe it would be if
+reached.
+
+| tier | meaning | rough |
+|---|---|---|
+| **T0** | blocks any use, and is not security at all | ~1 h |
+| **T1** | makes shipping-with-known-risk honest rather than negligent | ~4–8 h |
+| **T2** | ACCIDENT-mode risk — a well-meaning agent reaches it unaided | ~30–60 h |
+| **T3** | ADVERSARIAL-only — needs a crafted payload; **defer and DISCLOSE** | — |
+| **T4** | feature gap, not a risk — ship as unimplemented, say so | — |
+
+**T0 — `C-1`, no LICENSE; and `A-6`, added after review.** `A-6`
+(`spec-gate-commit`'s predicate) matches T0's own definition and was in no tier
+at all: it blocks the FIRST CODE COMMIT of every adopting project, which is
+"blocks any use" by definition. Tier it, size it, or close it — but it cannot
+be absent.
+
+**`C-1`, no LICENSE.** An owner decision, ~30 minutes of work, and it alone
+holds the "not production ready" verdict in `docs/production-readiness.md`.
+Fixing it does not make the protocol ready; it stops a non-technical item from
+masking the real state.
+
+**T1 — the honest-labelling pass, and the highest-leverage item on this page.**
+A bypassable gate is worse than no gate in exactly one way: it changes operator
+behaviour on a promise it cannot keep. The emitted `secrets.md` tells an operator
+their never-read paths are blocked; under padding they are not. Writing the real
+threat model into the emitted artifacts converts false assurance into calibrated
+assurance, and it costs hours rather than weeks. Draft: `docs/threat-model.md`.
+
+**T2 — accident-mode, and NOT deferrable under this model.** `C-6`
+(download-then-execute: an agent can `curl … | sh` by accident, so this is not
+adversarial-only) and `C-5` (the documented approval path is inert — operators
+cannot configure what they believe they configured, which is a correctness defect
+wearing a security costume).
+
+**T2 (cont.) — AUTONOMY AND DYNAMIC WORKFLOWS, PROMOTED 2026-08-13 BY OWNER
+DIRECTIVE.** `C-2` (the wrappers dispatch nothing) moves T4 → T2, and the
+dynamic-workflow policy joins the tiering, having been absent from it entirely.
+
+**PROMOTING AUTONOMY CHANGES THE THREAT MODEL, IT DOES NOT JUST REORDER THE
+LIST — READ THIS BEFORE RELYING ON ANY T3 DEFERRAL.** The "agent mistakes"
+model tacitly assumed a HUMAN BACKSTOP: someone sees each command, and the gates
+are a second line. Unattended dispatch removes that assumption, and two things
+follow:
+
+* **The cost ceiling becomes ACCIDENT-REACHABLE.** X-54's shape is `sudo`
+  followed by 2000 single-quoted runs — 80004 B, inside both caps. That is not
+  an attack payload; it is a **bulk file operation with quoted paths**
+  (`sudo chown user 'file one' 'file two' …` across ~2000 files). Supervised, a
+  human would question the command anyway. Unattended, ordinary bulk work
+  reaches the shape and **nobody sees that the gate was skipped**.
+* **A crossed ceiling is silent.** The hook is cancelled, exits 124, and the
+  call proceeds. In a loop, that failure has no observer at all.
+
+**Therefore `X-54` is PROMOTED T3 → T2** and the owed head-class cost
+measurement stops being evidence-gathering and becomes a **precondition of
+shipping autonomous mode**. `X-55` stays T3: it still requires a decider
+shape an agent does not construct incidentally. **`C-3` does NOT stay T3 — see
+the promotion below; filing it there was this tiering's worst error.**
+
+**Dynamic workflows — newly tiered, T2.** The DW-P4 prohibition is what stops
+agents driving commands through fixture hooks, and the ledger records **two
+logged breaches**. It is currently **prose, not a control**: this session had
+zero violations because the prohibition was stated first in every brief, which
+is a prompt-engineering result and not an enforcement mechanism. Owed, in order:
+(a) `.claude/dynamic-workflow-policy.md` §1's grant table names
+`~/.claude/settings.json`, which `CLAUDE_CONFIG_DIR` makes inert — it checks a
+file that cannot affect this tree; (b) the breach count is stale against the
+ledger; (c) **decide explicitly whether DW-P4 stays advisory or gets a
+mechanical control, and write the answer down.** Permitting dynamic workflows as
+a first-class use while their only safeguard is prose is the same
+false-assurance shape T1 exists to eliminate.
+
+**T2 (cont.) — `C-3` (readiness), PROMOTED T3 → T2 2026-08-13 after adversarial
+review, and the correction is worth stating in full because the original tiering
+was wrong in the dangerous direction.** **DISAMBIGUATION FIRST: this is
+`docs/production-readiness.md`'s C-3, "Nothing protects the gate substrate from
+itself" — NOT this file's own cluster-C row C-3 ("Doc-citation normalization
+pass", :52).** The two namespaces collide and every earlier reference here was
+unglossed.
+
+It was filed T3 as "adversarial-only". **That is false of it.** Measured
+end-to-end with a positive control: the five-hook Bash chain denies `cat .env`,
+then `printf "exit 0" > .claude/hooks/secrets-gate.sh` is **allowed by all
+five**, secrets-gate becomes 6 bytes, and `cat .env` returns the canary — **and
+the same overwrite works through the Write tool.** One ordinary write, no
+payload, no density tuning, no decider shape. It is a TOTAL gate defeat and it
+is the cheapest item on this page to reach.
+
+Accident-reachability is not hypothetical here: this repo's own ledger records
+**two** cases of well-meaning agents violating an explicit prohibition —
+`.claude/trust-ramp.md` logs a DW-P4 breach (agents drove commands through
+fixture hooks, 53 invocations) and a later round where "several wrote diff files
+into the session scratchpad despite an explicit read-only prohibition stated
+twice". Neither agent was an adversary. **Honest limit: nobody has yet MEASURED
+an agent accidentally overwriting a live gate hook.** The case rests on one
+write sufficing (measured) plus two logged prohibition violations, not on an
+observed incident.
+
+**T3 — deferred WITH THE REASON RECORDED, not forgotten.** `X-55` and the
+remaining padding/cost classes. Each needs a deliberately constructed payload or
+a specific decider shape. **They are `open` and stay `open`**;
+deferring is a scope decision, not a claim they are fixed. If the threat model
+widens to include prompt injection, THESE BECOME BLOCKING IMMEDIATELY, because
+injected content makes command text attacker-controlled.
+
+**T4 — feature gaps.** `C-7` only: the SDK substrate has never run against the
+real SDK. **Shell is the supported substrate.**
+
+**WHAT THIS BUYS:** with autonomy and dynamic workflows promoted, roughly
+**70–120 h** rather than the 35–70 h of the gates-only release — still well
+under the 150–300 h of fixing everything, because `X-55`, `C-3` and `C-7` remain
+*must disclose* rather than *must fix*. The delta is `C-2` (~20–40 h), the
+dynamic-workflow policy (~5–10 h), and `X-54` plus the head-class measurement
+that sizes it.
+
+**ONE PREMISE THAT DOES NOT SURVIVE, recorded so it is not re-argued:** "better
+models mean smaller risk" is half true and half inverted. Better models reduce
+ACCIDENTAL bad commands — which is the surface these gates already cover well.
+They do nothing for prompt injection (a more instruction-following model can be
+MORE steerable by injected content), and nothing at all for the padding bypasses,
+which are deterministic properties of a bash tokenizer's cost curve with the
+model nowhere in them. The case for shipping rests on the threat model, not on
+model quality.
 
 ## Priority reading
 
