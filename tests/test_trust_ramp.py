@@ -280,8 +280,28 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # Backfilled 2026-08-11 with the seven runs of that session, +1 on 2026-08-12
 # for PR #64's adversarial review; DW-A2 makes one run one entry, so this
 # number moves only when real work is logged.
+# +5 on 2026-08-13 for the X-52 session: three dynamic-workflow review rounds
+# (one of which returned SIX nulls and is logged as a run that did not run,
+# because §5 makes an uncounted null indistinguishable from a clean result) and
+# two solo blocks, X-52's fix and X-49's cost re-measurement. Logged late - the
+# session ran nine commits and four workflows before any entry was written,
+# which is the same omission 9041acf exists to correct.
+# +1 on 2026-08-13 for x52-lastw-array-phase: the array-phase half of X-52's
+# memo guard, found by reading the unreviewed tail rather than by any test.
+# Graded `corrected` on the day, then RE-GRADED `harmful` in c341775: the
+# vocabulary defines `corrected` as "nothing wrong reached the tree", and
+# b1fcc85 reached the tree, origin AND PR #65. Same argument as the
+# x49-cost-veto-superseded re-grade; the contest is settled, not owed.
+# +1 for x52-tail-review-and-corrections: six adversarial review rounds and the
+# corrections they forced. Graded `harmful` for the PUBLICATION-STATE error -
+# a live bypass sat in an open, mergeable PR while this session asserted
+# nothing was pushed - not for any of the code.
+# +1 for x52-merge-prep-review: three adversarial merge-readiness rounds over
+# PR #65. Graded `harmful` for a RATE - each of three correction commits put
+# new false claims into the record and the next round found them - not for any
+# code. No gate-logic finding survived refutation in any round.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 16, f"{len(es)} entries")
+      len(es) == 24, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

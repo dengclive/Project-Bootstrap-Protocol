@@ -3491,11 +3491,25 @@ _JUMP_BYTES = b"()\\\"'`$"
 def _cost_guard(input_data):
     """`None` if the command is cheap enough to gate, else a deny decision.
 
-    Two conditions, and they are NOT all of them - this guard is PARTIAL.
-    TOKEN COUNT is a third cost term it does not measure (X-52, open): a
-    command of 40000 `! ` tokens has ZERO jump targets, sits under the length
-    cap, and costs the shell 139.58 s against a 60 s ceiling. What these two
-    close is the length and density classes. Neither
+    Two conditions, and this guard does not claim they are all of them.
+    TOKEN COUNT was a third cost term it does not measure (X-52): a command of
+    40000 `! ` tokens has ZERO jump targets, sits under the length cap, and
+    cost the shell 139.58 s against a 60 s ceiling. FIXED 2026-08-12 by
+    removing the term rather than adding a condition here - the shell walk's
+    per-token tail rebuild was quadratic; the walk now steps a few tokens
+    lazily and only a walk still going after that splits the remainder,
+    so the same shapes DENY in 6.2 s. The COST CLASS is not closed - a wrapper
+    head still runs the walk to the end of the tail on every quoted run (X-54,
+    open) - but that is a shell cost property too and this side is unaffected. Nothing changed on THIS side: the fix is a
+    shell cost property, THIS MODULE'S verdicts are unchanged, and it was
+    already paying 0.10-0.45 s for those shapes. CORRECTED 2026-08-13: this
+    used to say flatly "it moves no verdict", and scoped to the whole fix that
+    is FALSE - b1fcc85's memo was a live dependency-gate bypass on the SHELL
+    side (main=DENY / tip=ALLOW), fixed in 0d24cc3, and the differential grew
+    4092 -> 4104 rows to carry it. What survives is the narrow claim: the
+    Python substrate's own verdicts did not move, which is why the new rows
+    are all shell==sdk. See freeze-exception no. 66. What these two close is the length and
+    density classes. Neither
     predicate catches the other's class (measured on a benign corpus of this
     repo's own files against the adversarial shapes):
 

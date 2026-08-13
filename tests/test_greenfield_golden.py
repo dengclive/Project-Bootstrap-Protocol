@@ -2814,7 +2814,240 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "a0c724446050f45289b9ad1cec1797653b1b03e9a7aa857cde7c9bcc38e39248",
+        # [freeze-exception no. 52, 2026-08-12] X-52 — THE THIRD COST TERM,
+        # CLOSED BY REMOVING IT RATHER THAN BOUNDING IT. `_cs_isinv` rebuilt
+        # the whole remaining tail once per token (`_tail="${_tail#"$_w"}"`),
+        # so the invoker walk was O(tokens x length) while doing linear work.
+        # `!` / `{` / `A=1` are head-transparent, so the walk never exits
+        # early: `"! " x 40000 + pip install evilpkg` is 80019 B with ZERO
+        # jump targets, passes BOTH of no. 51's caps, and cost 139.58 s
+        # against a 60 s ceiling - the hook is cancelled and the install RUNS.
+        # THREE quadratic loops removed, each found by profiling AFTER the
+        # previous one stopped dominating - reading the code found none of them:
+        #   1. `_cs_isinv`'s per-token tail rebuild. The walk steps
+        #      `_CS_LAZYMAX` (4) tokens LAZILY, exactly as the original did,
+        #      and only a walk still going after that splits the remainder.
+        #      91.16 s -> 0.90 s on the 40000-token walk in isolation.
+        #      THE BOUND TOOK THREE ROUNDS TO SIZE, all caught by adversarial
+        #      review and reproduced at width 1: splitting EAGERLY on every
+        #      call sent an `echo` head with 4090 runs 33.51 s -> 146.80 s;
+        #      switching after the HEAD sent a `!` head with 2000 runs
+        #      22.93 s -> 30.79 s; windowing the split only reached 30.79 s,
+        #      because `${_tail:$_CS_WIN}` copies the remainder anyway.
+        #      CORRECTED 2026-08-13: this used to open "AND EACH WRONG VALUE
+        #      WAS ITS OWN BYPASS". Only the FIRST was - 146.80 s crosses the
+        #      60 s ceiling, 30.79 s does not, so calling the other two
+        #      bypasses overstates them by the row's own definition of the
+        #      word. See no. 66. At 4 every head class measured
+        #      0.88-0.92x of main - AT d526733, WHICH CONTAINS NO `_lastw` AT
+        #      ALL, and not re-run since; see no. 65. NONE of this was
+        #      visible to the suite,
+        #      the differential or the boundary corpus - they measure
+        #      verdicts and every one of these is a COST property.
+        #   2. dependency-gate's install-head candidate (`_cand="$_cand $_UQW"`),
+        #      45.5% of the gate's runtime once (1) was linear. Accumulates into
+        #      an array joined only at completer tokens. 47.5 s -> 5.7 s.
+        #   3. the SECOND copy of (1) at the end of `_cs_scan` (`_rem`), 80% of
+        #      the runtime once (2) was fixed. 27.17 s -> 2.79 s on `bash5.2 `
+        #      x 9216 - an X-36y shape, which is why that row only moved 1.3x
+        #      until this one landed.
+        #   bang-40000     139.58 s bypass -> DENY 5.8 s  [c1c0945; see no. 65]
+        #   assign-20475    76.76 s bypass -> DENY 5.3 s  [c1c0945; see no. 65]
+        #   X-36y brace-40KB / bang-40KB   35.7 s -> 2.3 s (both DENY)
+        #   X-36y bash5.2 x 9216           35.5 s -> 2.79 s
+        #   benign sudo rm <4000 files>    10.69 s -> 1.7 s
+        # ~10x margin under the ceiling, against no. 51's ~3.5x.
+        # THE COST CLASS IS NOT CLOSED, ONLY THIS TERM IS: a WRAPPER
+        # head sets `_seen=1`, the `*)` arm stops ending the walk, and
+        # `sudo` + 2000 quoted runs runs to the end of the tail on
+        # every run - main TIMES OUT at 1200 s, this tip takes
+        # 150.95 s, still past the ceiling. Filed as X-54.
+        #
+        # VERDICTS ARE UNCHANGED - this is a COST fix, and that is what makes
+        # it a bytes-only exception. Walk step counts are identical at every
+        # size (40003 vs 40003), the 4092-row differential passes untouched,
+        # and `.claude/sdk_gates/gates.py` differs ONLY in the `_cost_guard`
+        # docstring - its executable AST is identical with docstrings stripped,
+        # verified rather than asserted. So unlike no. 51 there is no mirrored
+        # constant and no new parity surface. A per-event WORK COUNTER was the
+        # other candidate and was rejected on measurement: benign
+        # `sudo rm <4000 files>` already costs 4003 walk steps against the
+        # attack's 40000, a 10x separation leaving under 2x margin.
+        #
+        # PER-FILE, v2.7.4-vs-worktree PLAN ACTIONS, measured on THIS tree:
+        # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
+        # 0 removed. FOURTEEN moved bodies; no markdown, no settings.json, no
+        # skill, no steering artifact:
+        #   +13110  every hook - the shared header's two walk rewrites
+        #   +17852  dependency-gate - the header plus `_cparts` / `_cjoin`
+        #   gates.py - docstring only, no executable change
+        #
+        # [freeze-exception no. 63, 2026-08-13] X-52 `_lastw`, AND THIS ONE IS
+        # NOT A BYTES-ONLY EXCEPTION - READ IT AGAINST no. 52 ABOVE, WHICH IT
+        # PARTLY RETRACTS. No. 52 says "VERDICTS ARE UNCHANGED - this is a COST
+        # fix, and that is what makes it a bytes-only exception". That was true
+        # of the commits it covered and is NOT true of this one: the memo it
+        # shipped cached a decision taken on the TRAILING word in the array
+        # phase, which was a LIVE dependency-gate BYPASS, so this re-baseline
+        # MOVES VERDICTS on purpose. BOTH DIRECTIONS, and an earlier draft of this note said only 'the deny direction' while its own second bullet below records the opposite: the bypass rows go allow->DENY, and the `inv`-arm row goes tip=DENY -> ALLOW because the tip OVER-denied there.
+        #
+        # WHAT MOVED, all ratified at width 1 before the fix was written:
+        #   `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }`
+        #        main=DENY / tip=ALLOW / fixed=DENY, and bash RUNS it (file
+        #        marker, not captured stdout). `su`/`bash`/`eval` spell the
+        #        same bypass; `! ! ! ! ` is a second head spelling.
+        #   `{ { { { sh"a" "pip install evilpkg"; }; }; }; }`
+        #        main=ALLOW / tip=DENY / fixed=ALLOW - the `inv` arm cached in
+        #        the OTHER direction, i.e. the tip OVER-denies. Tolerated
+        #        direction, still wrong, and no row covered it.
+        # The differential grew 4092 -> 4104 rows to carry both directions;
+        # every new row is shell==sdk, which no pre-fix measurement covered.
+        #
+        # COST, three trees, equal caps, each verified to BE the tree it
+        # claims. The memo is KEPT because it is load-bearing where it is
+        # sound - on a decider with a separator behind it, bbf6434 (the last
+        # REVIEWED commit) is >240 s KILLED and this is 39.26 s - and it is
+        # DISABLED only where it is not. The give-back is that unsound class
+        # returning to bbf6434's cost: >240 s and 75.56 s vs bbf6434's >240 s
+        # and 73.39 s, i.e. this fix introduces nothing there. That class is
+        # fail-open ON THE REVIEWED COMMIT ALREADY and is filed as X-55, not
+        # absorbed. Note for anyone re-costing this: `fixed <= main` is close
+        # to a THEOREM here (main's walk is O(N x L) per call, this is
+        # O(L + N) with the same call count), so main is the wrong baseline;
+        # bbf6434 is the right one.
+        #
+        # PER-FILE, tip-vs-worktree PLAN ACTIONS, measured on THIS tree:
+        # counts unchanged (57/69/59, service 79 / agent 93), 0 added,
+        # 0 removed, 13 emitted hooks move:
+        #   +1324  every hook - the shared header, one line and its comment
+        #   gates.py BYTE-IDENTICAL - this is a shell-only fix, so unlike
+        #   no. 52 there is not even a docstring delta to explain
+        #
+        # NUMBERING: "no. 52" is used TWICE in this file for two different
+        # changes (X-45 dated 2026-08-10 and X-52 dated 2026-08-12), and
+        # :2807 uses the range "no. 56-61". 63 is the next free integer above
+        # 62 (tests/test_retrofit.py:2051). The duplicate is recorded rather
+        # than renumbered, because the number is a citation handle and
+        # rewriting one breaks whatever already cites it.
+        #
+        # [freeze-exception no. 64, 2026-08-13] COMMENT ONLY, ZERO EXECUTABLE
+        # CHANGE - and unlike no. 63 immediately above, that claim is the whole
+        # point of this one. `41cc941` justified the trailing-word test with
+        # "bounded by the WORD, which is short". Adversarial review of the PR
+        # tail said that is false and MEASUREMENT ON BARE BASH CONFIRMED IT:
+        # bash takes MB_STRLEN over the whole variable before slicing, so
+        # `${_tail:${#_w}:1}` costs the same at offset 4 as at offset len-1
+        # (412 vs 441 ms at 20 KB; 5321 vs 5323 ms at 200 KB) and is O(TAIL),
+        # not O(word). The spelling is KEPT - it is a real ~3x constant and the
+        # two forms are semantically equivalent - but the justification shipped
+        # into 13 emitted hooks was wrong, and `test_composition` had frozen it.
+        # Only comments move. Verdicts, action counts and the 4104-row
+        # differential are untouched, and gates.py is byte-identical.
+        # Recorded as its own exception rather than folded into no. 63 because
+        # a future reader auditing "why did a frozen artifact move" is owed the
+        # answer "a claim in a comment was wrong", which is a different answer
+        # from no. 63's "a guard was wrong".
+        #
+        # [freeze-exception no. 65, 2026-08-13] COMMENT ONLY AGAIN - AND IT IS
+        # THE SAME ERROR ONE CONSTANT OVER, WHICH IS WHY IT GETS ITS OWN NUMBER
+        # RATHER THAN AN AMENDMENT TO no. 64. `_CS_LAZYMAX`'s LOWER-bound
+        # paragraph justified the value with "switching before then costs
+        # O(runs x tail) and crossed the 60 s ceiling at 4090 runs inside both
+        # caps". Both halves are wrong. 30.79 s is UNDER the 60 s ceiling, and
+        # 30.79 against 22.93 is a 1.34x CONSTANT, not a class change. The
+        # figure was measured at d526733, BEFORE b1fcc85 added the per-segment
+        # memo: on that shape the memo is written on the second call and every
+        # later call returns at `_cs_isinv`'s head, ahead of `local _tail=`, so
+        # it is O(1) per call at ANY lazy bound. A smaller bound only delays the
+        # memo write by one call, on a tail still a few bytes long. Main is
+        # O(runs x tail) on this shape too, which is why the ratio was small.
+        # The constant 4 is KEPT and UNCHANGED - only its justification moves.
+        # A WRAPPER head is the genuinely different case: `_seen=1` keeps the
+        # walk running to the end of the tail (X-54), and where the decider
+        # stays the trailing word the memo cannot help (X-55). Both open.
+        #
+        # THIS IS THE THIRD INSTANCE OF ONE HABIT and the pattern is the point:
+        # no. 64 (`${_tail:${#_w}:1}` claimed O(word), measured O(tail)), X-49's
+        # retracted 7.84 s margin (actually 157.58 s), and now this. Each
+        # claimed a REMOVED TERM for a constant-factor win, on a number measured
+        # against an earlier tree and never re-run. Found by an adversarial
+        # merge-readiness review of this PR, not by any test - no test can see a
+        # comment's truth value.
+        #
+        # ALSO CARRIED BY THIS EXCEPTION, and the reason it is not cosmetic to
+        # anyone auditing the ledger: no. 52's cost evidence above is now marked
+        # with its provenance instead of reading as current. "At 4 every head
+        # class measures 0.88-0.92x of main" is from d526733 and the
+        # bang-40000 / assign-20475 DENY figures are from c1c0945 - both BEFORE
+        # `_lastw` existed - and no. 63 re-costed only the memo-HIT class, so
+        # the stalest numbers were carrying the strongest claim. They are
+        # ANNOTATED, NOT DELETED: they remain the honest record of what was
+        # measured when. A fresh head-class pass on THIS tree is owed and is
+        # explicitly NOT claimed here. Note also that no. 52's "DENY 5.8 s /
+        # 5.3 s" and the emitted `lib/templates.py` header's "6.2 s and 5.5 s"
+        # are two values for the same two shapes, from different trees.
+        #
+        # WHAT MOVED, verified by rendering both trees and diffing rather than
+        # asserted: 11 hook bodies in this fixture, i.e. every hook embedding
+        # the shared header. Action count unchanged (57). `gates.py` is
+        # byte-identical (26a35595423d77d6 on both sides) - the edit is in
+        # `lib/templates.py` only and `lib/sdk_gates_template.py` is untouched.
+        # Verdicts and the 4104-row differential are unaffected: no executable
+        # line changed in either substrate.
+        #
+        # [freeze-exception no. 66, 2026-08-13] NO. 65's RETRACTION WAS ITSELF
+        # INCOMPLETE, AND THIS IS THE SWEEP THAT FINISHES IT. A second
+        # adversarial round found the class claim no. 65 retracts still live in
+        # THREE places, one of them shipped verbatim into the emitted hooks:
+        #   lib/templates.py (emitted header)  "a 1.34x REGRESSION that crosses
+        #       the 60 s ceiling at n=4090 on a shape main clears"
+        #   no. 52's block above              "EACH WRONG VALUE WAS ITS OWN
+        #       BYPASS"
+        #   tests/test_composition.py         "Zero or one re-opens the
+        #       O(runs x tail) regression"
+        # Only the EAGER split (`echo` head, 4090 runs, 146.80 s) ever crossed
+        # the ceiling. The other two cuts reached 30.79 s at 2000 runs, under
+        # it - a 1.34x constant against main's 22.93 s. All three now carry the
+        # retraction, verified by grep across the tracked tree rather than by
+        # inspection of the places I happened to remember.
+        #
+        # NO. 65 ALSO INTRODUCED A WRONG NUMBER, now fixed: its corrected
+        # sentence bound "22.93 -> 30.79 s" to 4090 runs. Two independent
+        # records (no. 52's block, and the X-52 backlog row) both say 2000; the
+        # 4090 belongs to the eager-split shape and was carried across from the
+        # sentence being corrected. The X-52 row's correction block also said
+        # "FOUR OF ITS CLAIMS ARE RETRACTED" when a fifth was standing in the
+        # same cell, and quoted the suite as 9667 when its own commit made it
+        # 9668. Both fixed. The lesson is recorded in the row: a retraction
+        # that is not driven by an exhaustive grep is a retraction that will be
+        # incomplete, and this branch has now proved that three times
+        # (441fe26, no. 65, and the X-54 row below).
+        #
+        # THE SDK SUBSTRATE MOVES THIS TIME, WHICH NO PREVIOUS X-52 EXCEPTION
+        # DID. lib/sdk_gates_template.py said flatly "it moves no verdict" -
+        # true of THAT module, false of the fix, since b1fcc85 was a live
+        # shell-side bypass. Scoped rather than deleted. Consequence:
+        # `.claude/sdk_gates/gates.py` is NO LONGER byte-identical -
+        # 26a35595423d77d6 -> c4cd1cae9a627b05. VERIFIED, NOT ASSERTED: the
+        # executable AST with docstrings stripped is unchanged at
+        # f71ec4a81bae9f826e39d06f361dac5f on both sides, so the parity surface
+        # is intact and only the docstring moved. That check is the reason this
+        # exception can claim what no. 52 claimed about gates.py while the
+        # bytes differ.
+        #
+        # WHAT MOVED, counted by rendering both trees and diffing rather than
+        # from memory: 12 of this fixture's 57 actions - the 11 hook bodies
+        # that embed the shared header, plus gates.py. Action count unchanged
+        # at 57. Verdicts and the 4104-row differential unaffected: no
+        # executable line changed in either substrate. Fixture hook counts are
+        # 11 / 15 / 11, as this file records elsewhere (:2617); 13 is the
+        # ai-agent probe install and belongs to no fixture gated here.
+        #
+        # [no. 66, AMENDMENT] The emitted header said main measured
+        # 23.00 s on the `!` shape; every other record of that measurement,
+        # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
+        # 11 hook bodies move; gates.py is unchanged by this amendment.
+        "162962219b8371da9f382ae35adccd36110f2e1ae2064ed08585f4a0944d4a93",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3042,7 +3275,9 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "74c2403b4fa7c8ba74754c581ed602b7497d28ba4c5ab7ded143e1e74afc998f",
+        # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
+        # Same shared-header change; every plan-action body embeds it.
+        "d4dc7df186e3cf6f56db38fcac45a9806327a0f2cabf6747f583ca9767dd2c91",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3217,7 +3452,10 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        "3a9b157c7a4556fd11ab05323181935b65847097ff648938d94fa64f490ff1ba",
+        # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
+        # The three frozen design artifacts are again unchanged, verified
+        # per-file, and the count is still 59.
+        "ef02b2cfeaa581dbd23497d2e9db7b2d0ae2a9dafc7499a4971a24731772a88c",
 }
 
 EXPECTED_ACTION_COUNTS = {

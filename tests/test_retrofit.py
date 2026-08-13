@@ -2048,9 +2048,64 @@ def retrofit_digest_full(yaml_text):
 # refusal path, not an action. A PreToolUse hook that exceeds its timeout is
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
+# [freeze-exception no. 62, 2026-08-12] X-52 - THREE quadratic loops removed:
+# `_cs_isinv`'s per-token tail rebuild (it was O(tokens x length), and `!` /
+# `{` / `A=1` are head-transparent so it never exited early), the identical
+# rebuild in `_cs_scan`'s post-loop token walk, and dependency-gate's
+# install-head candidate accumulating into an array. All land in bodies every
+# emitted hook embeds. COUNTS ARE UNCHANGED (service 79 / agent 93): this
+# changes what the walk COSTS and not one verdict - the 4092-row differential
+# passes untouched, and `.claude/sdk_gates/gates.py` differs only in the
+# `_cost_guard` docstring (executable AST identical, verified). `"! " x 40000
+# + pip install evilpkg` went from a 139.58 s bypass to DENY in 5.8 s. See
+# freeze-exception no. 52 in tests/test_greenfield_golden.py for the per-file
+# measurement.
+# [freeze-exception no. 63, 2026-08-13] X-52 `_lastw` - and this one DOES move
+# verdicts, which is why no. 62's "not one verdict" sentence above must not be
+# read as covering it. The memo no. 62 shipped cached a decision on the
+# TRAILING word in `_cs_isinv`'s array phase, a live dependency-gate BYPASS
+# (`{ { { { s"h" -c 'pip install evilpkg'` was main=DENY / tip=ALLOW, and bash
+# runs it). Counts are still unchanged (service 79 / agent 93); the differential
+# grew 4092 -> 4104 rows to carry both directions of the defect. Full reasoning,
+# the cost table against bbf6434 rather than main, and the residual filed as
+# X-55 are in freeze-exception no. 63 in tests/test_greenfield_golden.py.
+# [freeze-exception no. 65, 2026-08-13] COMMENT ONLY, no executable change and
+# no verdict change - the opposite of no. 63 above. `_CS_LAZYMAX`'s LOWER-bound
+# justification claimed that sizing below it "costs O(runs x tail) and crossed
+# the 60 s ceiling"; it does neither. 30.79 s is under the ceiling, the 1.34x
+# is a constant, and the number predates the per-segment memo that makes the
+# shape O(1) per call at any bound. The constant 4 is unchanged. Counts are
+# still unchanged (service 79 / agent 93) and the 4104-row differential is
+# untouched. Full reasoning, plus the provenance annotations added to no. 52's
+# now-stale cost figures, are in freeze-exception no. 65 in
+# tests/test_greenfield_golden.py.
+# [freeze-exception no. 64, 2026-08-13, LOGGED LATE 2026-08-13] 4f4588e moved
+# BOTH digests below and added no note here, though it added one to
+# tests/test_greenfield_golden.py:2933. Comment-only, no executable change:
+# 41cc941 justified the trailing-word test as "bounded by the WORD"; measurement
+# on bare bash shows `${_tail:${#_w}:1}` is O(TAIL), the spelling is kept as a
+# real ~3x constant, and only the wrong justification moved. Counts unchanged
+# (service 79 / agent 93). Logged retroactively because a re-baseline with no
+# entry is exactly what this ledger exists to prevent, and this file's own
+# header records eleven retrofit bodies moving unobserved once already.
+# [freeze-exception no. 66, 2026-08-13] no. 65's retraction was itself
+# incomplete; this is the sweep that finishes it. The retracted class claim was
+# still live in three places including the emitted header, no. 65 bound the
+# 22.93 -> 30.79 s measurement to the wrong run count (4090; it is 2000), and
+# `lib/sdk_gates_template.py`'s flat "it moves no verdict" is now scoped to that
+# module. THE SDK SUBSTRATE MOVES THIS TIME: `.claude/sdk_gates/gates.py` is no
+# longer byte-identical, but its executable AST with docstrings stripped is
+# unchanged (f71ec4a81bae9f826e39d06f361dac5f both sides, verified by rendering
+# and comparing rather than asserted), so the parity surface holds. Counts
+# unchanged (service 79 / agent 93); the 4104-row differential is untouched.
+# Full reasoning is in freeze-exception no. 66 in
+# tests/test_greenfield_golden.py.
+# [no. 66, AMENDMENT] eb8994d moved both digests below a SECOND time under this
+# same exception, aligning the emitted header's "23.00 s" to the 22.93 s every
+# other record carries. One word; counts unchanged.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "261ea1f75fc2ac64382e65f2cb7cf9fe71ea4ffdb531a19d64bca00510df5e0f",
-    "agent": "7337b8f12225cf2fa41651f6f28e66a1d77911994087fcbb2c2ce7947fe07f84",
+    "service": "3b43eea6cf32c92e13b744603f87d0a3321282f126709ecd28c049be720161e4",
+    "agent": "6ca395bf75d35f5d8df380980ad6990b70176002c59f926763669413e1af13cb",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
