@@ -324,12 +324,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # own design found the loop self-merging, which the rung table forbids at EVERY
 # rung, and R0's grant mis-stated; both fixed pre-commit, both recommended to
 # the operator in their wrong form first).
+# 32nd entry 2026-08-14: x37-class-b-attempt-1, harmful (the PR body reached
+# origin with two false claims; the attempt itself was a net security
+# regression and was withdrawn rather than merged).
 # 31st entry 2026-08-14: c1-license, corrected (readiness C-1 CLOSED — the
 # first finding this cycle fixed rather than re-measured; graded `corrected`
 # because the plan review found six defects in the plan, one of which would
 # have rewritten history that is true of the shas it names).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 31, f"{len(es)} entries")
+      len(es) == 32, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
