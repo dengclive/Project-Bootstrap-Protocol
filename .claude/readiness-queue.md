@@ -1,0 +1,122 @@
+# Readiness queue
+
+Worked by `.claude/readiness-runbook.md`. **Internal automation, not protocol
+surface.** Ordered by the runbook's §1 rule: **A before B before C — never take
+a C item while an A item is ready.**
+
+The goal is not "empty this list". It is to move `docs/production-readiness.md`
+§1 off **"not production ready"**. Items are labelled with what they actually
+buy.
+
+---
+
+## A — moves the verdict
+
+- **[ready] c1-license** · `DOC` · eligible: **yes** · ~1 h · **TAKE THIS FIRST**
+  **DECIDED 2026-08-14 by the operator: Apache-2.0.** Unblocked; no longer E3.
+  `git ls-files | grep -icE 'licen[cs]e'` → **0** on the v2.8.0 tag. §1: the
+  verdict *"cannot have moved"* while a second tagged, adoptable release ships
+  with no legal grant. Add `LICENSE` (Apache-2.0 full text), the `NOTICE`
+  attribution file the licence's patent/attribution mechanism expects, and the
+  README statement. Step 4's failing check: a test asserting
+  `git ls-files | grep -icE 'licen[cs]e'` is **non-zero** — red now, green
+  after. **Not batched** — this is the A-tier item and it moves the verdict.
+  Step 10 MUST amend `docs/production-readiness.md` §1: this removes one of the
+  two legs the verdict rests on.
+
+- **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
+  · scope `lib/templates.py`, `lib/sdk_gates_template.py`,
+  `tests/test_substrate_differential.py`, `docs/deferred-backlog.md`
+  Item 1b / Class B: download-then-run laundered through a command
+  substitution (`bash -c "$(curl)"`, `eval`, bare/backtick/process-sub).
+  Status cell, derived 2026-08-14: `` `open` — pre-existing, forbidden
+  direction, release-relevant; the distinct half of item 1``. §8 holds item 1
+  release-blocking until 1b/X-37 **and** B3 land; **B3 has landed**
+  (`lib/templates.py:1700`), so this is the survivor and the only A-tier item
+  that can be taken without a decision.
+  Step 4 = a differential row that is red on the current tree. Freeze
+  exception applies. **Never batched.**
+
+## B — makes shipping-with-known-risk honest
+
+- **[ready] t1-honest-labelling** · `EMITTED` · eligible: **partial**
+  · scope `lib/templates.py`, `lib/sdk_gates_template.py`, emitted
+  `secrets.md`, `docs/changelog.md`
+  Qualify the emitted `secrets.md` promise (timeout/padding bypass); sweep
+  emitted templates for flat reassurances — joined-file, case-insensitive, over
+  `git ls-files` **and** emitted bodies **and** `gh pr view --json body`.
+  The sweep-and-qualify half is eligible; the emit-or-not question is split out
+  below. Freeze exception + citation rule apply.
+
+- **[ready] t1-threat-model-emit** · `EMITTED` · eligible: **yes**
+  **DECIDED 2026-08-14 by the operator: EMIT it into installs.** Unblocked.
+  This fulfils the disclosure half of defer-and-disclose. Costs a freeze
+  exception and a golden re-baseline (action counts WILL move — a file is
+  added, so §4.1's count check is expected to change here and that is not
+  **E5**; say so in the exception). Sequence AFTER `t1-honest-labelling` so the
+  emitted text is already honest when it ships.
+
+- **[ready] dw-p4-posture** · `DOC` · eligible: **yes** · batchable with C
+  **DECIDED 2026-08-14 by the operator: DW-P4 STAYS ADVISORY — write it down.**
+  Record the decision and close the standing question. Two `DOC` follow-ons
+  ride along: DW policy §1's grant table still names the inert
+  `~/.claude/settings.json` under `CLAUDE_CONFIG_DIR` (re-confirmed
+  2026-08-14), and the DW-P4 breach count is stale against the ledger. Note
+  honestly that advisory means the logged breach can recur.
+
+- **[blocked] a6-spec-gate-predicate** · `DECISION` · eligible: **no** · T0
+  `spec-gate-commit`'s predicate blocks the first code commit of every adopting
+  project. Tier it, size it, or close it — a decision, not a fix.
+
+## C — record hygiene · moves the verdict **not at all**
+
+**Batch these.** One branch, one PR, one review, one checkpoint. They are
+separate items only because they were discovered separately.
+
+- **[ready] x58-table-render** · `DOC` · scope `docs/deferred-backlog.md`
+  Anchors drifted (header :333-334, blanks :360/:397). **Not mechanical** —
+  deleting the blanks drops status cells from over-celled rows, which silently
+  changes `count.py`'s answer. Validate the rule at 88 before *and* after.
+- **[ready] priority-reading** · `DOC` · scope `docs/production-readiness.md`
+  Names none of the twelve genuinely blocking rows; Snapshot header still
+  `main @ 3c0a2de`, many merges stale.
+- **[ready] x49-four-eras** · `DOC` · scope `docs/deferred-backlog.md`,
+  `docs/changelog.md`
+- **[ready] changelog-citation-anchor** · `TEST-CONTRACT` · **not batched**
+  · scope `tests/test_doc_citations.py`, `.claude/dynamic-workflow-policy.md`
+  Anchor the changelog citation to a heading instead of a line: it moved three
+  times in one session (795 → 851 → 882 → 922; twelfth value, eleventh move).
+  Step 4 needs a case proving the old form passed wrongly.
+
+## Measurement residuals
+
+- **[ready] x54-deny-shape** · `MEASUREMENT` · eligible: **yes**
+  The gap the 2026-08-14 pass left in its own claim: same 80004 B / 4000 jumps
+  padding, but a payload that **would otherwise DENY**, through the emitted
+  60 s timeout. That *demonstrates* X-54's bypass rather than sizing it. The
+  harness exists and takes `HC_HEADS`.
+- **[ready] x55-rerun** · `MEASUREMENT` · eligible: **yes**
+  `>240 s KILLED` not re-run; stated as owed in the KB.
+
+## External — not ours to take
+
+- **[blocked] sibling-lit07-migrations** · `EXTERNAL` · eligible: **no**
+  AgenticRE and hermes-provisioning-refactor carry uncommitted LIT-07
+  migrations. A reset there loses them silently. Surface at next contact.
+
+## Residue — do not re-open
+
+Changelog per-item entries for nos. 51–67 (absent by the entry's own words);
+the nine historical fail-closed sites (historical record); the PR-attribution
+defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
+
+## Done
+
+`x54-headclass-measurement` PR #70 `9450b7d` (exc. 69) · `prd-filename-v280`
+PR #72 `54ebc4b` (exc. 70) · ledger entries 27/28 PRs #69 `f9c2bb2`, #71
+`03dd309` · post-v2.8.0 record PR #68 `6143427`.
+
+## Owed
+
+A ledger entry for the PR #72 rename work — entry 28 predates that PR.
+Disclosed rather than skipped; fold into the next entry.
