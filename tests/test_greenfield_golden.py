@@ -3115,9 +3115,25 @@ EXPECTED_DIGESTS = {
         # here, 15 in full_autonomous, 11 in design_steering (37 across the
         # three), 11 and 15 in the retrofit service/agent fixtures. No other
         # artifact moves in any of them. Count still 57.
+        #
+        # [freeze-exception no. 70, 2026-08-14] THE PRD FILENAME CAUGHT UP
+        # WITH ITS OWN CONTENTS. `Bootstrap-Protocol-v2-6-0.md` and its
+        # Companion have carried `**Version:** 2.8.0` since the LIT fold -
+        # the release updated the CONTENTS and never renamed the FILES, so
+        # the working PRD self-identified as 2.8.0 under a 2.6.0 name, and
+        # lib/templates.py:3121 said "(`Bootstrap-Protocol-v2-6-0.md`,
+        # 2.8.0)" in one breath. Renamed with `git mv` (content byte-
+        # identical; git records it as a rename, so no history is lost) and
+        # all 61 references across 17 tracked files repointed. Emitted bytes
+        # move only where a template cites the PRD by filename:
+        # steering/assumption-ledger.md here, plus loop.sh / goal-config.md /
+        # goal-loop.sh in the autonomous fixtures. No executable line, no
+        # logic, no count change. The rename was the OPERATOR's, made outside
+        # this session; this exception records it rather than re-deciding it.
+        # Count still 57.
         # Measurement recorded in docs/deferred-backlog.md (X-54),
         # docs/production-readiness.md and the security KB section 6.
-        "2fd6db32540ddb28ebf8366e3aa81a9d1e72e10924e139802c25dbc928b79220",
+        "3c0a375e45e236c65d95b73d63dcefda526005c6e61b195682b0758c43af9b4e",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3357,7 +3373,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
         # correction (see the `default` note): comment-only, in the gate
         # preamble every hook body embeds. No logic changes; count still 69.
-        "94a70d209cd088199081b20d7fd9ed1f753f22511b6ff769640ae8f89e572334",
+        "b72a35b92ced996270967c23f24315cc3dddedefcf150085b7da77a377055a58",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3544,7 +3560,7 @@ EXPECTED_DIGESTS = {
         # correction (see the `default` note): comment-only, in the shared
         # gate preamble. The three design-steering artifacts are again
         # untouched, and the count is still 59.
-        "ae3a559d9c7482db5f7c5a889ab98487caad462647eebe21f6aa445e0d504aef",
+        "ba815c1533c6a71c52602e54d74529d21395f419660a0984f500f7b41c3d8b63",
 }
 
 EXPECTED_ACTION_COUNTS = {

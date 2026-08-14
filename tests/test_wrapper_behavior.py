@@ -33,7 +33,7 @@ one specific spelling of the fix. Whether the fix keeps the pessimistic
 
 The other pinned defects:
   * `iteration-summary-enforcement` exits 1 for a missing/empty summary. Per
-    this repo's own normative checklist (Bootstrap-Protocol-v2-6-0.md:799)
+    this repo's own normative checklist (Bootstrap-Protocol-v2-8-0.md:799)
     exit 1 is "hook error, tool proceeds", and on a Stop hook exit 2 means "do
     not stop". The enforcement hook uses the code that means "proceed"; its
     fail-closed path returns 2, so it demonstrably CAN block.
@@ -315,7 +315,7 @@ check("no wrapper dispatched a real `claude` call",
 
 print("\n== F2: the iteration-summary gate must use the code that BLOCKS ==")
 
-# Bootstrap-Protocol-v2-6-0.md:799-800 -- "exit 2 blocks, but exit 1 is 'hook
+# Bootstrap-Protocol-v2-8-0.md:799-800 -- "exit 2 blocks, but exit 1 is 'hook
 # error, tool proceeds'". :800 -- "on a `Stop` hook exit 2 means 'do not
 # stop'". A Stop hook that exits 1 for its own violation lets the iteration
 # end exactly as if the summary had been written.

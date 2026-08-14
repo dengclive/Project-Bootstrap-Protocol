@@ -3118,9 +3118,9 @@ rather than becoming a second authority:
 - **Max-iterations and the subagent token-multiplier note** — Phase 9.5 of
   `Bootstrap-Protocol-v2-4-0.md`; {max_iter_where}
 - **No-lossy-rewrite preservation invariant (LIT-01)** — Phase 7 step 5 of
-  the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
+  the working PRD (`Bootstrap-Protocol-v2-8-0.md`, 2.8.0).
 - **Priming-slice cap redaction (LIT-07)** — Phase 9.5 "Max-iterations
-  safety" of the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
+  safety" of the working PRD (`Bootstrap-Protocol-v2-8-0.md`, 2.8.0).
 
 Add a row whenever a new default is introduced because a current model needs
 it — that is what keeps the staleness class from going invisible again.
@@ -6456,7 +6456,7 @@ fi
 latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   # EXIT 2, NOT 1. This gate used to exit 1 for the one violation it exists
-  # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-6-0.md
+  # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-8-0.md
   # :799-800) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
   # means "do not stop" - so the iteration ended exactly as if the summary had
   # been written, and the stderr line below claimed to be "feeding error to
@@ -7349,7 +7349,7 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 # a plain CLI env var available on ANY conformant install, NOT gated on
 # gate_substrate.
 #
-# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-6-0.md Phase 9.5
+# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-8-0.md Phase 9.5
 #  "Deliverable contract for the wrappers" item 5 - the single normative home
 #  of this contract, which Phase 9.6 references rather than restates. BINDING
 #  on the operator-completed iteration loop; the bare skeleton dispatches
@@ -7683,7 +7683,7 @@ usage_limit_wait_jitter_seconds: 60  # uniform 0..N seconds ADDED to resets_at (
 # Completion-criteria checks the wrapper trusts the agent's self-attestation
 # on in loop mode (goal-supervised mode re-checks them independently):
 require_completion_sentinel: true
-# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-8-0.md
 # Phase 9.5 "Max-iterations safety"): the per-task loop_max_iterations cap
 # is filtered OUT of the primed task-definition slice by the
 # operator-completed loop. Enforcement is the harness's job; a
@@ -7727,7 +7727,7 @@ investigate_disagreement: false
 # completion-criteria checklist, and audio-cue overrides. The protocol
 # document names no config keys for these; they remain wrapper-implemented
 # defaults pending normative key names (see docs/changelog.md).
-# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-8-0.md
 # Phase 9.5 "Max-iterations safety"): loop_max_iterations is filtered OUT
 # of the primed task-definition slice by the operator-completed loop (it
 # exists only on eligible-for-both tasks; a no-op otherwise), and this

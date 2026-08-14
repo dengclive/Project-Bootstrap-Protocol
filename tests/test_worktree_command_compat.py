@@ -372,7 +372,7 @@ check("retrofit front-end: key is in ANSWER_KEYS and typed bool",
 # --------------------------------------------------------------------------- #
 print("\n== verbatim pin ==")
 
-with open(os.path.join(ROOT, "Bootstrap-Protocol-v2-6-0.md"),
+with open(os.path.join(ROOT, "Bootstrap-Protocol-v2-8-0.md"),
           encoding="utf-8", newline="") as fh:
     _doc = fh.read().split("\n")
 _ql = [l for l in _doc

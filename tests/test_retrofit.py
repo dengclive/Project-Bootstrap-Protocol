@@ -2133,9 +2133,16 @@ def retrofit_digest_full(yaml_text):
 # Re-measured on v2.8.0 (f9c2bb2): sudo 156.75-157.19 s, env 157.84-159.88 s,
 # nice 156.28-156.92 s — all past the 60 s ceiling; transparent heads flat at
 # 12.10-12.30 s. No logic changes; counts unchanged (service 79 / agent 93).
+# [freeze-exception no. 70, 2026-08-14] PRD filename catches up with its own
+# contents: `Bootstrap-Protocol-v2-6-0.md` (+ Companion) has read
+# `**Version:** 2.8.0` since the LIT fold, so the file self-identified as
+# 2.8.0 under a 2.6.0 name. Renamed via `git mv`, byte-identical content, 61
+# references repointed across 17 tracked files. Emitted bytes move only where
+# a template cites the PRD by filename (assumption-ledger.md in both fixtures,
+# loop.sh / goal-config.md in agent). No logic; counts unchanged.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "d8a517e466aa64ee2f37bb2b14ad2166dc19034b2ce8fa78bb99ba20c3edc89e",
-    "agent": "985a2cfc582d42b79809c6c5c36451a5e7283efcc3af5eaf5b8a1f0493875788",
+    "service": "322f12ccfaea2fdbf3f4ee5677ef5e3e6f3a8ca006c29322370676473251a203",
+    "agent": "f8a2de4a9c7896ef72ca896fb9283f66563176da1d87e6819a3e8d65708d5679",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

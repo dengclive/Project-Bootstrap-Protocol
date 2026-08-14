@@ -5,8 +5,8 @@
 > branch, not a release. This line was stale at `v2.6.0` through three releases
 > (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
 >
-> The normative spec is still `Bootstrap-Protocol-v2-6-0.md` +
-> `Bootstrap-Protocol-Companion-v2-6-0.md`: **2.6.1 through 2.7.4 are gate
+> The normative spec is still `Bootstrap-Protocol-v2-8-0.md` +
+> `Bootstrap-Protocol-Companion-v2-8-0.md`: **2.6.1 through 2.7.4 are gate
 > corrections, with one exception — 2.7.0 added two configuration keys
 > (`commands.execute_in_cwd`, `workflow.implementer_isolation`), which is why it
 > is the MINOR in the run and why the PRD carries a v2.7.0 block. No other
@@ -212,7 +212,7 @@ bootstrap-installer/
   security-critical file, or whose tree does not dispatch its own plan, exits
   **3** with the reason on stderr. Exit 0 means enforcement was verified.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
-- **Faithful to Bootstrap-Protocol-v2-6-0.md** — encodes the skip-policy invariants
+- **Faithful to Bootstrap-Protocol-v2-8-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
   starter sets, the conditional hook set (eval-gate only for ai-agent,
   tdd-gate only when TDD is required, loop-cooperation hooks only when an

@@ -1825,7 +1825,7 @@ Derived from the above; ordered by how much each would have caught here.
 - `docs/lens-a-execution-findings-2026-07-28.md`, `docs/lens-b-execution-findings-2026-07-28.md` — supporting lenses.
 - `docs/changelog.md` "2.5.0 → 2.6.0" — the release record.
 - `docs/deferred-backlog.md` clusters A, I, J, K, L, M — open decisions and residue.
-- `Bootstrap-Protocol-v2-6-0.md` §6.D — the normative hook checklist these lessons are encoded into.
+- `Bootstrap-Protocol-v2-8-0.md` §6.D — the normative hook checklist these lessons are encoded into.
 - `tests/test_hook_behavior.py`, `tests/test_substrate_differential.py` — the executing suites.
 
 Post-tag sources `[+2026-07-31]`:

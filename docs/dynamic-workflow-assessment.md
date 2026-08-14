@@ -1,8 +1,8 @@
 # Dynamic workflows (the `Workflow` tool) — compatibility assessment
 
 **Date:** 2026-08-06 · **Tree:** `afc24a2` (main, protocol 2.7.3) ·
-**Normative sources read:** `Bootstrap-Protocol-v2-6-0.md`,
-`Bootstrap-Protocol-Companion-v2-6-0.md`, `SEAM-CONTRACT-v2-0-0.md`.
+**Normative sources read:** `Bootstrap-Protocol-v2-8-0.md`,
+`Bootstrap-Protocol-Companion-v2-8-0.md`, `SEAM-CONTRACT-v2-0-0.md`.
 **Question:** does Claude Code's dynamic-workflow feature — JS scripts calling
 `agent()`/`parallel()`/`pipeline()`/`phase()`, JSON-schema structured output,
 per-agent model/effort/isolation overrides, concurrency capped at
@@ -75,7 +75,7 @@ admits is a different object than fan-out.** CITED.
 The PRD admits concurrency at **task** granularity, with a budget, an accounting
 structure, and a derived cap:
 
-- `Bootstrap-Protocol-v2-6-0.md:423` — *"**Concurrency rule across autonomous
+- `Bootstrap-Protocol-v2-8-0.md:423` — *"**Concurrency rule across autonomous
   modes.** … concurrency budgets apply to the **combined** sum across modes …
   **Recommended starting concurrency: 2 across all autonomous modes combined for
   the first week of use**, expanding based on review throughput."*
@@ -94,7 +94,7 @@ stated justification is review throughput, not machine capacity.
 Three facts make fan-out a different object:
 
 1. **Nested spawning is explicitly noted as not happening.**
-   `Bootstrap-Protocol-Companion-v2-6-0.md:161` — *"For this protocol, this
+   `Bootstrap-Protocol-Companion-v2-8-0.md:161` — *"For this protocol, this
    matters mainly if your custom subagents spawn further subagents — **currently
    none do**, so frontmatter is sufficient."* A workflow script *is* subagents
    spawning subagents. The Companion's model-enforcement reasoning is written
@@ -265,7 +265,7 @@ emit, and that is controllable.
 **UNSPECIFIED. This is a spec gap to name, not a default to invent.** CITED.
 
 The ramp is explicitly **not protocol surface**.
-`Bootstrap-Protocol-v2-6-0.md:209-212`: *"**Not protocol surface, deliberately
+`Bootstrap-Protocol-v2-8-0.md:209-212`: *"**Not protocol surface, deliberately
 excluded:** this repository's own `.claude/trust-ramp.md` governs how much
 autonomy the agent is granted *on the protocol repo itself*. It emits nothing,
 no installer plan references it, and it is not part of any conformance
