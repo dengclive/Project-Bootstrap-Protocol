@@ -855,3 +855,26 @@ green; goldens re-baselined three times, diff-verified before each update.
 The GR2-01 template moved out of the operator-edited `INDEX.md` into its own
 installer-owned `.claude/specs/progress-template.md` so upgrades can actually
 receive it, which is the review's one file-count change (56 → 57, 68 → 69).
+
+## License
+
+Copyright 2026 Deng Clive
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this project except in compliance with the License. You may obtain a copy
+of the License at <https://www.apache.org/licenses/LICENSE-2.0>, and a verbatim
+copy ships in [`LICENSE`](LICENSE).
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+**Applies to this repository, and to what it emits.** The installer writes
+scaffolding into your project; that output is yours, and this License does not
+attach conditions to the projects you configure with it.
+
+**No NOTICE file, deliberately.** Apache-2.0 does not require one — it requires
+that an existing NOTICE be propagated by every downstream redistributor. This
+project vendors no third-party code and carries no attributions, so shipping a
+near-empty NOTICE would create a permanent obligation for no benefit.

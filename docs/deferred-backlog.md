@@ -453,16 +453,23 @@ reached.
 | **T3** | ADVERSARIAL-only — needs a crafted payload; **defer and DISCLOSE** | — |
 | **T4** | feature gap, not a risk — ship as unimplemented, say so | — |
 
-**T0 — `C-1`, no LICENSE; and `A-6`, added after review.** `A-6`
+**T0 — `C-1`, no LICENSE [CLOSED 2026-08-14, Apache-2.0]; and `A-6`, added after review.** `A-6`
 (`spec-gate-commit`'s predicate) matches T0's own definition and was in no tier
 at all: it blocks the FIRST CODE COMMIT of every adopting project, which is
 "blocks any use" by definition. Tier it, size it, or close it — but it cannot
 be absent.
 
-**`C-1`, no LICENSE.** An owner decision, ~30 minutes of work, and it alone
-holds the "not production ready" verdict in `docs/production-readiness.md`.
-Fixing it does not make the protocol ready; it stops a non-technical item from
-masking the real state.
+**`C-1`, no LICENSE. CLOSED 2026-08-14 — Apache-2.0**, verbatim from
+apache.org, tracked, with a README statement, and pinned by
+`tests/test_doc_citations.py` section 5 so deleting it is not silent. It was an
+owner decision plus about an hour of work. **[Sizing corrected in the same
+commit: this paragraph said "~30 minutes" while the tier table above said
+"~1 h" — one document, two figures, and the tier table was right.]** It alone
+held the "not production ready" verdict in `docs/production-readiness.md` in
+the sense of being independently sufficient for it; **closing it does not make
+the protocol ready** — the verdict now stands on the two security legs (X-37
+and C-2). It stops a non-technical item from masking the real state, which is
+exactly what it has now done.
 
 **T1 — the honest-labelling pass, and the highest-leverage item on this page.**
 A bypassable gate is worse than no gate in exactly one way: it changes operator

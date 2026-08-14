@@ -258,6 +258,8 @@ for (citing, doc), rows in sorted(pairs.items()):
 # --------------------------------------------------------------------------- #
 print("\n=== Section 4: the table covers every live citation ===")
 
+_re_lic = re.compile(r"LICEN[CS]E(\.(txt|md))?")
+
 SCAN = re.compile(
     r"((?:Bootstrap-Protocol(?:-Companion)?-v\d+-\d+-\d+|docs/changelog)\.md)" + CITE)
 
@@ -307,6 +309,41 @@ _tpl = read("lib/templates.py")
 check("the scan matches the line-split EMITTED citation",
       any(m.group(1) == PRD for m in SCAN.finditer(_tpl)),
       "    lib/templates.py's citation spans a newline and a `#` continuation")
+
+
+# =========================================================================== #
+# Section 5: repo-shape invariants — readiness C-1                            #
+#                                                                             #
+# A TOPICAL STRETCH, STATED RATHER THAN HIDDEN. This suite is about citations;
+# a licence is not a citation. It lives here because section 4 already builds
+# `tracked` from `git ls-files` behind a vacuity guard, and because the
+# alternative was a new tests/test_repo_shape.py — which `bin/run-tests`
+# auto-discovers, silently taking the suite count 25 -> 26 and staling every
+# "25 suites" claim in the changelog, the queue, the runbook and the
+# checkpoints. That count is prose-only, not mechanically pinned, so moving it
+# is a SWEEP, and an unnecessary sweep is how this repo has repeatedly shipped
+# a stale number. Two checks are not worth that.
+#
+# What it pins: readiness C-1 said there was no legal grant to adopt a tagged,
+# adoptable release. The fix is a file; without a pin, deleting it is silent.
+# =========================================================================== #
+print("\n=== Section 5: repo-shape — a LICENSE exists and is the chosen one ===")
+
+_lic = [p for p in tracked if _re_lic.fullmatch(p)]
+check("a LICENSE file is tracked at the repo root (readiness C-1)",
+      len(_lic) == 1, f"    matched {_lic!r}; expected exactly one root LICENSE")
+
+_lic_text = read(_lic[0]) if _lic else ""
+check("the licence is Apache-2.0, the licence the operator chose",
+      "Apache License" in _lic_text and "Version 2.0, January 2004" in _lic_text,
+      "    LICENSE does not carry the Apache-2.0 header")
+check("the Apache-2.0 text is the canonical one, not a paraphrase",
+      "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION" in _lic_text
+      and "APPENDIX: How to apply the Apache License to your work" in _lic_text,
+      "    missing the canonical TERMS/APPENDIX anchors")
+check("README states the licence, so an adopter finds it without reading LICENSE",
+      "Apache License" in read("README.md") or "Apache-2.0" in read("README.md"),
+      "    README carries no licence statement — the exact clause C-1's row named")
 
 
 print(f"\n{passed} passed, {failed} failed")
