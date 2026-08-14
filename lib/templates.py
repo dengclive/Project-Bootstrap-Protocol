@@ -714,7 +714,7 @@ _join_cont(){
 #
 # EMPTY, not a copy, when the two agree: every consumer skips an empty
 # spelling, so the commands that carry no continuation and no ANSI-C quote -
-# which is nearly all of them - pay nothing, and this gate's 60 s fail-CLOSED
+# which is nearly all of them - pay nothing, and this gate's 60 s
 # budget does not move.
 #
 # [X-36h] THIRD GLOBAL, `_CMD_RESOLVED`: WHAT THE *DECIDABLE* EXPANSIONS
@@ -754,7 +754,7 @@ _ansic_body(){
   # character at a time made this O(n^2) in bash's string slicing, and a
   # 10 KB PLAIN body inside `$'...'` - an ordinary long commit message or
   # printf format - went 0.39 s to 7.17 s, which walks a command that used
-  # to pass toward the 60 s fail-CLOSED ceiling. Chunking makes the
+  # to pass toward the 60 s ceiling. Chunking makes the
   # escape-free body a single pass. Measured after: 1.0x.
   local _b="${1-}" _out="" _hex _oct _ch _v _chunk
   while [ -n "$_b" ]; do
@@ -856,7 +856,7 @@ _param_default(){
   # - so a walk that keeps the whole command in `_rest` pays O(n) per `${` and
   # is O(n^2) overall. Measured on the emitted hook: 8000 `${aN:-vN}` tokens
   # (126 KB) spent 47.7 s in THIS FUNCTION, which carried a command that
-  # PASSED at v2.7.1 in 29.8 s over the 60 s fail-CLOSED PreToolUse timeout at
+  # PASSED at v2.7.1 in 29.8 s over the 60 s PreToolUse timeout at
   # 86.3 s - an allowed command turned into an unactionable timeout refusal,
   # the same failure the ANSI-C walk was chunked for one fix earlier. Slicing
   # a bounded window off the front and walking THAT makes every inner
@@ -1038,17 +1038,32 @@ _read_cmd(){
 # An earlier version of this comment said "two INDEPENDENT cost terms" as
 # though the list were complete. It is not, and the counter-example was found
 # by adversarial review of the PR that shipped it: TOKEN COUNT is a third
-# term, `_cs_isinv` is quadratic in it, and `!` / `{` / `A=1` are
-# head-transparent so the walk never exits early. Reproduced at HEAD:
+# term, `_cs_isinv` was quadratic in it, and `!` / `{` / `A=1` are
+# head-transparent so the walk never exits early. Reproduced at the time:
 #     "! " x 40000  + pip install evilpkg   80019 B, ZERO jump targets, 139.58 s
 #     "A=1 " x 20475 + pip install evilpkg  81919 B, ZERO jump targets,  76.76 s
-# Both pass BOTH conditions below and both run past the 60 s ceiling, so the
-# hook is cancelled and the command runs. That is X-52, it is OPEN, and this
-# guard does not close it. What the two conditions below DO close is the
-# length and density classes, which is why this ships as a disclosed partial
-# mitigation rather than as a fix. The replacement is a deterministic
-# per-event WORK COUNTER - bound the work actually done instead of guessing
-# which proxy tracks it, since the proxy has now been evaded twice.
+# Both passed BOTH conditions below and both ran past the 60 s ceiling, so the
+# hook was cancelled and the command ran. That was X-52.
+#
+# [X-52, FIXED 2026-08-12] THAT TERM WAS REMOVED RATHER THAN BOUNDED, AND NOT
+# BY THIS GUARD. The quadratic was the walk's per-token tail rebuild; the walk
+# now steps `_CS_LAZYMAX` tokens lazily and splits the remainder only if it is
+# still going, and the same shapes DENY in 6.2 s and 5.5 s - a ~10x margin where
+# there was a bypass. See `_cs_isinv`. THIS DID NOT CLOSE THE COST CLASS: a
+# WRAPPER head keeps the walk running to the end of the tail on every quoted
+# run, and `sudo` + 2000 runs is still 150.95 s here against a main that times
+# out above 1200 s - filed as X-54, and these two caps do not catch it either
+# (80004 B, 4000 jumps, inside both). A third
+# CONDITION here was the other candidate and was rejected on measurement: the
+# benign `sudo rm <4000 files>` already costs 4003 walk steps against the
+# attack's 40000, a 10x separation that leaves under 2x margin - the same trade
+# already rejected for `_CMD_MAXJUMP` at 10240. So the count of conditions
+# below is still TWO, and this comment no longer claims that is all of them:
+# what these two close is the length and density classes, and nothing here
+# asserts a third class cannot exist. Whether they can now be RETIRED is a
+# separate question and is deliberately not answered here - they still bound
+# shapes the walk fix does not touch, and retiring a cap wants its own sizing
+# pass rather than a free ride on this one.
 # Measured across
 # a benign corpus (this repo's own files as heredocs, long argument lists, real
 # substitutions) and the adversarial shapes:
@@ -1249,6 +1264,40 @@ _CS_EXTRA=""
 # (this line, _cs_ops, _cs_scan, cmd_segments' per-event reset) and the
 # invariant `_CS_TAIL == ${_CS_BUF##*$_CS_SEP}` is what makes the swap sound.
 _CS_TAIL=""
+# [X-52] `_cs_isinv`'s answer, MEMOISED PER SEGMENT - and the invariant that
+# makes it sound is that within a segment `_CS_TAIL` only ever GROWS.
+#
+# The walk decides one of two ways. It can decide ON A TOKEN: an `inv` word
+# (true) or an `other` word with no wrapper seen (false). Or it decides by
+# EXHAUSTION, having run out of words with `_seen=1`; a later token could still
+# be an invoker, so that answer is never cached.
+#
+# "GROWS" MEANS THE TAIL GETS LONGER, NOT THAT ITS WORDS ARE FINAL - and the
+# first cut of this memo got that wrong and was caught by the #54 X-36q
+# PART-QUOTED WRAPPER row (`su"do" ...`, shell=allow / sdk=deny / want=deny).
+# `_cs_scan` appends each quoted run to `_CS_TAIL`, and a run can EXTEND THE
+# TRAILING WORD rather than start a new one: `sud` classifies `other`, then
+# `"o"` arrives and the word is `sudo`, an invoker. So a decision taken on the
+# trailing word is NOT stable and must not be cached. `_lastw` marks exactly
+# that case - the word is the whole remaining tail with nothing behind it - and
+# only decisions on a word with a separator after it, which no later append can
+# reach, are memoised.
+#
+# WHY IT IS WORTH THE STATE. `_cs_isinv` runs ONCE PER QUOTED RUN [X-45], so
+# every cost this walk carries is multiplied by the run count, and FIVE
+# successive attempts to make the walk itself cheap enough each left a shape
+# where that multiplication still crossed the 60 s ceiling - the last on a TWO
+# BYTE difference (`! ` x3 -> x4 took dependency-gate from 27.31 s to 136.72 s
+# while main went 27.31 -> 30.23). Memoising removes the multiplication instead
+# of shrinking its factor, which is why it is here rather than a sixth
+# heuristic on when to split.
+#
+# CLEARED WHERE THE TAIL RESTARTS, NEVER WHERE IT GROWS: the two
+# `##*$_CS_SEP` branches (a new segment begins) and `cmd_segments_real`'s
+# per-event reset. The two APPEND branches deliberately leave it alone - that
+# is the whole optimisation, and clearing there would restore the old cost
+# silently.
+_CS_INVMEMO=""
 # [round-4 D17] `_CS_INVOKERS` used to live here: emitted into every hook,
 # ZERO call sites, and already drifted (it was missing `su`). A second, silent
 # invoker list whose only effect was to make the count of them look smaller.
@@ -1310,14 +1359,14 @@ _SUBST_BUDGET=8192
 #     backstop 24576              64.8 s              77.4 s   <- over
 #     backstop 32768             111.5 s             TIMEOUT
 #     backstop 65536             TIMEOUT             TIMEOUT   <- attempt 1
-# against a 60 s fail-closed ceiling where added cost IS over-denial. The true
+# against a 60 s ceiling where added cost IS BYPASS SURFACE. The true
 # crossing sits between 20480 and 24576; the numbers are machine-dependent and
 # are a BAND, not a constant, so re-measure before raising this.
 #
 # WHY NOT 20480, WHICH ALSO "FITS": its worst case leaves 14 s and its plateau
 # leaves 4.9 s. Attempt 1 rejected 131072 for having 2.6 s of headroom and
 # ACCEPTED 65536 for having 14 s - and 65536 times out in reality. A margin that
-# thin against a machine-dependent, fail-CLOSED ceiling is how this was got
+# thin against a machine-dependent ceiling is how this was got
 # wrong the first time, so the choice here is the one with ~29 s.
 # And 8192 is not merely cheaper, it is USELESS: the bypass this exists to close
 # needs the walk to reach a substitution sitting at ~8300 bytes.
@@ -1359,6 +1408,37 @@ _SUBST_SCANMAX=16384
 # per-run `${_s#*"$_q"}` re-slice was the second quadratic of this class -
 # and its SDK twins (`shlex.split`, `_shell_segments`) index too.
 _CS_WIN=1024
+# [X-52] How many tokens the invoker walk steps through LAZILY before it splits
+# the remainder into an array. Both bounds are load-bearing and both were paid
+# for with a regression.
+# LOWER: it must exceed the walk length of a head-transparent token followed by
+# an ordinary word - `! 'run' 'run' ...` ends on token TWO and `_cs_isinv` runs
+# once per quoted run. Sizing below that measured 22.93 s -> 30.79 s at 2000
+# runs, inside both caps. (2000, not 4090: the 4090-run figure belongs to the
+# EAGER-split shape, an `echo` head at 33.51 -> 146.80 s. An earlier draft of
+# this correction carried 4090 across from the sentence it was fixing and
+# attached it to the wrong measurement.)
+# CORRECTED 2026-08-13: this paragraph used to say switching before then "costs
+# O(runs x tail) and crossed the 60 s ceiling". THAT CLASS CLAIM IS RETRACTED -
+# 30.79 s is under the ceiling and the 1.34x is a CONSTANT. It was measured at
+# d526733, BEFORE the per-segment memo landed. On this shape the memo is written
+# on the second call and every later call returns at `_cs_isinv`'s head, BEFORE
+# `local _tail=` - so it is O(1) per call at any lazy bound, and a smaller bound
+# only delays that write by one call, on a tail still a few bytes long. Main is
+# O(runs x tail) here too, which is why the ratio is small. The bound is KEPT
+# because the constant is real, but see `${_tail:${#_w}:1}` below and 41cc941 /
+# 4f4588e: claiming a removed TERM for a constant-factor win is an error this
+# file has already made once and retracted.
+# A WRAPPER head is a different case - `_seen=1` keeps the walk running to the
+# end of the tail, which is X-54; and where the decider STAYS the trailing word
+# the memo cannot help by construction, which is X-55. Both open, and X-55 is
+# pre-existing at bbf6434 rather than introduced here.
+# UPPER: every lazy step is a whole-tail expansion, so a large value re-opens
+# the very quadratic this closes; at _CS_LAZYMAX the worst case is that many
+# expansions before the split makes the rest linear.
+# 4 clears the two-token shape with room for a wrapper chain (`sudo -u root`)
+# and keeps the pre-split cost at four expansions.
+_CS_LAZYMAX=4
 _CS_TRUNC_R=""
 _cs_btrunc(){                   # $1 truncated to the first $2 BYTES
   # `local LC_ALL=C` is scoped to THIS function and restored on return, exactly
@@ -1414,7 +1494,7 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   # tail restarts after the last of them; the `##` here runs on the short `_t`,
   # never on the accumulated buffer.
   case "$_t" in
-    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}" ;;
+    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO="" ;;
     *) _CS_TAIL="$_CS_TAIL$_t" ;;
   esac
   return 0
@@ -1466,7 +1546,7 @@ _cs_subst_scan(){
   # argument does not transfer and characters look safer - but characters are
   # unaffordable: a 16384-CHARACTER multibyte quote-dense command is ~49 KB of
   # text, and measured end to end on dependency-gate it costs **74.4 s against
-  # the 60 s fail-closed ceiling** (the same payload under LC_ALL=C, i.e.
+  # the 60 s ceiling** (the same payload under LC_ALL=C, i.e.
   # byte-truncated, costs 6.7 s). Characters would trade a divergence for an
   # unoverridable deny. So the walk is pinned to BYTES on BOTH substrates: the
   # two now agree in EVERY locale, the 60 s ceiling stays intact, and today's
@@ -1584,7 +1664,7 @@ _cs_subst_scan(){
     # the comment rule can fire. `#` reaches that rule only while UNQUOTED (the
     # arm sits behind both quote tests), so carrying it in the jump set inside a
     # quoted run buys nothing and costs one loop iteration per `#`. Measured at
-    # 8 KB against dependency-gate's 60 s fail-closed ceiling, where added cost
+    # 8 KB against dependency-gate's 60 s ceiling, where added cost
     # IS over-denial:
     #     quoted `#`-dense        6.54 s -> 0.37 s   (pre-B5 0.37 s)
     #     unquoted, `#` at word start     0.29 s     (pre-B5 0.40 s)
@@ -1926,7 +2006,7 @@ _cs_subst_scan(){
 # to head is 0.74x-1.15x over six shapes at 5-80 KB, head being FASTER on the
 # reducible-word shapes; but the prefixed-run shape is a constant +4-5%, and
 # near 100 KB of single-token command word that constant puts a ~4% length
-# band on the far side of the 60 s fail-closed ceiling (measured: base 59.2 s
+# band on the far side of the 60 s ceiling (measured: base 59.2 s
 # allow, head 61.8 s). "Nothing base allowed is pushed into the ceiling" is
 # therefore NOT claimed; nothing realistic reaches that length, and the cost
 # there is the tokenizer's pre-existing quadratic rather than this reduction.
@@ -2092,7 +2172,7 @@ _xp_iw(){
 # one is driven by the NUMBER of recognised invoker tokens and this caps one
 # word's LENGTH.  Re-derived on this tree, dependency-gate on N repetitions of
 # `bash5.2`: 40 KB base 4.48 s -> 20.51 s, 64 KB 10.92 -> 51.98, and at 72 KB
-# / 9,216 tokens base 13.91 s ALLOW -> 65.40 s, PAST the 60 s fail-CLOSED
+# / 9,216 tokens base 13.91 s ALLOW -> 65.40 s, PAST the 60 s
 # timeout.  eval-gate, which declares no timeout and falls to the platform
 # default 60 s, is 2.94 -> 52.82 s at 100 KB and crosses just past it.  The
 # bound is measurably irrelevant to the shape: at 40 KB, 7-character words are
@@ -2206,11 +2286,146 @@ _cs_isinv(){
   # [X-45] `$_CS_TAIL`, not `${_CS_BUF##*$_CS_SEP}`. Identical by the invariant
   # every _CS_BUF writer maintains, and the reason this function stopped being
   # the cost of the whole gate - see the _CS_TAIL declaration for the numbers.
-  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k
+  #
+  # [X-52] SPLIT ONCE INTO AN ARRAY. THE TAIL REBUILD WAS THE WHOLE DEFECT.
+  # `_tail="${_tail#"$_w"}"` rebuilds the ENTIRE remainder once per token, so
+  # the walk was O(tokens x length) - quadratic - while doing linear work. That
+  # is the third cost term X-51's guard could not close: `!` / `{` / `A=1` are
+  # head-transparent, so the walk never exits early and every token pays for
+  # the whole string. Measured on the emitted walk, ambient locale:
+  #     "! " x 5000   10 KB    1.506 s -> 0.027 s    53x
+  #     "! " x 20000  40 KB   23.157 s -> 0.251 s    91x
+  #     "! " x 40000  80 KB   91.160 s -> 0.904 s   100x
+  #     "A=1 " x 40000 160 KB 180.485 s -> 1.714 s  105x
+  # Step counts are IDENTICAL at every size (40003 vs 40003), which is the
+  # point: this changes what the walk COSTS and not one thing it decides, so it
+  # adds no constant to mirror and no differential surface. Bounding the walk
+  # with a counter was the other candidate and it does not size: the benign
+  # `sudo rm <4000 files>` already costs 4003 steps / 10.69 s against the
+  # attack's 40000, a 10x separation that leaves under 2x margin - the same
+  # trade rejected for `_CMD_MAXJUMP` at 10240.
+  #
+  # NORMALISE WITH `[[:space:]]` FIRST, DO NOT SPLIT ON IFS DIRECTLY. IFS is a
+  # fixed character set and `[[:space:]]` is a LOCALE-DEPENDENT class, and they
+  # genuinely disagree: under a UTF-8 locale `[[:space:]]` matches U+2003 EM
+  # SPACE (and not U+00A0), under `LC_ALL=C` it matches neither. Splitting on
+  # IFS alone would stop separating `sh<U+2003>-c 'pip install evil'`, the head
+  # would classify as `other`, the walk would end and the quoted argument would
+  # never be segmented - a FAIL-OPEN. Replacing the class with a plain space
+  # first uses the SAME class in the SAME locale the old walk used, so the word
+  # sequence is identical by construction; an equivalence test over spaces,
+  # tabs, newlines, \\v, \\f, \\r, U+2003, U+00A0, globs, backslashes and the
+  # parked sentinels reproduces it word for word. The pre-existing locale
+  # dependence is neither fixed nor worsened here - it is backlogged, not
+  # silently changed under cover of a performance fix.
+  #
+  # `set -f` around the split ONLY: the words are unquoted there so that IFS
+  # splits them, which also exposes them to pathname expansion, and a command
+  # holding `*.txt` would otherwise be replaced by the directory listing.
+  # Saved and restored because a caller may already be inside a `set -f`
+  # region. The array is read by INDEX behind an `_ai -ge _an` bound rather than
+  # iterated, so an empty split needs no `${_words+...}` guard: `_an` is 0, the
+  # bound returns before any element is touched, and `set -u` never sees an
+  # unset subscript. `_cjoin`'s call sites, which DO expand an array into an
+  # argument list, still carry that guard.
+  #
+  # THE FIRST TOKEN IS TAKEN LAZILY AND THE SPLIT IS PAID ONLY IF THE WALK
+  # ACTUALLY CONTINUES. This is not an optimisation, it is the difference
+  # between a fix and a new bypass, and the first cut of this change got it
+  # wrong. `_cs_isinv` runs ONCE PER QUOTED RUN [X-45], and the overwhelmingly
+  # common answer is decided by the head alone: `echo`/`ls`/`git` classify
+  # `other` with no wrapper seen, which ENDS the walk at token one. Normalising
+  # and splitting the whole tail up front made every one of those calls pay
+  # O(tail) - so N quoted runs cost O(N x tail) and the quadratic came straight
+  # back in a different place. Measured, dependency-gate, shapes UNDER BOTH
+  # X-51 caps (an `echo` head with N single-quoted runs, 2 jumps each):
+  #        N=2000  80004 B  4000 jumps   17.94 s -> 48.05 s
+  #        N=3000  81004 B  6000 jumps   25.77 s -> 89.51 s   PAST THE CEILING
+  #        N=4090  81804 B  8180 jumps   33.52 s -> 146.80 s  PAST THE CEILING
+  # i.e. the eager version was a WORSE bypass than the one it fixed, on a shape
+  # the old code cleared at 33.52 s. Found by adversarial review, reproduced
+  # serially at width 1. Taking the head lazily restores the old cost on the
+  # exit path exactly, and the array is built only for the walks that really do
+  # run long - which is where X-52's shapes live and where linear-vs-quadratic
+  # is worth a whole-tail pass.
+  if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi
+  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0 _lz=0 _lastw=0
+  # Safe for the callees: `_cs_head_kind`, `_cs_inv_word` and `_xp_iw` match
+  # with `case` on quoted words and perform no word splitting of their own.
+  local IFS=' '
   while : ; do
-    _tail="${_tail#"${_tail%%[![:space:]]*}"}"
-    _w="${_tail%%[[:space:]]*}"
-    [ -z "$_w" ] && return 1
+    if [ "$_ai" -lt 0 ]; then
+      # LAZY PHASE - the head, straight off the raw tail, exactly as before.
+      # The word is NOT consumed here. The original consumed it only AFTER the
+      # classification, so a walk that ends on the head paid one whole-tail
+      # expansion and not two; consuming here would have added a second on the
+      # exit path, which is the path every ordinary command takes. The consume
+      # moved to the phase switch at the bottom, which runs only when the walk
+      # actually continues.
+      _tail="${_tail#"${_tail%%[![:space:]]*}"}"
+      _w="${_tail%%[[:space:]]*}"
+      [ -z "$_w" ] && return 1
+      # Is this the TRAILING word? If so it is not provably complete - see the
+      # memo note - because the next quoted run can EXTEND it.
+      #
+      # `${_tail:${#_w}:1}`, NOT `[ "$_w" = "$_tail" ]` - a ~3x CONSTANT-FACTOR
+      # win, and NOT the class change this comment used to claim.
+      #
+      # THE ORIGINAL CLAIM WAS "bounded by the WORD, which is short". THAT IS
+      # FALSE, and it was frozen into `test_composition` before anyone checked
+      # it. bash computes MB_STRLEN over the WHOLE variable before it slices,
+      # so a substring costs O(tail) REGARDLESS OF OFFSET. Measured on bare
+      # bash 5.3.15, 20000 reps, LC_ALL=C, no repo code involved:
+      #     len  20004   offset 4: 412 ms   offset len-1: 441 ms
+      #     len 200004   offset 4: 5321 ms  offset len-1: 5323 ms
+      # 10x the length is ~13x the time, and the offset makes no difference at
+      # all - which is the whole point. Same harness, slice vs equality:
+      #     len   1000     55 ms vs    92 ms
+      #     len  10000    231 ms vs   593 ms
+      #     len 100000   2548 ms vs  7703 ms
+      # Both are linear in the tail; the slice is ~3x cheaper. That is worth
+      # having and it is all it is: the `sudo` shape moved 161.84 -> 159.52 s,
+      # 1.4%, which is the size of a constant-factor win and not of a removed
+      # quadratic.
+      #
+      # SO DO NOT SUBTRACT THIS TERM WHEN SIZING THE LAZY PHASE. It is still
+      # one of several whole-tail passes paid per lazy token, it still grows
+      # with `_CS_TAIL`, and `_CS_TAIL` only resets at a segment break - which
+      # is exactly the growth X-54 and X-55 are about. Found by adversarial
+      # review of this commit's own claim, and reproduced before being written
+      # down.
+      if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi
+    else
+      # ARRAY PHASE - the remainder, split once. Reached only after the walk
+      # has already stepped through `_CS_LAZYMAX` head-transparent tokens, so
+      # the shapes that get here are the ones that genuinely run long.
+      [ "$_ai" -ge "$_an" ] && return 1
+      _w="${_words[$_ai]}"
+      _ai=$((_ai + 1))
+      # The last element IS the trailing word, unconditionally: the phase
+      # switch splits `${_tail//[[:space:]]/ }`, i.e. the WHOLE remainder, so
+      # nothing is ever left unsplit behind the array.
+      #
+      # THE FIRST SPELLING ALSO TESTED `[ -z "$_tail" ]` AND THAT CONJUNCT IS
+      # UNSATISFIABLE, so `_lastw` was always 0 here and this phase memoised
+      # exactly what the memo note forbids. `_tail` is NOT emptied at the phase
+      # switch (the split reads a copy), and `_an` is derived FROM `_tail`, so
+      # `_an >= 1` already implies `_tail` non-empty. It was a LIVE
+      # dependency-gate bypass, not a latent one:
+      # `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }` measured
+      # main=DENY / tip=ALLOW, and bash RUNS it (file marker). `{` is
+      # head-transparent AND is not a `_cs_ops` separator, so four of them
+      # reach the array phase inside ONE segment; `! ! ! ! ` is a second
+      # spelling, and `su`/`bash`/`eval` bypass the same way. Patching this one
+      # line restored deny with every control unchanged.
+      #
+      # THE #54 X-36q ROW CANNOT REACH IT and that is why the differential was
+      # green: `su"do" ...` has a SHORT head, so it decides in the lazy phase
+      # where the guard works. The array phase needs `_CS_LAZYMAX` transparent
+      # tokens in front, which no existing row had. Rows for both spellings are
+      # pinned now.
+      if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi
+    fi
     # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
     # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is
     # its own basename, so ask first and pay only when there is a path to
@@ -2253,16 +2468,64 @@ _cs_isinv(){
       esac
     fi
     case "$_k" in
-      inv) return 0 ;;
+      inv) [ "$_lastw" = "0" ] && _CS_INVMEMO=0
+           return 0 ;;
       wrap) _seen=1 ;;
       skip|flag) ;;              # transparent; never the command word
-      *) [ "$_seen" = "1" ] || return 1 ;;
+      # Decided ON A TOKEN, so a longer tail cannot change it - memo it. The
+      # two exhaustion returns above deliberately do NOT, because with
+      # `_seen=1` a later token could still be an invoker.
+      *) if [ "$_seen" != "1" ]; then
+           [ "$_lastw" = "0" ] && _CS_INVMEMO=1
+           return 1
+         fi ;;
     esac
-    _tail="${_tail#"$_w"}"
+    # Still walking. Consume the token the lazy way - AFTER classifying, exactly
+    # as the original did, so a walk that ends here pays one whole-tail
+    # expansion and not two - and switch to the array only once the walk has
+    # proved it is going to run.
+    #
+    # WHY A COUNT AND NOT "SWITCH IMMEDIATELY". Switching after the head was the
+    # THIRD cost regression this function has had, and the review caught it:
+    # `! 'r0' 'r1' ... 'r1999'` is 80001 B with 4000 jumps, inside both X-51
+    # caps. `!` is head-transparent, so the walk left the lazy phase at once,
+    # paid a whole-tail normalise plus split, then read ONE array element - the
+    # first quoted run, which classifies `other` with no wrapper seen and ENDS
+    # the walk. `_cs_isinv` runs once per quoted run and `_CS_TAIL` only resets
+    # at a segment break, so that is O(runs x tail): measured 22.93 s on main
+    # against 30.79 s here, a 1.34x REGRESSION at n=2000. Windowing the split
+    # was tried first and only got it to 30.79 s, because `${_tail:$_CS_WIN}`
+    # copies the remainder anyway.
+    # CORRECTED 2026-08-13: this used to read "a 1.34x REGRESSION that crosses
+    # the 60 s ceiling at n=4090 on a shape main clears". BOTH HALVES WERE
+    # WRONG and both are retracted. 30.79 s is UNDER the 60 s ceiling, so this
+    # cut was never a bypass - only the EAGER split (`echo` head, 4090 runs,
+    # 146.80 s) ever crossed it, and n=4090 was carried over from that
+    # different shape. 1.34x is a constant, not a class change: main is
+    # O(runs x tail) on this shape too. See freeze-exception no. 66.
+    #
+    # Stepping `_CS_LAZYMAX` tokens lazily before switching makes THAT shape
+    # never switch at all - it ends on token two - so the cost is exactly the
+    # original's. A walk that really does run long pays at most
+    # `_CS_LAZYMAX` whole-tail expansions before the split makes the rest
+    # linear, which is what closes X-52's `"! " x 40000`.
+    if [ "$_ai" -lt 0 ]; then
+      _tail="${_tail#"$_w"}"
+      _lz=$((_lz + 1))
+      if [ "$_lz" -ge "$_CS_LAZYMAX" ]; then
+        _t="${_tail//[[:space:]]/ }"
+        _f=0; case "$-" in *f*) _f=1 ;; esac
+        set -f
+        _words=( $_t )
+        [ "$_f" = "1" ] || set +f
+        _an=${#_words[@]}
+        _ai=0
+      fi
+    fi
   done
 }
 _cs_scan(){
-  local _s _w _more _pd _ps _pre _q _run _seg _tok _rem _spl
+  local _s _w _more _pd _ps _pre _q _run _seg _tok _rem _spl _rtoks _rf _roifs
   _s="$1"; _w=""; _more=0
   # Walk quoted runs the way secrets-gate's _sg_scan does, translating
   # operators in the UNQUOTED stretches only. [X-36y] Window at a time, with
@@ -2270,7 +2533,7 @@ _cs_scan(){
   # `${_s#*"$_q"}` REBUILDS the remainder and is quadratic in the distance to
   # the quote (50 reps, LC_ALL=C, quote at the far end: 0.016 s at 1 KB,
   # 2.60 s at 16 KB), and paid once per quoted run it put dependency-gate
-  # past its 60 s fail-closed ceiling on a 16 KB quote-dense command
+  # past its 60 s ceiling on a 16 KB quote-dense command
   # (2/4/8/16 KB: 1.2 / 4.1 / 16.1 / 77.0 s, timeout at 32 KB). So every
   # splitting expansion below runs on the window `_w`, never on the tail
   # `_s`: the tail is re-sliced once per _CS_WIN characters consumed, and
@@ -2348,7 +2611,7 @@ _cs_scan(){
     # one pattern test on a short string and removes the assumption rather than
     # documenting it.
     case "$_run" in
-      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}" ;;
+      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO="" ;;
       *) _CS_TAIL="$_CS_TAIL$_run" ;;
     esac
     if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
@@ -2358,11 +2621,23 @@ _cs_scan(){
   # backslashes - so the loop above never fires and the invoker rule never saw
   # it. A parked escaped space is exactly the marker for that shape.
   if _cs_isinv; then
-    _rem="$_CS_TAIL"          # [X-45] same swap, once per call rather than per run
-    while [ -n "$_rem" ]; do
-      _rem="${_rem#"${_rem%%[![:space:]]*}"}"
-      _tok="${_rem%%[[:space:]]*}"
-      [ -z "$_tok" ] && break
+    # [X-52] THE SECOND COPY OF THE SAME QUADRATIC WALK, LINEARISED THE SAME
+    # WAY. This loop rebuilt `_rem` per token exactly as `_cs_isinv` rebuilt
+    # `_tail`, and once that one was fixed a DEBUG-trap profile put 80% of
+    # dependency-gate's runtime HERE, on `bash5.2 ` x 9216 - one of the shapes
+    # X-36y filed and the reason that row only improved 1.3x on the first cut.
+    # Same construction, same guarantee: `${_CS_TAIL//[[:space:]]/ }` uses the
+    # same locale-dependent class the walk used, so the token sequence is
+    # identical, and `set -f` keeps an unquoted `*.txt` from globbing.
+    # Word splitting, not `read -ra <<<`: a here-string feeds `read` ONE line,
+    # so a newline in the tail would silently truncate the walk - and dropping
+    # tokens here drops candidate segments, which is the fail-OPEN direction.
+    _rem="${_CS_TAIL//[[:space:]]/ }"
+    _rf=0; case "$-" in *f*) _rf=1 ;; esac
+    _roifs="$IFS"; set -f; IFS=' '
+    _rtoks=( $_rem )
+    IFS="$_roifs"; [ "$_rf" = "1" ] || set +f
+    for _tok in ${_rtoks+"${_rtoks[@]}"}; do
       case "$_tok" in
         *$_CS_ESP*)
           _cs_esc_restore "$_tok"
@@ -2399,7 +2674,6 @@ _cs_scan(){
             _CS_EXTRA="$_CS_EXTRA$_CS_SEP$_CS_R"
           fi ;;
       esac
-      _rem="${_rem#"$_tok"}"
     done
   fi
   return 0
@@ -2413,7 +2687,7 @@ cmd_segments_real(){
   _s="${_s//$_CS_SEP/ }"; _s="${_s//$_CS_WS/ }"
   _s="${_s//$_CS_ESC/ }"; _s="${_s//$_CS_EDQ/ }"
   _s="${_s//$_CS_ESQ/ }"; _s="${_s//$_CS_ESP/ }"
-  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""
+  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""; _CS_INVMEMO=""
   # [item 1] Lift double-quoted command substitutions BEFORE the scan and seed
   # the recursion queue with them; the loop below re-scans each (invoker rule
   # re-applied) exactly as it does an invoker's quoted argument. `_s` is the RAW
@@ -3742,9 +4016,14 @@ mapfile -t PATS <<'PAT_EOF'
 PAT_EOF
 # --- [round-4 D15] per-PATTERN derivation, done ONCE ------------------------
 #
-# This gate runs under a 60 s PreToolUse timeout that fails CLOSED, so its
-# cost is not latency - it is a HARD BLOCK on benign input, in the gate with
-# no override path. Measured at b1782ec with a 202-pattern config and benign
+# This gate runs under a 60 s PreToolUse timeout. [CORRECTED 2026-08-13, X-51]
+# This used to say the timeout "fails CLOSED, so its cost is not latency - it is
+# a HARD BLOCK on benign input". BOTH HALVES ARE WRONG, and the design argument
+# below was built on them: a cancelled hook exits 124/137/143, only exit 2
+# blocks, so crossing the ceiling SKIPS the gate and the command runs. The cost
+# is therefore a SECURITY property, not an availability one. The work below is
+# still worth doing - it just buys bypass-resistance, not benign-input relief.
+# Measured at b1782ec with a 202-pattern config and benign
 # many-short-lines input: linear at ~15-22 ms/line depending on the machine
 # (x1.99-2.05 per doubling), crossing 60 s somewhere between 2,600 and 4,000
 # lines. Both prior reports measured that ONE shape; the gate's own comment
@@ -3894,9 +4173,13 @@ for TARGET in ${{_LIST[@]+"${{_LIST[@]}}"}}; do
   # ordinary large Bash call - a heredoc writing a file, a generated script,
   # pasted data - spent SECONDS in this loop (measured: 22.9 s at 2000
   # lines, ~92% of it in these forks), and a ~150 KB one crossed the 60 s
-  # timeout this gate runs under. A PreToolUse timeout fails CLOSED, so the
-  # cost did not land as latency, it landed as a HARD BLOCK on benign input
-  # in the one gate with no override path - the "operator deletes the gate"
+  # timeout this gate runs under. [CORRECTED 2026-08-13, X-51] This used to add
+  # that "A PreToolUse timeout fails CLOSED, so the cost did not land as latency,
+  # it landed as a HARD BLOCK on benign input". It is the reverse: a cancelled
+  # hook is SKIPPED and the command runs, so crossing the ceiling is a bypass.
+  # The fork cost is still worth removing; the harm it avoids is an attacker
+  # spending the budget, not a benign block. Retained below: the "operator
+  # deletes the gate"
   # pressure this file keeps citing, arriving through performance.
   #
   # Pure parameter expansion, no fork, same semantics: strip trailing
@@ -4370,6 +4653,25 @@ _uqw(){{
   local _t="${{1-}}"
   _t="${{_t//\\'/}}"; _t="${{_t//\\"/}}"; _t="${{_t//\\\\/}}"
   _UQW="$_t"
+}}
+# [X-52] Join words with a SINGLE SPACE, independently of the ambient IFS.
+# `"${{arr[*]}}"` joins on the first character of IFS, so a bare use of it is
+# correct only while nothing in the emitted script ever reassigns IFS - a
+# whole-file invariant that no test states and that the caller cannot see.
+# `local IFS` inside a function that does nothing else makes the separator a
+# property of this line instead, and the value it produces is byte-identical to
+# the `"$_cand $_UQW"` append it replaces.
+_CJ=""
+_cjoin(){{
+  local IFS=' '
+  # `${{*-}}`, not `$*`: the call sites guard the ARRAY with
+  # `${{_cparts+...}}` so an empty array is legal under `set -u`, and an empty
+  # array means this function is entered with ZERO positional parameters. Bash
+  # 5.x expands `"$*"` to the empty string there, but the `-` default form
+  # makes it explicit rather than resting on a version behaviour the emitted
+  # scripts pin no floor for (the shebang is bare `env bash`). Identical output
+  # for every non-empty argument list.
+  _CJ="${{*-}}"
 }}
 _XP_CW=""
 _xp_cw(){{
@@ -5176,7 +5478,13 @@ _xp_run_scan(){{
     # IFS whitespace INSIDE a token - `cmd_segments` substitutes the $_CS_WS
     # sentinel for in-quote spaces, which is what `set -- $_seg` twelve lines
     # above already depends on - IFS is never assigned globally in this hook
-    # (only as `IFS= read` command prefixes and one `local IFS=/`), and
+    # AT A POINT THIS CODE CAN OBSERVE. The enumeration, kept current because
+    # the guarantee is the enumeration: `IFS= read` command prefixes; one
+    # `local IFS=/`; `local IFS=' '` in `_cs_isinv` and in `_cjoin` [X-52],
+    # both function-scoped and neither on this call path; and ONE genuine global
+    # assignment, `IFS=' '` in `_cs_scan`'s post-loop split [X-52], whose window
+    # is a single array assignment restored on the next statement and which
+    # cannot reach here either. And
     # `set -f` is on at the call site, so no operand can glob-expand on the
     # way back. It is captured AFTER the shift so it is the tail, not the
     # command word.
@@ -5521,13 +5829,53 @@ while IFS= read -r nseg; do
   # LATER one, returning an emptied argument list. The guarantee is the census
   # test in tests/test_issue_fixes.py, which requires every match to end on a
   # token whose key is a completer.
+  # [X-52] ACCUMULATE INTO AN ARRAY, JOIN ONLY WHERE THE RESULT IS READ.
+  # `_cand="$_cand $_UQW"` re-copies everything accumulated so far on EVERY
+  # token, which is O(total^2) - the identical shape B4 fixed inside the walk
+  # and X-50 fixed in `norm_cmd`, in the one loop neither reached. A DEBUG-trap
+  # line profile put 45.5% of dependency-gate's whole runtime on these two
+  # lines for the X-52 shape, which is what was left of the 60 s ceiling once
+  # `_cs_isinv` stopped being quadratic. The join is O(n) but runs only at a
+  # COMPLETER token, where the `[[ =~ ]]` below already pays O(n) anyway, so
+  # the loop is linear in the shapes that have no completer - which is exactly
+  # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
+  # idiom; this is it applied to the other half of the pair.
+  #
+  # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
+  # the append's behaviour, not a choice made here. `_uqw` reduces a token to
+  # the EMPTY string for `''` and `""`, and the append it replaced tested
+  # `[ -z "$_cand" ]`: an empty leading token left `_cand` empty, so the next
+  # token became the whole candidate with NO leading space, while an empty
+  # INTERIOR token appended a bare separator and doubled the space. A plain
+  # `_cparts+=("$_UQW")` reproduces the interior case and breaks the leading one
+  # (`'' pip install evilpkg` joined to " pip install evilpkg"), which survives
+  # only because `HEAD` happens to be anchored `^ *`. Relying on that is one
+  # anchor edit away from a silent change, so the condition is reproduced here
+  # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
+  # `set -u`.
+  _cparts=()
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
-    if [ -z "$_cand" ]; then _cand="$_UQW"
-    else _cand="$_cand $_UQW"; fi
+    if [ -n "$_UQW" ] || [ -n "$_cand" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
+      _cparts+=("$_UQW")
+    fi
     _ckey "$_UQW"
     case "$_CKEY" in
       @@COMPLETER_CASE@@)
+        # FOLD ONLY WHAT IS PENDING, then clear. Re-joining the WHOLE array at
+        # every completer marshals it into an argument list each time, which is
+        # strictly worse than the append it replaced when EVERY token is a
+        # completer - `i` is a one-character INSTALL_VERB that is itself one, so
+        # `i i i ...` is entirely attacker-supplied with zero jump targets.
+        # Measured: `i` x 20000 (40000 B, under both caps) went 24.38 s on main
+        # to 171.88 s re-joining, i.e. a shape main CLEARS turned into a 7x
+        # ceiling breach. Folding the pending elements keeps the completer-dense
+        # case at the old append's cost (one pending element, then an O(len)
+        # append) while the completer-FREE case - X-52's own padding - still
+        # never joins at all inside the loop.
+        _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+        if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
+        _cparts=()
         if [[ "$_cand" =~ $HEAD ]]; then
           head_txt="$_cand"
           # [#43 review, F9] One expansion, not an append loop that
@@ -5537,6 +5885,16 @@ while IFS= read -r nseg; do
         fi ;;
     esac
   done
+  # [X-52] The guarded loop above now sets `_cand` only AT a completer, so the
+  # whole-segment spelling the check below reads has to be materialised here.
+  # Unconditional would re-join on the break path too, where `_cand` is already
+  # the matched prefix and must not be overwritten - hence the `head_txt` test,
+  # which is the same found/not-found signal F9 established.
+  if [ -z "$head_txt" ] && [ "${{#_cparts[@]}}" -gt 0 ]; then
+    _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+    if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
+    _cparts=()
+  fi
   # `_cand` now holds the whole reduced segment when the guard found nothing,
   # so ONE match decides whether the guard could have missed anything.
   if [ -z "$head_txt" ] && [[ "$_cand" =~ $HEAD ]]; then

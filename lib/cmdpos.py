@@ -1200,7 +1200,7 @@ def normalize_command(cmd: str) -> str:
 # The second pass costs nothing on the commands that dominate: `spellings`
 # returns an EMPTY second element whenever the fold was a no-op, which is
 # every command that carries no continuation and no ANSI-C quote, and both
-# substrates skip an empty spelling. The gate's 60 s fail-CLOSED budget is
+# substrates skip an empty spelling. The gate's 60 s budget is
 # therefore unchanged except on the payloads that actually needed folding.
 # ---- [X-36h] THE THIRD SPELLING: WHAT A *DECIDABLE* EXPANSION RESOLVES TO - #
 #
@@ -1388,7 +1388,7 @@ RESOLVED_SPELLING_MAX = 16384
 # word, re-derived three ways on this tree (base = v2.7.2; "unbounded" = this
 # same tree with INVOKER_WORD_MAX raised to 10**9 and nothing else changed):
 #     120 KB   base 57.94 s ALLOW / bounded 58.17 s (1.00x) / UNBOUNDED
-#              101.26 s - past a 60 s timeout, i.e. a fail-closed refusal of a
+#              101.26 s - past a 60 s timeout, i.e. the gate SKIPPED on a
 #              command v2.7.2 permitted
 #     100 KB   base 41.50 s ALLOW / bounded 40.68 s (0.98x) / UNBOUNDED
 #              71.26 s

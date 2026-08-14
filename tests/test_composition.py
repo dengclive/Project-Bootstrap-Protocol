@@ -222,6 +222,17 @@ check("the shell charges the same five, in the outer dispatch",
 # cursor for. `_subst_inners` walks an index over an immutable string, is
 # already O(n), and giving it a window would add a second boundary to keep in
 # step for no gain.
+check("the lazy-phase bound is shell-only and is not zero",
+      "_CS_LAZYMAX=4" in _tmpl and "_CS_LAZYMAX" not in _sdk,
+      "it decides when the shell swaps representation, never a verdict; an SDK "
+      "twin would be a boundary to keep in sync for a number the SDK cannot "
+      # The class claim in this rationale is RETRACTED (2026-08-13, no. 66):
+      # zero or one costs a 1.34x CONSTANT (22.93 -> 30.79 s at 2000 runs,
+      # under the ceiling), not a re-opened O(runs x tail) term - the memo
+      # returns before the tail is copied, so the shape is O(1) per call at
+      # any bound. The pin is KEPT: the constant is real and the value is
+      # still the sized one.
+      "observe. Zero or one costs a 1.34x constant, not a class change")
 check("the walk's cost window is shell-only",
       "_CS_WIN=1024" in _tmpl and "_CS_WIN" not in _sdk,
       "_CS_WIN bounds a bash re-slice, not the walk's reach; the SDK indexes "
@@ -240,6 +251,191 @@ check("_cs_isinv reads the carried segment tail, not the whole buffer",
       and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
       "re-deriving the tail per quoted run is what put dependency-gate at "
       "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
+# [X-52] THE TWO QUADRATIC ACCUMULATIONS, PINNED GONE. Both are invisible to
+# every verdict - the differential was byte-identical across the two commits
+# this comment was written for - so only a source pin can keep them out.
+# CORRECTION 2026-08-13: that is NOT the same claim as "this PR moved no
+# verdict", and the stronger reading is retracted. b1fcc85's memo shipped a
+# live dependency-gate bypass (`{ { { { s"h" -c 'pip install evilpkg'` was
+# main=DENY / tip=ALLOW, bash ran it), fixed in 0d24cc3, and the corpus grew
+# 4092 -> 4104 rows to carry both directions. An unchanged corpus proves the
+# corpus did not move, not that behaviour did not - every X-36q row has a
+# SHORT head, so none of them ever leaves the walk's lazy phase.
+# Reintroducing either is what put
+# `"! " x 40000 + pip install evilpkg` at 139.58 s against a 60 s ceiling, where
+# the hook is CANCELLED and the install runs: the deny never arrives.
+#   the walk   `_tail="${_tail#"$_w"}"` rebuilt the whole remainder per token,
+#              making _cs_isinv O(tokens x length). 91.16 s -> 0.90 s at 40000.
+#   the D20    `_cand="$_cand $_UQW"` re-copied the candidate per token. A
+#   candidate  DEBUG-trap profile put 45.5% of the gate's runtime on it once the
+#              walk was linear. dependency-gate 47.5 s -> 5.7 s.
+# THE WALK IS A HYBRID AND BOTH HALVES ARE LOAD-BEARING. Pinning "no tail
+# rebuild at all" was WRONG and this check said so for one commit: the eager
+# version it described paid a whole-tail normalise plus a full array build on
+# EVERY call, and `_cs_isinv` runs once per quoted run, so an `echo` head with
+# 4090 single-quoted runs - inside both X-51 caps - went 33.52 s -> 146.80 s,
+# a WORSE bypass than the one being fixed. So: exactly ONE `#`-rebuild, for the
+# HEAD only, behind the lazy-phase guard; and the array for the remainder,
+# built only after a head-transparent token has already been seen.
+check("the invoker walk consumes its head lazily and splits only the remainder",
+      _tmpl.count('_tail="${_tail#"$_w"}"') == 1
+      and '[ "$_ai" -lt 0 ]' in _tmpl
+      and "_words=( $_t )" in _tmpl
+      and '_t="${_tail//[[:space:]]/ }"' in _tmpl
+      and '[ "$_lz" -ge "$_CS_LAZYMAX" ]' in _tmpl,
+      "a per-token rebuild is quadratic in tokens (the X-52 bypass); an EAGER "
+      "whole-tail split is quadratic in quoted runs (the bypass the first cut "
+      "of the fix introduced). Both halves are needed")
+# THE SECOND COPY, in `_cs_scan`'s post-loop token walk. It was the identical
+# expression on a different variable, so fixing only the first left 80% of
+# dependency-gate's runtime in place on `bash5.2 ` x 9216 (an X-36y shape):
+# 27.17 s until this one landed, 2.79 s after. Pinned separately because the
+# two are easy to fix one at a time and the profile only reveals the second
+# once the first is gone.
+check("_cs_scan's post-loop token walk does not rebuild its remainder",
+      '_rem="${_rem#"$_tok"}"' not in _tmpl
+      and "_rtoks=( $_rem )" in _tmpl
+      and '_rem="${_CS_TAIL//[[:space:]]/ }"' in _tmpl,
+      "the same quadratic rebuild as the invoker walk, on `_rem` - and the "
+      "same `[[:space:]]` normalisation, without which splitting on IFS alone "
+      "stops separating `sh<U+2003>-c` and the walk fails OPEN")
+# ONE append survives, in the UNGUARDED FALLBACK loop, and that is deliberate.
+# The fallback re-matches at EVERY token rather than only at completers, so its
+# cost is the per-token `[[ =~ ]]` over a growing string - O(total^2) whatever
+# the string is built with, and an array join per token would be the same order
+# for more code. It is also unreachable while the #45 D1 census in
+# tests/test_issue_fixes.py holds: every HEAD match ends on a completer, so the
+# guarded loop tests that prefix first and breaks. Pinned at ONE so the guarded
+# loop cannot quietly regain the append; if the census property is ever broken,
+# this fallback becomes reachable and quadratic and must be revisited then.
+check("the D20 install-head candidate does not re-copy per token",
+      _tmpl.count('_cand="$_cand $_UQW"') == 1
+      and '_cparts+=("$_UQW")' in _tmpl
+      # the fold clears the pending elements, so a completer-DENSE segment
+      # marshals one element per join instead of the whole array every time
+      and _tmpl.count("_cparts=()") == 3,
+      "appending to one growing string per token is O(total^2) - the same "
+      "shape B4 fixed in the walk and X-50 in norm_cmd")
+# The array join is only equivalent to the ` `-append it replaced while the
+# separator is a single space, and `"${arr[*]}"` takes it from IFS.
+# NOT `"_cjoin(){" in _tmpl and "local IFS=\' \'" in _tmpl` - that pair is
+# satisfied by `_cs_isinv`'s OWN `local IFS`, which the same commit added, so it
+# would pass with `_cjoin` reverted to a bare `"${_cparts[*]}"`. Pin the body.
+# [X-52] The join must FOLD into `_cand`, never REPLACE it. Replacing means
+# re-marshalling the whole array at every completer, and `i` is a one-character
+# INSTALL_VERB that is itself a completer - so `i i i ...` is attacker-supplied,
+# carries zero jump targets, and sent a shape main clears at 24.38 s to 171.88 s.
+# [X-52] THE MEMO'S READ, WHICH NOTHING PINNED UNTIL 2026-08-13. `_CS_INVMEMO`
+# is read in exactly ONE place and deleting that single line disables the whole
+# memo. Reproduced at width 1 on a scratch tree with the line removed: THIS
+# suite 129/0 and test_substrate_differential.py 4104/0 - both of the suites
+# this work names as the memo's guards, fully green with the memo dead. Only the
+# opaque golden digests moved, and those also move on a comment reflow, so they
+# cannot tell `memo disabled` from `comment rewrapped` - this PR re-baselined
+# them three times under cost-only notes that would each have been literally
+# true of the deletion. The memo is not cosmetic: freeze-exception no. 63
+# records it as the difference between 39.26 s and `>240 s KILLED` on the
+# decider-in-tail class, i.e. between denying and failing open past the 60 s
+# ceiling. The read must also come BEFORE the tail copy - a hit that copies the
+# tail first is O(tail) per call and hands the whole class back.
+check("the invoker memo is READ, and read before the tail is copied",
+      _tmpl.count('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi') == 1
+      and (_tmpl.index('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi')
+           < _tmpl.index('local _tail="$_CS_TAIL"')),
+      "deleting the read disables the memo with every verdict test still green; "
+      "reading it after the tail copy restores O(runs x tail) on every hit")
+# [X-52] THE MEMO'S TWO SOUNDNESS CONDITIONS, PINNED - both were got wrong once.
+# (1) It is cleared where the tail RESTARTS and never where it GROWS. There are
+#     exactly three restart sites: the two `##*$_CS_SEP` branches and
+#     cmd_segments' per-event reset. Clearing at an APPEND branch instead would
+#     restore the old O(runs x tail) cost silently, with every test still green.
+check("the invoker memo is cleared at every tail RESTART and only there",
+      _tmpl.count('_CS_INVMEMO=""') == 4      # declaration + three restarts
+      and '_CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO=""' in _tmpl
+      and '_CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO=""' in _tmpl
+      and '_CS_TAIL=""; _CS_INVMEMO=""' in _tmpl,
+      "a memo surviving a segment break answers for the WRONG segment; one "
+      "cleared on append throws away the whole optimisation")
+# (2) A decision taken on the TRAILING word is not cacheable, because
+#     `_cs_scan` appends each quoted run to `_CS_TAIL` and a run can EXTEND that
+#     word rather than start a new one - `sud` classifies `other`, then `"o"`
+#     arrives and it is `sudo`, an invoker. The first cut of the memo missed
+#     this and the #54 X-36q PART-QUOTED WRAPPER differential row caught it
+#     (shell=allow / sdk=deny / want=deny, the forbidden direction).
+#     THIS PIN USED TO BE HALF VACUOUS AND THE MISSING HALF WAS A LIVE BYPASS.
+#     It counted the two WRITE guards and pinned the LAZY-phase test, and both
+#     of those were right - while the ARRAY-phase test next to them read
+#     `[ "$_ai" -ge "$_an" ] && [ -z "$_tail" ]`, whose second conjunct cannot
+#     ever be true (`_tail` is not emptied at the phase switch, and `_an` is
+#     derived FROM `_tail`, so `_an >= 1` implies it is non-empty). `_lastw`
+#     was therefore pinned to 0 in that phase and the memo cached exactly what
+#     condition (2) forbids: `{ { { { s"h" -c 'pip install evilpkg'` measured
+#     main=DENY / tip=ALLOW with bash really running it. Guarding the WRITES is
+#     not the property; the ARRAY-phase test reaching 1 is.
+#
+#     WHICH CONJUNCT ACTUALLY BITES, stated because the first draft of this pin
+#     got it wrong in the other direction. Evaluated against the PRE-FIX source,
+#     THREE of the four below were ALREADY TRUE: the write-guard count (2), the
+#     lazy-phase full text, and `count('_lastw=1') == 2` -- the buggy line
+#     `... && [ -z "$_tail" ]; then _lastw=1; ...` still contains `_lastw=1`, so
+#     a text count cannot express reachability however its comment is worded.
+#     Only the array-phase full text bites, because the buggy spelling reads
+#     `"$_an" ] && [` and is not a substring of it. The other THREE are
+#     REGRESSION pins on parts that are currently right, not evidence that the
+#     bug is gone. The BEHAVIOUR is carried by the differential rows, which are
+#     the only thing here that would have failed on the buggy tree.
+#
+#     A FIFTH CONJUNCT WAS TRIED AND DROPPED: `'[ -z "$_tail" ]' not in _tmpl`,
+#     as a tripwire against the dead conjunct returning. Its teeth depended on
+#     `_code_only` happening to strip the one surviving occurrence (a comment
+#     line in `_cs_isinv`), so a reflow onto a code line would have failed it
+#     with no behaviour change; and it banned an ordinary shell idiom across the
+#     whole emitted template. The array-phase full text above already fails if
+#     the conjunct comes back, which is the tripwire that was wanted.
+check("the invoker memo is never written from a decision on the trailing word",
+      _tmpl.count('[ "$_lastw" = "0" ] && _CS_INVMEMO=') == 2
+      # `${_tail:${#_w}:1}` and not `[ "$_w" = "$_tail" ]`. THIS PIN'S ORIGINAL
+      # COMMENT SAID THE SLICE IS BOUNDED BY THE WORD. IT IS NOT - bash takes
+      # MB_STRLEN over the whole variable before slicing, so both spellings are
+      # O(tail) and the slice is a ~3x CONSTANT, measured on bare bash (offset 4
+      # and offset len-1 cost the same to within 1%). The pin is kept because the
+      # constant is real and because the two spellings are semantically
+      # equivalent, NOT because it removes a term - see `_cs_isinv` for the
+      # numbers and for why sizing the lazy phase must still count this pass.
+      and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      # THE CONJUNCT THAT BITES. The array phase's last element is ALWAYS the
+      # trailing word, because the split consumes the whole remainder. A second
+      # conjunct testing `_tail` is DEAD - `_an` is derived from `_tail`, so
+      # `_an >= 1` already implies it non-empty - and silently disables this
+      # phase's guard, which was a live dependency-gate bypass.
+      and 'if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      and _tmpl.count('_lastw=1') == 2,
+      "a quoted run can EXTEND the trailing word, so a decision taken on it is "
+      "not stable under a longer tail - in EITHER phase of the walk")
+check("the candidate join folds rather than re-joins",
+      _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
+                  'else _cand="$_cand $_CJ"; fi') == 2,
+      "one fold inside the loop and one after it; `_cand=\"$_CJ\"` alone "
+      "re-joins the whole array per completer token")
+check("the candidate join fixes its own separator",
+      "_cjoin(){{\n  local IFS=' '" in _tmpl
+      and _tmpl.count('_CJ="${{*-}}"') == 1,
+      "a bare \"${_cparts[*]}\" would depend on nothing in the emitted script "
+      "ever reassigning IFS, an invariant no test states")
+# The append it replaced tested `[ -z "$_cand" ]`, which DROPPED a leading
+# empty token (`_uqw` reduces `''` and `""` to the empty string) while KEEPING
+# an interior one as a doubled separator. A plain `_cparts+=(...)` reproduces
+# the interior case and breaks the leading one - `'' pip install evilpkg`
+# joins to " pip install evilpkg" - which currently still matches only because
+# `HEAD` is anchored `^ *`. That is an anchor edit away from a silent verdict
+# change, and no verdict reveals it today, so it is pinned at the source.
+# NB the doubled braces: this block is inside an f-string in lib/templates.py,
+# so the SOURCE spells `${{#_cparts[@]}}` and emits `${#_cparts[@]}`.
+check("the candidate accumulation drops leading empties like the append did",
+      ('[ -n "$_UQW" ] || [ -n "$_cand" ] '
+       '|| [ "${{#_cparts[@]}}" -gt 0 ]') in _tmpl,
+      "without the guard a leading `''` token shifts the candidate by one "
+      "space and the gate relies on HEAD's `^ *` to absorb it")
 # Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is
 # unsound. There are four; a fifth added later without a tail update is the
 # way this breaks, so the count is pinned rather than described.

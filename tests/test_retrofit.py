@@ -2048,20 +2048,85 @@ def retrofit_digest_full(yaml_text):
 # refusal path, not an action. A PreToolUse hook that exceeds its timeout is
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
-# [freeze-exception no. 65, 2026-08-14] v2.8.0 LIT literature fold + release
-# stamp. Both fixtures move: steering/tools.md (LIT-04/05 retrieval-routing
+# [freeze-exception no. 62, 2026-08-12] X-52 - THREE quadratic loops removed:
+# `_cs_isinv`'s per-token tail rebuild (it was O(tokens x length), and `!` /
+# `{` / `A=1` are head-transparent so it never exited early), the identical
+# rebuild in `_cs_scan`'s post-loop token walk, and dependency-gate's
+# install-head candidate accumulating into an array. All land in bodies every
+# emitted hook embeds. COUNTS ARE UNCHANGED (service 79 / agent 93): this
+# changes what the walk COSTS and not one verdict - the 4092-row differential
+# passes untouched, and `.claude/sdk_gates/gates.py` differs only in the
+# `_cost_guard` docstring (executable AST identical, verified). `"! " x 40000
+# + pip install evilpkg` went from a 139.58 s bypass to DENY in 5.8 s. See
+# freeze-exception no. 52 in tests/test_greenfield_golden.py for the per-file
+# measurement.
+# [freeze-exception no. 63, 2026-08-13] X-52 `_lastw` - and this one DOES move
+# verdicts, which is why no. 62's "not one verdict" sentence above must not be
+# read as covering it. The memo no. 62 shipped cached a decision on the
+# TRAILING word in `_cs_isinv`'s array phase, a live dependency-gate BYPASS
+# (`{ { { { s"h" -c 'pip install evilpkg'` was main=DENY / tip=ALLOW, and bash
+# runs it). Counts are still unchanged (service 79 / agent 93); the differential
+# grew 4092 -> 4104 rows to carry both directions of the defect. Full reasoning,
+# the cost table against bbf6434 rather than main, and the residual filed as
+# X-55 are in freeze-exception no. 63 in tests/test_greenfield_golden.py.
+# [freeze-exception no. 65, 2026-08-13] COMMENT ONLY, no executable change and
+# no verdict change - the opposite of no. 63 above. `_CS_LAZYMAX`'s LOWER-bound
+# justification claimed that sizing below it "costs O(runs x tail) and crossed
+# the 60 s ceiling"; it does neither. 30.79 s is under the ceiling, the 1.34x
+# is a constant, and the number predates the per-segment memo that makes the
+# shape O(1) per call at any bound. The constant 4 is unchanged. Counts are
+# still unchanged (service 79 / agent 93) and the 4104-row differential is
+# untouched. Full reasoning, plus the provenance annotations added to no. 52's
+# now-stale cost figures, are in freeze-exception no. 65 in
+# tests/test_greenfield_golden.py.
+# [freeze-exception no. 64, 2026-08-13, LOGGED LATE 2026-08-13] 4f4588e moved
+# BOTH digests below and added no note here, though it added one to
+# tests/test_greenfield_golden.py:2933. Comment-only, no executable change:
+# 41cc941 justified the trailing-word test as "bounded by the WORD"; measurement
+# on bare bash shows `${_tail:${#_w}:1}` is O(TAIL), the spelling is kept as a
+# real ~3x constant, and only the wrong justification moved. Counts unchanged
+# (service 79 / agent 93). Logged retroactively because a re-baseline with no
+# entry is exactly what this ledger exists to prevent, and this file's own
+# header records eleven retrofit bodies moving unobserved once already.
+# [freeze-exception no. 66, 2026-08-13] no. 65's retraction was itself
+# incomplete; this is the sweep that finishes it. The retracted class claim was
+# still live in three places including the emitted header, no. 65 bound the
+# 22.93 -> 30.79 s measurement to the wrong run count (4090; it is 2000), and
+# `lib/sdk_gates_template.py`'s flat "it moves no verdict" is now scoped to that
+# module. THE SDK SUBSTRATE MOVES THIS TIME: `.claude/sdk_gates/gates.py` is no
+# longer byte-identical, but its executable AST with docstrings stripped is
+# unchanged (f71ec4a81bae9f826e39d06f361dac5f both sides, verified by rendering
+# and comparing rather than asserted), so the parity surface holds. Counts
+# unchanged (service 79 / agent 93); the 4104-row differential is untouched.
+# Full reasoning is in freeze-exception no. 66 in
+# tests/test_greenfield_golden.py.
+# [freeze-exception no. 67, 2026-08-13] The fail-open correction, finished. A
+# code review found the retracted "A PreToolUse timeout fails CLOSED" sentence
+# still live verbatim in lib/sdk_gates_template.py and the same false premise
+# still carrying design trade-offs in lib/templates.py - both EMITTED. Comment
+# and docstring only, no executable line changed in either substrate; gates.py
+# moves again on the docstring. Full reasoning in no. 67 in
+# tests/test_greenfield_golden.py.
+# [no. 66, AMENDMENT] eb8994d moved both digests below a SECOND time under this
+# same exception, aligning the emitted header's "23.00 s" to the 22.93 s every
+# other record carries. One word; counts unchanged.
+# [freeze-exception no. 68, 2026-08-14] v2.8.0 LIT literature fold + release
+# stamp, re-baselined on the merged tree (this fold + the X-52 line above).
+# Both fixtures move: steering/tools.md (LIT-04/05 retrieval-routing
 # section), the checkpoint skill body (LIT-01 invariant),
-# specs/progress-template.md (LIT-01), steering/assumption-ledger.md (LIT-01 +
-# LIT-07 rows), settings.json (_generatedBy protocol 2.8.0). Agent fixture
+# specs/progress-template.md (LIT-01, cap-free Status exemplar),
+# steering/assumption-ledger.md (LIT-01 + LIT-07 rows + source-of-truth
+# bullets), settings.json (_generatedBy protocol 2.8.0). Agent fixture
 # additionally: loop.sh / goal-loop.sh (LIT-07 priming-slice-filter BINDING
 # block), loop-config.md / goal-config.md (LIT-07 deliberate-absence
 # trailers), learnings/mode-selection.md (LIT-08 tokens + format-validity
 # columns), and iteration-summary-enforcement.sh by a comment-only citation
-# renumber (:775-776 -> :799-800). No logic changes; counts unchanged
-# (service 79 / agent 93). Recorded in docs/changelog.md 2.7.4 -> 2.8.0.
+# renumber. No logic changes; counts unchanged (service 79 / agent 93).
+# Recorded in docs/changelog.md 2.7.4 -> 2.8.0. Why 68: 62-67 were consumed
+# by the X-52 line above, which merged to main mid-fold.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "533cd50b9e392d0a0ee4609038dc95e955ef745800c3e778fd492b9cfc91bce5",
-    "agent": "10f68945dc7bca5c1c3c568de0b3fe641e9ac746007a76309613a20c5f294af6",
+    "service": "6f20a7b6e18ce501525f22853b06734995626b36c2e4640bd64e0af21f7c8879",
+    "agent": "cebe270e5464d2e0a12ab8b4e557283b16daa3d04969f70b55aae37e4b80006d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

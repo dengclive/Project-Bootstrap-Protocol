@@ -126,23 +126,32 @@ substitution scan), X-36y, X-45, X-46 (control-whitespace budget lift),
 X-47, X-50 (norm_cmd two-level accumulation, prefix-sampling fix), and the
 X-51 cost guard (a `PreToolUse` hook cancelled at its timeout FAILS OPEN, so
 commands too expensive to gate are now refused up front — the declared
-timeout is the attacker's budget, not a safety net). Per those records the
-class is closed bypasses, added refusal paths, and maintainer-side
-tests/docs; no new configuration keys — PATCH-grade on their own; the MINOR
-tier is carried by the fold above.
+timeout is the attacker's budget, not a safety net). (c) The X-52 cost-term
+line (PR #66, merged mid-fold; freeze exceptions 62–67): three quadratic
+loops removed from the substitution walk, the `_lastw` memo bypass closed
+(the differential grew 4092 → 4104 rows to carry it), the fail-open-claim
+retraction swept through every emitted comment, and the backlog re-sorted by
+threat model — recorded in its freeze-exception stacks, the backlog, and
+`docs/threat-model.md`, with no changelog entries of its own either. Per all
+those records the class is closed bypasses, added refusal paths, cost-bound
+fixes, and maintainer-side tests/docs; no new configuration keys —
+PATCH-grade on their own; the MINOR tier is carried by the fold above.
 
-**Freeze exception 65.** All five aggregate golden digests
+**Freeze exception 68.** All five aggregate golden digests
 (`test_greenfield_golden.py` default / full_autonomous / design_steering,
 `test_retrofit.py` service / agent) plus `EXPECTED_TELEMETRY_BODY` re-baseline
-once at the version bump: content movement is the LIT comment/prose additions
+once at the version bump, and again on the post-merge tree after PR #66
+landed mid-fold: content movement is the LIT comment/prose additions
 enumerated above, the renumbered PRD citation carried in the emitted
 iteration-summary-enforcement hook, and the `_generatedBy` version stamp. No
-hook logic, gate body, or dispatch line moves. **Why 65, not 62:** 62–64 are
-consumed (dated 2026-08-12/13) by the X-52 work on the unmerged branches
-`docs/post-x52-readiness-and-kb` / `fix/x52-work-counter`; this fold takes 65
-so both lineages keep unique identifiers regardless of merge order.
+hook logic, gate body, or dispatch line moves in the fold's own diff. **Why
+68:** the fold first took 62, then 65, and both were consumed out from under
+it by the X-52 line (62–67, dated 2026-08-12/13, merged as PR #66); 68 is
+the first number free on the merged tree.
 
-Suite 9,462 → **9,646 checks**, 0 failed; 25 suites.
+Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
+X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
+them — landing under this release identity).
 
 ## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
 

@@ -2212,8 +2212,11 @@ def _print_substrate_refusal(results: dict) -> None:
 def _runtime_floor_check() -> None:
     """AC-9-4: log the detected Claude Code CLI version; warn LOUDLY when
     it is below the seam binds floor (RUNTIME_FLOOR) or undetectable.
-    Never fatal - the floor binds dispatch behavior (fail-closed
-    PreToolUse timeouts), not emission - but never silent either."""
+    Never fatal - the floor binds dispatch behavior (no unattended stall on
+    a gate-hook timeout), not emission - but never silent either.
+    [Corrected 2026-08-13, X-51: this said "fail-closed PreToolUse timeouts".
+    No runtime provides that - a cancelled hook exits 124/137/143 and only
+    exit 2 blocks, so a crossed timeout is a SKIPPED gate, not a refusal.]"""
     import re
     import shutil
     import subprocess
@@ -2245,9 +2248,10 @@ def _runtime_floor_check() -> None:
     floor = tuple(int(p) for p in RUNTIME_FLOOR.split("."))
     if detected is None:
         print(f"WARNING: Claude Code CLI version undetectable - the seam "
-              f"runtime floor >= {RUNTIME_FLOOR} (fail-closed PreToolUse "
-              f"timeouts) cannot be confirmed. Unattended dispatch below "
-              f"the floor can stall on a gate-hook timeout.",
+              f"runtime floor >= {RUNTIME_FLOOR} cannot be confirmed. "
+              f"Unattended dispatch below the floor can stall on a "
+              f"gate-hook timeout. Note: no runtime makes a hook timeout "
+              f"fail closed - a cancelled hook does not block.",
               file=sys.stderr)
         return
     ver = ".".join(map(str, detected))

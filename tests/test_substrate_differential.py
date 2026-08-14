@@ -1557,6 +1557,132 @@ for _c, _g, _why in (
     differential(_g, bash(_c), "deny", "#54 X-36q quoted wrapper: %s" % _why)
 
 # --------------------------------------------------------------------------- #
+# X-52 -- THE INVOKER MEMO'S ARRAY PHASE, WHICH THE ROWS ABOVE CANNOT REACH
+# --------------------------------------------------------------------------- #
+#
+# The rows above are the reason `_cs_isinv`'s memo has a trailing-word guard at
+# all: `s"udo" ...` extends `s` into `sudo` when the quoted run is appended, so
+# a decision taken on the trailing word is not stable and must not be cached.
+#
+# BUT EVERY ROW ABOVE DECIDES IN THE **LAZY** PHASE, because its head is short.
+# `_cs_isinv` switches to the array phase only after `_CS_LAZYMAX` (4)
+# head-transparent tokens, and the guard was written a SECOND time there --
+# `[ "$_ai" -ge "$_an" ] && [ -z "$_tail" ]` -- with a conjunct that is
+# UNSATISFIABLE (`_tail` is not emptied at the phase switch and `_an` is
+# derived from it). So `_lastw` was pinned to 0 in that phase, the memo cached
+# a trailing-word decision, and `pip install evilpkg` was never re-scanned.
+#
+# WHAT WAS ACTUALLY MEASURED, stated at the strength of the evidence and no
+# higher. TWO shapes were ratified before the fix, both with a SINGLE-quoted
+# payload: `{ { { { s"h" -c 'pip install evilpkg'; }; }; }; }` and the `!` x4
+# spelling. Both are main=DENY / tip=ALLOW, and bash RUNS both -- proved by
+# FILE MARKER, not captured stdout, per this repo's own rule. Patching the one
+# line restored deny with the lazy-phase and unsplit controls unmoved. The
+# `su`/`bash`/`eval` spellings were measured on the SHELL only. The rows below
+# are DOUBLE-quoted (the file's idiom) and were not individually pre-measured,
+# and `differential()` additionally requires the SDK to agree -- which no
+# pre-fix measurement covered at all.
+#
+# An earlier draft of this comment said "main=DENY / tip=ALLOW on every row
+# below", which was false twice over: the three controls are deny on BOTH
+# substrates by construction, and the secrets-gate row cannot regress on this
+# defect at all. Caught in plan review; recorded rather than quietly narrowed,
+# because a comment asserting a measurement nobody took is the exact defect
+# this PR keeps producing.
+#
+# `{` is the shape that makes this reachable in valid bash: it is
+# HEAD_TRANSPARENT and it is NOT one of `_cs_ops`' separators, so four of them
+# sit in ONE segment. `!` is the second spelling. The controls below are what
+# isolate the ARRAY phase from the lazy one, so a future change that re-breaks
+# only one phase still fails a row.
+_52_DQ = chr(34)
+for _c, _g, _why in (
+        ('{ { { { s%sh%s -c "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "dependency-gate", "4 head-transparent `{` push the walk into the "
+         "ARRAY phase, then the quoted run EXTENDS the trailing word `s` into "
+         "`sh` -- the memo answered for the shorter word"),
+        ('! ! ! ! s%sh%s -c "pip install evilpkg"' % (_52_DQ, _52_DQ),
+         "dependency-gate", "second head-transparent spelling, same phase"),
+        ('{ { { { s%su%s root -c "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "dependency-gate", "array phase, `su` spelling"),
+        ('{ { { { bas%sh%s -c "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "dependency-gate", "array phase, `bash` spelling -- the extension is "
+         "the LAST character of a longer word"),
+        ('{ { { { ev%sal%s "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "dependency-gate", "array phase, `eval` spelling"),
+        # CONTROLS -- these decide in the LAZY phase and were never broken.
+        # They isolate WHICH PHASE a future regression lands in: if the lazy
+        # rows fail and the array rows pass, the guard broke in the other half.
+        #
+        # WHAT THEY CANNOT DO, said plainly because an earlier draft of this
+        # comment claimed it: they cannot catch a "fix" that repairs the array
+        # phase by disabling the memo WHOLESALE. The memo is a pure COST
+        # optimisation and is sound by construction when absent, so deleting
+        # the read at `_cs_isinv`'s head reverts the walk to main's behaviour
+        # and every row in this block still passes. NOTHING IN THIS FILE CAN
+        # SEE THAT, because this file measures verdicts and that is a cost
+        # property - which is exactly how five cost regressions got past 9655
+        # checks in this PR. The composition text-pins are what notice, and
+        # the cost evidence lives in the X-52 backlog row, not in any suite.
+        ('{ { { s%sh%s -c "pip install evilpkg"; }; }; }' % (_52_DQ, _52_DQ),
+         "dependency-gate", "control: THREE `{` stay in the lazy phase, where "
+         "the guard always worked"),
+        ('{ { { { sh -c "pip install evilpkg"; }; }; }; }',
+         "dependency-gate", "control: array phase but the invoker is UNSPLIT, "
+         "so no trailing-word extension happens"),
+        ('{ { { { s%sh%s -c "cat secrets/prod.yaml"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "secrets-gate", "the OTHER walker on the same shape: secrets-gate "
+         "reaches it through `_sg_push`, which carries NO memo -- so this row "
+         "cannot regress on this defect and is NOT a control for it. It is "
+         "here to pin that the two walkers still agree; if it ever fails it "
+         "is a new finding about `_sg_push`, not about the memo"),
+        # HEAD_TRANSPARENT has TEN members, not two. All ten classify `skip`,
+        # none sets `_seen`, and none contains a `_cs_ops` separator, so any
+        # four of them reach the array phase inside one segment. `{` x4 and
+        # `!` x4 are the two spellings that were measured; this row is the
+        # MIXED spelling, which looks like ordinary script text rather than
+        # like an attack, and it is the one a corpus built from the two
+        # measured spellings would miss.
+        ('if true; then ! ! ! s%sh%s -c "pip install evilpkg"; fi'
+         % (_52_DQ, _52_DQ),
+         "dependency-gate", "mixed head-transparent spelling (`then` + three "
+         "`!`) reaching the same array phase")):
+    differential(_g, bash(_c), "deny", "X-52 invoker memo, array phase: %s"
+                 % _why)
+
+# THE `inv` ARM, which the rows above do not touch. All of them exercise the
+# `other`-with-no-wrapper write (`_CS_INVMEMO=1`); the `inv` write
+# (`_CS_INVMEMO=0`) has the same trailing-word exposure in the OTHER direction:
+# the tip caches "is an invoker" from `sh`, the run then extends it to `sha`,
+# and the memo answers for the shorter word. RATIFIED: main=ALLOW /
+# tip=DENY / fixed=ALLOW -- so the buggy tip OVER-denies here. That is the
+# tolerated direction and it is still wrong, and no row covered it.
+for _c, _why in (
+        ('{ { { { sh%sa%s "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "`sh` extended to `sha`, which is NOT an invoker -- the memo must not "
+         "answer `inv` for it"),
+        ('{ { { { sh%salom%s "pip install evilpkg"; }; }; }; }'
+         % (_52_DQ, _52_DQ),
+         "same, with an unambiguously non-invoker extension")):
+    differential("dependency-gate", bash(_c), "allow",
+                 "X-52 invoker memo, array phase, `inv` arm: %s" % _why)
+
+# The benign twin. NOTE THE QUOTED RUN: `{ { { { echo hello; }; }; }; }` -- the
+# spelling this row had in its first draft -- contains NO quoted run, so
+# `_cs_isinv` is called exactly ONCE (the post-loop call) on a tail of `" }"`,
+# one token, four short of the array phase. It could not test what it claimed.
+# `echo "hello"` puts a run in, so the tail at the call is `{ { { { echo ` and
+# the walk does reach the array phase. Caught in plan review.
+differential("dependency-gate", bash('{ { { { echo "hello"; }; }; }; }'),
+             "allow", "X-52 invoker memo, array phase: benign transparent head")
+
+# --------------------------------------------------------------------------- #
 # X-36v / X-36w -- A HEAD FORM NEITHER WALKER SAW PAST
 # --------------------------------------------------------------------------- #
 #
