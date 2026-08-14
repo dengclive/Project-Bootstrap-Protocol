@@ -163,13 +163,19 @@ them — landing under this release identity).
 **The measurement that was owed since the X-52 line is run, and it is the
 PRECONDITION the autonomous-mode work was waiting on.** It was declared owed in
 `docs/deferred-backlog.md` (X-54), the security KB, `docs/production-readiness.md`
-and the work order, and claimed in none of them. Run on `f9c2bb2`; the figure
-binds the RELEASE and not merely that head, because emitted `gates.py` is
-AST-identical to the tag's (`f71ec4a81bae9f826e39d06f361dac5f`, verified by
-rendering both trees, not asserted). `dependency-gate`, 80004 B / 4000 jumps,
-two reps per head, serial at width 1, each hook in its own session with the
-whole process group killed on timeout, and no row started while the 1-minute
-load average was above 1.50 — the load is stamped per row.
+and the work order, and claimed in none of them. Run on `f9c2bb2`; **the figure
+binds `053a367` and the v2.8.0 tag as well, and the warrant is the artifact
+that was actually TIMED**: emitted `dependency-gate.sh` is byte-identical
+comment-stripped across `053a367..f9c2bb2` (raw bytes differ — 225738 vs
+225620 — the stripped digest does not), verified by rendering both trees.
+(Emitted `gates.py` is separately AST-identical at
+`f71ec4a81bae9f826e39d06f361dac5f`, but that is the SDK artifact and is **not**
+what this pass measured; citing it here would be a warrant for the wrong
+object.) `dependency-gate`, **80001–80004 B** / 4000 jumps — the byte count
+varies by head length, the jump count does not — two reps per head, serial at
+width 1, each hook in its own session with the whole process group killed on
+timeout, and no row started while the 1-minute load average was above 1.50 —
+the load is stamped per row.
 
 * **Wrapper heads, all PAST the 60 s ceiling at ~2.6x:** `sudo`
   **156.75–157.19 s**, `env` **157.84–159.88 s**, `nice` **156.28–156.92 s**.
@@ -191,25 +197,50 @@ records. Measuring the literal would have measured a 15 KB command and returned
 a reassuring number for the row whose entire claim is that 80 KB is reachable
 under both caps.
 
-**THIS DOES NOT CLOSE X-54, AND THE ROW STAYS `open`.** Every row returned rc 0
-ALLOW only because the harness let the gate finish. Under the emitted 60 s
-timeout each wrapper row is instead a cancelled hook, exit 124, fail-open — the
-mechanism X-54 records, now reproduced on the released tag. What the pass buys
-is a SIZE, not a fix. X-55's `>240 s KILLED` is not re-run and stays owed.
+**THIS DOES NOT CLOSE X-54, AND THE ROW STAYS `open`. It also does not
+reproduce the bypass, and an earlier draft of this entry said it did.** Every
+row returned rc 0 ALLOW — but the measured payload carries **no install verb**,
+so ALLOW is the CORRECT verdict at any speed and no deny was ever at stake.
+What crossed the ceiling is the COST; the fail-open X-54 describes needs a
+shape that would otherwise DENY, carried in the same padding, and that is not
+what was run here. Stating it the other way round would have claimed a
+reproduced bypass on the strength of a benign command. What the pass buys is a
+SIZE, not a fix and not a proof. X-55's `>240 s KILLED` is not re-run and stays
+owed.
 
 **Freeze exception 69.** All five aggregate golden digests
 (`test_greenfield_golden.py` default / full_autonomous / design_steering,
 `test_retrofit.py` service / agent) re-baseline for a **comment-only** change in
-the gate preamble that every one of the 13 emitted hooks embeds — which is why
-one edit moves five digests. The preamble asserted **in the present tense** that
-`sudo` + 2000 runs "is still 150.95 s here". 150.95 s was the PRE-memo figure,
-and the same emitted file already carried the post-memo 159.52 s a few hundred
-lines down: every install shipped two different current costs for one shape.
-The tense was the defect, not the number — **150.95 s is kept as history, not
-deleted**, per the standing rule that a stale wall-clock figure is marked
-superseded rather than refreshed away. No executable line, hook logic, gate body
-or dispatch line moves; action counts unchanged (57 / 69 / 59, service 79 /
-agent 93).
+the `_read_cmd` preamble that every emitted hook body embeds — which is why one
+edit moves five digests. **The moved set is counted per fixture, not from a
+probe install:** 11 hook bodies in `default`, 15 in `full_autonomous`, 11 in
+`design_steering` (37 across the three), 11 and 15 in retrofit service/agent;
+no other artifact moves in any fixture. (An earlier draft wrote "all 13 emitted
+hooks" — 13 is the hook count of an ad-hoc probe config, never a fixture count,
+and `test_greenfield_golden.py` already carried two corrections of exactly that
+substitution. It is the same class of error as citing the wrong artifact: a
+number that is real, but of the wrong thing.)
+
+The preamble asserted **in the present tense** that `sudo` + 2000 runs "is
+still 150.95 s here", against "a main that times out above 1200 s". Both halves
+were wrong by referent rather than arithmetic: 150.95 s was the PRE-memo
+figure while the same preamble carried the post-memo 159.52 s **over 1,300
+lines below**, so every install shipped two current costs for one shape; and
+the >1200 s tree is `d20860b`, not `main`, which now IS the measured tree.
+**Both figures are kept and MARKED, not refreshed away** — the 161.84 → 159.52
+pair is a before/after whose point is the delta, and refreshing half of it
+would destroy the record. No executable line, hook logic, gate body or dispatch
+line moves; action counts unchanged (57 / 69 / 59, service 79 / agent 93).
+
+**The policy citation moved with this entry, and again when the entry was
+expanded after review: `795 → 851 → 882`.** This branch's first commit message
+called it the "SIXTH move" and is immutable, so this is the correction:
+derived from `git log` over `.claude/dynamic-workflow-policy.md`, the full
+committed series is `207 → 367 → 423 → 601 → 637 → 755 → 781 → 790 → 795 →
+851 → 882` — **eleven values, ten moves.** The checkpoint's "moved five times"
+counted only the tail. It tracks a sentence, cite-by-line is fragile by
+construction, and `test_doc_citations` caught every move here rather than a
+reader finding a rotted citation later.
 
 Harness and logs live at `.claude/checkpoints/x52-harnesses/headclass_v280.py`
 and `logs-20260814/` — gitignored and durable, like the X-52 harnesses.

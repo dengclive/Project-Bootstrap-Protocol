@@ -2134,8 +2134,8 @@ def retrofit_digest_full(yaml_text):
 # nice 156.28-156.92 s — all past the 60 s ceiling; transparent heads flat at
 # 12.10-12.30 s. No logic changes; counts unchanged (service 79 / agent 93).
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "9fb5147294ab6eea78da3586d60d6fb33a931b27749da2114792cf2cbe7181d1",
-    "agent": "1f1524795c21ca32a8d14c21aa45c41d6086b31f77cc4613140626a75e1e0ec7",
+    "service": "d8a517e466aa64ee2f37bb2b14ad2166dc19034b2ce8fa78bb99ba20c3edc89e",
+    "agent": "985a2cfc582d42b79809c6c5c36451a5e7283efcc3af5eaf5b8a1f0493875788",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

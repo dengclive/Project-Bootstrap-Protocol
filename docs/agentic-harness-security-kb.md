@@ -1737,10 +1737,13 @@ words, and the shell's answer depends on the ambient locale.      (X-53)
 
 **Was owed and IS NOW RUN, 2026-08-14.** The fresh head-class measurement — a
 comparable pass across the head classes, taken together on ONE tree — exists.
-Run on `f9c2bb2` rather than the `053a367` this paragraph asked for, which is
-the stronger tree and not a substitution: emitted `gates.py` is AST-identical
-across `053a367..f9c2bb2`, so the figures bind the merged tree AND the v2.8.0
-tag. `dependency-gate`, 80004 B / 4000 jumps, two reps, serial at width 1,
+Run on `f9c2bb2` rather than the `053a367` this paragraph asked for, and that
+is not a substitution: **the artifact that was TIMED — emitted
+`dependency-gate.sh` — is byte-identical comment-stripped across
+`053a367..f9c2bb2`** (raw bytes differ, 225738 vs 225620; the stripped digest
+does not), verified by rendering both trees. So the figures bind the merged
+tree AND the v2.8.0 tag. Emitted `gates.py` is separately AST-identical, but
+that is the SDK artifact and is NOT what was measured here. `dependency-gate`, 80004 B / 4000 jumps, two reps, serial at width 1,
 load ≤ 1.50 per row. **Wrapper heads, all past the 60 s ceiling at ~2.6x:
 `sudo` 156.75-157.19 s, `env` 157.84-159.88 s, `nice` 156.28-156.92 s.
 Transparent heads, flat at 4.9x under: `!`, `{`, `-x`, `echo`, 12.10-12.30 s.**
@@ -1836,7 +1839,7 @@ Post-tag sources `[+2026-08-13]` — the cost class behind §4.11:
 - `docs/deferred-backlog.md` cluster **X**, rows **X-50 … X-58** — the class (X-50, X-51), the guard, its bypass, the fix (X-52, `done`) and its five open residuals (X-53, X-54, X-55, X-56, X-57), plus X-58 on the rendering fault in this cluster's own table.
 - **PR #65, merged as `053a367`** — 21 commits, and the account of six self-inflicted regressions, five of them fail-open, shipped and fixed in the course of one fix.
 - `.claude/trust-ramp.md`, the `x52-*` and `x49-*` entries — five `harmful` grades, and the record of *which instrument caught what*: review caught four regressions, ad-hoc wall-clock caught two, and the 9668-check suite caught none of them.
-- **The same honest deviation from §0 that §4.10 records applies here.** These figures come from named commits, harnesses in `.claude/checkpoints/x52-harnesses/` (gitignored), and live checks against Claude Code — not from a suite you can re-run from this repo. A fresh head-class measurement on `053a367` is owed and has not been taken.
+- **The same honest deviation from §0 that §4.10 records applies here.** These figures come from named commits, harnesses in `.claude/checkpoints/x52-harnesses/` (gitignored), and live checks against Claude Code — not from a suite you can re-run from this repo. A fresh head-class measurement WAS owed here and was TAKEN 2026-08-14 [superseded by the block above, which is the record]: run on `f9c2bb2`, and it binds `053a367` because the artifact it timed — emitted `dependency-gate.sh` — is comment-stripped identical across `053a367..f9c2bb2`, verified by rendering both trees.
 
 All exit codes in §§1–5 were reproduced on 2026-07-30 against tags `v2.5.0`
 (`fc04c10`) and `v2.6.0` (`f6bded0`). Everything marked **`[+2026-07-31]`** was

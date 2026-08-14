@@ -3109,11 +3109,15 @@ EXPECTED_DIGESTS = {
         # been measured anywhere before. Transparent heads flat at
         # 12.10-12.30 s. 150.95 s is KEPT as history, not deleted; what was
         # wrong was the tense. NO EXECUTABLE LINE CHANGES - the moved bytes
-        # are comment text inside the preamble shared by all 13 emitted
-        # hooks, which is why five digests move for one edit. Count still 57.
+        # are comment text in the `_read_cmd` preamble that EVERY emitted hook
+        # body embeds, which is why one edit moves five digests. THE MOVED SET
+        # IS COUNTED PER FIXTURE, NOT FROM A PROBE INSTALL: 11 hook bodies
+        # here, 15 in full_autonomous, 11 in design_steering (37 across the
+        # three), 11 and 15 in the retrofit service/agent fixtures. No other
+        # artifact moves in any of them. Count still 57.
         # Measurement recorded in docs/deferred-backlog.md (X-54),
         # docs/production-readiness.md and the security KB section 6.
-        "90c70bf9b30f9f6492b34279c8c2b77e213dd4e0921b00b415a7bb8b79feb590",
+        "2fd6db32540ddb28ebf8366e3aa81a9d1e72e10924e139802c25dbc928b79220",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3353,7 +3357,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
         # correction (see the `default` note): comment-only, in the gate
         # preamble every hook body embeds. No logic changes; count still 69.
-        "a92b6353bf61ae588cb742bf9e7b37577725b4355a18532ab13a724609ed6c8c",
+        "94a70d209cd088199081b20d7fd9ed1f753f22511b6ff769640ae8f89e572334",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3540,7 +3544,7 @@ EXPECTED_DIGESTS = {
         # correction (see the `default` note): comment-only, in the shared
         # gate preamble. The three design-steering artifacts are again
         # untouched, and the count is still 59.
-        "dbcd0ea8f1a5f455b7b9a5382b03ad49f6b97480293b48fdedbd62ce62bc1ef1",
+        "ae3a559d9c7482db5f7c5a889ab98487caad462647eebe21f6aa445e0d504aef",
 }
 
 EXPECTED_ACTION_COUNTS = {

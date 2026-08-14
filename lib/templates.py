@@ -1051,19 +1051,25 @@ _read_cmd(){
 # still going, and the same shapes DENY in 6.2 s and 5.5 s - a ~10x margin where
 # there was a bypass. See `_cs_isinv`. THIS DID NOT CLOSE THE COST CLASS: a
 # WRAPPER head keeps the walk running to the end of the tail on every quoted
-# run, and `sudo` + 2000 runs costs 156.75-157.19 s here against a main that
-# times out above 1200 s - filed as X-54, and these two caps do not catch it
-# either (80004 B, 4000 jumps, inside both).
+# run, and `sudo` + 2000 runs costs 156.75-157.19 s here, against the >1200 s
+# that the PRE-X-52 tree `d20860b` took on the same shape - filed as X-54, and
+# these two caps do not catch it either (80004 B, 4000 jumps, inside both).
 # [Corrected 2026-08-14 by measurement, freeze exception no. 69: this line read
-# "is still 150.95 s here". 150.95 s was the PRE-memo figure and is preserved
-# in THIS MARKER rather than deleted - what was wrong was the PRESENT TENSE,
-# which asserted a stale number as the current cost while the same emitted
-# file already carried the post-memo 159.52 s, further down this same emitted
-# preamble. Re-measured on v2.8.0
-# (f9c2bb2), dependency-gate, two reps, serial, 1-min load <= 1.50. THE CLASS
-# IS WIDER THAN THIS ONE HEAD: `env` 157.84-159.88 s and `nice` 156.28-156.92 s
-# cross the same ceiling; `nice` had never been measured anywhere. The
-# transparent heads stay flat at 12.10-12.30 s.] A third
+# "is still 150.95 s here" against "a main that times out above 1200 s". TWO
+# defects, both of tense/referent rather than of arithmetic. (1) 150.95 s was
+# the PRE-memo figure asserted as the CURRENT cost, while the same emitted
+# preamble carried the post-memo 159.52 s over 1300 lines below - every
+# install shipped two current costs for one shape. (2) "a main that times out
+# above 1200 s" named the wrong tree: >1200 s is `d20860b`, and `main` now IS
+# the tree being measured. 150.95 s is preserved in this marker, not deleted.
+# Re-measured on v2.8.0 (f9c2bb2), dependency-gate, two reps, serial, 1-min
+# load <= 1.50. THE MEASURED CLASS IS WIDER THAN THIS ONE HEAD: `env`
+# 157.84-159.88 s and `nice` 156.28-156.92 s cross the same ceiling, `nice`
+# never having been measured before; the transparent heads stay flat at
+# 12.10-12.30 s. WHAT THIS DID NOT SHOW: the measured payload carries NO
+# install verb, so ALLOW was the correct verdict at any speed. The pass
+# measured COST, not a bypass - a shape that would otherwise DENY is what
+# turns this cost into the fail-open X-54 describes.] A third
 # CONDITION here was the other candidate and was rejected on measurement: the
 # benign `sudo rm <4000 files>` already costs 4003 walk steps against the
 # attack's 40000, a 10x separation that leaves under 2x margin - the same trade
@@ -2397,6 +2403,12 @@ _cs_isinv(){
       # having and it is all it is: the `sudo` shape moved 161.84 -> 159.52 s,
       # 1.4%, which is the size of a constant-factor win and not of a removed
       # quadratic.
+      # [Freeze exception no. 69, 2026-08-14: both figures here are HISTORICAL
+      # and are kept as the record of that delta. They are NOT the current
+      # cost - the shape measures 156.75-157.19 s on v2.8.0 (f9c2bb2); see the
+      # X-54 marker far above. Marked rather than refreshed, because the
+      # before/after pair is the whole point of this note and refreshing one
+      # half would destroy it.]
       #
       # SO DO NOT SUBTRACT THIS TERM WHEN SIZING THE LAZY PHASE. It is still
       # one of several whole-tail passes paid per lazy token, it still grows
