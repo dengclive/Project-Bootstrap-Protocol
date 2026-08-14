@@ -2140,6 +2140,13 @@ def retrofit_digest_full(yaml_text):
 # references repointed across 17 tracked files. Emitted bytes move only where
 # a template cites the PRD by filename (assumption-ledger.md in both fixtures,
 # loop.sh / goal-config.md in agent). No logic; counts unchanged.
+# !!! FREEZE EXCEPTION 71 IS WITHDRAWN AND UNUSED. The X-37 attempt below was
+# built, measured and WITHDRAWN 2026-08-14 as a NET REGRESSION: ~cubic in
+# substitution-opener count, so a cap-legal $(-dense payload crosses the emitted
+# 60s timeout and a killed hook fails OPEN, turning existing denies into allows;
+# and one nested $() before the downloader defeated every arm. Branch
+# fix/x37-class-b / PR #77 are kept as EVIDENCE and are NOT merged. X-37 stays
+# `open`. Attempt 2 reuses the number 71. See docs/deferred-backlog.md X-37.
 # [freeze-exception no. 71, 2026-08-14] X-37 / item 1b: Class B CLOSED. A
 # downloader inside a substitution whose value lands at an EXECUTION position
 # (`bash -c "$(curl url)"`, `eval`, a bare sub/backtick at command position,
@@ -2149,7 +2156,7 @@ def retrofit_digest_full(yaml_text):
 # hooks/dependency-gate.sh` ONLY - one body per fixture. NOT `gates.py`,
 # because retrofit emits none (see the note above; the greenfield twin moves
 # two bodies because it does). Artifact SET identical, 0 added, 0 dropped;
-# counts unchanged, service 79 / agent 93. 53 differential rows go
+# counts unchanged, service 79 / agent 93. 54 differential rows go
 # allow/allow -> deny/deny, every one of them MEASURED allow/allow before the
 # change; the false-positive fence is pinned in the same section and none of
 # it moves.

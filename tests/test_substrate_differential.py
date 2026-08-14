@@ -3344,7 +3344,7 @@ _DQCS = [
     # substrates as `cmdpos.subst_to_shell_regex`.
     #
     # EVERY ROW BELOW WAS MEASURED allow/allow AT daf85b9 BEFORE IT WAS WRITTEN
-    # HERE - 53 deny rows, 0 of which already denied. A row that never failed
+    # HERE - 54 deny rows, 0 of which already denied. A row that never failed
     # proves nothing, and an earlier draft of this work asserted a residue row
     # (`eval "$(echo hi; curl >/dev/null)"`) that was ALREADY deny: `>/dev/null`
     # supplies a file token, so D20's file-write<->file-run correlation fires and

