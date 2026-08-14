@@ -114,9 +114,18 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 `x54-headclass-measurement` PR #70 `9450b7d` (exc. 69) · `prd-filename-v280`
 PR #72 `54ebc4b` (exc. 70) · ledger entries 27/28 PRs #69 `f9c2bb2`, #71
-`03dd309` · post-v2.8.0 record PR #68 `6143427`.
+`03dd309` · post-v2.8.0 record PR #68 `6143427` · **the harness itself**
+(runbook + this queue + `context-check.py`) PR #73 `358ac9b`, **merged by the
+operator — the first merge in this run the loop did not perform itself**, which
+is exactly what 9b now requires.
 
 ## Owed
 
-A ledger entry for the PR #72 rename work — entry 28 predates that PR.
-Disclosed rather than skipped; fold into the next entry.
+*(Nothing. The PR #72 ledger entry that was owed here is discharged as entry
+29; the harness work is entry 30. Ledger at 30, pin moved in the same commit.)*
+
+**Verdict status, so the scoreboard is not lost between sessions:**
+`docs/production-readiness.md` §1 still reads **not production ready**. Nothing
+merged so far this cycle moved it — the measurement SIZED X-54, the rename and
+the harness were hygiene and tooling. The first item that can move it is
+`c1-license`, and it is now unblocked and top of the queue.

@@ -317,8 +317,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # WRONG ARTIFACT — gates.py, which was not what was timed — and two commits
 # carrying that plus a probe-vs-fixture hook count and a fail-open overclaim
 # were pushed to origin; all fixed pre-merge, none reached main).
+# 29th entry 2026-08-14: prd-filename-rename, corrected (I reverted the
+# operator's deliberate uncommitted rename; preserved rather than deleted, and
+# nothing wrong reached origin — the lesson is now E6 in the readiness runbook).
+# 30th entry 2026-08-14: readiness-harness, corrected (a 50-agent review of my
+# own design found the loop self-merging, which the rung table forbids at EVERY
+# rung, and R0's grant mis-stated; both fixed pre-commit, both recommended to
+# the operator in their wrong form first).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 28, f"{len(es)} entries")
+      len(es) == 30, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
