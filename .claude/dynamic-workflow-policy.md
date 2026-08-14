@@ -37,7 +37,7 @@ owns it; if all ten pass, author the script.
 | 5 | Writing stages are width 1 **or** worktree-isolated — counting the index and refs, not just tracked files | DW-R1 |
 | 6 | No test execution inside any fan-out stage, by any entry point | DW-R2 |
 | 7 | `PYTHONDONTWRITEBYTECODE=1` set for any agent that imports a repo module; scratch goes to the session scratchpad | DW-R3, DW-R4 |
-| 8 | No agent commits, tags, pushes, or merges | DW-R6 |
+| 8 | No agent commits to `main`, tags, merges, or edits a remote ref. A push of a NON-`main` branch is permitted under an approved plan (amended 2026-08-14) | DW-R6 |
 | 9 | Width is stated in the plan with its reason, and bounded by what you will read | §5 |
 | 10 | The current rung's requirements apply **unchanged** — fan-out unlocks nothing. At R0: plan approved before work starts, diff reviewed before every commit | DW-G1 |
 
@@ -455,6 +455,35 @@ DW-P5 forbids a workflow *deciding* a merge; this forbids it *performing* one,
 which is a different act and was not otherwise covered. A DW-U4 pipeline that
 commits per-site is the natural shape that walks into this — stage the edits,
 let the operator commit.
+
+**AMENDED 2026-08-14 BY THE OPERATOR: A BRANCH PUSH IS PERMITTED. `main` IS
+NOT.** The rule as first written forbade *pushing* outright, and the readiness
+runbook's loop pushed a feature branch for every PR of this cycle (#68, #69,
+#70, #71, #72, #73, #74, #75, #76) under operator direction. That left nine
+pushes that were directed but not permitted — a gap between the written rule and
+the practice, which the `checkpoint-20260814-1230` handoff filed as unresolved
+rather than assumed away, with the instruction to *decide it before the next
+push*. This is that decision, taken when `x37-class-b` reached it.
+
+The amended rule:
+
+| act | agent | why |
+|---|---|---|
+| `git push origin <branch>`, branch ≠ `main` | **MAY** | a branch is a proposal; it publishes nothing and reaches no user |
+| `git push` to `main` | never | the standing no-direct-commit rule |
+| merge a PR | never | 9b, and the trust ramp says the human diff review before merge does **not** change at any rung, R3 included |
+| tag | never | a tag is a release act |
+| edit a remote ref, force-push, delete a branch | never | destructive and not reversible by the operator's review |
+
+**Precondition: an approved plan.** Under the runbook's §5 ruling, an applied
+step-3 plan review is what approves it — so a push is permitted only for work
+whose plan was reviewed. An unreviewed branch is still unpushable.
+
+**What this does NOT relax.** The push makes the diff *visible*; it does not
+make it *merged*. Step 9a still ends at "post the evidence and wait", and 9b is
+still the operator's. The reason the original rule bundled push with merge was
+that both touch a remote; the amendment separates them on the ground that only
+one of them ships anything.
 
 ---
 
