@@ -312,8 +312,13 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # body certified the diffs "derived, not asserted" BEFORE the review ran;
 # the review then found two underived provenance claims in them — the
 # defects themselves were fixed pre-merge and never reached main).
+# 28th entry 2026-08-14: x54-headclass-measurement, harmful (the head-class
+# pass itself is sound, but PR #70's body argued its central claim from the
+# WRONG ARTIFACT — gates.py, which was not what was timed — and two commits
+# carrying that plus a probe-vs-fixture hook count and a fail-open overclaim
+# were pushed to origin; all fixed pre-merge, none reached main).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 27, f"{len(es)} entries")
+      len(es) == 28, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
