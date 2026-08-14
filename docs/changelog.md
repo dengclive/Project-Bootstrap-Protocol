@@ -41,7 +41,11 @@ precedent).** Nine additive items:
   rows say trajectory-derived or N/A) and the PAR-05 TEL-01 positioning (one
   evidence channel: telemetry-on operators query instead of transcribe). Also
   extends the retrofit mode-selection seed table (additive columns only —
-  `bin/trust-ramp` parsing is preservation-safe for added fields).
+  no emitted tool parses that seed table — `bin/trust-ramp` reads only its
+  own `.claude/trust-ramp.md` ledger, whose absorb path preserves unknown
+  `**Field:**` lines; one named residual: the new `**Outcome:**` field's
+  vocabulary is broader than trust-ramp's own outcome enum, relevant only if
+  a ledger later absorbs mode-selection blocks, not a current conflict).
 - **[LIT-09]** Complexity-downgrade rule for the calibration review — each
   scaffold layer must pay for itself in the ledger, judged via the
   *Felt right? = "yes but the judge was noisy"* answer, recommendations only.
@@ -91,34 +95,56 @@ note under Migration notes.
 **Seam impact: none.** `SEAM-CONTRACT-v2-0-0.md` §8.4: no tier membership
 change, no provenance-marker or synthesize-file-contract change, no shared
 sentinel change, no CLI entry point or contract-level flag, no §4.1/§5 table
-change, no `binds` change. No gate internals are touched at all: the emitted
-diff against 2.7.4 moves comment blocks, steering prose, ledger rows, and the
-version stamp only — the release criterion inherited from 2.7.0 holds with
-the **"previously denied, now allowed" set empty by construction** (verified
-at release by rendering both versions' emissions). `seam_version` stays 2.0.0.
+change, no `binds` change. **The fold's own diff — measured against pre-fold
+`main`, the tree it landed on — touches no gate internals:** it moves comment
+blocks, steering prose, ledger rows, and the version stamp only, so the
+release criterion inherited from 2.7.0 holds for the fold with the
+**"previously denied, now allowed" set empty by construction** (verified by
+rendering both trees' emissions and diffing per path). The full release delta
+against the **v2.7.4 tag** additionally contains the gate-corrective work
+named under Release identity below; that work ships here as it landed, its
+verdict movement recorded at its own landing (closed bypasses and added
+refusal paths per its freeze-exception records), not re-measured by this
+entry. `seam_version` stays 2.0.0.
 
 **Open proposals untouched.** B-2..B-7 and GR2-03b/04/05/06/07 remain open
 exactly as recorded. **[LIT-07] amends adopted-B-1 text** (the Phase 9.5
 deliverable contract's binding comment enumeration, four → five items) — B-1
 was ADOPTED at 2.2.0; no open proposal's text moves.
 
-**Release identity.** Besides the fold, this release ships the five
-`Unreleased` entries below (2026-08-08/09): item 1 and its follow-ups
-(double-quoted command-substitution class, invoker-wrapped substitution, D20
-driver, comment-aware walk) and the G-6 close with the two emission paths
-pinned. All are gate-corrective or maintainer-side (allow → deny only, no new
-configuration keys) — PATCH-grade on their own; the MINOR tier is carried by
-the fold above.
+**Release identity — everything merged since the v2.7.4 tag ships here, not
+only the fold.** (a) The five formerly-`Unreleased` entries below
+(2026-08-08/09, retitled *Post-2.7.4, shipped in 2.8.0*): item 1 and its
+follow-ups (double-quoted command-substitution class, invoker-wrapped
+substitution, D20 driver, comment-aware walk) and the G-6 close with the two
+emission paths pinned. (b) The gate-corrective work of 2026-08-10..13 that
+landed with freeze-exception records (nos. 51–61, in the golden digest
+comment stacks of `tests/test_greenfield_golden.py` / `tests/test_retrofit.py`)
+but **no changelog entries of its own — a recording debt this entry settles
+by naming it**: the B3 flat-budget re-land (PR #64), B4 (front-window
+substitution scan), X-36y, X-45, X-46 (control-whitespace budget lift),
+X-47, X-50 (norm_cmd two-level accumulation, prefix-sampling fix), and the
+X-51 cost guard (a `PreToolUse` hook cancelled at its timeout FAILS OPEN, so
+commands too expensive to gate are now refused up front — the declared
+timeout is the attacker's budget, not a safety net). Per those records the
+class is closed bypasses, added refusal paths, and maintainer-side
+tests/docs; no new configuration keys — PATCH-grade on their own; the MINOR
+tier is carried by the fold above.
 
-**Freeze exception 62.** All five aggregate golden digests
+**Freeze exception 65.** All five aggregate golden digests
 (`test_greenfield_golden.py` default / full_autonomous / design_steering,
 `test_retrofit.py` service / agent) plus `EXPECTED_TELEMETRY_BODY` re-baseline
 once at the version bump: content movement is the LIT comment/prose additions
 enumerated above, the renumbered PRD citation carried in the emitted
 iteration-summary-enforcement hook, and the `_generatedBy` version stamp. No
-hook logic, gate body, or dispatch line moves.
+hook logic, gate body, or dispatch line moves. **Why 65, not 62:** 62–64 are
+consumed (dated 2026-08-12/13) by the X-52 work on the unmerged branches
+`docs/post-x52-readiness-and-kb` / `fix/x52-work-counter`; this fold takes 65
+so both lineages keep unique identifiers regardless of merge order.
 
-## Unreleased — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
+Suite 9,462 → **9,646 checks**, 0 failed; 25 suites.
+
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
 
 **No version bump** (still item 1; freeze exception **50**). Not a fail-open —
 an **unoverridable block that runs an operator-configured command first**, and
@@ -243,7 +269,7 @@ quoted-heredoc over-denial is real, but a bare verb in a quoted heredoc denies
 on merged main too, so closing the walker's half alone buys nothing — while an
 `<<EOF` (unquoted, and it really does expand) mistake would reopen a proven read.
 
-## Unreleased — item 1 follow-up B2: the D20 download-then-run driver (2026-08-09)
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B2: the D20 download-then-run driver (2026-08-09)
 
 **No version bump** (still item 1; freeze exception **50**, round-3 addition).
 `_download_then_run` was the **one** whole-command segmentation driver in
@@ -280,7 +306,7 @@ status-idiom self-match. Suite counts and the residue this does **not** close
 are recorded with the run; `_xp_chains(raw)` is still substitution-blind on both
 substrates (**X-41**).
 
-## Unreleased — item 1 follow-up: the invoker-wrapped substitution, closed on both substrates (2026-08-09)
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up: the invoker-wrapped substitution, closed on both substrates (2026-08-09)
 
 **No version bump** (still inside item 1's release-blocking work; freeze
 exception **50**, round-2 addition, same named set). Adversarial review of the
@@ -332,7 +358,7 @@ Perf: the hot path is unchanged (the `$(`/backtick guard short-circuits), and
 secrets-gate's cheapest 60 s payload is a **pre-existing** `_sg_scan` quote-walk
 quadratic at ~33.6 KB on both trees, which this change does not move.
 
-## Unreleased — item 1: the double-quoted command-substitution hole, Class A closed (2026-08-08)
+## Post-2.7.4, shipped in 2.8.0 — item 1: the double-quoted command-substitution hole, Class A closed (2026-08-08)
 
 **No version bump yet** (release-blocking work in progress). Freeze exception
 **50**: `_cs_subst_scan` lands in the shared `_HOOK_HEADER` and its call site in
@@ -388,7 +414,7 @@ inside the fileless D20 correlation). Pre-existing allow/allow, **ledgered
 `allow`** in the differential corpus so it is legible, needs its own review.
 **Item 1 remains release-blocking until 1b lands.**
 
-## Unreleased — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
+## Post-2.7.4, shipped in 2.8.0 — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
 
 **No version bump.** No configuration key exists that did not, and the one
 emitted body that moves does so by one comment line. Recorded here *before*

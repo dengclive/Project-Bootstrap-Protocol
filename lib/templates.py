@@ -2796,9 +2796,11 @@ floor moves, the wizard reads this ledger and surfaces every row whose
 re-validation trigger matches as a plain notice — never blocking the change,
 never silently proceeding. Until that surfacing lands in your installed
 tooling (deferred with locked constraints; see the project changelog), treat
-any such change as your cue to re-check the matching rows by hand. The point
-is only to make the calibration debt visible at the moment it becomes payable;
-you decide whether to re-tune.
+any such change as your cue to re-check the matching rows by hand. Where a
+committed golden set exists (Phase 9 step 9, LIT-06), re-running it through
+each enabled autonomous mode turns that re-check from a notice into a
+measurement. The point is only to make the calibration debt visible at the
+moment it becomes payable; you decide whether to re-tune.
 
 **Where the re-validation evidence comes from.** A surfaced row asks a question
 you then answer with data. If you opted into telemetry export (TEL-01),
@@ -2819,6 +2821,10 @@ rather than becoming a second authority:
   numbers above reflect this project's actual configured values.
 - **Max-iterations and the subagent token-multiplier note** — Phase 9.5 of
   `Bootstrap-Protocol-v2-4-0.md`; {max_iter_where}
+- **No-lossy-rewrite preservation invariant (LIT-01)** — Phase 7 step 5 of
+  the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
+- **Priming-slice cap redaction (LIT-07)** — Phase 9.5 "Max-iterations
+  safety" of the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
 
 Add a row whenever a new default is introduced because a current model needs
 it — that is what keeps the staleness class from going invisible again.
@@ -6963,9 +6969,11 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 # a plain CLI env var available on ANY conformant install, NOT gated on
 # gate_substrate.
 #
-# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-6-0.md Phase {phase}
-#  "Deliverable contract for the wrappers" item 5 - BINDING on the
-#  operator-completed iteration loop; the bare skeleton dispatches nothing.]
+# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-6-0.md Phase 9.5
+#  "Deliverable contract for the wrappers" item 5 - the single normative home
+#  of this contract, which Phase 9.6 references rather than restates. BINDING
+#  on the operator-completed iteration loop; the bare skeleton dispatches
+#  nothing.]
 #  When assembling the primed context (the enumeration lives in the Phase
 #  {phase} text), the completed loop MUST filter the loop_max_iterations
 #  field from the primed COPY of the task definition (a no-op where the
@@ -7453,7 +7461,7 @@ failure). Instantiate exactly this shape:
 
 ## Status
 
-<one line: e.g. "In flight — iteration 3 of 10; deterministic gate passing, judge advisory pending.">
+<one line: e.g. "In flight — iteration 3; deterministic gate passing, judge advisory pending." Do NOT restate the iteration cap here — this file is primed first every iteration and the cap is deliberately absent from the primed slice (LIT-07).>
 
 ## Completed
 

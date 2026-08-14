@@ -35,7 +35,9 @@
 > clusters **J**, **K** and **L** are the v2.6.0 upstream-fix and review residue;
 > cluster I is the v2.5.0 release-review set.
 >
-> **2.6.0 was corrective, not additive — and every release since has been too.**
+> **2.6.0 was corrective, not additive — and every release through 2.7.4 was too**
+> (2.7.0's two configuration keys excepted); **2.8.0 is the first additive
+> release since** (the LIT fold above).
 > Every 2.x release before it was an opt-in flag defaulting to `false`, so an
 > operator who left it alone saw nothing change. This one has no such flag:
 > gates that were silently inert begin to block, `dependency-gate` starts catching

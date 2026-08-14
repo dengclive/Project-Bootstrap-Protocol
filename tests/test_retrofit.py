@@ -2048,7 +2048,7 @@ def retrofit_digest_full(yaml_text):
 # refusal path, not an action. A PreToolUse hook that exceeds its timeout is
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
-# [freeze-exception no. 62, 2026-08-14] v2.8.0 LIT literature fold + release
+# [freeze-exception no. 65, 2026-08-14] v2.8.0 LIT literature fold + release
 # stamp. Both fixtures move: steering/tools.md (LIT-04/05 retrieval-routing
 # section), the checkpoint skill body (LIT-01 invariant),
 # specs/progress-template.md (LIT-01), steering/assumption-ledger.md (LIT-01 +
@@ -2060,8 +2060,8 @@ def retrofit_digest_full(yaml_text):
 # renumber (:775-776 -> :799-800). No logic changes; counts unchanged
 # (service 79 / agent 93). Recorded in docs/changelog.md 2.7.4 -> 2.8.0.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "ebff84c22006c4c3735d2a1de1a728a20185977ebb7758cb39293237050418f1",
-    "agent": "10db852a2f4834b1b6e3f796ca9afad860567716571ba22443fb179d9af76ac8",
+    "service": "533cd50b9e392d0a0ee4609038dc95e955ef745800c3e778fd492b9cfc91bce5",
+    "agent": "10f68945dc7bca5c1c3c568de0b3fe641e9ac746007a76309613a20c5f294af6",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

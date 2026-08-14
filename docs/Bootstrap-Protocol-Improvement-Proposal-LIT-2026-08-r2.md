@@ -1,6 +1,6 @@
 # Bootstrap Protocol Improvement Proposal — Literature Fold (LIT series), revision r2
 
-**Status: PROPOSED, NOT adopted.** Under the same rule as the protocol's Proposed-revisions appendix: nothing here changes the protocol; adopting any item is a deliberate, separately-versioned decision by the human owner. Target document: the working PRD, **Version 2.7.4** (filename `Bootstrap-Protocol-v2-6-0.md`; named by version per the G-6 rule).
+**Status: ADOPTED in full at 2.8.0 (2026-08-14; see `docs/changelog.md`).** All ten items adopted by owner decision (Tier 3 in-fold, LIT-07 included); the six rejections below were upheld and remain the durable record. Retained for provenance. *Originally: PROPOSED, NOT adopted — under the same rule as the protocol's Proposed-revisions appendix: nothing here changes the protocol; adopting any item is a deliberate, separately-versioned decision by the human owner.* Target document at proposal time: the working PRD, **Version 2.7.4** (filename `Bootstrap-Protocol-v2-6-0.md`; named by version per the G-6 rule).
 
 **Revision provenance [r2].** This revision folds the resolutions of the 2026-08-11 multi-lens adversarial review (findings PAR-01..PAR-12; one BLOCKING, resolved here). Every substantive delta is tagged inline `[PAR-nn]`. The review verified all three papers against their page bundles, the protocol sections in full, and arXiv 2603.29519 by fetch; nothing in r1 was found invented — the defects were one misclassified item (LIT-07) and citation hygiene. All six rejections were upheld.
 

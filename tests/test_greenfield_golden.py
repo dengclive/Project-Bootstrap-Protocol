@@ -2814,7 +2814,7 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        # [freeze-exception no. 62, 2026-08-14] v2.8.0 LIT literature
+        # [freeze-exception no. 65, 2026-08-14] v2.8.0 LIT literature
         # fold + release stamp. Moved bodies: steering/tools.md (the
         # LIT-04/05 retrieval-routing section), the checkpoint skill
         # body (LIT-01 invariant), specs/progress-template.md (LIT-01),
@@ -2822,7 +2822,7 @@ EXPECTED_DIGESTS = {
         # settings.json (_generatedBy protocol 2.8.0). No hook or gate
         # body moves in this fixture; no logic changes anywhere. Count
         # still 57. Recorded in docs/changelog.md 2.7.4 -> 2.8.0.
-        "96ceeff3690c2eecedf73912841769852a5cf189c36a3dd16d1bf7e2fb46d493",
+        "054a82a63efae71b3bf5e11722fa46e8491b994bbd3e6e343a5dbf279ff42e95",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3050,7 +3050,7 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        # [freeze-exception no. 62, 2026-08-14] v2.8.0 LIT literature
+        # [freeze-exception no. 65, 2026-08-14] v2.8.0 LIT literature
         # fold + release stamp (see the `default` note). This fixture
         # additionally moves: loop.sh / goal-loop.sh (the LIT-07
         # priming-slice-filter BINDING comment block), loop-config.md /
@@ -3058,7 +3058,7 @@ EXPECTED_DIGESTS = {
         # iteration-summary-enforcement.sh by a comment-only citation
         # renumber (:775-776 -> :799-800 after the 2.8.0 PRD head
         # block). No logic changes; count still 69.
-        "6ad500c5238b5145388d454001aee59cb6dd4fb62e2f16b73d2b9edcd480ebb2",
+        "7051a5b5360ec8918e0a50887ba184b328b323a51c73cadaf686e54209c500e1",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3233,12 +3233,12 @@ EXPECTED_DIGESTS = {
         # PROCEEDS, so padding alone bypassed any gate whose cost
         # crossed 60 s - proven live, `pip install evilpkg` behind
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
-        # [freeze-exception no. 62, 2026-08-14] v2.8.0 LIT literature
+        # [freeze-exception no. 65, 2026-08-14] v2.8.0 LIT literature
         # fold + release stamp — same moved set as the `default` note
         # (tools.md, checkpoint skill, progress-template,
         # assumption-ledger, settings.json). The three design-steering
         # artifacts are untouched. No logic changes; count still 59.
-        "ed45273246f4a00e8a77e970274541f2086fa8772b6b14f948d73514f16f3f89",
+        "c82eb77f96f211069dc3561949f99ef09abe2ec59cef16873b3c6168b1b3db0e",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -3339,7 +3339,7 @@ check("telemetry.md IS emitted with the flag on", _tel_on is not None)
 if _tel_on is not None:
     # Version-stamp-bearing. If this moves for any reason OTHER than a release
     # bump, the change is unintended -- that is the whole point of pinning it.
-    # [freeze-exception no. 62, 2026-08-14] version stamp only: the body
+    # [freeze-exception no. 65, 2026-08-14] version stamp only: the body
     # interpolates PROTOCOL_VERSION (2.8.0); no other telemetry.md change.
     EXPECTED_TELEMETRY_BODY = (
         "9f599f14a391693fa831a21a6c08cc86b5ba5504ec458d6e84da264bbf0a7c3d")
