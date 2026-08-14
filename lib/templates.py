@@ -2786,6 +2786,7 @@ compensates for**, the **model generation it was calibrated against**, and a
 | Subagent token multipliers (~2–3x mixed-model) | Per-session context cost under the current price/tokenizer structure | Pre-remap estimate; re-derive on Sonnet 5 | Any price/tokenizer or model-tier change |
 | Max-iterations default (10 per task) | Bounded blast radius when a task cannot converge | Current runtime-floor model tier | Any pinned-model tier change |
 | No-lossy-rewrite preservation invariant [LIT-01] | Current-generation condensation tendency in rewrite/summarization passes (silent fact loss) | Current pinned-model generation | Any pinned-model change |
+| Priming-slice cap redaction [LIT-07] | Current-generation budget-anxiety behavior when an iteration cap is prompt-visible | Current pinned-model tier | Any pinned-model change — a generation that plans *better* with a known budget flips this default |
 
 ## How this ledger is used
 
@@ -6962,6 +6963,23 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 # a plain CLI env var available on ANY conformant install, NOT gated on
 # gate_substrate.
 #
+# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-6-0.md Phase {phase}
+#  "Deliverable contract for the wrappers" item 5 - BINDING on the
+#  operator-completed iteration loop; the bare skeleton dispatches nothing.]
+#  When assembling the primed context (the enumeration lives in the Phase
+#  {phase} text), the completed loop MUST filter the loop_max_iterations
+#  field from the primed COPY of the task definition (a no-op where the
+#  field is absent - goal-supervised-only tasks carry no cap field), and
+#  MUST include this sentence in the primed context:
+#     Don't ration or count iterations; the harness manages all budgets
+#     and will end the loop when appropriate.
+#  The field STAYS in the committed task file and the task-definition
+#  schema; cap enforcement stays here in the wrapper, unchanged. The filter
+#  redacts prompt salience only - the cap remains workspace-readable in the
+#  committed task file and config files. DELIBERATE ABSENCE (W-1 pattern):
+#  do not "fix" the unfiltered task definition back into priming; the
+#  rationale block lives in loop-config.md / goal-config.md.
+#
 # [loop-final-$TASK_ID.md structure - GR2-02, Bootstrap-Protocol-v2-4-0.md
 #  Phase {phase}] The operator-completed loop writes the audit record to
 #     .claude/sessions/loop-final-$TASK_ID.md
@@ -7277,6 +7295,15 @@ usage_limit_wait_jitter_seconds: 60  # uniform 0..N seconds ADDED to resets_at (
 # Completion-criteria checks the wrapper trusts the agent's self-attestation
 # on in loop mode (goal-supervised mode re-checks them independently):
 require_completion_sentinel: true
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# Phase 9.5 "Max-iterations safety"): the per-task loop_max_iterations cap
+# is filtered OUT of the primed task-definition slice by the
+# operator-completed loop. Enforcement is the harness's job; a
+# prompt-visible budget invites rationing against it. The cap stays
+# truthful here and in the committed task file. Do not "fix" the
+# unfiltered task definition back into priming - the absence is
+# deliberate, recorded in the Assumption Ledger, and re-validated on any
+# pinned-model change.
 """
 
 
@@ -7312,6 +7339,15 @@ investigate_disagreement: false
 # completion-criteria checklist, and audio-cue overrides. The protocol
 # document names no config keys for these; they remain wrapper-implemented
 # defaults pending normative key names (see docs/changelog.md).
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# Phase 9.5 "Max-iterations safety"): loop_max_iterations is filtered OUT
+# of the primed task-definition slice by the operator-completed loop (it
+# exists only on eligible-for-both tasks; a no-op otherwise), and this
+# file's own max_iterations is never primed. Enforcement is the harness's
+# job; a prompt-visible budget invites rationing against it. Do not "fix"
+# the unfiltered task definition back into priming - the absence is
+# deliberate, recorded in the Assumption Ledger, and re-validated on any
+# pinned-model change.
 """
 
 
