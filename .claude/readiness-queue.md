@@ -15,8 +15,37 @@ buy.
 *(`c1-license` closed 2026-08-14 — PR #75, merge `de13e71`. See Done.)*
 
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
-  · scope `lib/templates.py`, `lib/sdk_gates_template.py`,
-  `tests/test_substrate_differential.py`, `docs/deferred-backlog.md`
+  · scope `lib/cmdpos.py`, `lib/templates.py`, `lib/sdk_gates_template.py`,
+  `tests/test_substrate_differential.py`, `tests/test_composition.py`,
+  `tests/test_greenfield_golden.py`, `tests/test_retrofit.py`,
+  `docs/deferred-backlog.md`
+  **ATTEMPT 1 BUILT AND WITHDRAWN 2026-08-14 — STILL OPEN. Read the X-37 row
+  before re-planning; it carries what 100 agents proved.** Branch
+  `fix/x37-class-b`, PR #77, NOT merged, kept as evidence. It made 54 rows go
+  allow/allow → deny/deny with the fence intact and the suite at 25/9,739/0,
+  and the step-7 review still killed it: the rule is ~cubic in
+  substitution-opener count, a dimension `_cost_guard` does not bound, so a
+  cap-legal `$(`-dense payload crosses the emitted 60 s timeout — and a killed
+  hook fails OPEN, turning the approved-list and D20 denies into ALLOWS. A
+  larger hole than the one it closed. Second blocker: the body scan `[^)]`
+  cannot cross a `)`, so one nested `$()` before the downloader defeated all
+  six arms. The two are in TENSION.
+  **THE ROW'S OWN INSTRUCTION IS THE THING TO STOP FOLLOWING:** "model it
+  beside `cmdpos.pipe_to_shell_regex`" is the wrong architecture. Attempt 2
+  should use the walk that already exists — `_cs_subst_scan` / `_subst_inners`
+  / `_lift_subs`, bounded by `_SUBST_BUDGET` / `_SUBST_MAXLEN` — to ask which
+  substitutions carry a downloader at a command position, plus a CHEAP anchored
+  test for whether the substitution sits at an execution position.
+  **Scope is wider than this row said** (the four files above were missing, and
+  `tests/test_retrofit.py`'s digests go red without it — a step-5 E4 waiting to
+  happen). Freeze exception **71 is drafted but UNUSED**; attempt 2 reuses it.
+  **Also carried:** `interpreter_word` not `INVOKERS` (or `${SHELL} -c "$(dl)"`
+  matches nothing) · the code letter is admissible anywhere in a bundle
+  (`bash -cx`) · `bash < <(dl)`, `bash <<< "$(dl)"`, `bash /dev/stdin <<<`,
+  `bash 0< <(dl)` are the same channel and absent from this row's shape list ·
+  `bash -c -- "$(dl)"` needs a `--`-tolerant run · `ssh host "$(dl)"` denies on
+  the merits · **measure cost with `$(`-DENSE padding, not plain text** — plain
+  padding is linear and hides this entire class.
   Item 1b / Class B: download-then-run laundered through a command
   substitution (`bash -c "$(curl)"`, `eval`, bare/backtick/process-sub).
   Status cell, derived 2026-08-14: `` `open` — pre-existing, forbidden
@@ -126,5 +155,12 @@ than re-measured, and `git ls-files | grep -icE 'licen[cs]e'` now returns 1.
 wrappers dispatch nothing). *"C-1 alone settles it either way"* meant
 independently sufficient, never sole ground.
 
-**So the next item is the one that goes at a leg: `x37-class-b`.** It is the
-only remaining A-tier row, it is `CODE`, and it gets full ceremony.
+**So the next item is still `x37-class-b`.** It is the only remaining A-tier
+row, it is `CODE`, and it gets full ceremony. **Attempt 1 (2026-08-14) was
+built, measured and WITHDRAWN as a net security regression — see the entry above
+and the X-37 row. Nothing about the verdict changed, and X-37 is still `open`.**
+The lesson the next session should not have to rediscover: a verdict corpus of
+4,163 rows was fully green over a rule that was bypassable by one nested `$()`
+and that turned existing denies into allows under padding. **A green corpus
+proves the corpus did not move, not that the gate is sound** — the third time
+this repo has logged that shape.
