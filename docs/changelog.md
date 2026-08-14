@@ -158,6 +158,46 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the PRD filename catches up with its own contents (2026-08-14)
+
+**`Bootstrap-Protocol-v2-6-0.md` and `Bootstrap-Protocol-Companion-v2-6-0.md`
+are now `-v2-8-0`.** This is a filename correction, not a version bump: both
+files have carried `**Version:** 2.8.0` and the LIT-fold header since the
+release, which updated their CONTENTS and never renamed them. The result was a
+working PRD that self-identified as 2.8.0 under a 2.6.0 name — and
+`lib/templates.py:3121` saying **"(`Bootstrap-Protocol-v2-6-0.md`, 2.8.0)"** in
+a single breath. **The rename is the operator's, made outside this session;
+this entry records and completes it rather than re-deciding it.**
+
+Done with `git mv`, so the content is byte-identical and git records a rename
+rather than a delete-plus-add — no history is lost, and `git log --follow`
+still reaches the 2.0.0-era commits. **No 2.6.0 snapshot is destroyed, because
+none existed to destroy:** 2.6.1 through 2.8.0 were all edited into this same
+file in place, which is exactly the confusion the rename ends. The genuinely
+frozen snapshots (`v2-0-0`, `v2-2-0`, `v2-4-0`, `v2-5-0`) are untouched.
+
+**All 61 references across 17 tracked files repointed**, verified by
+`git grep -c` returning nothing for the old names. Three suites had been
+opening the file by its literal path and CRASHED before this pass —
+`test_doc_citations`, `test_installer`, `test_worktree_command_compat` — which
+is how a rename this wide announces itself. Historical entries above and in
+`.claude/trust-ramp.md` now name the file as it is called today; they refer to
+the same object, and what they CLAIMED is untouched.
+
+**Freeze exception 70.** All five aggregate golden digests re-baseline. Emitted
+bytes move only where a template cites the PRD by filename —
+`steering/assumption-ledger.md` in every fixture, plus `loop.sh`,
+`goal-config.md` and `goal-loop.sh` in the autonomous ones. No executable line,
+no gate body, no dispatch line, no action-count change (57 / 69 / 59, service
+79 / agent 93).
+
+**The policy citation moved again with this entry — `882 → 922`, its twelfth
+value and eleventh move**, renumbered in this same commit per the standing
+rule. Two entries in a row have now moved it, which is the argument for
+anchoring that citation to a heading rather than a line; filed as a note here
+rather than done, because changing the citation FORM is a change to
+`test_doc_citations`'s contract and wants its own pass.
+
 ## Post-2.8.0 — the head-class cost measurement, and the emitted figure it corrects (2026-08-14)
 
 **The measurement that was owed since the X-52 line is run, and it is the
@@ -659,7 +699,7 @@ completes it.
 
 ### The PRD header, and what this release does *not* do
 
-`Bootstrap-Protocol-v2-6-0.md`'s `**Version:**` field read **2.7.0** through
+`Bootstrap-Protocol-v2-8-0.md`'s `**Version:**` field read **2.7.0** through
 three releases (2.7.1, 2.7.2, 2.7.3). Those were gate corrections adding no
 operator-facing surface a PRD would describe, so the body needed no edit — but
 the version field should have tracked `PROTOCOL_VERSION` regardless. Now 2.7.4.
@@ -1539,7 +1579,7 @@ rendered by the morning-after summary. Two findings changed the answer.
 
 **The enum is queue-scoped by the protocol, not just by the pin.** P-10 noted
 the `exactly 13` pin reads `body(AUTO)` only. It is stronger than that:
-`Bootstrap-Protocol-v2-6-0.md:283` already says *"successful per-task
+`Bootstrap-Protocol-v2-8-0.md:283` already says *"successful per-task
 terminations (`max-iterations`, `goal-condition-suspect`, `terminal-success`)
 do not produce a queue-level `exit_reason`"*. For `loop.sh`/`goal-loop.sh` there
 was never a contract question at all.
@@ -1708,7 +1748,7 @@ on the parser being *absent*: *"Fails closed when the parser is missing"*, and
 second being the `elif have_py` bug written as instruction. §6.D is normative, so
 an author conforming to it wrote P0-3d and it looked like conformance. Both now
 turn on the parser **failing**, not on its absence. Same correction in
-`Bootstrap-Protocol-Companion-v2-6-0.md`.
+`Bootstrap-Protocol-Companion-v2-8-0.md`.
 
 Suite: 21 suites / 1905 checks / 0 failed, unchanged throughout.
 

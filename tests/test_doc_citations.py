@@ -70,8 +70,8 @@ def check(name, cond, detail=""):
 # --------------------------------------------------------------------------- #
 # The citation table — ANCHORS, never line numbers
 # --------------------------------------------------------------------------- #
-PRD = "Bootstrap-Protocol-v2-6-0.md"
-COMPANION = "Bootstrap-Protocol-Companion-v2-6-0.md"
+PRD = "Bootstrap-Protocol-v2-8-0.md"
+COMPANION = "Bootstrap-Protocol-Companion-v2-8-0.md"
 # Frozen: last touched long before the 2.7.x line. Cannot rot, but a wrong
 # citation into it would be wrong permanently, so it is cheap to pin.
 FROZEN_V200 = "Bootstrap-Protocol-v2-0-0.md"
@@ -137,7 +137,7 @@ HISTORICAL = {
 HISTORICAL_LINE_MARKERS = {
     # Keyed on (citing file, CITED DOC, line). Keying on (file, line) alone
     # would suppress that same number cited into a different document.
-    ("docs/deferred-backlog.md", "Bootstrap-Protocol-v2-6-0.md", 283),
+    ("docs/deferred-backlog.md", "Bootstrap-Protocol-v2-8-0.md", 283),
 }
 
 

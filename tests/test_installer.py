@@ -1349,13 +1349,13 @@ check("AC-A0-1: README release line tracks PROTOCOL_VERSION",
       f"Current release: v{_PV}." in _readme)
 check("AC-A0-1: README pin target tracks PROTOCOL_VERSION",
       f"pin the annotated git tag `v{_PV}`" in _readme)
-_prd = open(os.path.join(ROOT, "Bootstrap-Protocol-v2-6-0.md")).read()
+_prd = open(os.path.join(ROOT, "Bootstrap-Protocol-v2-8-0.md")).read()
 check("AC-A0-1: PRD **Version:** header tracks PROTOCOL_VERSION",
       f"**Version:** {_PV}" in _prd)
 _comp = open(os.path.join(ROOT,
-                          "Bootstrap-Protocol-Companion-v2-6-0.md")).read()
+                          "Bootstrap-Protocol-Companion-v2-8-0.md")).read()
 check("AC-A0-1: Companion version line tracks the PRD",
-      f"matches Bootstrap-Protocol-v2-6-0.md {_PV}." in _comp)
+      f"matches Bootstrap-Protocol-v2-8-0.md {_PV}." in _comp)
 
 d = _install(FULL)
 try:

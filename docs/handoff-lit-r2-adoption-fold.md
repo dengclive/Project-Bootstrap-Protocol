@@ -28,7 +28,7 @@ dependency order the proposal states.
   upheld rejections, and an r1→r2 delta table. Nine items are additive doc/steering
   text; **LIT-07 is the one behavioral change** (priming redaction + binding-comment
   contract amendment + migration step).
-- The working PRD (filename `Bootstrap-Protocol-v2-6-0.md`, header **Version 2.7.4**
+- The working PRD (filename `Bootstrap-Protocol-v2-8-0.md`, header **Version 2.7.4**
   as of 2026-08-11). The proposal names its targets against 2.7.4.
 
 ## Step 0 — Detect, don't assume (before any edit)
