@@ -5,7 +5,9 @@ WHY THIS EXISTS. Line citations into a LIVING document rot silently, and this
 repo cites the PRD by line from prose, from tests, and from one EMITTED hook
 body. Traced for a single target (`exit 2 blocks, but exit 1 is …`):
 
-    v2.6.0 :654   v2.6.1 :670   v2.7.0 :713   v2.7.4 :739   now :759
+    v2.6.0 :654   v2.6.1 :670   v2.7.0 :713   v2.7.4 :739   :759 at this
+    file's creation (2026-08-08)   :799 at 2.8.0 — a bare number, so the
+    section-4 scan cannot police this trace; it is narrative, not a pin
 
 Every one of those citations was CORRECT when written. They are **unversioned,
 not wrong** — which is why no review caught them: each was verified once, and

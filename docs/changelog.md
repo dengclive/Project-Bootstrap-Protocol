@@ -1,6 +1,159 @@
 # Changelog — Bootstrap Protocol implementation
 
-## Unreleased — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
+## 2.7.4 → 2.8.0 — the LIT literature fold: nine additive items, one priming change (2026-08-14)
+
+**MINOR — it qualifies on both counts, the v2.7.0 shape.** Adopts all ten items
+of the LIT r2 proposal
+(`docs/Bootstrap-Protocol-Improvement-Proposal-LIT-2026-08-r2.md`, the
+2026-08-11 adversarial-review resolutions PAR-01..12 already folded; all six
+rejections upheld and recorded there). Applied changelog-first per the
+v2.3.0 / v2.4.0 doc-fold discipline; every PRD edit is tagged inline
+`[LIT-nn]`. Owner decisions at adoption: Tier 3 (LIT-06/LIT-02) adopted rather
+than deferred to the Proposed-revisions appendix; LIT-07 included rather than
+deferred one cycle; one MINOR fold.
+
+**Count 1 — new operator-facing normative surface (the v2.3.0/v2.4.0 additive
+precedent).** Nine additive items:
+
+- **[LIT-01]** No-lossy-rewrite preservation invariant — any rewrite of a
+  memory artifact preserves every fact, flag, and citation (prose may drop);
+  lands in the Phase 7 progress/learnings discipline, the emitted `/checkpoint`
+  body, and the emitted progress-template. One new Assumption-Ledger row.
+- **[LIT-04]** Lexical-first retrieval guardrail — exact/governance recall
+  uses lexical or pointer retrieval, never single-vector semantic search
+  alone; multi-vector/hybrid preferred if a vector layer is ever chosen
+  (PAR-09 upgrade adopted). Phase 6.5 plus the emitted `steering/tools.md`.
+- **[LIT-05]** Tool-harness store-shaping annotation — changing search/edit
+  tooling is a store-affecting decision, recorded like a model change; see-also
+  at [W-1] (deliberately demoted to see-also: gate fail-open, not store shape).
+- **[LIT-10]** Small-model single-step invariant — Haiku-tier components get
+  single-step, schema-constrained jobs only; elevates existing behavior
+  (structured `{verdict, reason}`, iteration-summary enforcement,
+  retry-once-then-halt) to a stated invariant. Labeled as this proposal's
+  synthesis (PAR-07), not P3's statement.
+- **[LIT-03]** Verbatim-vs-distilled retention routing — verbatim artifacts
+  (trajectories, raw checkpoints) serve strong consumers; distilled artifacts
+  (`decisions.md`, `learnings/`, synopses) serve weak/cheap consumers; never
+  feed raw trajectories to the judge tier. PRD-only.
+- **[LIT-08]** Four-metric calibration-ledger fields — outcome, tokens,
+  iterations-vs-cap, format-validity per entry, with PAR-12 field-existence
+  precision (tokens and format-validity are goal-mode-recordable; loop-mode
+  rows say trajectory-derived or N/A) and the PAR-05 TEL-01 positioning (one
+  evidence channel: telemetry-on operators query instead of transcribe). Also
+  extends the retrofit mode-selection seed table (additive columns only —
+  no emitted tool parses that seed table — `bin/trust-ramp` reads only its
+  own `.claude/trust-ramp.md` ledger, whose absorb path preserves unknown
+  `**Field:**` lines; one named residual: the new `**Outcome:**` field's
+  vocabulary is broader than trust-ramp's own outcome enum, relevant only if
+  a ledger later absorbs mode-selection blocks, not a current conflict).
+- **[LIT-09]** Complexity-downgrade rule for the calibration review — each
+  scaffold layer must pay for itself in the ledger, judged via the
+  *Felt right? = "yes but the judge was noisy"* answer, recommendations only.
+  **Surface correction against the proposal's "Affects" line:** no
+  calibration-review skill exists as an emitted artifact (the PRD frames it as
+  operator-added), so the rule lands in the Calibration-mechanism prose and
+  the Companion — no template edit, no digest movement.
+- **[LIT-06]** Golden-task regression harness — 2–3 known-good, loop-eligible,
+  trivially revertible tasks seeded from the Phase 9 smokes, re-run through
+  each *enabled* autonomous mode on any Assumption-Ledger trigger, own
+  iteration cap 2–3, stated worst-case cost (PAR-06). Converts the ledger's
+  fail-loud notice into a measurement without overclaiming current automation.
+- **[LIT-02]** Reversible, eval-gated memory consolidation — operator-run,
+  targets `.claude/learnings/` only (`specs/INDEX.md` is the task board and is
+  never reorganized, PAR-04); git commit/tag is the snapshot so nothing parks
+  where the 7-day purge or the GR2-02 pruning obligation reaches; parallel
+  copy, LIT-01 diff, LIT-06 golden run on both stores, ties promote (stated),
+  every promotion reversible.
+
+**Count 2 — one behavioral priming change [LIT-07] (the v2.7.0
+behavior-change-is-still-MINOR precedent).** `loop_max_iterations` is redacted
+from the primed task-definition slice — Phase 9.5 step 3 always, Phase 9.6
+only for eligible-for-both tasks (PAR-11) — and the **adopted-B-1 binding
+comment contract gains a fifth enumerated item** (four → five): the
+operator-completed loop filters the field from the primed copy and primes the
+sentence *"Don't ration or count iterations; the harness manages all budgets
+and will end the loop when appropriate."* (PAR-03 rewording; the r1 sentence
+was not literally true and is not restored). The field **stays in the
+task-definition schema and the committed task file** — a priming-slice change,
+not a schema change; enforcement stays wrapper-only. Deliberate-absence
+comment blocks (W-1 pattern) land in the emitted `loop-config.md` /
+`goal-config.md` and a new BINDING comment block in the per-task wrapper
+skeleton (the skeleton previously carried no priming-assembly comment at
+all — the PRD phase text was the only home). Honest scope (PAR-01b): this
+reduces prompt *salience*; the cap remains workspace-readable in the committed
+task file and configs. One new Assumption-Ledger row; a model generation that
+plans *better* with a known budget flips this default.
+
+**Migration [LIT-07].** Operators edit their completed `loop.sh` /
+`goal-loop.sh` priming assembly to apply the filter and add the priming
+sentence. **Unedited legacy installs keep the old priming behavior** — the cap
+remains primed and nothing else changes. Re-running the installer will not
+perform this edit: operator-completed wrappers are hand-edited files, and the
+hand-edit digest guard skips them by design. The Companion carries the same
+note under Migration notes.
+
+**Seam impact: none.** `SEAM-CONTRACT-v2-0-0.md` §8.4: no tier membership
+change, no provenance-marker or synthesize-file-contract change, no shared
+sentinel change, no CLI entry point or contract-level flag, no §4.1/§5 table
+change, no `binds` change. **The fold's own diff — measured against pre-fold
+`main`, the tree it landed on — touches no gate internals:** it moves comment
+blocks, steering prose, ledger rows, and the version stamp only, so the
+release criterion inherited from 2.7.0 holds for the fold with the
+**"previously denied, now allowed" set empty by construction** (verified by
+rendering both trees' emissions and diffing per path). The full release delta
+against the **v2.7.4 tag** additionally contains the gate-corrective work
+named under Release identity below; that work ships here as it landed, its
+verdict movement recorded at its own landing (closed bypasses and added
+refusal paths per its freeze-exception records), not re-measured by this
+entry. `seam_version` stays 2.0.0.
+
+**Open proposals untouched.** B-2..B-7 and GR2-03b/04/05/06/07 remain open
+exactly as recorded. **[LIT-07] amends adopted-B-1 text** (the Phase 9.5
+deliverable contract's binding comment enumeration, four → five items) — B-1
+was ADOPTED at 2.2.0; no open proposal's text moves.
+
+**Release identity — everything merged since the v2.7.4 tag ships here, not
+only the fold.** (a) The five formerly-`Unreleased` entries below
+(2026-08-08/09, retitled *Post-2.7.4, shipped in 2.8.0*): item 1 and its
+follow-ups (double-quoted command-substitution class, invoker-wrapped
+substitution, D20 driver, comment-aware walk) and the G-6 close with the two
+emission paths pinned. (b) The gate-corrective work of 2026-08-10..13 that
+landed with freeze-exception records (nos. 51–61, in the golden digest
+comment stacks of `tests/test_greenfield_golden.py` / `tests/test_retrofit.py`)
+but **no changelog entries of its own — a recording debt this entry settles
+by naming it**: the B3 flat-budget re-land (PR #64), B4 (front-window
+substitution scan), X-36y, X-45, X-46 (control-whitespace budget lift),
+X-47, X-50 (norm_cmd two-level accumulation, prefix-sampling fix), and the
+X-51 cost guard (a `PreToolUse` hook cancelled at its timeout FAILS OPEN, so
+commands too expensive to gate are now refused up front — the declared
+timeout is the attacker's budget, not a safety net). (c) The X-52 cost-term
+line (PR #66, merged mid-fold; freeze exceptions 62–67): three quadratic
+loops removed from the substitution walk, the `_lastw` memo bypass closed
+(the differential grew 4092 → 4104 rows to carry it), the fail-open-claim
+retraction swept through every emitted comment, and the backlog re-sorted by
+threat model — recorded in its freeze-exception stacks, the backlog, and
+`docs/threat-model.md`, with no changelog entries of its own either. Per all
+those records the class is closed bypasses, added refusal paths, cost-bound
+fixes, and maintainer-side tests/docs; no new configuration keys —
+PATCH-grade on their own; the MINOR tier is carried by the fold above.
+
+**Freeze exception 68.** All five aggregate golden digests
+(`test_greenfield_golden.py` default / full_autonomous / design_steering,
+`test_retrofit.py` service / agent) plus `EXPECTED_TELEMETRY_BODY` re-baseline
+once at the version bump, and again on the post-merge tree after PR #66
+landed mid-fold: content movement is the LIT comment/prose additions
+enumerated above, the renumbered PRD citation carried in the emitted
+iteration-summary-enforcement hook, and the `_generatedBy` version stamp. No
+hook logic, gate body, or dispatch line moves in the fold's own diff. **Why
+68:** the fold first took 62, then 65, and both were consumed out from under
+it by the X-52 line (62–67, dated 2026-08-12/13, merged as PR #66); 68 is
+the first number free on the merged tree.
+
+Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
+X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
+them — landing under this release identity).
+
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
 
 **No version bump** (still item 1; freeze exception **50**). Not a fail-open —
 an **unoverridable block that runs an operator-configured command first**, and
@@ -125,7 +278,7 @@ quoted-heredoc over-denial is real, but a bare verb in a quoted heredoc denies
 on merged main too, so closing the walker's half alone buys nothing — while an
 `<<EOF` (unquoted, and it really does expand) mistake would reopen a proven read.
 
-## Unreleased — item 1 follow-up B2: the D20 download-then-run driver (2026-08-09)
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B2: the D20 download-then-run driver (2026-08-09)
 
 **No version bump** (still item 1; freeze exception **50**, round-3 addition).
 `_download_then_run` was the **one** whole-command segmentation driver in
@@ -162,7 +315,7 @@ status-idiom self-match. Suite counts and the residue this does **not** close
 are recorded with the run; `_xp_chains(raw)` is still substitution-blind on both
 substrates (**X-41**).
 
-## Unreleased — item 1 follow-up: the invoker-wrapped substitution, closed on both substrates (2026-08-09)
+## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up: the invoker-wrapped substitution, closed on both substrates (2026-08-09)
 
 **No version bump** (still inside item 1's release-blocking work; freeze
 exception **50**, round-2 addition, same named set). Adversarial review of the
@@ -214,7 +367,7 @@ Perf: the hot path is unchanged (the `$(`/backtick guard short-circuits), and
 secrets-gate's cheapest 60 s payload is a **pre-existing** `_sg_scan` quote-walk
 quadratic at ~33.6 KB on both trees, which this change does not move.
 
-## Unreleased — item 1: the double-quoted command-substitution hole, Class A closed (2026-08-08)
+## Post-2.7.4, shipped in 2.8.0 — item 1: the double-quoted command-substitution hole, Class A closed (2026-08-08)
 
 **No version bump yet** (release-blocking work in progress). Freeze exception
 **50**: `_cs_subst_scan` lands in the shared `_HOOK_HEADER` and its call site in
@@ -270,7 +423,7 @@ inside the fileless D20 correlation). Pre-existing allow/allow, **ledgered
 `allow`** in the differential corpus so it is legible, needs its own review.
 **Item 1 remains release-blocking until 1b lands.**
 
-## Unreleased — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
+## Post-2.7.4, shipped in 2.8.0 — G-6 closed, and the two unpinned emission paths pinned (2026-08-08)
 
 **No version bump.** No configuration key exists that did not, and the one
 emitted body that moves does so by one comment line. Recorded here *before*

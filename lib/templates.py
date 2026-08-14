@@ -15,7 +15,7 @@ import cmdpos                                    # round-4: THE command-position
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 
-PROTOCOL_VERSION = "2.7.4"
+PROTOCOL_VERSION = "2.8.0"
 
 
 # --------------------------------------------------------------------------- #
@@ -343,6 +343,19 @@ gaps, not drift gaps. Every server costs context budget.
 ## Considered & rejected
 
 {rej}
+
+## Retrieval routing (guardrail) [LIT-04/LIT-05]
+
+Exact recall - which files reference a spec, which decisions touched X,
+secret-path matching - uses lexical or pointer retrieval (grep/ripgrep,
+`.claude/specs/INDEX.md`), never single-vector semantic search alone. A
+semantic index (e.g. Claude Context) is for fuzzy code discovery, paired with
+a lexical fallback; a vector-backed memory MCP, if ever installed, is a fuzzy
+supplement - never the system of record for governance facts. If a vector
+layer is ever chosen, prefer late-interaction/multi-vector or hybrid backends
+over single-vector. The tool harness shapes the memory store as strongly as
+the model does: changing search or edit tooling is a store-affecting
+decision - record it the way a model change is recorded.
 
 ## Don't add (guardrail)
 
@@ -3046,6 +3059,8 @@ compensates for**, the **model generation it was calibrated against**, and a
 | Interactive tier-3 hard reset (no acknowledge) | Operator self-override at saturated context being the failure mode | Current runtime-floor model tier | Any pinned-model tier change, or a shift in the substrate's native compaction behavior |
 | Subagent token multipliers (~2–3x mixed-model) | Per-session context cost under the current price/tokenizer structure | Pre-remap estimate; re-derive on Sonnet 5 | Any price/tokenizer or model-tier change |
 | Max-iterations default (10 per task) | Bounded blast radius when a task cannot converge | Current runtime-floor model tier | Any pinned-model tier change |
+| No-lossy-rewrite preservation invariant [LIT-01] | Current-generation condensation tendency in rewrite/summarization passes (silent fact loss) | Current pinned-model generation | Any pinned-model change |
+| Priming-slice cap redaction [LIT-07] | Current-generation budget-anxiety behavior when an iteration cap is prompt-visible | Current pinned-model tier | Any pinned-model change — a generation that plans *better* with a known budget flips this default |
 
 ## How this ledger is used
 
@@ -3055,9 +3070,11 @@ floor moves, the wizard reads this ledger and surfaces every row whose
 re-validation trigger matches as a plain notice — never blocking the change,
 never silently proceeding. Until that surfacing lands in your installed
 tooling (deferred with locked constraints; see the project changelog), treat
-any such change as your cue to re-check the matching rows by hand. The point
-is only to make the calibration debt visible at the moment it becomes payable;
-you decide whether to re-tune.
+any such change as your cue to re-check the matching rows by hand. Where a
+committed golden set exists (Phase 9 step 9, LIT-06), re-running it through
+each enabled autonomous mode turns that re-check from a notice into a
+measurement. The point is only to make the calibration debt visible at the
+moment it becomes payable; you decide whether to re-tune.
 
 **Where the re-validation evidence comes from.** A surfaced row asks a question
 you then answer with data. If you opted into telemetry export (TEL-01),
@@ -3078,6 +3095,10 @@ rather than becoming a second authority:
   numbers above reflect this project's actual configured values.
 - **Max-iterations and the subagent token-multiplier note** — Phase 9.5 of
   `Bootstrap-Protocol-v2-4-0.md`; {max_iter_where}
+- **No-lossy-rewrite preservation invariant (LIT-01)** — Phase 7 step 5 of
+  the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
+- **Priming-slice cap redaction (LIT-07)** — Phase 9.5 "Max-iterations
+  safety" of the working PRD (`Bootstrap-Protocol-v2-6-0.md`, 2.8.0).
 
 Add a row whenever a new default is introduced because a current model needs
 it — that is what keeps the staleness class from going invisible again.
@@ -6414,7 +6435,7 @@ latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   # EXIT 2, NOT 1. This gate used to exit 1 for the one violation it exists
   # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-6-0.md
-  # :775-776) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
+  # :799-800) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
   # means "do not stop" - so the iteration ended exactly as if the summary had
   # been written, and the stderr line below claimed to be "feeding error to
   # next iteration" when exit 1's stderr reaches nobody. The hook was already
@@ -6691,7 +6712,13 @@ _SKILL_BODIES = {
         "Synopsis sections: current task and spec ID, completed work\n"
         "this session, in-flight (uncommitted) changes, files touched,\n"
         "key decisions made, open questions, state of tests, next\n"
-        "steps. Update `.claude/specs/INDEX.md` to flag the checkpoint."),
+        "steps. Update `.claude/specs/INDEX.md` to flag the checkpoint.\n\n"
+        "Preservation invariant (LIT-01): any rewrite or summarization\n"
+        "of an existing memory artifact must preserve every load-bearing\n"
+        "fact - decisions, failed approaches with their do-not-retry\n"
+        "flags, source locators and citations - or link to it.\n"
+        "Condensation may drop prose; it may never drop a fact, a flag,\n"
+        "or a citation."),
     "resume": (
         "Load the most recent checkpoint (or a chosen one) from\n"
         "`.claude/sessions/`.\n\n"
@@ -7300,6 +7327,25 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 # a plain CLI env var available on ANY conformant install, NOT gated on
 # gate_substrate.
 #
+# [Priming-slice filter - LIT-07, Bootstrap-Protocol-v2-6-0.md Phase 9.5
+#  "Deliverable contract for the wrappers" item 5 - the single normative home
+#  of this contract, which Phase 9.6 references rather than restates. BINDING
+#  on the operator-completed iteration loop; the bare skeleton dispatches
+#  nothing.]
+#  When assembling the primed context (the enumeration lives in the Phase
+#  {phase} text), the completed loop MUST filter the loop_max_iterations
+#  field from the primed COPY of the task definition (a no-op where the
+#  field is absent - goal-supervised-only tasks carry no cap field), and
+#  MUST include this sentence in the primed context:
+#     Don't ration or count iterations; the harness manages all budgets
+#     and will end the loop when appropriate.
+#  The field STAYS in the committed task file and the task-definition
+#  schema; cap enforcement stays here in the wrapper, unchanged. The filter
+#  redacts prompt salience only - the cap remains workspace-readable in the
+#  committed task file and config files. DELIBERATE ABSENCE (W-1 pattern):
+#  do not "fix" the unfiltered task definition back into priming; the
+#  rationale block lives in loop-config.md / goal-config.md.
+#
 # [loop-final-$TASK_ID.md structure - GR2-02, Bootstrap-Protocol-v2-4-0.md
 #  Phase {phase}] The operator-completed loop writes the audit record to
 #     .claude/sessions/loop-final-$TASK_ID.md
@@ -7615,6 +7661,15 @@ usage_limit_wait_jitter_seconds: 60  # uniform 0..N seconds ADDED to resets_at (
 # Completion-criteria checks the wrapper trusts the agent's self-attestation
 # on in loop mode (goal-supervised mode re-checks them independently):
 require_completion_sentinel: true
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# Phase 9.5 "Max-iterations safety"): the per-task loop_max_iterations cap
+# is filtered OUT of the primed task-definition slice by the
+# operator-completed loop. Enforcement is the harness's job; a
+# prompt-visible budget invites rationing against it. The cap stays
+# truthful here and in the committed task file. Do not "fix" the
+# unfiltered task definition back into priming - the absence is
+# deliberate, recorded in the Assumption Ledger, and re-validated on any
+# pinned-model change.
 """
 
 
@@ -7650,6 +7705,15 @@ investigate_disagreement: false
 # completion-criteria checklist, and audio-cue overrides. The protocol
 # document names no config keys for these; they remain wrapper-implemented
 # defaults pending normative key names (see docs/changelog.md).
+# DELIBERATE ABSENCE (LIT-07, W-1 pattern; Bootstrap-Protocol-v2-6-0.md
+# Phase 9.5 "Max-iterations safety"): loop_max_iterations is filtered OUT
+# of the primed task-definition slice by the operator-completed loop (it
+# exists only on eligible-for-both tasks; a no-op otherwise), and this
+# file's own max_iterations is never primed. Enforcement is the harness's
+# job; a prompt-visible budget invites rationing against it. Do not "fix"
+# the unfiltered task definition back into priming - the absence is
+# deliberate, recorded in the Assumption Ledger, and re-validated on any
+# pinned-model change.
 """
 
 
@@ -7755,7 +7819,7 @@ failure). Instantiate exactly this shape:
 
 ## Status
 
-<one line: e.g. "In flight — iteration 3 of 10; deterministic gate passing, judge advisory pending.">
+<one line: e.g. "In flight — iteration 3; deterministic gate passing, judge advisory pending." Do NOT restate the iteration cap here — this file is primed first every iteration and the cap is deliberately absent from the primed slice (LIT-07).>
 
 ## Completed
 
@@ -7785,6 +7849,12 @@ Lint rule (GR2-01, compose-do-not-fork): a `progress.md` must LINK to
 `decisions.md`, `learnings/`, and the latest checkpoint — never inline their
 content. Keep every section terse; the audit detail lives in the linked
 artifacts, not here.
+
+Preservation invariant (LIT-01): any rewrite or summarization of an existing
+memory artifact (this file, `decisions.md`, `learnings/`, checkpoints) must
+preserve every load-bearing fact — decisions, failed approaches with their
+do-not-retry flags, source locators and citations — or link to it.
+Condensation may drop prose; it may never drop a fact, a flag, or a citation.
 """
 
 
@@ -9136,7 +9206,11 @@ Goal-supervised mode's `spec-decompose` recommendation rule learns from
 this file. Each entry: task id, mode chosen (operator-in-loop / loop /
 goal-supervised), drift-prone area touched (from
 `inventory/danger-zones.md` or `inventory/tribal-knowledge.md`),
-outcome, iteration count.
+outcome, iteration count, tokens, and format-validity (LIT-08).
+Tokens: goal mode transcribes loop-final's value; loop mode derives
+from the retained trajectory JSONL or records "unavailable".
+Format-validity: goal mode only (`summary_failure_count` exists only
+there); loop-mode rows record N/A.
 
 **Brownfield seed note (RETROFIT R8.H):** the drift-prone-area column
 SHOULD be populated from `inventory/danger-zones.md` and
@@ -9147,8 +9221,8 @@ the input the calibration rule needs.
 The R8.H brownfield milestone gate requires `>= 10` real brownfield
 entries here before `goal_supervised_mode_enabled: true` may be set.
 
-| task | mode | drift-prone area | outcome | iterations |
-|---|---|---|---|---|
+| task | mode | drift-prone area | outcome | iterations | tokens | format-validity |
+|---|---|---|---|---|---|---|
 """
 
 

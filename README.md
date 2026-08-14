@@ -1,7 +1,7 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-> **Current release: v2.7.4.** `PROTOCOL_VERSION = 2.7.4`. **External consumers
-> pin the annotated git tag `v2.7.4`** — pinning a moving `main` is pinning a
+> **Current release: v2.8.0.** `PROTOCOL_VERSION = 2.8.0`. **External consumers
+> pin the annotated git tag `v2.8.0`** — pinning a moving `main` is pinning a
 > branch, not a release. This line was stale at `v2.6.0` through three releases
 > (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
 >
@@ -11,7 +11,10 @@
 > (`commands.execute_in_cwd`, `workflow.implementer_isolation`), which is why it
 > is the MINOR in the run and why the PRD carries a v2.7.0 block. No other
 > release in that range adds operator-facing surface a PRD would describe.**
-> **Why the filename says `v2-6-0` when the version says 2.7.4:** the filename
+> 2.8.0 is the LIT literature fold — nine additive doc/steering items plus one
+> priming-contract change ([LIT-07]) — amended into the same pair in place,
+> with a v2.8.0 block at the PRD head and a migration note in the Companion.
+> **Why the filename says `v2-6-0` when the version says 2.8.0:** the filename
 > records **when the pair was cut**, not what it describes. Through 2.6.0 a new
 > pair was cut at each MAJOR/MINOR; **since 2.7.0 releases amend the pair in
 > place**, and a new one is cut only by an explicit re-issue decision recorded
@@ -32,7 +35,9 @@
 > clusters **J**, **K** and **L** are the v2.6.0 upstream-fix and review residue;
 > cluster I is the v2.5.0 release-review set.
 >
-> **2.6.0 was corrective, not additive — and every release since has been too.**
+> **2.6.0 was corrective, not additive — and every release through 2.7.4 was too**
+> (2.7.0's two configuration keys excepted); **2.8.0 is the first additive
+> release since** (the LIT fold above).
 > Every 2.x release before it was an opt-in flag defaulting to `false`, so an
 > operator who left it alone saw nothing change. This one has no such flag:
 > gates that were silently inert begin to block, `dependency-gate` starts catching

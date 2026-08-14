@@ -3082,7 +3082,19 @@ EXPECTED_DIGESTS = {
         # 23.00 s on the `!` shape; every other record of that measurement,
         # including no. 66's own text, says 22.93 s. Aligned to 22.93. Same
         # 11 hook bodies move; gates.py is unchanged by this amendment.
-        "b279b8e2ea331122f9a55613841c4ddd571091d4e3eff1f90281ea06bb8ef8dd",
+        # [freeze-exception no. 68, 2026-08-14] v2.8.0 LIT literature
+        # fold + release stamp, re-baselined on the merged tree (fold +
+        # the X-52 line above; 62-67 were consumed by that line, which
+        # merged to main mid-fold — hence 68). Moved bodies:
+        # steering/tools.md (the LIT-04/05 retrieval-routing section),
+        # the checkpoint skill body (LIT-01 invariant),
+        # specs/progress-template.md (LIT-01, cap-free Status exemplar),
+        # steering/assumption-ledger.md (LIT-01 + LIT-07 rows +
+        # source-of-truth bullets), and settings.json (_generatedBy
+        # protocol 2.8.0). No hook or gate body moves in this fixture;
+        # no logic changes anywhere. Count still 57. Recorded in
+        # docs/changelog.md 2.7.4 -> 2.8.0.
+        "36802b31c46ed3e97e57795060931c31e765a61298c6d1b562fd9e226b2517f3",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3312,7 +3324,14 @@ EXPECTED_DIGESTS = {
         # 128 KB still reached rc=2 at 59.97 s and was killed first.
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # Same shared-header change; every plan-action body embeds it.
-        "cda4ae569407a962239b61c06e34d52a437396bbad6c02204a862dd00fa75007",
+        # [freeze-exception no. 68, 2026-08-14] v2.8.0 LIT literature
+        # fold + release stamp (see the `default` note). This fixture
+        # additionally moves: loop.sh / goal-loop.sh (the LIT-07
+        # priming-slice-filter BINDING comment block), loop-config.md /
+        # goal-config.md (LIT-07 deliberate-absence trailers), and
+        # iteration-summary-enforcement.sh by a comment-only citation
+        # renumber. No logic changes; count still 69.
+        "540e6e9c7a3217b64f1f889e73eb5624e619cab22cf9aa0e2badfd00f2fba03a",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3490,7 +3509,12 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 52, 2026-08-12] X-52 (see the `default` note).
         # The three frozen design artifacts are again unchanged, verified
         # per-file, and the count is still 59.
-        "23c6e251248e8748e95393ac30de5bccef7b2aba75a97fd32484c9ee82f7ea57",
+        # [freeze-exception no. 68, 2026-08-14] v2.8.0 LIT literature
+        # fold + release stamp — same moved set as the `default` note
+        # (tools.md, checkpoint skill, progress-template,
+        # assumption-ledger, settings.json). The three design-steering
+        # artifacts are untouched. No logic changes; count still 59.
+        "544a8f8c5dc72b73842da245a74d0f2cc911fe2143f5214e21ec378c455afa9a",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -3591,8 +3615,10 @@ check("telemetry.md IS emitted with the flag on", _tel_on is not None)
 if _tel_on is not None:
     # Version-stamp-bearing. If this moves for any reason OTHER than a release
     # bump, the change is unintended -- that is the whole point of pinning it.
+    # [freeze-exception no. 68, 2026-08-14] version stamp only: the body
+    # interpolates PROTOCOL_VERSION (2.8.0); no other telemetry.md change.
     EXPECTED_TELEMETRY_BODY = (
-        "fb6f51965f05d837568d8ded6dfad484083fdb1b9d43c3e8718e2a9bc0a57ed8")
+        "9f599f14a391693fa831a21a6c08cc86b5ba5504ec458d6e84da264bbf0a7c3d")
     actual = hashlib.sha256(_tel_on.encode()).hexdigest()
     if os.environ.get("GOLDEN_UPDATE"):
         print(f'  EXPECTED_TELEMETRY_BODY = "{actual}"')
