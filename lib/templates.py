@@ -6071,7 +6071,7 @@ latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   # EXIT 2, NOT 1. This gate used to exit 1 for the one violation it exists
   # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-6-0.md
-  # :775-776) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
+  # :799-800) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
   # means "do not stop" - so the iteration ended exactly as if the summary had
   # been written, and the stderr line below claimed to be "feeding error to
   # next iteration" when exit 1's stderr reaches nobody. The hook was already

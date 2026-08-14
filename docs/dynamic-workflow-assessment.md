@@ -75,7 +75,7 @@ admits is a different object than fan-out.** CITED.
 The PRD admits concurrency at **task** granularity, with a budget, an accounting
 structure, and a derived cap:
 
-- `Bootstrap-Protocol-v2-6-0.md:401` — *"**Concurrency rule across autonomous
+- `Bootstrap-Protocol-v2-6-0.md:423` — *"**Concurrency rule across autonomous
   modes.** … concurrency budgets apply to the **combined** sum across modes …
   **Recommended starting concurrency: 2 across all autonomous modes combined for
   the first week of use**, expanding based on review throughput."*
@@ -265,7 +265,7 @@ emit, and that is controllable.
 **UNSPECIFIED. This is a spec gap to name, not a default to invent.** CITED.
 
 The ramp is explicitly **not protocol surface**.
-`Bootstrap-Protocol-v2-6-0.md:187-190`: *"**Not protocol surface, deliberately
+`Bootstrap-Protocol-v2-6-0.md:209-212`: *"**Not protocol surface, deliberately
 excluded:** this repository's own `.claude/trust-ramp.md` governs how much
 autonomy the agent is granted *on the protocol repo itself*. It emits nothing,
 no installer plan references it, and it is not part of any conformance
