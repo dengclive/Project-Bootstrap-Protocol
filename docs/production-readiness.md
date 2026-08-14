@@ -6,9 +6,13 @@ written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` �
 below is measured.
 
 **SUBJECT NOTE, 2026-08-14 — `main` has moved; nothing below is re-measured.**
-`main` is now **`0d4d5af` = annotated tag `v2.8.0`** (PR #66 `3af0c11` — docs
-only: this document's RE-BASE block, the security KB, the threat-model draft;
-then PR #67, the v2.8.0 LIT literature fold). Re-derived on `0d4d5af` today:
+`main` is now **`0d4d5af` = annotated tag `v2.8.0`** (PR #66 `3af0c11` — the
+X-52 docs line, and NOT docs-only: per its merge diff, this document's RE-BASE
+block, the security KB, the threat-model draft and the backlog threat-model
+re-sort, PLUS the fail-open retraction's sweep through four `lib/` files —
+including the installer's runtime warning string, an executable f-string —
+with golden digests re-baselined under freeze exception no. 67; then PR #67,
+the v2.8.0 LIT literature fold). Re-derived on `0d4d5af` today:
 **C-1** — `git ls-files | grep -icE 'licen[cs]e'` → **0**, so **v2.8.0 is a
 second tagged release with no LICENSE** and the verdict cannot have moved; for
 the first time since v2.7.4, "not production ready" attaches to an *adoptable*
