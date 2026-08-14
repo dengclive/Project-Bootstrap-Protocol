@@ -308,8 +308,12 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # description here is what a previous round caught.
 # 26th entry 2026-08-14: v280-lit-fold-release, harmful (the merged 2.8.0
 # changelog misattributed the X-52 line to PR #66; corrected in fc37aaa).
+# 27th entry 2026-08-14: pr68-record-review-and-merge, harmful (the PR #68
+# body certified the diffs "derived, not asserted" BEFORE the review ran;
+# the review then found two underived provenance claims in them — the
+# defects themselves were fixed pre-merge and never reached main).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 26, f"{len(es)} entries")
+      len(es) == 27, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
