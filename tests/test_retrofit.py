@@ -909,10 +909,10 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.7.4' literally "
-          "(v2.7.4 release bump; retrofit state also stamps the "
+    check("8.3: bootstrap_protocol_version matches '2.8.0' literally "
+          "(v2.8.0 release bump; retrofit state also stamps the "
           "greenfield PROTOCOL_VERSION per the shared writer)",
-          state["bootstrap_protocol_version"] == "2.7.4")
+          state["bootstrap_protocol_version"] == "2.8.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "
@@ -2048,9 +2048,20 @@ def retrofit_digest_full(yaml_text):
 # refusal path, not an action. A PreToolUse hook that exceeds its timeout is
 # CANCELLED and the tool call PROCEEDS, so padding alone bypassed any gate
 # whose cost crossed 60 s.
+# [freeze-exception no. 62, 2026-08-14] v2.8.0 LIT literature fold + release
+# stamp. Both fixtures move: steering/tools.md (LIT-04/05 retrieval-routing
+# section), the checkpoint skill body (LIT-01 invariant),
+# specs/progress-template.md (LIT-01), steering/assumption-ledger.md (LIT-01 +
+# LIT-07 rows), settings.json (_generatedBy protocol 2.8.0). Agent fixture
+# additionally: loop.sh / goal-loop.sh (LIT-07 priming-slice-filter BINDING
+# block), loop-config.md / goal-config.md (LIT-07 deliberate-absence
+# trailers), learnings/mode-selection.md (LIT-08 tokens + format-validity
+# columns), and iteration-summary-enforcement.sh by a comment-only citation
+# renumber (:775-776 -> :799-800). No logic changes; counts unchanged
+# (service 79 / agent 93). Recorded in docs/changelog.md 2.7.4 -> 2.8.0.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "261ea1f75fc2ac64382e65f2cb7cf9fe71ea4ffdb531a19d64bca00510df5e0f",
-    "agent": "7337b8f12225cf2fa41651f6f28e66a1d77911994087fcbb2c2ce7947fe07f84",
+    "service": "ebff84c22006c4c3735d2a1de1a728a20185977ebb7758cb39293237050418f1",
+    "agent": "10db852a2f4834b1b6e3f796ca9afad860567716571ba22443fb179d9af76ac8",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

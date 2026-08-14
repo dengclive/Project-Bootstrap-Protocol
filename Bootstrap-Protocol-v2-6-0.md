@@ -1,6 +1,6 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.7.4
+**Version:** 2.8.0
 
 > **v2.8.0 — LIT literature fold, MINOR (2026-08-14).** Nine additive items and
 > one behavioral priming change, from

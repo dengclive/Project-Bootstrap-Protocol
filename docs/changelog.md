@@ -110,7 +110,7 @@ pinned. All are gate-corrective or maintainer-side (allow → deny only, no new
 configuration keys) — PATCH-grade on their own; the MINOR tier is carried by
 the fold above.
 
-**Freeze exception 51.** All five aggregate golden digests
+**Freeze exception 62.** All five aggregate golden digests
 (`test_greenfield_golden.py` default / full_autonomous / design_steering,
 `test_retrofit.py` service / agent) plus `EXPECTED_TELEMETRY_BODY` re-baseline
 once at the version bump: content movement is the LIT comment/prose additions
