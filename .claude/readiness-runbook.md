@@ -83,7 +83,7 @@ slowly. Scale it:
 | `CODE` | gate logic, `lib/`, emitted bodies | **full**: 4 lenses + refuters, ultracode | yes | yes |
 | `EMITTED` | comment/text inside emitted templates | **full** (freeze exception is why) | yes | yes |
 | `MEASUREMENT` | harnesses, numbers entering the record | 2 lenses (counts + overclaim) | yes | yes |
-| `DOC` | repo docs, no emission | **1 lens**, or none if the step-4 check is mechanical and green | fold into next entry | only if session ends |
+| `DOC` | repo docs, no emission | **step 3 plan review: 2 lenses (mandatory, it discharges approval). Step 7 post-PR: 1 lens**, or none if the step-4 check is mechanical and green | fold into next entry | only if session ends |
 | `TEST-CONTRACT` | a suite's own contract | 2 lenses | yes | yes |
 | `DECISION` / `EXTERNAL` | — | — | — | **E3 on sight** |
 
@@ -127,8 +127,15 @@ that is the display, this is the gate.
 from the queue's prose; declare **scope globs**; declare class; list the owner
 decisions it needs (non-empty → **E3**); state what would falsify the plan.
 
-**3 — plan review**: `CODE`/`EMITTED` only. Does the defect exist as quoted; is
-the scope complete; is the class right. Skip for `DOC`.
+**3 — plan review: EVERY CLASS, NO EXCEPTIONS.** Does the defect exist as
+quoted; is the scope complete; is the class right; what will bite later.
+Read-only lenses, sized per §2 (a `DOC` item gets 2; `CODE`/`EMITTED` get more).
+
+**It used to say "`CODE`/`EMITTED` only, skip for `DOC`". That is withdrawn**,
+because step 3 now carries the approval function (§5): if review is what
+substitutes for operator sign-off, then a class that skips review would proceed
+with neither, which is strictly less scrutiny than before the rule changed. The
+first item to hit this was `c1-license` — A-tier and `DOC`.
 
 **4 — the failing check first.** "TDD" here means *a mechanical check that
 fails now and passes after*:
@@ -262,7 +269,14 @@ between items." That was wrong, and the ledger says so in its own table:**
 So R0 grants **three** operator gates, not one, and the third is invariant at
 *every* rung including R3 — no amount of ramp progress removes it:
 
-1. **Plan approved before work starts** — after step 3, before step 4.
+1. **Plan approved before work starts** — **OPERATOR RULING 2026-08-14: an
+   APPLIED PLAN REVIEW (step 3) satisfies this; a separate sign-off is not
+   required.** The gate is not waived, it is *discharged by review* — so step 3
+   is now mandatory for every class (see above), and "no review was run" means
+   the plan is NOT approved and step 4 must not begin.
+   Questions the review cannot answer — facts only the operator holds, such as
+   the legal copyright holder — remain **E3** and are still asked; a review
+   cannot derive them from the tree.
 2. **Diff reviewed before every commit** — before step 5 commits.
 3. **Diff reviewed by a human before it merges** — step 9b. **Never automated,
    at any rung.**
