@@ -167,6 +167,18 @@ run on the tree you intend to run it on.** That measurement is owed and has not
 been taken. Until then, treat unattended operation as running with the gates
 advisory rather than enforcing.
 
+**If your wrappers were completed before v2.8.0, your priming is older than
+your docs.** v2.8.0 (LIT-07) filters `loop_max_iterations` out of the primed
+task slice and primes *"Don't ration or count iterations; the harness manages
+all budgets and will end the loop when appropriate."* instead — but that change
+lives in the operator-completed `loop.sh` / `goal-loop.sh` priming assembly,
+and re-running the installer will not apply it: hand-edited wrappers are
+skipped by the digest guard by design. An unedited wrapper keeps the old
+cap-primed behavior while every 2.8.0 document describes the new one. Salience
+only — the cap is enforced by the wrapper either way — but if you are
+reasoning about loop behavior from the 2.8.0 docs, check which priming your
+install actually runs (the Companion's Migration notes give the exact edit).
+
 ## How to use this honestly
 
 - **Do** use these gates to catch agent mistakes. That is what they are for and

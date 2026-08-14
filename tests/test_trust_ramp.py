@@ -306,8 +306,10 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # was false and the sweep behind it had left the retracted sentence live in
 # EMITTED code. Keep this comment in step with the ledger; a stale grade
 # description here is what a previous round caught.
+# 26th entry 2026-08-14: v280-lit-fold-release, harmful (the merged 2.8.0
+# changelog misattributed the X-52 line to PR #66; corrected in fc37aaa).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 25, f"{len(es)} entries")
+      len(es) == 26, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

