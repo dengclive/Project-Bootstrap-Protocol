@@ -1051,9 +1051,19 @@ _read_cmd(){
 # still going, and the same shapes DENY in 6.2 s and 5.5 s - a ~10x margin where
 # there was a bypass. See `_cs_isinv`. THIS DID NOT CLOSE THE COST CLASS: a
 # WRAPPER head keeps the walk running to the end of the tail on every quoted
-# run, and `sudo` + 2000 runs is still 150.95 s here against a main that times
-# out above 1200 s - filed as X-54, and these two caps do not catch it either
-# (80004 B, 4000 jumps, inside both). A third
+# run, and `sudo` + 2000 runs costs 156.75-157.19 s here against a main that
+# times out above 1200 s - filed as X-54, and these two caps do not catch it
+# either (80004 B, 4000 jumps, inside both).
+# [Corrected 2026-08-14 by measurement, freeze exception no. 69: this line read
+# "is still 150.95 s here". 150.95 s was the PRE-memo figure and is preserved
+# in THIS MARKER rather than deleted - what was wrong was the PRESENT TENSE,
+# which asserted a stale number as the current cost while the same emitted
+# file already carried the post-memo 159.52 s, further down this same emitted
+# preamble. Re-measured on v2.8.0
+# (f9c2bb2), dependency-gate, two reps, serial, 1-min load <= 1.50. THE CLASS
+# IS WIDER THAN THIS ONE HEAD: `env` 157.84-159.88 s and `nice` 156.28-156.92 s
+# cross the same ceiling; `nice` had never been measured anywhere. The
+# transparent heads stay flat at 12.10-12.30 s.] A third
 # CONDITION here was the other candidate and was rejected on measurement: the
 # benign `sudo rm <4000 files>` already costs 4003 walk steps against the
 # attack's 40000, a 10x separation that leaves under 2x margin - the same trade

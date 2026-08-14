@@ -158,6 +158,62 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the head-class cost measurement, and the emitted figure it corrects (2026-08-14)
+
+**The measurement that was owed since the X-52 line is run, and it is the
+PRECONDITION the autonomous-mode work was waiting on.** It was declared owed in
+`docs/deferred-backlog.md` (X-54), the security KB, `docs/production-readiness.md`
+and the work order, and claimed in none of them. Run on `f9c2bb2`; the figure
+binds the RELEASE and not merely that head, because emitted `gates.py` is
+AST-identical to the tag's (`f71ec4a81bae9f826e39d06f361dac5f`, verified by
+rendering both trees, not asserted). `dependency-gate`, 80004 B / 4000 jumps,
+two reps per head, serial at width 1, each hook in its own session with the
+whole process group killed on timeout, and no row started while the 1-minute
+load average was above 1.50 — the load is stamped per row.
+
+* **Wrapper heads, all PAST the 60 s ceiling at ~2.6x:** `sudo`
+  **156.75–157.19 s**, `env` **157.84–159.88 s**, `nice` **156.28–156.92 s**.
+* **Transparent heads, flat and 4.9x UNDER it:** `!` 12.10–12.20 s, `{`
+  12.20–12.25 s, `-x` 12.25–12.30 s, `echo` 12.10–12.20 s.
+* Reps agree to 1.01x; the two classes separate by ~13x.
+
+**`nice` widens the class and had never been measured.** Membership recorded
+anywhere was two — `sudo` in X-54's row, `env` in the trust ramp — and it is at
+least three. X-54's rule ("only a `wrap` head reaches this") is CONFIRMED; its
+example list was short, which is a different thing from wrong.
+
+**The work order's own recipe for the shape was wrong, and is corrected rather
+than quietly re-derived.** It gave `head + " " + " ".join("'r%d'" % i for i in
+range(2000))` and called it "~80 KB, 4000 jumps". That literal is **14894 B** at
+the same 4000 jumps — the jump count right, the length **5.4x short** — because
+the quoted runs must be PADDED toward `_CMD_MAXLEN` to reach the 80004 B X-54
+records. Measuring the literal would have measured a 15 KB command and returned
+a reassuring number for the row whose entire claim is that 80 KB is reachable
+under both caps.
+
+**THIS DOES NOT CLOSE X-54, AND THE ROW STAYS `open`.** Every row returned rc 0
+ALLOW only because the harness let the gate finish. Under the emitted 60 s
+timeout each wrapper row is instead a cancelled hook, exit 124, fail-open — the
+mechanism X-54 records, now reproduced on the released tag. What the pass buys
+is a SIZE, not a fix. X-55's `>240 s KILLED` is not re-run and stays owed.
+
+**Freeze exception 69.** All five aggregate golden digests
+(`test_greenfield_golden.py` default / full_autonomous / design_steering,
+`test_retrofit.py` service / agent) re-baseline for a **comment-only** change in
+the gate preamble that every one of the 13 emitted hooks embeds — which is why
+one edit moves five digests. The preamble asserted **in the present tense** that
+`sudo` + 2000 runs "is still 150.95 s here". 150.95 s was the PRE-memo figure,
+and the same emitted file already carried the post-memo 159.52 s a few hundred
+lines down: every install shipped two different current costs for one shape.
+The tense was the defect, not the number — **150.95 s is kept as history, not
+deleted**, per the standing rule that a stale wall-clock figure is marked
+superseded rather than refreshed away. No executable line, hook logic, gate body
+or dispatch line moves; action counts unchanged (57 / 69 / 59, service 79 /
+agent 93).
+
+Harness and logs live at `.claude/checkpoints/x52-harnesses/headclass_v280.py`
+and `logs-20260814/` — gitignored and durable, like the X-52 harnesses.
+
 ## Post-2.7.4, shipped in 2.8.0 — item 1 follow-up B5: the walk ran before the comment strip (2026-08-09)
 
 **No version bump** (still item 1; freeze exception **50**). Not a fail-open —
