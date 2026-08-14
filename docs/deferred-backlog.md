@@ -449,7 +449,7 @@ reached.
 |---|---|---|
 | **T0** | blocks any use, and is not security at all | ~1 h |
 | **T1** | makes shipping-with-known-risk honest rather than negligent | ~4–8 h |
-| **T2** | ACCIDENT-mode risk — a well-meaning agent reaches it unaided | ~30–60 h |
+| **T2** | ACCIDENT-mode risk — a well-meaning agent reaches it unaided | ~55–110 h + unsized rows (was ~30–60 h gates-only, before the 2026-08-13 C-2/DW/X-54/C-3 promotions; see WHAT THIS BUYS) |
 | **T3** | ADVERSARIAL-only — needs a crafted payload; **defer and DISCLOSE** | — |
 | **T4** | feature gap, not a risk — ship as unimplemented, say so | — |
 
@@ -553,10 +553,13 @@ real SDK. **Shell is the supported substrate.**
 
 **WHAT THIS BUYS:** with autonomy and dynamic workflows promoted, roughly
 **70–120 h** rather than the 35–70 h of the gates-only release — still well
-under the 150–300 h of fixing everything, because `X-55`, `C-3` and `C-7` remain
-*must disclose* rather than *must fix*. The delta is `C-2` (~20–40 h), the
-dynamic-workflow policy (~5–10 h), and `X-54` plus the head-class measurement
-that sizes it.
+under the 150–300 h of fixing everything, because `X-55`, readiness-`C-3` and
+`C-7` remain *must disclose* rather than *must fix* — readiness-`C-3` sits in
+T2 for disclosure-and-operational-mitigation priority (make `.claude/hooks/**`
+and `.claude/settings.json` agent-read-only by means outside the gates,
+threat-model §3); its in-tree self-protection fix stays unpriced here. The
+delta is `C-2` (~20–40 h), the dynamic-workflow policy (~5–10 h), and `X-54`
+plus the head-class measurement that sizes it.
 
 **ONE PREMISE THAT DOES NOT SURVIVE, recorded so it is not re-argued:** "better
 models mean smaller risk" is half true and half inverted. Better models reduce
