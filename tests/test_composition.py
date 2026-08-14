@@ -522,6 +522,40 @@ check("the SDK renders the head sets from cmdpos, not by hand",
 check("the shell header carries the shared head classifier",
       "_cs_head_kind(){" in _tmpl and _tmpl.count("_cs_head_kind(){") == 1,
       "one predicate, called by _cs_isinv AND _sg_push")
+# [X-37 / item 1b] THE SUBSTITUTION-EXECUTION RULE IS RENDERED, NOT HAND-COPIED.
+# This is the pin the trust ramp says was missing for the invoker memo, whose
+# READ "was pinned by NOTHING - deleting one line disabled it entirely with
+# test_composition 129/0 and the 4104-row differential 0 failed". A behavioural
+# suite cannot see a SECOND copy of a rule; only a source check can.
+check("both substrates render subst_to_shell_regex from cmdpos",
+      "@@SUBRUN_ERE@@" in _tmpl and "cmdpos.subst_to_shell_regex()" in _tmpl
+      and "_SUBST_TO_SHELL = re.compile(%r)" in _sdk
+      and "cmdpos.subst_to_shell_regex(" in _sdk,
+      "one source, two renderings - D3")
+check("subst_to_shell_regex is defined exactly once in lib/cmdpos.py",
+      _cmdpos.count("def subst_to_shell_regex(") == 1)
+check("cmd_position_anchor is defined exactly once in lib/cmdpos.py",
+      _cmdpos.count("def cmd_position_anchor(") == 1)
+# The shell reads the pattern out of a `$'...'` assignment rather than a plain
+# single-quoted one, because the command-position class carries a NEWLINE. A
+# plain `'...'` would ship the two characters `\` and `n` and the newline arm
+# would silently match the letter n instead - a shell-deny/SDK-allow divergence
+# on any command containing an `n` before a substitution.
+check("the shell renders _SUBRUN_RE through $'...' so the newline survives",
+      "_SUBRUN_RE=$'@@SUBRUN_ERE@@'" in _tmpl,
+      "a plain single-quoted assignment would make the newline a literal `n`")
+# `paren_open=False` narrows TWO arms and must not touch the others: the
+# default rendering has to stay byte-identical or every existing caller moves.
+check("prefix_run's default rendering is unchanged by the new parameter",
+      cmdpos.prefix_run() == cmdpos.prefix_run(paren_open=True))
+_pr_np = cmdpos.prefix_run(paren_open=False)
+check("prefix_run(paren_open=False) drops `(` from the group arm",
+      "[({] *" not in _pr_np and "[{] *" in _pr_np)
+check("prefix_run(paren_open=False) keeps the assignment arm out of `(`",
+      "[^ (]*" in _pr_np,
+      "so `arr=($(dl))` is an array initializer, not a command position")
+check("prefix_run(paren_open=False) keeps every other arm",
+      all(a in _pr_np for a in ("[0-9]*[<>]+ *", "[A-Za-z_][A-Za-z0-9_]*[+]?=")))
 # The trailing `space` in prefix_run's keyword arm is what stops `do` matching
 # inside `done ` and `if` inside `ifconfig `. Pinned at the REGEX, because the
 # behavioural twin is three gates away.

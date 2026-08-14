@@ -2897,6 +2897,11 @@ _SHELL_SUBST = {
     "@@PFX_CASE@@": cmdpos.bash_case_alt(cmdpos.ALL_PREFIXES, "      "),
     "@@ANCHOR_ERE@@": cmdpos.anchor_regex(),
     "@@PIPE_ERE@@": cmdpos.pipe_to_shell_regex(),
+    # [X-37 / item 1b] The substitution twin of the pipe trigger. Rendered
+    # into a `$'...'` assignment, not a plain single-quoted one, because the
+    # command-position class carries a NEWLINE - see cmdpos.CMD_OP_CHARS for
+    # why a blank cannot stand in for it.
+    "@@SUBRUN_ERE@@": cmdpos.subst_to_shell_regex(),
     # [issue #36] The WHOLE install anchor after the prefix run - tools,
     # verbs, runner channels and the `python -m` transparent prefix - so
     # the dependency gate's HEAD and the SDK's _INSTALL_HEAD are one
@@ -4489,6 +4494,15 @@ pkg_name(){{
 # shells, and could not read across a second pipe. See cmdpos.py for the nine
 # executed evasions.
 _PIPE_RE='@@PIPE_ERE@@'
+# [X-37 / item 1b] The SUBSTITUTION twin of the trigger above: a downloader
+# inside a `$(...)`/backtick/`<(...)` whose value lands at an EXECUTION
+# position. `bash -c "$(curl url)"` is `curl url | bash` with the pipe spelled
+# as a substitution, and until this landed it was allow/allow on both
+# substrates while really fetching and running a remote payload. `$'...'`
+# rather than `'...'` because the command-position class carries a newline.
+# See lib/cmdpos.py for the four positions, the false-positive fence, and the
+# ONE over-refusal this accepts deliberately.
+_SUBRUN_RE=$'@@SUBRUN_ERE@@'
 _XP_WRITES=""
 _XP_NP=""
 # [batch 30-33, issue #32] THE REGEX IS THE VERDICT. It used to be a broad
@@ -5138,7 +5152,9 @@ _RQCMD="${{_RCMD//"$_XP_SQC"/}}"
 _RQCMD="${{_RQCMD//"$_XP_DQC"/}}"
 _RQCMD="${{_RQCMD//"$_XP_BSC"/}}"
 _PK_HIT=0
+_PK_OK=0
 if _xp_park "$NCMD"; then
+  _PK_OK=1
   if [[ "$_XP_PK" =~ $_PIPE_RE ]]; then _PK_HIT=1; fi
 fi
 if [[ "$NCMD" =~ $_PIPE_RE ]] || [[ "$_QCMD" =~ $_PIPE_RE ]] \\
@@ -5154,6 +5170,27 @@ if [[ "$NCMD" =~ $_PIPE_RE ]] || [[ "$_QCMD" =~ $_PIPE_RE ]] \\
   # to sit here is gone.
   echo "Dependency gate: piping downloaded bytes into an interpreter is blocked - this gate cannot tell a fetched program from fetched data." >&2
   echo "If the bytes are DATA, write them to a file first (curl -o f URL) and read the file, or fetch with a dedicated tool. If they are a PROGRAM, vendor it, review it, then run it explicitly." >&2
+  exit 2
+fi
+# [X-37 / item 1b] THE SAME ARRIVAL CHANNEL, LAUNDERED THROUGH A SUBSTITUTION.
+# Checked on the SAME five strings as the pipe trigger and reusing every one of
+# them - no sixth normalization, which was a stated falsifier of this change.
+# Placed BEFORE the D20 correlation below and deliberately not folded into it:
+# this channel is FILELESS, so D20 has no file token to correlate and never
+# fires on it. Shell parity: lib/sdk_gates_template.py runs the identical
+# rendering of cmdpos.subst_to_shell_regex on its own five copies.
+# `_PK_OK` rather than a second `_xp_park` call: parking the command is a real
+# cost this gate already paid four lines up, and paying it twice per event is
+# the shape X-51 turns into a fail-open at the emitted 60s timeout.
+_SR_PK_HIT=0
+if [ "$_PK_OK" = "1" ]; then
+  if [[ "$_XP_PK" =~ $_SUBRUN_RE ]]; then _SR_PK_HIT=1; fi
+fi
+if [[ "$NCMD" =~ $_SUBRUN_RE ]] || [[ "$_QCMD" =~ $_SUBRUN_RE ]] \\
+   || [[ "$_RCMD" =~ $_SUBRUN_RE ]] || [[ "$_RQCMD" =~ $_SUBRUN_RE ]] \\
+   || [ "$_SR_PK_HIT" = "1" ]; then
+  echo "Dependency gate: running the output of a command substitution as a program is blocked - a substituted downloader at an execution position is 'curl | sh' with the pipe spelled differently." >&2
+  echo "If the bytes are DATA, capture them in a variable (x=\\$(curl URL)) or write them to a file and read it. If they are a PROGRAM, vendor it, review it, then run it explicitly." >&2
   exit 2
 fi
 # [round-4 D20] DOWNLOAD-THEN-RUN. `curl url > /tmp/a.sh && sh /tmp/a.sh` is

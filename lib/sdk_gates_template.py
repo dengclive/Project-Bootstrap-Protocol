@@ -3144,6 +3144,27 @@ def _scan_install_line(line, approved):
     # is the same arrival channel with a file in the middle, and no pipe
     # pattern can see it. Both halves are required, so an ordinary
     # `curl -o out.json url` or an ordinary `sh ./deploy.sh` is untouched.
+    # [X-37 / item 1b] THE SAME ARRIVAL CHANNEL, LAUNDERED THROUGH A
+    # SUBSTITUTION. `bash -c "$(curl url)"` is `curl url | bash` with the pipe
+    # spelled as a substitution; it was allow/allow on both substrates at 2.8.0
+    # while really fetching and running a remote payload. Evaluated on the SAME
+    # five strings as the trigger above and reusing every one of them - adding a
+    # sixth normalization was a stated falsifier of this change. Placed BEFORE
+    # `_download_then_run` and deliberately not folded into it: this channel is
+    # FILELESS, so D20 has no file token to correlate and never fires on it.
+    # Shell parity: lib/templates.py emits `_SUBRUN_RE` and the same two lines.
+    if (_SUBST_TO_SHELL.search(norm)
+            or _SUBST_TO_SHELL.search(_xp_unquote(norm))
+            or _SUBST_TO_SHELL.search(_rn)
+            or _SUBST_TO_SHELL.search(_xp_unquote(_rn))
+            or (_pkok and _SUBST_TO_SHELL.search(_pk))):
+        return ("Dependency gate: running the output of a command substitution "
+                "as a program is blocked - a substituted downloader at an "
+                "execution position is 'curl | sh' with the pipe spelled "
+                "differently.\\nIf the bytes are DATA, capture them in a "
+                "variable (x=$(curl URL)) or write them to a file and read it. "
+                "If they are a PROGRAM, vendor it, review it, then run it "
+                "explicitly.", "")
     if _download_then_run(norm):
         return ("Dependency gate: running a script this command just "
                 "downloaded is blocked.\\nVendor the installer, review it, "
@@ -3864,6 +3885,12 @@ def sdk_gates_module(cfg: dict) -> str:
         "_XP_WS = %r\n"
         "_XP_OPS = %r\n"
         "_PIPE_TO_SHELL = re.compile(%r)\n"
+        "# [X-37 / item 1b] The SUBSTITUTION twin of the pipe trigger:\n"
+        "# a downloader inside a substitution whose value lands at an\n"
+        "# EXECUTION position. ONE rendering with the shell gate's\n"
+        "# _SUBRUN_RE - see lib/cmdpos.py for the four positions and\n"
+        "# the false-positive fence.\n"
+        "_SUBST_TO_SHELL = re.compile(%r)\n"
         "# [issue #36] The whole install anchor after the prefix run -\n"
         "# tools, verbs, runner channels and the `python -m` transparent\n"
         "# prefix - ONE rendering with the shell gate's HEAD.\n"
@@ -3897,6 +3924,9 @@ def sdk_gates_module(cfg: dict) -> str:
            cmdpos.XP_WS, tuple(cmdpos.XP_OPS),
            _py(cmdpos.pipe_to_shell_regex(space=r"\s+", nonspace=r"\S",
                                           ws=r"\s")),
+           _py(cmdpos.subst_to_shell_regex(space=r"\s+", nonspace=r"\S",
+                                           ws=r"\s", space0=r"\s*",
+                                           nl="\n", nonpar=r"[^\s(]")),
            _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
                                         space0=r"\s*", wsp=r"\s")),
            sorted(cmdpos.install_completers()), cmdpos.COMPLETER_GLUE,
