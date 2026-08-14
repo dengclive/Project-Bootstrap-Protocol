@@ -21,7 +21,29 @@ legal grant to adopt any of it — §9's "no external adopter can obtain" is
 overtaken in exactly this sense. **Backlog rows `open` = 105**, unchanged from
 `053a367` by the same validated rule (re-validated at 88 on v2.7.4); suite
 **25 / 9,668 / 0**; differential **4,104**; X-54/X-55 still `open` (X-54's own
-row now records **159.52 s** post-memo, 2.7× past the ceiling). The LIT fold
+row recorded **159.52 s** post-memo, 2.7× past the ceiling; **re-measured
+2026-08-14 ON THIS TAG at 156.75–157.19 s for `sudo`, 2.6×** — see the next
+paragraph).
+
+**THE HEAD-CLASS COST MEASUREMENT IS DONE, 2026-08-14 — it was the one item
+this document called owed and claimed nowhere, and it is now claimed here.**
+Measured on `f9c2bb2`. **It binds the release, and the warrant is the artifact
+that was TIMED:** emitted `dependency-gate.sh` is comment-stripped identical
+across `053a367..f9c2bb2`, verified by rendering both trees — not emitted
+`gates.py`, which is AST-identical too but is the SDK artifact this pass did
+not measure. `dependency-gate`, 80001–80004 B / 4000 jumps, two reps, serial
+at width 1, load ≤ 1.50: **wrapper heads over the 60 s ceiling at ~2.6× —
+`sudo` 156.75–157.19 s, `env` 157.84–159.88 s, `nice` 156.28–156.92 s**;
+**transparent heads 4.9× under it — `!`, `{`, `-x`, `echo` all 12.10–12.30 s.**
+`nice` had never been measured and widens the MEASURED membership from two to
+three — the gate's wrapper-word list is longer than three, so this is a floor
+on the class, not its size. **What this does and does not license:** it SIZES the class and removes
+the precondition's excuse. It does NOT close X-54, and it does NOT demonstrate
+a bypass: the measured payload carries no install verb, so ALLOW was the
+correct verdict at any speed and no deny was at stake. What crossed the ceiling
+is COST; converting that into the fail-open X-54 describes needs a
+would-otherwise-DENY shape in the same padding, which was not run. Autonomous
+mode's precondition was a NUMBER, and the number exists. The LIT fold
 moves no gate mechanism — emitted `gates.py` AST-identical across
 `053a367..0d4d5af` (`f71ec4a81bae9f826e39d06f361dac5f`), all 11 hook bodies
 identical comment-stripped, settings delta = the `_generatedBy` stamp — so no

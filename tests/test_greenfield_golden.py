@@ -3094,7 +3094,30 @@ EXPECTED_DIGESTS = {
         # protocol 2.8.0). No hook or gate body moves in this fixture;
         # no logic changes anywhere. Count still 57. Recorded in
         # docs/changelog.md 2.7.4 -> 2.8.0.
-        "36802b31c46ed3e97e57795060931c31e765a61298c6d1b562fd9e226b2517f3",
+        #
+        # [freeze-exception no. 69, 2026-08-14] COMMENT ONLY, and the comment
+        # is a COST FIGURE CORRECTED BY MEASUREMENT rather than by argument.
+        # lib/templates.py's shared gate preamble asserted, in the present
+        # tense, that `sudo` + 2000 runs "is still 150.95 s here". 150.95 s
+        # was the PRE-memo figure; the same emitted file already carried the
+        # post-memo 159.52 s a few hundred lines down, so every emitted hook
+        # shipped two different current costs for one shape. Re-measured on
+        # v2.8.0 (f9c2bb2), dependency-gate, 80004 B / 4000 jumps, two reps,
+        # serial at width 1, 1-min load <= 1.50: sudo 156.75-157.19 s, and
+        # the class is WIDER than the one head - env 157.84-159.88 s and
+        # nice 156.28-156.92 s cross the same 60 s ceiling, nice never having
+        # been measured anywhere before. Transparent heads flat at
+        # 12.10-12.30 s. 150.95 s is KEPT as history, not deleted; what was
+        # wrong was the tense. NO EXECUTABLE LINE CHANGES - the moved bytes
+        # are comment text in the `_read_cmd` preamble that EVERY emitted hook
+        # body embeds, which is why one edit moves five digests. THE MOVED SET
+        # IS COUNTED PER FIXTURE, NOT FROM A PROBE INSTALL: 11 hook bodies
+        # here, 15 in full_autonomous, 11 in design_steering (37 across the
+        # three), 11 and 15 in the retrofit service/agent fixtures. No other
+        # artifact moves in any of them. Count still 57.
+        # Measurement recorded in docs/deferred-backlog.md (X-54),
+        # docs/production-readiness.md and the security KB section 6.
+        "2fd6db32540ddb28ebf8366e3aa81a9d1e72e10924e139802c25dbc928b79220",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3331,7 +3354,10 @@ EXPECTED_DIGESTS = {
         # goal-config.md (LIT-07 deliberate-absence trailers), and
         # iteration-summary-enforcement.sh by a comment-only citation
         # renumber. No logic changes; count still 69.
-        "540e6e9c7a3217b64f1f889e73eb5624e619cab22cf9aa0e2badfd00f2fba03a",
+        # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
+        # correction (see the `default` note): comment-only, in the gate
+        # preamble every hook body embeds. No logic changes; count still 69.
+        "94a70d209cd088199081b20d7fd9ed1f753f22511b6ff769640ae8f89e572334",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3514,7 +3540,11 @@ EXPECTED_DIGESTS = {
         # (tools.md, checkpoint skill, progress-template,
         # assumption-ledger, settings.json). The three design-steering
         # artifacts are untouched. No logic changes; count still 59.
-        "544a8f8c5dc72b73842da245a74d0f2cc911fe2143f5214e21ec378c455afa9a",
+        # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
+        # correction (see the `default` note): comment-only, in the shared
+        # gate preamble. The three design-steering artifacts are again
+        # untouched, and the count is still 59.
+        "ae3a559d9c7482db5f7c5a889ab98487caad462647eebe21f6aa445e0d504aef",
 }
 
 EXPECTED_ACTION_COUNTS = {

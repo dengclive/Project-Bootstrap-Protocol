@@ -2124,9 +2124,18 @@ def retrofit_digest_full(yaml_text):
 # renumber. No logic changes; counts unchanged (service 79 / agent 93).
 # Recorded in docs/changelog.md 2.7.4 -> 2.8.0. Why 68: 62-67 were consumed
 # by the X-52 line above, which merged to main mid-fold.
+# [freeze-exception no. 69, 2026-08-14] COMMENT ONLY — the X-54 cost figure,
+# corrected by MEASUREMENT rather than by argument. The shared gate preamble
+# in lib/templates.py asserted in the present tense that `sudo` + 2000 runs
+# "is still 150.95 s here", which was the PRE-memo figure while the same
+# emitted file already carried the post-memo 159.52 s further down. Both
+# fixtures move for the one edit because every hook body embeds that preamble.
+# Re-measured on v2.8.0 (f9c2bb2): sudo 156.75-157.19 s, env 157.84-159.88 s,
+# nice 156.28-156.92 s — all past the 60 s ceiling; transparent heads flat at
+# 12.10-12.30 s. No logic changes; counts unchanged (service 79 / agent 93).
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "6f20a7b6e18ce501525f22853b06734995626b36c2e4640bd64e0af21f7c8879",
-    "agent": "cebe270e5464d2e0a12ab8b4e557283b16daa3d04969f70b55aae37e4b80006d",
+    "service": "d8a517e466aa64ee2f37bb2b14ad2166dc19034b2ce8fa78bb99ba20c3edc89e",
+    "agent": "985a2cfc582d42b79809c6c5c36451a5e7283efcc3af5eaf5b8a1f0493875788",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
