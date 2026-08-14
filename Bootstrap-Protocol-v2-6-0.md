@@ -2,6 +2,28 @@
 
 **Version:** 2.7.4
 
+> **v2.8.0 — LIT literature fold, MINOR (2026-08-14).** Nine additive items and
+> one behavioral priming change, from
+> `docs/Bootstrap-Protocol-Improvement-Proposal-LIT-2026-08-r2.md` (PAR-01..12
+> folded; six rejections upheld and recorded there), applied changelog-first.
+> Additive: preservation invariant **[LIT-01]**, lexical-first retrieval
+> guardrail **[LIT-04]**, store-shaping annotation **[LIT-05]**, small-model
+> single-step invariant **[LIT-10]**, retention routing rule **[LIT-03]**,
+> four-metric calibration fields **[LIT-08]**, complexity-downgrade rule
+> **[LIT-09]**, golden-task harness **[LIT-06]**, eval-gated consolidation
+> **[LIT-02]**. Behavioral: **[LIT-07]** redacts `loop_max_iterations` from the
+> primed task-definition slice (9.5 always; 9.6 for eligible-for-both tasks)
+> and extends the adopted-B-1 binding comment contract four → five items; the
+> field stays in the task-definition schema and the committed task file.
+> **Migration:** operators hand-edit their completed wrapper priming assembly;
+> **unedited installs keep the old priming behavior** (the digest guard skips
+> hand-edited wrappers by design). Two new Assumption-Ledger rows (LIT-01,
+> LIT-07). **Why MINOR:** new operator-facing normative surface (the
+> v2.3.0/v2.4.0 additive precedent) plus a behavior change (the v2.7.0
+> precedent) — and not PATCH because the surface is new, not corrective.
+> **Seam impact: none** (§8.4: gate internals untouched; zero verdict
+> movement, "previously denied, now allowed" = ∅). `seam_version` stays 2.0.0.
+
 > **v2.7.4 — a head form neither walker saw past, PATCH (2026-08-07).** Contains
 > PR **#57** (backlog X-36v / X-36w): `{ bash -c "pip install evil"; }` was
 > allow/allow on both substrates while the subshell twin denied, because `(` is
