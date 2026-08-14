@@ -127,12 +127,17 @@ X-47, X-50 (norm_cmd two-level accumulation, prefix-sampling fix), and the
 X-51 cost guard (a `PreToolUse` hook cancelled at its timeout FAILS OPEN, so
 commands too expensive to gate are now refused up front — the declared
 timeout is the attacker's budget, not a safety net). (c) The X-52 cost-term
-line (PR #66, merged mid-fold; freeze exceptions 62–67): three quadratic
-loops removed from the substitution walk, the `_lastw` memo bypass closed
-(the differential grew 4092 → 4104 rows to carry it), the fail-open-claim
-retraction swept through every emitted comment, and the backlog re-sorted by
-threat model — recorded in its freeze-exception stacks, the backlog, and
-`docs/threat-model.md`, with no changelog entries of its own either. Per all
+line — **PR #65** (`fix/x52-work-counter`, merged 053a367, freeze exceptions
+62–66): three quadratic loops removed from the substitution walk and the
+`_lastw` memo bypass closed (the differential grew 4092 → 4104 rows to carry
+it) — and its documentation line, **PR #66** (`docs/post-x52-readiness-and-kb`,
+merged 3af0c11 mid-fold, exception 67): the fail-open-claim retraction swept
+through every emitted comment, the backlog re-sorted by threat model, and
+`docs/threat-model.md` drafted — recorded in the freeze-exception stacks and
+the backlog, with no changelog entries of their own either. **[Corrected
+2026-08-14: this clause originally attributed the whole X-52 line to PR #66;
+the code work is #65, the docs are #66. The e6f279b merge-commit message
+repeats the error and is immutable — this entry is the record.]** Per all
 those records the class is closed bypasses, added refusal paths, cost-bound
 fixes, and maintainer-side tests/docs; no new configuration keys —
 PATCH-grade on their own; the MINOR tier is carried by the fold above.
@@ -146,8 +151,8 @@ enumerated above, the renumbered PRD citation carried in the emitted
 iteration-summary-enforcement hook, and the `_generatedBy` version stamp. No
 hook logic, gate body, or dispatch line moves in the fold's own diff. **Why
 68:** the fold first took 62, then 65, and both were consumed out from under
-it by the X-52 line (62–67, dated 2026-08-12/13, merged as PR #66); 68 is
-the first number free on the merged tree.
+it by the X-52 line (62–66 with PR #65, 67 with PR #66, dated
+2026-08-12/13); 68 is the first number free on the merged tree.
 
 Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
