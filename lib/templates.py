@@ -8804,7 +8804,11 @@ Goal-supervised mode's `spec-decompose` recommendation rule learns from
 this file. Each entry: task id, mode chosen (operator-in-loop / loop /
 goal-supervised), drift-prone area touched (from
 `inventory/danger-zones.md` or `inventory/tribal-knowledge.md`),
-outcome, iteration count.
+outcome, iteration count, tokens, and format-validity (LIT-08).
+Tokens: goal mode transcribes loop-final's value; loop mode derives
+from the retained trajectory JSONL or records "unavailable".
+Format-validity: goal mode only (`summary_failure_count` exists only
+there); loop-mode rows record N/A.
 
 **Brownfield seed note (RETROFIT R8.H):** the drift-prone-area column
 SHOULD be populated from `inventory/danger-zones.md` and
@@ -8815,8 +8819,8 @@ the input the calibration rule needs.
 The R8.H brownfield milestone gate requires `>= 10` real brownfield
 entries here before `goal_supervised_mode_enabled: true` may be set.
 
-| task | mode | drift-prone area | outcome | iterations |
-|---|---|---|---|---|
+| task | mode | drift-prone area | outcome | iterations | tokens | format-validity |
+|---|---|---|---|---|---|---|
 """
 
 

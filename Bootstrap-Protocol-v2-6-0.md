@@ -1720,8 +1720,14 @@ The next iteration's priming context includes the **most recent two entries** (n
 **Recommendation:** <what classifier recommended>
 **Chosen:** <what operator picked>
 **Felt right?** <yes / no — too autonomous / no — too cautious / yes but the judge was noisy / yes but the gates were stricter than needed>
+**Outcome:** <terminal-success | halt class — goal mode: from loop-final's `halt_reason`; loop mode: from the loop-final Status line> [LIT-08]
+**Tokens:** <goal mode: from loop-final's elapsed/turns/tokens/evaluator-calls; loop mode: derived from the retained trajectory JSONL, or "unavailable"> [LIT-08]
+**Iterations:** <used> of <cap> [LIT-08]
+**Format-validity:** <goal mode: iterations-with-valid-summary out of total, from `summary_failure_count`; loop mode: N/A — the counter exists only in goal-supervised mode> [LIT-08]
 **Notes:** <optional one-line>
 ```
+
+**Field provenance [LIT-08] (transcription, not new instrumentation).** The four metric fields are wrapper-emitted or trajectory-derivable. Goal mode's `loop-final-<task-id>.md` promises elapsed/turns/tokens/evaluator-calls and `halt_reason`; loop mode's loop-final promises the iteration history and the required `Trajectory` line but names no tokens field — loop-mode tokens come from the retained trajectory JSONL or are recorded as unavailable, and format-validity is structurally N/A for loop-mode rows, and the template says so rather than implying uniform recordability. **[PAR-05] This transcription is the telemetry-off path:** when the operator has opted into TEL-01, `.claude/steering/telemetry.md` already names `claude_code.token.usage` sliced by `agent.name` as queryable evidence, and the review may query instead of transcribe — one evidence channel, stated, not two unreconciled ones. With ~20 entries the calibration review can run a per-project score-vs-cost comparison across mode×model pairs — the right-sized private version of a public leaderboard.
 
 After ~20 entries, the operator may invoke a calibration-review skill that surfaces the accumulated answers, highlights any classifier-recommendation/operator-choice divergences and any "felt wrong" patterns, and proposes adjustments to the recommendation rule's flip-properties for this specific project. The operator approves, vetoes, or refines. This is the same posture as the existing `learnings/` mechanism: the protocol provides starting structure, the operator refines over time.
 
@@ -1748,7 +1754,7 @@ The wizard surfaces these to the operator before generating goal-supervised-mode
 7. **Augment the implementer subagent** with the `goal_supervised` variant block (already specified in Phase 7; this phase wires it in). Confirm the reviewer subagent is **not** modified.
 8. **Verify the drift-detector cooperation hook recognizes `.goal-active-*` markers** (already specified in Phase 6 — the hook serves both modes via parallel marker recognition). If Phase 6 ran with only `loop_mode_enabled: true` and goal-supervised mode is being opted into later, regenerate or amend the hook so it recognizes both markers.
 9. **Update `.gitignore`** with the goal-supervised-mode sentinel paths (already specified in Phase 7 step 7; verify they were included if Phase 7 ran before this phase, or add them now).
-10. **Initialize `learnings/mode-selection.md`** as an empty calibration file with a header explaining its purpose (operators record per-task-completion whether the chosen mode felt right, accumulating evidence for refining the recommendation rule over time).
+10. **Initialize `learnings/mode-selection.md`** as an empty calibration file with a header explaining its purpose (operators record per-task-completion whether the chosen mode felt right, accumulating evidence for refining the recommendation rule over time). The header carries the entry template above, four metric fields included [LIT-08].
 11. **Recommend the smoke test.** If Phase 9 was run, recommend the goal-supervised-mode (fourth-stage) smoke. If Phase 9 was skipped, strongly recommend running the goal-supervised smoke before relying on the wrapper for real work.
 12. **Update state file.** Confirm `bootstrap_protocol_version: "2.0.0"` is set (Phase 0 wrote it; this phase does not change it). Confirm `goal_supervised_mode_enabled: true` is set (from Phase 0). Verify `goal_in_flight: []` is present from Phase 0's initial write (the wrapper will append/remove entries during goal-supervised runs).
 13. Show all created and modified files. Ask: **approve / edit / start over**.
