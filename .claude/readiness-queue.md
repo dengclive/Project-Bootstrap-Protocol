@@ -12,22 +12,7 @@ buy.
 
 ## A — moves the verdict
 
-- **[ready] c1-license** · `DOC` · eligible: **yes** · ~1 h · **TAKE THIS FIRST**
-  **DECIDED 2026-08-14 by the operator: Apache-2.0.** Unblocked; no longer E3.
-  `git ls-files | grep -icE 'licen[cs]e'` → **0** on the v2.8.0 tag. §1: the
-  verdict *"cannot have moved"* while a second tagged, adoptable release ships
-  with no legal grant. Add `LICENSE` (Apache-2.0 full text) and the README
-  statement. **NO NOTICE** — this line previously prescribed one and misstated
-  why: NOTICE does not carry the patent grant (§3 does), and Apache-2.0 requires
-  only that an *existing* NOTICE be propagated by downstream redistributors.
-  Step 4's failing check went in `tests/test_doc_citations.py` section 5 (it
-  has `tracked` from `git ls-files`); it pins that LICENSE is TRACKED, not
-  merely on disk. **Not batched.**
-  **CORRECTED: this does NOT amend §1 in place.** `production-readiness.md` is
-  a layered document whose §1 leg is measured against named shas and stays true
-  of them; the item adds a **new dated layer** and MARKS the historical ones.
-  And it removes one of **three** negative legs, not two — X-37 and C-2 stand,
-  so the verdict does not move.
+*(`c1-license` closed 2026-08-14 — PR #75, merge `de13e71`. See Done.)*
 
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/templates.py`, `lib/sdk_gates_template.py`,
@@ -117,7 +102,9 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
-`x54-headclass-measurement` PR #70 `9450b7d` (exc. 69) · `prd-filename-v280`
+**`c1-license` PR #75 `de13e71` — readiness C-1 CLOSED, Apache-2.0; the first
+finding this cycle FIXED rather than re-measured** · `x54-headclass-measurement`
+PR #70 `9450b7d` (exc. 69) · `prd-filename-v280`
 PR #72 `54ebc4b` (exc. 70) · ledger entries 27/28 PRs #69 `f9c2bb2`, #71
 `03dd309` · post-v2.8.0 record PR #68 `6143427` · **the harness itself**
 (runbook + this queue + `context-check.py`) PR #73 `358ac9b`, **merged by the
@@ -130,7 +117,14 @@ is exactly what 9b now requires.
 29; the harness work is entry 30. Ledger at 30, pin moved in the same commit.)*
 
 **Verdict status, so the scoreboard is not lost between sessions:**
-`docs/production-readiness.md` §1 still reads **not production ready**. Nothing
-merged so far this cycle moved it — the measurement SIZED X-54, the rename and
-the harness were hygiene and tooling. The first item that can move it is
-`c1-license`, and it is now unblocked and top of the queue.
+`docs/production-readiness.md` §1 still reads **NOT PRODUCTION READY** — and
+that is the correct outcome, not a failure of the item. **C-1 is CLOSED** (PR
+#75, `de13e71`): the first readiness finding this cycle to be *fixed* rather
+than re-measured, and `git ls-files | grep -icE 'licen[cs]e'` now returns 1.
+§1 rests on **three** negative legs and one is gone. Still standing:
+**X-37** (Class B — a remote payload still runs) and **C-2** (the autonomous
+wrappers dispatch nothing). *"C-1 alone settles it either way"* meant
+independently sufficient, never sole ground.
+
+**So the next item is the one that goes at a leg: `x37-class-b`.** It is the
+only remaining A-tier row, it is `CODE`, and it gets full ceremony.
