@@ -1414,8 +1414,8 @@ The corpus was also structurally unable to help: every one of those 4092 rows ha
 a short head, so none ever reached the walk phase where the bypass lived.
 
 Note the numbers carefully, because the temptation is to quote today's. The
-differential is **4104** rows now, and **12 of them exist precisely to reach that
-phase** — they were added by the fix, so citing 4104 as what failed to catch the
+differential is **4163** rows now, and **12 of them exist precisely to reach that
+phase** — they were added by the fix, so citing 4163 as what failed to catch the
 bug would credit the corpus with coverage it only has *because* of the bug.
 
 **What did work:** constructing shapes from reasoning about which class the guard

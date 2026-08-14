@@ -609,9 +609,25 @@ def bash_case_alt(words, indent: str = "") -> str:
 # The wrapper arm is what fixes D9 and, on the SDK side, D3. `\S`-style
 # shorthands are avoided so the identical source works as a bash ERE.
 
-def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
+def prefix_run(space: str = " +", nonspace: str = "[^ ]",
+               paren_open: bool = True, nonpar: str = "[^ (]") -> str:
     """THE command-position prefix run, factored out so the anchor and the
     pipe trigger cannot encode command position differently.
+
+    [X-37] `paren_open=False` IS FOR ONE CALLER AND HAS ONE JOB. `subst_to_shell_regex`
+    looks for a substitution opener immediately after this run, and in that
+    position a `(` does not mean "subshell" - it means an ARRAY INITIALIZER
+    (`arr=($(dl))`) or an ARITHMETIC context (`(( $(dl) == 200 ))`), where the
+    substitution's output is DATA. Two arms would otherwise hand the `(` over:
+    the group arm `[({] *`, and the assignment arm, whose value class `[^ ]*`
+    happily swallows the `(` of `arr=(`. With the flag off the group arm is
+    `[{] *` and the value class is `nonpar`, so both spellings stay allow while
+    `FOO=1 $(dl)` - an assignment PREFIX, which really does open a command
+    position - still denies. Measured: with the flag on, the pinned HTTP-status
+    idiom and both array spellings DENY.
+
+    The default preserves every other caller byte-for-byte, and
+    tests/test_composition.py pins that.
 
     [round-4 P1, finding 9] They did. `anchor_regex` grew a `VAR=value` arm
     when D9 landed, because an assignment opens a command position;
@@ -669,9 +685,10 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
         + "|(" + alt(NAMED_GROUP_HEADS) + ")("
         + space + "-" + nonspace + "*|"
         + space + "[^- ]" + nonspace + "*)*" + space
-        + "|[({] *"
+        + "|" + ("[({] *" if paren_open else "[{] *")
         + "|[0-9]*[<>]+ *" + nonspace + "+" + space
-        + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
+        + "|[A-Za-z_][A-Za-z0-9_]*[+]?="
+        + (nonspace if paren_open else nonpar) + "*" + space
         + "|(" + alt(KEYWORDS) + ")" + space
         + ")*"
     )
@@ -741,6 +758,206 @@ def pipe_to_shell_regex(space: str = " +", nonspace: str = "[^ ]",
     return ("(" + alt(DOWNLOADERS) + ")[^;&]*[|] *"
             + prefix_run(space, nonspace)
             + interpreter_word(space, nonspace, ws))
+
+
+# ---- [X-37 / item 1b] download-then-run laundered through a SUBSTITUTION -- #
+#
+# `curl url | sh` and `bash -c "$(curl url)"` are the SAME arrival channel:
+# fetched bytes reach an interpreter. The pipe spells the hand-off with `|`; the
+# substitution spells it by putting the fetched TEXT at an execution position.
+# `pipe_to_shell_regex` models the first, this models the second, and they are
+# deliberately neighbours - the backlog row that filed this asked for exactly
+# that placement.
+#
+# WHY NOT THE D20 FILE CORRELATION. D20 pairs a downloader that WRITES a path
+# with an interpreter that later RUNS that path. This channel is FILELESS, so
+# there is no token to correlate and `_download_then_run` / `_xp_run_scan` never
+# fire. They DO fire when the substitution happens to carry a write target -
+# `eval "$(echo hi; curl >/dev/null)"` denied at 2.8.0 through D20 - which is
+# why the row is scoped to the fileless half and why the corpus pins the
+# FILELESS spelling (`eval "$(echo hi; curl -sSL url)"`, allow/allow at 2.8.0).
+#
+# THE FOUR EXECUTION POSITIONS, every one measured allow/allow at 2.8.0:
+#   1a  eval "$(dl)"                  the builtin whose argument IS a command
+#   1b  bash -c "$(dl)", python3 -c   a code flag whose VALUE is the fetched text
+#   2   $(dl) / `dl` at command pos   the fetched text IS the command word
+#   3   bash <(dl), bash <<< "$(dl)"  the fetched bytes arrive on stdin
+#
+# AND THE FENCE, equally load-bearing: `x=$(dl)`, `echo "$(dl)"`,
+# `bash -c "echo hi" "$(dl)"`, `arr=($(dl))`, `(( $(dl) ))` and `source "$(dl)"`
+# are DATA. `source "$(dl)"` is the sharp one: the output is a FILENAME, not
+# code, which is why it stays allow while `source <(dl)` denies.
+#
+# THE CODE LETTER IS POSITION-FREE INSIDE A BUNDLE, and this is not a detail.
+# bash's `-c` still consumes the next word when other letters follow it, so a
+# rule keyed on the flag's LAST character catches `-xc` and misses `-cx`. An
+# earlier draft spelled it as a tail and ten measured spellings walked through.
+# Long forms are enumerated separately because a bundle rule cannot see them.
+#
+# ADMISSION RULE for CODE_FLAG_LETTERS: the interpreter executes that flag's
+# argument as code. `c` = sh/bash/zsh/dash/ksh/python -c; `e` = perl/ruby/node
+# -e; `r` = php -r. The class is gated BEHIND an interpreter word, so an
+# ordinary `grep -e pat` never reaches it, and `bash -r` (restricted shell)
+# over-denies rather than under-denies - the direction this module accepts.
+CODE_FLAG_LETTERS = "cer"
+CODE_FLAG_LONG = ("--command", "--eval")
+
+# The characters after which a command really begins. `;`, `&` and `|` are
+# control operators (`&&` and `||` end in one, so no second arm is needed) and
+# `{` opens a group. A NEWLINE is the fourth member of XP_OPS and is spelled by
+# the caller's dialect - `\n` for `$'...'` in the emitted bash, a real newline
+# for Python - because NEITHER dialect can subtract blanks from `[[:space:]]`,
+# and admitting a plain blank here would turn every ARGUMENT into a command
+# position (`bash -c "$(echo curl)"` would deny).
+CMD_OP_CHARS = ";&|{"
+
+# ---- the three bounded scans, and why a bound is the SAFE choice here ----- #
+#
+# THE UNBOUNDED SPELLING WAS BUILT FIRST AND MEASURED. Every forward scan below
+# was `*`, and an unanchored search then costs O(n) start positions x O(n)
+# forward scan: an 8 KB command took **3.73 s**, and `_cost_guard` admits 81920
+# bytes. That crosses the emitted 60 s PreToolUse timeout, and X-51 measured
+# what a crossing does - the hook is KILLED, a killed hook does not exit 2, and
+# the command RUNS. So the unbounded spelling is itself a fail-open, and the
+# choice is not "bound vs no bound" but "bounded over-scan vs a bypass anyone
+# can reach with padding".
+#
+# This is X-51's own conclusion applied to a new predicate: "the cheapest
+# correct move is to make crossing IMPOSSIBLE rather than survivable". The
+# INVOKER_WORD_MAX note in this file warns that a count fence inside a security
+# predicate is a fail-OPEN guard; that warning holds, and it is why each bound
+# below sits far above any benign spelling and the residue is DISCLOSED and
+# PINNED rather than argued:
+#
+#   FLAG_GAP_SCAN     the run between an interpreter word and its code flag.
+#                     Benign worst case measured here is `bash --rcfile
+#                     /dev/null -o pipefail ` at 31 bytes; the bound is 4x that.
+#                     Residue: >120 bytes of flags before `-c` is not matched.
+#   FLAG_BUNDLE_SCAN  the tail of a single-dash bundle after its code letter.
+#                     `-uecx` is 4; the bound is 16.
+#   SUBST_BODY_SCAN   the run inside a substitution before the command position
+#                     that carries the downloader. `echo hi; ` is 9; the bound
+#                     is 240. Residue: a downloader parked past 240 bytes of
+#                     substitution body is not matched.
+#
+# The residues are all "pad the command in a specific interior position", which
+# is strictly harder than the padding X-51 already showed defeats the UNBOUNDED
+# spelling outright - and unlike that one, these leave the gate ALIVE to refuse
+# everything else. Measured after: the 8 KB case goes 3.73 s -> 0.01 s.
+FLAG_GAP_SCAN = 120
+FLAG_BUNDLE_SCAN = 16
+SUBST_BODY_SCAN = 240
+
+
+def cmd_position_anchor(nl: str = "\\n") -> str:
+    r"""The left context that OPENS a command position, as one named fragment.
+
+    [X-37] Written down rather than inlined, because the review that approved
+    this rule asked whether a second, hand-written encoding of "command
+    position" was finding 9 reappearing inside its own repair. It is one
+    fragment with one reader, and `prefix_run` still does the word-level work.
+
+    THE TWO `(` ARMS ARE THE WHOLE SUBTLETY. A `(` opens a command position
+    (`( $(dl) )` is a subshell and really runs the fetched text), but the same
+    character opens an ARRAY INITIALIZER after `=` and an ARITHMETIC context
+    when doubled, and in both of those the substitution is DATA. Neither
+    dialect has lookbehind - bash ERE has none at all - so the exclusion is
+    spelled by CONSUMING the preceding character: `[^=(][(]` admits
+    `cmd ( $(dl) )` and refuses both `arr=(` and the second `(` of `((`. The
+    `^[(]` arm exists because a leading `(` has no preceding character.
+    """
+    return "(^|[" + CMD_OP_CHARS + nl + "]|[^=(][(]|^[(])"
+
+
+def subst_to_shell_regex(space: str = " +", nonspace: str = "[^ ]",
+                         ws: str = "[[:space:]]", space0: str = " *",
+                         nl: str = "\\n", nonpar: str = "[^ (]") -> str:
+    r"""A DOWNLOADER inside a substitution whose value lands at an EXECUTION
+    position - `dl | executor` spelled without the pipe.
+
+    Built from `prefix_run`, `interpreter_word` and `cmd_position_anchor`, not
+    from private copies of any of them. `interpreter_word` in particular is not
+    an ornament: its SECOND arm is an UNMODELLABLE command word, and without it
+    `${SHELL} -c "$(curl url)"` matches nothing at all - which is the same
+    evasion that arm was added for on the pipe side (verified RCE, both
+    substrates, inherited from 2.6.1).
+
+    THREE THINGS THE FIRST DRAFT LEFT OUT, each measured as a fail-open on all
+    six headline rows before it was fixed:
+
+    * `space0` in front of the inner prefix run. `prefix_run` has NO arm whose
+      first character can be a blank, so `$( curl url)` - one keystroke -
+      evaded everything. The pipe twin spells the same blank as `[|] *`.
+    * the `([^ ]*/)?` PATH arm on the downloader. `$(/usr/bin/curl url)` evaded
+      everything. `pipe_to_shell_regex` gets away without one only because its
+      downloader is unanchored on the left; here it is pinned by the literal
+      `$(`, so the accident does not carry over.
+    * the trailing word class, so `$(curlftpfs ...)` does not match on the
+      `curl` prefix - the rule `interpreter_word` already applies.
+
+    THE DISCLOSED OVER-REFUSAL. Arm 2 uses the ordinary `prefix_run`, which
+    consumes a wrapper's positionals, so `sudo echo "$(dl)"` DENIES even though
+    the fetched text is an argument. The alternative - a flags-only run - was
+    built and measured, and it costs `timeout 5 $(dl)`, `nice -n 5 $(dl)`,
+    `sudo -u root $(dl)` and `watch -n 1 $(dl)`, every one of which really runs
+    a remote payload, because telling a wrapper's flag VALUE from its command
+    WORD is arity modelling and this module refuses that three times over. The
+    over-refusal is the direction INERT_FILTERS' admission rule calls "the only
+    acceptable one here"; both directions are pinned in the differential.
+    """
+    anchor = cmd_position_anchor(nl)
+    pfx = prefix_run(space, nonspace)
+    pfx_np = prefix_run(space, nonspace, paren_open=False, nonpar=nonpar)
+    iw = interpreter_word(space, nonspace, ws)
+    # A double quote may sit between the executor and the opener; the single
+    # quote and the backslash are reached through the quote-stripped copy the
+    # callers already compute, so neither has to survive two emission paths.
+    qr = '["]*'
+    # `${x:-$(dl)}` satisfies "begins the token" in bash but not in a literal
+    # regex, and param_default cannot resolve a NESTED substitution.
+    opener = "([$][{][^}]*)?([$][(]|`)"
+    downloader = "((" + nonspace + "*/)?(" + alt(DOWNLOADERS) + "))"
+    dl_inside = ("([^)]{0," + str(SUBST_BODY_SCAN) + "}" + anchor + ")?"
+                 + space0 + pfx_np + downloader
+                 + "(" + ws + "|$|[;)&|])")
+    code_flag = ("(-[^- ]*[" + CODE_FLAG_LETTERS + "][^- ]{0,"
+                 + str(FLAG_BUNDLE_SCAN) + "}" + space
+                 + "|(" + alt(CODE_FLAG_LONG) + ")(" + space + "|=))")
+    # `space0` rather than `space`, because `interpreter_word` has already eaten
+    # the blank after the runner: at `python3 - <<< "$(dl)"` the scan resumes on
+    # `-`, and a run demanding a LEADING blank matched nothing there. An
+    # ordinary positional still stops it (`python3 script.py <(dl)` stays allow,
+    # because `script.py` does not start with `-`).
+    flags_only = "(" + space0 + "-" + nonspace + "*)*"
+    # `<(dl)` AND `< <(dl)`. The redirect spelling puts the process
+    # substitution's FILE on the runner's stdin, which is the same execution
+    # position by a different route - and it is one character away from the
+    # pinned `bash <(dl)` row.
+    psub = "(<" + space0 + ")+[(]"
+    # EVERY ARM IS ANCHORED AT A COMMAND POSITION, and that is a correctness
+    # statement before it is a performance one: an executor only executes if it
+    # is itself at a command position, so `foo --opt "bash -c \"$(curl u)\""`
+    # (an executor named inside an ARGUMENT) is not this channel.
+    #
+    # It is also the fix for a measured fail-open. Unanchored, `interpreter_word`
+    # is tried at EVERY offset, and its second arm - the unmodellable command
+    # word `[^ ]*[$`][^ ]*` - scans to end-of-string and backtracks at each one.
+    # That is O(n^2): `echo "<8 KB of padding>"` cost **3.97 s**, and
+    # `_cost_guard` admits 81920 bytes, so the emitted 60 s timeout is reachable
+    # with padding alone - X-51's exact shape, where the killed hook fails OPEN.
+    # `pipe_to_shell_regex` never had the problem because its copy of the same
+    # arm sits behind `[|] *`. Measured after anchoring: 3.97 s -> under 1 ms.
+    at = anchor + space0
+    return ("(" + at + pfx + "eval" + space + qr + space0 + opener + dl_inside
+            + "|" + at + pfx + iw + "[^;&|]{0," + str(FLAG_GAP_SCAN) + "}"
+            + code_flag + qr + space0
+            + opener + dl_inside
+            + "|" + at + pfx_np + qr + opener + dl_inside
+            + "|" + at + "([.]|source)" + space + psub + dl_inside
+            + "|" + at + pfx + iw + flags_only + space0 + psub + dl_inside
+            + "|" + at + pfx + iw + flags_only + space0 + "<<<" + space0 + qr
+            + space0 + opener + dl_inside
+            + ")")
 
 
 def runners_regex(space: str = " +", nonspace: str = "[^ ]") -> str:

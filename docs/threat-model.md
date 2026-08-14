@@ -54,7 +54,7 @@ possible place for an overclaim.
 - **The gates fail closed on THEIR OWN errors** — missing parser, unwritable
   filesystem, malformed input. **They do NOT fail closed when the runtime kills
   them**; see §1.
-- **Verdicts agree across the two substrates on the 4104 differential rows** —
+- **Verdicts agree across the two substrates on the 4163 differential rows** —
   that is agreement on the corpus, not a general equivalence claim, and several
   open rows above are precisely where they diverge off-corpus.
 

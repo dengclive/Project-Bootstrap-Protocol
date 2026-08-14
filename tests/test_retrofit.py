@@ -2140,9 +2140,22 @@ def retrofit_digest_full(yaml_text):
 # references repointed across 17 tracked files. Emitted bytes move only where
 # a template cites the PRD by filename (assumption-ledger.md in both fixtures,
 # loop.sh / goal-config.md in agent). No logic; counts unchanged.
+# [freeze-exception no. 71, 2026-08-14] X-37 / item 1b: Class B CLOSED. A
+# downloader inside a substitution whose value lands at an EXECUTION position
+# (`bash -c "$(curl url)"`, `eval`, a bare sub/backtick at command position,
+# `bash <(curl url)`, `bash <<< "$(curl url)"`) now denies on both substrates
+# via cmdpos.subst_to_shell_regex, rendered into the dependency-gate body.
+# BLAST RADIUS DERIVED BY RENDERING BOTH TREES, not transcribed: `.claude/
+# hooks/dependency-gate.sh` ONLY - one body per fixture. NOT `gates.py`,
+# because retrofit emits none (see the note above; the greenfield twin moves
+# two bodies because it does). Artifact SET identical, 0 added, 0 dropped;
+# counts unchanged, service 79 / agent 93. 53 differential rows go
+# allow/allow -> deny/deny, every one of them MEASURED allow/allow before the
+# change; the false-positive fence is pinned in the same section and none of
+# it moves.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "322f12ccfaea2fdbf3f4ee5677ef5e3e6f3a8ca006c29322370676473251a203",
-    "agent": "f8a2de4a9c7896ef72ca896fb9283f66563176da1d87e6819a3e8d65708d5679",
+    "service": "287b688c554f63f81b4c13e6f571185cae23c4c4d592d7ca640290f994551d05",
+    "agent": "35fb39699d128a7bea3329dbe8802dc1209f33b50d7443a1c5a0f3c623cc05a8",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

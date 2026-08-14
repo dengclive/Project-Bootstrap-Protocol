@@ -3133,7 +3133,41 @@ EXPECTED_DIGESTS = {
         # Count still 57.
         # Measurement recorded in docs/deferred-backlog.md (X-54),
         # docs/production-readiness.md and the security KB section 6.
-        "3c0a375e45e236c65d95b73d63dcefda526005c6e61b195682b0758c43af9b4e",
+        # [freeze-exception no. 71, 2026-08-14] X-37 / ITEM 1b: CLASS B IS
+        # CLOSED, and it is the second readiness finding this cycle FIXED
+        # rather than re-measured. A downloader inside a substitution whose
+        # value lands at an EXECUTION position - `bash -c "$(curl url)"`,
+        # `eval "$(curl url)"`, a bare `$(curl url)`/backtick at a command
+        # position, `bash <(curl url)`, `bash <<< "$(curl url)"` - was
+        # allow/allow on BOTH substrates at 2.8.0 while really fetching and
+        # running a remote payload. `cmdpos.subst_to_shell_regex` now models
+        # it beside `pipe_to_shell_regex`, which is where the backlog row asked
+        # for it, and both substrates render the ONE source.
+        #
+        # BLAST RADIUS DERIVED BY RENDERING BOTH TREES AND DIFFING ARTIFACT BY
+        # ARTIFACT, not reasoned: 61 artifacts, SET IDENTICAL, 0 added and 0
+        # dropped. TWO bodies move - `.claude/hooks/dependency-gate.sh` and
+        # `.claude/sdk_gates/gates.py` - plus the two files that RECORD their
+        # digests (`.bootstrap-state.json`, `.installer-manifest.json`), which
+        # move because the bodies did. The shared `_HOOK_HEADER` does NOT move,
+        # so the other ten hooks are byte-identical; contrast no. 50, where the
+        # header moved and every hook went with it. Counts unchanged:
+        # 57 / 69 / 59, and the count check PASSED on its own before this
+        # re-baseline - a count move here would have been E5, not a digest.
+        #
+        # 53 differential rows go allow/allow -> deny/deny. EVERY ONE WAS
+        # MEASURED allow/allow AT daf85b9 BEFORE IT WAS WRITTEN INTO THE
+        # CORPUS: a row that never failed proves nothing, and an earlier draft
+        # of this work asserted a residue row that was already `deny` through
+        # D20 because its `>/dev/null` supplied a file token. The 19-row
+        # false-positive fence (`x=$(dl)`, `echo "$(dl)"`, `source "$(dl)"`,
+        # `arr=($(dl))`, `(( $(dl) ))`, `jq . <(dl)`, the HTTP-status idiom)
+        # does not move. ONE over-refusal ships deliberately and is pinned in
+        # both directions: `sudo echo "$(dl)"` denies, because telling a
+        # wrapper's flag VALUE from its command WORD is arity modelling, and
+        # the flags-only alternative was MEASURED to cost `timeout 5 $(dl)`,
+        # `sudo -u root $(dl)` and `watch -n 1 $(dl)` - all live RCE.
+        "dc121f4b0abb3c62f1c3fa58d71a062ff53430541a4ce94824faaa5194da2e00",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3373,7 +3407,7 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
         # correction (see the `default` note): comment-only, in the gate
         # preamble every hook body embeds. No logic changes; count still 69.
-        "b72a35b92ced996270967c23f24315cc3dddedefcf150085b7da77a377055a58",
+        "f90336635e2d26dd71b3fe28dea50f2ba113c72fea25fec52a5abf191619263a",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3560,7 +3594,7 @@ EXPECTED_DIGESTS = {
         # correction (see the `default` note): comment-only, in the shared
         # gate preamble. The three design-steering artifacts are again
         # untouched, and the count is still 59.
-        "ba815c1533c6a71c52602e54d74529d21395f419660a0984f500f7b41c3d8b63",
+        "63f198d122603ec4a858847e62d8b3fc9ffc5722a84383bbd03098473e727fb3",
 }
 
 EXPECTED_ACTION_COUNTS = {
