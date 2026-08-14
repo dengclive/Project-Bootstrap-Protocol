@@ -1735,12 +1735,21 @@ The two substrates disagree about which characters separate shell
 words, and the shell's answer depends on the ambient locale.      (X-53)
 ```
 
-**Also owed and NOT run:** a fresh head-class cost measurement on the merged tree
-(`053a367`) — a comparable pass across the head classes, taken together on one
-tree. Some individual post-memo figures do exist (X-54 records 150.95 s at the
-X-52 tip; X-55 records `>240 s KILLED` with the `_lastw` fix), but they were
-taken one shape at a time on different commits, which is why they disagree by up
-to 7% for one shape. See §4.11.
+**Was owed and IS NOW RUN, 2026-08-14.** The fresh head-class measurement — a
+comparable pass across the head classes, taken together on ONE tree — exists.
+Run on `f9c2bb2` rather than the `053a367` this paragraph asked for, which is
+the stronger tree and not a substitution: emitted `gates.py` is AST-identical
+across `053a367..f9c2bb2`, so the figures bind the merged tree AND the v2.8.0
+tag. `dependency-gate`, 80004 B / 4000 jumps, two reps, serial at width 1,
+load ≤ 1.50 per row. **Wrapper heads, all past the 60 s ceiling at ~2.6x:
+`sudo` 156.75-157.19 s, `env` 157.84-159.88 s, `nice` 156.28-156.92 s.
+Transparent heads, flat at 4.9x under: `!`, `{`, `-x`, `echo`, 12.10-12.30 s.**
+Taken together on one tree, the shapes no longer disagree the way the
+one-at-a-time figures did — reps agree to 1.01x and the two classes separate by
+~13x, which is the point of running them together. **The prior figures are
+superseded as CURRENT but stand as historical:** X-54's 150.95 s (X-52 tip,
+pre-memo) and 159.52 s (post-memo) were each true of their tree. X-55's
+`>240 s KILLED` is NOT re-run here and remains owed. See §4.11.
 
 ---
 

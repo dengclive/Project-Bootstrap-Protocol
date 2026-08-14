@@ -21,7 +21,23 @@ legal grant to adopt any of it — §9's "no external adopter can obtain" is
 overtaken in exactly this sense. **Backlog rows `open` = 105**, unchanged from
 `053a367` by the same validated rule (re-validated at 88 on v2.7.4); suite
 **25 / 9,668 / 0**; differential **4,104**; X-54/X-55 still `open` (X-54's own
-row now records **159.52 s** post-memo, 2.7× past the ceiling). The LIT fold
+row recorded **159.52 s** post-memo, 2.7× past the ceiling; **re-measured
+2026-08-14 ON THIS TAG at 156.75–157.19 s for `sudo`, 2.6×** — see the next
+paragraph).
+
+**THE HEAD-CLASS COST MEASUREMENT IS DONE, 2026-08-14 — it was the one item
+this document called owed and claimed nowhere, and it is now claimed here.**
+Measured on `f9c2bb2` (emitted `gates.py` AST identical to the tag's, so it
+binds the release), `dependency-gate`, 80004 B / 4000 jumps, two reps, serial
+at width 1, load ≤ 1.50: **wrapper heads over the 60 s ceiling at ~2.6× —
+`sudo` 156.75–157.19 s, `env` 157.84–159.88 s, `nice` 156.28–156.92 s**;
+**transparent heads 4.9× under it — `!`, `{`, `-x`, `echo` all 12.10–12.30 s.**
+`nice` had never been measured and widens the class from two known members to
+three. **What this does and does not license:** it SIZES the class and removes
+the precondition's excuse, and it does NOT close X-54 — a wrapper head still
+crosses the emitted timeout, so the hook is cancelled, exits 124, and fails
+open. Autonomous mode's precondition was a NUMBER, and the number says the
+class is live on the released tag. The LIT fold
 moves no gate mechanism — emitted `gates.py` AST-identical across
 `053a367..0d4d5af` (`f71ec4a81bae9f826e39d06f361dac5f`), all 11 hook bodies
 identical comment-stripped, settings delta = the `_generatedBy` stamp — so no
