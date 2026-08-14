@@ -344,6 +344,19 @@ gaps, not drift gaps. Every server costs context budget.
 
 {rej}
 
+## Retrieval routing (guardrail) [LIT-04/LIT-05]
+
+Exact recall - which files reference a spec, which decisions touched X,
+secret-path matching - uses lexical or pointer retrieval (grep/ripgrep,
+`.claude/specs/INDEX.md`), never single-vector semantic search alone. A
+semantic index (e.g. Claude Context) is for fuzzy code discovery, paired with
+a lexical fallback; a vector-backed memory MCP, if ever installed, is a fuzzy
+supplement - never the system of record for governance facts. If a vector
+layer is ever chosen, prefer late-interaction/multi-vector or hybrid backends
+over single-vector. The tool harness shapes the memory store as strongly as
+the model does: changing search or edit tooling is a store-affecting
+decision - record it the way a model change is recorded.
+
 ## Don't add (guardrail)
 
 Multiple overlapping memory MCPs; a memory MCP before auto-memory tried;
@@ -2772,6 +2785,7 @@ compensates for**, the **model generation it was calibrated against**, and a
 | Interactive tier-3 hard reset (no acknowledge) | Operator self-override at saturated context being the failure mode | Current runtime-floor model tier | Any pinned-model tier change, or a shift in the substrate's native compaction behavior |
 | Subagent token multipliers (~2–3x mixed-model) | Per-session context cost under the current price/tokenizer structure | Pre-remap estimate; re-derive on Sonnet 5 | Any price/tokenizer or model-tier change |
 | Max-iterations default (10 per task) | Bounded blast radius when a task cannot converge | Current runtime-floor model tier | Any pinned-model tier change |
+| No-lossy-rewrite preservation invariant [LIT-01] | Current-generation condensation tendency in rewrite/summarization passes (silent fact loss) | Current pinned-model generation | Any pinned-model change |
 
 ## How this ledger is used
 
@@ -6333,7 +6347,13 @@ _SKILL_BODIES = {
         "Synopsis sections: current task and spec ID, completed work\n"
         "this session, in-flight (uncommitted) changes, files touched,\n"
         "key decisions made, open questions, state of tests, next\n"
-        "steps. Update `.claude/specs/INDEX.md` to flag the checkpoint."),
+        "steps. Update `.claude/specs/INDEX.md` to flag the checkpoint.\n\n"
+        "Preservation invariant (LIT-01): any rewrite or summarization\n"
+        "of an existing memory artifact must preserve every load-bearing\n"
+        "fact - decisions, failed approaches with their do-not-retry\n"
+        "flags, source locators and citations - or link to it.\n"
+        "Condensation may drop prose; it may never drop a fact, a flag,\n"
+        "or a citation."),
     "resume": (
         "Load the most recent checkpoint (or a chosen one) from\n"
         "`.claude/sessions/`.\n\n"
@@ -7427,6 +7447,12 @@ Lint rule (GR2-01, compose-do-not-fork): a `progress.md` must LINK to
 `decisions.md`, `learnings/`, and the latest checkpoint — never inline their
 content. Keep every section terse; the audit detail lives in the linked
 artifacts, not here.
+
+Preservation invariant (LIT-01): any rewrite or summarization of an existing
+memory artifact (this file, `decisions.md`, `learnings/`, checkpoints) must
+preserve every load-bearing fact — decisions, failed approaches with their
+do-not-retry flags, source locators and citations — or link to it.
+Condensation may drop prose; it may never drop a fact, a flag, or a citation.
 """
 
 
