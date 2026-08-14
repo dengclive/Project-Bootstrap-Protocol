@@ -16,13 +16,18 @@ buy.
   **DECIDED 2026-08-14 by the operator: Apache-2.0.** Unblocked; no longer E3.
   `git ls-files | grep -icE 'licen[cs]e'` → **0** on the v2.8.0 tag. §1: the
   verdict *"cannot have moved"* while a second tagged, adoptable release ships
-  with no legal grant. Add `LICENSE` (Apache-2.0 full text), the `NOTICE`
-  attribution file the licence's patent/attribution mechanism expects, and the
-  README statement. Step 4's failing check: a test asserting
-  `git ls-files | grep -icE 'licen[cs]e'` is **non-zero** — red now, green
-  after. **Not batched** — this is the A-tier item and it moves the verdict.
-  Step 10 MUST amend `docs/production-readiness.md` §1: this removes one of the
-  two legs the verdict rests on.
+  with no legal grant. Add `LICENSE` (Apache-2.0 full text) and the README
+  statement. **NO NOTICE** — this line previously prescribed one and misstated
+  why: NOTICE does not carry the patent grant (§3 does), and Apache-2.0 requires
+  only that an *existing* NOTICE be propagated by downstream redistributors.
+  Step 4's failing check went in `tests/test_doc_citations.py` section 5 (it
+  has `tracked` from `git ls-files`); it pins that LICENSE is TRACKED, not
+  merely on disk. **Not batched.**
+  **CORRECTED: this does NOT amend §1 in place.** `production-readiness.md` is
+  a layered document whose §1 leg is measured against named shas and stays true
+  of them; the item adds a **new dated layer** and MARKS the historical ones.
+  And it removes one of **three** negative legs, not two — X-37 and C-2 stand,
+  so the verdict does not move.
 
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/templates.py`, `lib/sdk_gates_template.py`,

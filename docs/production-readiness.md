@@ -5,6 +5,36 @@ written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` �
 `d884a43`, which is where this analysis started and against which every delta
 below is measured.
 
+**C-1 IS CLOSED, 2026-08-14 — the first finding in this document to be FIXED
+rather than re-measured.** `LICENSE` (Apache-2.0, verbatim from apache.org,
+sha256 `cfc7749b…d30`) and a README licence statement are tracked as of this
+commit; `git ls-files | grep -icE 'licen[cs]e'` now returns non-zero and is
+pinned by `tests/test_doc_citations.py` section 5, so deleting it is no longer
+silent. Operator's choice of licence, recorded 2026-08-14. No NOTICE, by
+decision — Apache-2.0 requires only that an *existing* NOTICE be propagated,
+and this project vendors nothing.
+
+**THIS IS A NEW LAYER, NOT A CORRECTION, AND THE DISTINCTION IS THE WHOLE
+POINT.** Every sentence below about there being no LICENSE was measured against
+a named sha — `d884a43`, `e47d827`, `6f77ccc`, `0d4d5af` — and **remains true of
+those trees forever**. They are marked, not rewritten, per this document's own
+rule that *"nothing that was measured is deleted when it stops being current,
+because a finding that WAS true is the only way to show what a change actually
+bought."* What goes stale is the present-tense inference drawn from them, and
+that inference is superseded here.
+
+**WHAT THIS DOES NOT BUY, said plainly: the verdict does not move.** §1 rests on
+three negative legs and this closes one. Still standing: **(a)** the emitted
+gates are not a reliable security boundary — X-37 (Class B, download-then-run
+laundered through a substitution) is `open` and a remote payload still runs;
+**(b)** the autonomous-mode wrappers dispatch nothing (C-2). §1's *"C-1 alone
+settles it either way"* means C-1 was **independently sufficient** for
+"not ready", not that it was the only ground. **`main` is still not production
+ready** — now on two legs instead of three. (The RE-BASE layer's *"one of the
+verdict's two supporting legs"* counts the two SECURITY legs, excluding the
+licence; both readings are in the tree and neither is wrong, so this note names
+the leg it means rather than adding a third count.)
+
 **SUBJECT NOTE, 2026-08-14 — `main` has moved; nothing below is re-measured.**
 `main` is now **`0d4d5af` = annotated tag `v2.8.0`** (PR #66 `3af0c11` — the
 X-52 docs line, and NOT docs-only: per its merge diff, this document's RE-BASE
@@ -622,7 +652,7 @@ document, not regressions.
 
 | # | Finding | Note |
 |---|---|---|
-| C-1 | **No LICENSE at tag `v2.7.4` — nor anywhere since** | **STILL TRUE @ e47d827.** Re-verified 2026-08-09: `git ls-tree -r --name-only` finds no `LICEN[CS]E` at the tag, at `main` (6f77ccc), or at the branch (e47d827); README carries no license statement either. Exactly two tracked files were added after the tag (`docs/production-readiness.md` — then named `production-readiness-v2-7-4.md` — and `tests/test_doc_citations.py`). A public repo with no legal grant to adopt. Cheapest fix here, and a hard blocker. |
+| C-1 | **No LICENSE at tag `v2.7.4` — nor anywhere since** [**CLOSED 2026-08-14** — see the top layer; the row's measurements stay true of the shas they name, and its clause *"README carries no license statement either"* is now false of `main` and true of every sha it was measured against] | **STILL TRUE @ e47d827.** Re-verified 2026-08-09: `git ls-tree -r --name-only` finds no `LICEN[CS]E` at the tag, at `main` (6f77ccc), or at the branch (e47d827); README carries no license statement either. Exactly two tracked files were added after the tag (`docs/production-readiness.md` — then named `production-readiness-v2-7-4.md` — and `tests/test_doc_citations.py`). A public repo with no legal grant to adopt. Cheapest fix here, and a hard blocker. |
 | C-2 | **Autonomous-mode wrappers dispatch nothing** | **STILL TRUE @ e47d827**, with a count correction. `loop.sh`, `goal-loop.sh` and `auto.sh` are byte-identical to the tag. `loop.sh` has 8 `claude -p` occurrences — **6 in comments, 2 in `echo … >&2` advisories** — and `goal-loop.sh` has 10 — **8 in comments, 2 in advisories**: four non-comment occurrences in total, all echoes (the original said two). `loop.sh:3` reads *"SKELETON: the claude -p iteration loop is intentionally unimplemented"*. Driven end-to-end past the eligibility guards with a `loop_eligible: true` task, `loop.sh` prints *"No agent work was dispatched."* and exits 1; `goal-loop.sh` does the same. |
 | C-3 | **Nothing protects the gate substrate from itself** | **STILL TRUE @ e47d827.** Re-measured end-to-end on a stock install with a canary `.env`, positive control first: the five-hook Bash chain DENIES `cat .env` and `pip install evil`. Then `printf "exit 0" > .claude/hooks/secrets-gate.sh` is **allowed** by all five and executes (secrets-gate.sh becomes 6 bytes); `cat .env` is then allowed and returns `SECRET=CANARY-…`; `cat .env > /dev/null && echo STOLEN:$(cat .env)` prints the secret. `printf "{}" > .claude/settings.json` is allowed too, and so is the same overwrite via the **Write tool**. Identical against a `git archive v2.7.4` install. |
 | C-4 | **P-19 — a `jq` that *exits 0 without parsing* fails every parsing gate open** | **CORRECTION — the row as written on 2026-08-08 was over-broad**, and reproduces over-broad at the tag (`jget` is byte-identical tag↔branch). "A broken `jq` fails every parsing gate open" is false: **only the exit-0 shape fails open.** P-19's own substrate, the defensive wrapper `real-jq "$@" 2>/dev/null \|\| true; exit 0`, gives `cat .env` rc=0 and `npm install evil` rc=0, with a marker proving the fake ran. Every other breakage **denies**: `jq` exiting 127 (the asdf/mise shim, the broken-`libonig` image), `chmod 644` jq, and jq absent entirely all give rc=2, because P0-3d's exit-status check already catches them. The remedy is §4.6's capability probe — parse a known literal — **not** an operator `jq` shim. Still a live, marker-proven fail-open; narrower than stated. |
