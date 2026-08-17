@@ -331,8 +331,18 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # first finding this cycle fixed rather than re-measured; graded `corrected`
 # because the plan review found six defects in the plan, one of which would
 # have rewritten history that is true of the shas it names).
+# 33rd entry 2026-08-16: b1b-fence-pins, corrected (pinned the item-1b
+# false-positive fence, which did not exist at all; graded `corrected` because
+# six of the ten blocking/confirmed review findings were false claims of mine,
+# one of which would have pinned a fetch-then-execute shape as a permanent
+# `allow` — the exact inversion the item exists to prevent — and all six were
+# caught before merge).
+# 34th entry 2026-08-16: sdk-pipe-trigger-redos, clean (a FINDING, filed, not
+# an implementation: `_PIPE_TO_SHELL` backtracks exponentially at exactly 2.00x
+# per prefix token, 134 bytes crosses the SDK's 60 s timeout while the shell
+# denies in 0.03 s, and both prototype fixes were measured DEAD).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 32, f"{len(es)} entries")
+      len(es) == 34, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
