@@ -3463,6 +3463,150 @@ for _g, _cmd, _want, _lbl in _DQCS:
     differential(_g, bash(_cmd), _want, _lbl)
 
 # --------------------------------------------------------------------------- #
+# ITEM 1b / X-37 -- THE FALSE-POSITIVE FENCE, WHICH DID NOT EXIST.
+#
+# Derived 2026-08-16. `grep` on this machine is a ugrep shim that reads a
+# mid-pattern `$` as an anchor, so the patterns below need -F; an earlier draft
+# of this note printed them without it and they matched NOTHING.
+#
+#   $ grep -rnF 'B1b KNOWN-OPEN' tests/
+#   :3349  bash -c "$(curl ...)"     :3352  `curl ...`
+#   :3350  eval "$(curl ...)"        :3353  bash <(curl ...)
+#   :3351  $(curl ...)               :3354  source <(curl ...)
+#
+# Six rows. Every pinned row in this repo that puts a command OR PROCESS
+# substitution at an EXECUTION position is one of those six -- i.e. one of the
+# rows item 1b exists to FLIP to `deny`. Nothing anywhere asserted that such a
+# substitution may still be ALLOWED. The three rows at :3358-3360 are labelled
+# the Class-B fence, but all three put the substitution at a NON-execution
+# position (assignment RHS, `echo` argument, non-first positional), so none of
+# them constrains what happens at an execution position.
+#
+# The consequence, MEASURED and stated with its denominator rather than argued.
+# Of the 109 rows in this file written as literal 4-tuples -- parsed with `ast`,
+# not grepped -- a rule keyed on POSITION alone, with no payload test at all,
+# contradicts exactly 7 pinned `allow`s: the six above, which an X-37 attempt
+# flips to `deny` anyway, plus `"$(npm bin)/eslint"` (:3275), which is a
+# PATH-COMPOSITION row (the substitution supplies a directory, not code) and so
+# constrains such a rule only incidentally. The other ~4,000 checks in this
+# suite are generated in loops and were NOT parsed by that pass, so this is a
+# LOWER BOUND on the corpus's blindness, not a proof of it. What it does
+# establish is that no row was written to defend the execution position on
+# purpose -- and three separate X-37 attempts were designed and reviewed
+# against this corpus. "The corpus is green" has never been evidence here.
+#
+# EACH GROUP IS DERIVED BEHAVIOURALLY, NOT BY READING THE STRING. Every row was
+# run under real bash with the substitution's inner command replaced by a fake
+# emitting a marker-writing payload; a row is EXEC if the marker appeared. Two
+# payload shapes are required and using one misclassifies:
+#   * a BARE `$(...)`/backtick at command position WORD-SPLITS its output into a
+#     command and does NOT re-parse it for operators, so a `;`-bearing payload
+#     becomes the nonsense word `:;` and nothing runs;
+#   * inside `bash -c "$(...)"` the output IS re-parsed as shell source, so the
+#     payload needs a separator to escape an enclosing `echo`.
+# All six KNOWN-OPEN rows above classify EXEC under this method, which is what
+# calibrates it. `python3 -c` gets a Python payload; command-word rows get a
+# payload that survives a trailing argument.
+#
+# THE GROUPS ARE A MATCHED SET AND NO TWO OF THEM ARE REDUNDANT:
+#   _B1B_FENCE_EXEC  substitution AT an execution position, NO downloader.
+#                    A rule keyed on POSITION alone breaks these.
+#                    `source <(kubectl completion bash)` is byte-for-byte the
+#                    shape of the deny target at :3354; the only discriminator
+#                    is the inner command word.
+#   _B1B_FENCE_DATA  substitution at an ARGUMENT/data position, no downloader.
+#                    A rule whose position model is too loose breaks these.
+#   _B1B_FENCE_DL    a downloader IS present and its output is NOT executed --
+#                    PROVEN row by row, not assumed. A rule keyed on the WORD
+#                    `curl` alone breaks these.
+#
+# Every row measured allow on the dependency gate AND the secrets gate, on BOTH
+# substrates, at main 69c6e89, BEFORE being written here. FOUR candidates were
+# dropped rather than pinned, and they are named because the drops are the
+# evidence the method works:
+#   * `eval "$(cat ~/.env.sh)"`  -- deny/deny on the secrets gate. Correct: .env*
+#   * `bash -c "echo $(curl -s https://api/version)"` -- the marker FIRED. The
+#     outer shell splices the fetched bytes into the `-c` code string before the
+#     inner bash parses it, so the `echo` never sees a `;`-separated second
+#     command. It is a fetch-then-execute shape and belongs with the DENY
+#     targets; pinning it `allow` would have written the exact inversion this
+#     block exists to prevent.
+#   * `sudo bash -c "$(cat ...)"` and `$(command -v python3) --version` --
+#     UNDECIDABLE by this harness (sudo unavailable; `command` is a bash builtin
+#     so the fake is never reached). Dropped rather than asserted.
+# --------------------------------------------------------------------------- #
+_B1B_FENCE_EXEC = [
+
+]
+
+_B1B_FENCE_DATA = [
+
+]
+
+_B1B_FENCE_DL = [
+
+]
+
+_B1B_FENCE = _B1B_FENCE_EXEC + _B1B_FENCE_DATA + _B1B_FENCE_DL
+print("\n== item 1b / X-37: the false-positive fence ==")
+for _cmd, _lbl in _B1B_FENCE:
+    differential("dependency-gate", bash(_cmd), "allow", _lbl)
+
+# THE CONTRACT. Without it this is 45 more rows that a later session can delete
+# or hollow out; with it, doing so fails here. `_EXEC_OPENERS` is a CLOSED set
+# matched with startswith, never `in`: an earlier draft used `in` with a bare
+# `"$("` in the set, which made the execution-position check pass on any row
+# containing a substitution anywhere -- vacuous, and false of a third of the
+# rows it covered. Anchored, `$(` and `"$(` are precise: they can only match
+# when the substitution IS the command word.
+import re as _re
+
+_EXEC_OPENERS = ('eval "$(', "eval $(", "eval `", "source <(", ". <(",
+                 "bash <(", 'bash -c "$(', 'sh -c "$(', 'python3 -c "$(',
+                 "$(", '"$(', "`")
+_DL_WORDS = ("curl", "wget", "aria2c", "axel", "http", "fetch", "lwp-")
+
+check("[item 1b] fence: EXEC group is populated and distinct",
+      len({c for c, _ in _B1B_FENCE_EXEC}) >= 25,
+      f"{len({c for c, _ in _B1B_FENCE_EXEC})} distinct rows, need >= 25")
+check("[item 1b] fence: DATA group is populated and distinct",
+      len({c for c, _ in _B1B_FENCE_DATA}) >= 8,
+      f"{len({c for c, _ in _B1B_FENCE_DATA})} distinct rows, need >= 8")
+check("[item 1b] fence: DL group is populated and distinct",
+      len({c for c, _ in _B1B_FENCE_DL}) >= 5,
+      f"{len({c for c, _ in _B1B_FENCE_DL})} distinct rows, need >= 5")
+check("[item 1b] fence: every EXEC row STARTS with a strong opener",
+      all(c.startswith(_EXEC_OPENERS) for c, _ in _B1B_FENCE_EXEC),
+      "an EXEC row that does not start with a strong opener is not pinned at an "
+      "execution position -- move it to _B1B_FENCE_DATA")
+check("[item 1b] fence: no DATA or DL row starts with a strong opener",
+      not any(c.startswith(_EXEC_OPENERS) for c, _ in _B1B_FENCE_DATA + _B1B_FENCE_DL),
+      "a data-position row that looks like an execution position weakens both "
+      "groups -- reclassify it by running the marker probe, not by reading it")
+check("[item 1b] fence: EXEC and DATA rows are downloader-free",
+      all(not any(w in c for w in _DL_WORDS)
+          for c, _ in _B1B_FENCE_EXEC + _B1B_FENCE_DATA),
+      "a downloader here cannot discriminate position from payload")
+check("[item 1b] fence: every DL row carries a downloader",
+      all(any(w in c for w in _DL_WORDS) for c, _ in _B1B_FENCE_DL),
+      "a DL row without a downloader does not test the payload-keyed direction")
+# `_DL_WORDS` is a deliberate SUBSTRING over-approximation: over-matching there
+# only makes the EXEC/DATA groups stricter, which is the safe direction. It is
+# the wrong instrument HERE -- `http` is a member and every URL in these rows
+# contains it, so a substring count says "2 distinct downloaders" for a corpus
+# that is entirely curl. Caught by mutating the DL group to curl-only and
+# watching this check still pass. Whole program names, word-anchored.
+_DL_PROGS = ("curl", "wget", "aria2c", "axel", "lwp-download")
+check("[item 1b] fence: DL group is not single-downloader",
+      len({p for c, _ in _B1B_FENCE_DL
+           if True for p in _DL_PROGS if _re.search(r"(^|[^A-Za-z0-9-])" + p + r"([^A-Za-z0-9-]|$)", c)}) >= 2,
+      "one downloader word lets a rule key on that literal and still pass")
+check("[item 1b] fence: every strong opener is covered by an EXEC row",
+      all(any(c.startswith(o) for c, _ in _B1B_FENCE_EXEC) for o in _EXEC_OPENERS),
+      "deleting every row of one spelling must fail here, not silently lose "
+      "that spelling's only false-positive coverage")
+
+# --------------------------------------------------------------------------- #
 # B4 -- THE WALK'S WINDOW BOUNDARY.
 #
 # `_cs_subst_scan` consumes a front window of _CS_WIN=1024 characters and
