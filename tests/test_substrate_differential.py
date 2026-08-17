@@ -3536,15 +3536,57 @@ for _g, _cmd, _want, _lbl in _DQCS:
 #     so the fake is never reached). Dropped rather than asserted.
 # --------------------------------------------------------------------------- #
 _B1B_FENCE_EXEC = [
-
+    ('eval "$(ssh-agent -s)"', 'eval of ssh-agent init'),
+    ('eval "$(pyenv init -)"', 'eval of pyenv init'),
+    ('eval "$(rbenv init -)"', 'eval of rbenv init'),
+    ('eval "$(direnv hook bash)"', 'eval of direnv hook'),
+    ('eval "$(starship init bash)"', 'eval of starship init'),
+    ('eval "$(zoxide init bash)"', 'eval of zoxide init'),
+    ('eval "$(conda shell.bash hook)"', 'eval of conda hook'),
+    ('eval "$(dircolors -b)"', 'eval of dircolors'),
+    ('eval $(minikube docker-env)', 'eval UNQUOTED of docker-env'),
+    ('eval "$(docker-machine env default)"', 'eval of docker-machine env'),
+    ('eval "$(fzf --bash)"', 'eval of fzf init'),
+    ('eval "$(op signin)"', 'eval of 1password signin'),
+    ('eval "$(aws ecr get-login --no-include-email)"', 'eval of aws ecr login'),
+    ('eval `dircolors -b`', 'eval of a BACKTICK sub -- twin of the :3352 deny target'),
+    ('source <(kubectl completion bash)', 'source procsub -- twin of the :3354 deny target'),
+    ('source <(helm completion bash)', 'source procsub, helm'),
+    ('source <(npm completion)', 'source procsub, npm'),
+    ('. <(kubectl completion bash)', 'dot procsub'),
+    ('. <(fzf --bash)', 'dot procsub, fzf'),
+    ('. <(grep -v "^#" env.list)', 'dot procsub of a filter'),
+    ('bash <(sed s/a/b/ tpl.sh)', 'bash procsub -- twin of the :3353 deny target'),
+    ('source <(cat completions.bash)', 'source procsub of cat'),
+    ('bash -c "$(cat scripts/deploy.sh)"', 'bash -c of a LOCAL file -- twin of :3349'),
+    ('python3 -c "$(cat gen.py)"', 'python3 -c of a local file'),
+    ('bash -c "$(cat /dev/null)"', 'bash -c of empty input'),
+    ('sh -c "$(cat scripts/deploy.sh)"', 'sh -c of a local file'),
+    ('$(which python3) --version', 'sub at the COMMAND-WORD position -- twin of :3351'),
+    ('"$(which node)" app.js', 'QUOTED sub at the command-word position'),
+    ('`which python3` --version', 'BACKTICK at the command-word position -- twin of :3352'),
 ]
 
 _B1B_FENCE_DATA = [
-
+    ('cd "$(git rev-parse --show-toplevel)"', 'cd to a computed path'),
+    ('make -j$(nproc) all', 'computed parallelism flag'),
+    ('docker run --rm "$(docker build -q .)"', 'run a just-built image id'),
+    ('export PATH="$(brew --prefix)/bin:$PATH"', 'computed PATH'),
+    ('tar czf backup-$(date +%F).tgz src/', 'computed filename'),
+    ('echo "linux-$(uname -r)"', 'computed string'),
+    ('git checkout "$(git rev-parse HEAD~1)"', 'computed rev'),
+    ('source "$(find . -name env.sh)"', 'source a COMPUTED FILENAME -- output is a PATH, not code'),
+    ('PATH="$(dirname "$(which python3)")":$PATH', 'nested substitution into an assignment'),
 ]
 
 _B1B_FENCE_DL = [
-
+    ('docker build --build-arg V="$(curl -s https://api/v)" .', 'downloader output as a build arg'),
+    ('VER=$(curl -s https://api/v); echo $VER', 'downloader output captured then printed'),
+    ('echo "version: $(curl -s https://api/v)"', 'downloader output echoed'),
+    ('git checkout "$(curl -s https://api/rev)"', 'downloader output as a rev operand'),
+    ('tar czf "$(curl -s https://api/name).tgz" src/', 'downloader output as a filename'),
+    ('docker run --rm "$(curl -s https://api/tag)"', 'downloader output as an image tag'),
+    ('V=$(wget -qO- https://api/v); echo "$V"', 'WGET output captured then printed'),
 ]
 
 _B1B_FENCE = _B1B_FENCE_EXEC + _B1B_FENCE_DATA + _B1B_FENCE_DL
