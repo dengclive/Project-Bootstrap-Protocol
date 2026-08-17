@@ -35,10 +35,40 @@ buy.
   **`_cost_guard` CANNOT SEE IT.** It measures LENGTH (`_CMD_MAXLEN` 81920) and
   DENSITY (`_CMD_MAXJUMP` 8191); this payload is 134 bytes with **zero** jump
   bytes. The axis is **TOKEN COUNT at fixed length** and nothing measures it.
-  **BLAST RADIUS IS NARROWER THAN IT LOOKS, MEASURED:** of the three SDK regexes
-  carrying `prefix_run`, only `_PIPE_TO_SHELL` blows up. `_ANCHOR` and
-  `_INSTALL_HEAD` are flat at n=24, because the blowup needs a **failing tail**
-  after the prefix run and only `_PIPE_TO_SHELL` has one.
+  **BLAST RADIUS — THE FIRST STATEMENT OF IT WAS FALSE AND IS CORRECTED HERE
+  RATHER THAN REWRITTEN.** This row and ledger entry 34 first said *"only
+  `_PIPE_TO_SHELL` blows up; `_ANCHOR` and `_INSTALL_HEAD` are flat at n=24"*.
+  **`_INSTALL_HEAD` is NOT flat.** What was timed was `cmdpos.install_head_tail()`
+  — the TAIL BUILDER. The emitted object is a different thing:
+  `_CMD_PFX_RE` (gates.py:79) is the prefix run, `_PREFIX = _CMD_PFX_RE` (:1775),
+  and `_INSTALL_HEAD = re.compile(r"^\s*" + _PREFIX + _INSTALL_TAIL)` (:1801) —
+  prefix run followed by a failable tail, i.e. the vulnerable shape. Measured on
+  the emitted compiled objects, payload `"env " x n + "zzz"`:
+  `_INSTALL_HEAD` 0.013 / 0.204 / 0.824 / 3.289 / 13.160 s and `_PIPE_TO_SHELL`
+  0.016 / 0.254 / 1.016 / 4.116 / 16.405 s at n = 14 / 18 / 20 / 22 / 24.
+  **THREE of the emitted objects carry the prefix run and ALL THREE blow up**,
+  and `_ANCHOR` does not exist in the emitted module at all. The third is
+  `_GIT_VERB_TMPL` (gates.py:1739), which splices `_CMD_PFX_RE` and is compiled
+  per call as `pat = _GIT_VERB_TMPL % verb`; a scan for module-level COMPILED
+  patterns cannot see a template compiled at call time, which is how the first
+  two counts of this set were both wrong. Measured
+  `_GIT_VERB_TMPL % "commit"` on `"env " x n + "zzz"`: 0.0064 / 0.1032 / 0.4135
+  / 1.6492 / 6.6510 s at n = 14 / 18 / 20 / 22 / 24, the same base-2 shape.
+  **`_git_verb` is the FIRST statement of spec-gate-commit, test-gate and
+  eval-gate, so ONE 121-byte payload costs FOUR gates:** dependency-gate
+  12.867 s, eval-gate 7.757 s, spec-gate-commit 7.805 s, test-gate 7.787 s.
+  **AND THE COST IS NOT A COUNT — IT IS AN INTERLEAVING.** Measured end to end:
+  1 wrapper + 800 assignments is 3207 B / 802 tokens / **0.20 s**, while
+  6 wrappers x 16 assignments is 411 B / 103 tokens / **>95 s**. So no cap on
+  length, bytes or token count separates benign from attack, and any fence must
+  key on the parse/interleaving structure instead.
+  **AND THE REACHABLE ATTACK IS SIMPLER THAN FIRST REPORTED — no downloader, no
+  pipe, no substitution.** `"env " x n + "zzz ; pip install evilpkg"` end to end
+  on the emitted gate: n=24 121 B 13.20 s, n=25 125 B 26.44 s, n=26 129 B
+  51.62 s, **n=27 133 B 102.32 s** — 133 bytes of ordinary words, zero jump
+  bytes, past the 60 s ceiling, with a genuine `pip install` deny never
+  delivered. This makes the item MORE urgent, not less. `verify the artifact you
+  measured` — logged again.
   **TWO OBVIOUS FIXES ARE ALREADY DEAD, BY MEASUREMENT — DO NOT RE-PROPOSE:**
   atomic-grouping the whole prefix run (`(?>...)`) kills the cost completely
   (0.0000 s at n=2000) but turns **17 of 29** live denies into ALLOWS, every one

@@ -341,8 +341,12 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # an implementation: `_PIPE_TO_SHELL` backtracks exponentially at exactly 2.00x
 # per prefix token, 134 bytes crosses the SDK's 60 s timeout while the shell
 # denies in 0.03 s, and both prototype fixes were measured DEAD).
+# 35th entry 2026-08-17: sdk-pipe-trigger-redos-correction, harmful (entry 34's
+# blast-radius claim reached main and was false -- `_INSTALL_HEAD` is vulnerable
+# too, and the reachable attack needs no downloader, no pipe and no
+# substitution: 133 bytes of ordinary words, zero jump bytes, 102.32 s).
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 34, f"{len(es)} entries")
+      len(es) == 35, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
