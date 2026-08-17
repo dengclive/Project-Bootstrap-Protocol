@@ -3475,12 +3475,17 @@ for _g, _cmd, _want, _lbl in _DQCS:
 #   :3351  $(curl ...)               :3354  source <(curl ...)
 #
 # Six rows. Every pinned row in this repo that puts a command OR PROCESS
-# substitution at an EXECUTION position is one of those six -- i.e. one of the
-# rows item 1b exists to FLIP to `deny`. Nothing anywhere asserted that such a
-# substitution may still be ALLOWED. The three rows at :3358-3360 are labelled
-# the Class-B fence, but all three put the substitution at a NON-execution
-# position (assignment RHS, `echo` argument, non-first positional), so none of
-# them constrains what happens at an execution position.
+# substitution at an execution position was one of those six -- i.e. one of the
+# rows item 1b exists to FLIP to `deny` -- WITH ONE INCIDENTAL EXCEPTION found
+# at step 7: `"$(npm bin)/eslint"` (:3275) is pinned `allow` and the
+# substitution's output DOES select the executed program (measured: with `npm`
+# faked to emit a directory, the named `eslint` runs). It is a path-naming row
+# pinned for an unrelated reason, not a defence of the execution position. So
+# the corpus held exactly ONE such row, incidentally, and none written on
+# purpose. The three rows at :3358-3360 are labelled the Class-B fence, but all
+# three put the substitution at a NON-execution position (assignment RHS,
+# `echo` argument, non-first positional), so none of them constrains what
+# happens at an execution position.
 #
 # The consequence, MEASURED and stated with its denominator rather than argued.
 # Of the 109 rows in this file written as literal 4-tuples -- parsed with `ast`,
@@ -3514,7 +3519,12 @@ for _g, _cmd, _want, _lbl in _DQCS:
 #                    `source <(kubectl completion bash)` is byte-for-byte the
 #                    shape of the deny target at :3354; the only discriminator
 #                    is the inner command word.
-#   _B1B_FENCE_DATA  substitution at an ARGUMENT/data position, no downloader.
+#   _B1B_FENCE_PATH  the output NAMES the program or file that is executed --
+#                    NOT code, but it still decides what runs. The strongest
+#                    constraint here, and the filename-vs-code fence
+#                    (`source "$(dl)"` allow vs `source <(dl)` deny) lives in it.
+#   _B1B_FENCE_DATA  substitution at an ARGUMENT/data position: the output is
+#                    neither code nor the name of anything executed.
 #                    A rule whose position model is too loose breaks these.
 #   _B1B_FENCE_DL    a downloader IS present and its output is NOT executed --
 #                    PROVEN row by row, not assumed. A rule keyed on the WORD
@@ -3562,9 +3572,27 @@ _B1B_FENCE_EXEC = [
     ('python3 -c "$(cat gen.py)"', 'python3 -c of a local file'),
     ('bash -c "$(cat /dev/null)"', 'bash -c of empty input'),
     ('sh -c "$(cat scripts/deploy.sh)"', 'sh -c of a local file'),
-    ('$(which python3) --version', 'sub at the COMMAND-WORD position -- twin of :3351'),
-    ('"$(which node)" app.js', 'QUOTED sub at the command-word position'),
-    ('`which python3` --version', 'BACKTICK at the command-word position -- twin of :3352'),
+]
+
+# [step 7] THE THIRD RELATIONSHIP, WHICH THIS BLOCK ORIGINALLY MISSED AND WAS
+# INTERNALLY INCONSISTENT ABOUT. A substitution's output can be (1) executed AS
+# CODE, (2) the NAME of the program or file that is then executed, or (3) pure
+# data. The first draft had only two groups, filed the `which` rows under EXEC
+# and `source "$(find ...)"` under DATA -- and those two are the SAME
+# relationship. Measured: with the inner command faked to emit a path,
+# `source "$(find . -name env.sh)"` and `"$(npm bin)/eslint"` both RUN the named
+# file, while `cd "$(...)"`, `echo "$(...)"` and `git checkout "$(...)"` do not.
+#
+# These rows carry the STRONGEST constraint in the block: the substitution
+# decides what runs, and they must STILL allow. `source "$(dl)"` allow versus
+# `source <(dl)` deny is the filename-vs-code fence the X-37 row names by hand,
+# and it lives here.
+_B1B_FENCE_PATH = [
+    ('$(which python3) --version', 'sub NAMES the program -- twin of :3351'),
+    ('"$(which node)" app.js', 'QUOTED sub names the program'),
+    ('`which python3` --version', 'BACKTICK names the program -- twin of :3352'),
+    ('source "$(find . -name env.sh)"',
+     'source a COMPUTED FILENAME -- bytes are not code, but bash RUNS the file they name'),
 ]
 
 _B1B_FENCE_DATA = [
@@ -3575,7 +3603,6 @@ _B1B_FENCE_DATA = [
     ('tar czf backup-$(date +%F).tgz src/', 'computed filename'),
     ('echo "linux-$(uname -r)"', 'computed string'),
     ('git checkout "$(git rev-parse HEAD~1)"', 'computed rev'),
-    ('source "$(find . -name env.sh)"', 'source a COMPUTED FILENAME -- output is a PATH, not code'),
     ('PATH="$(dirname "$(which python3)")":$PATH', 'nested substitution into an assignment'),
 ]
 
@@ -3589,7 +3616,8 @@ _B1B_FENCE_DL = [
     ('V=$(wget -qO- https://api/v); echo "$V"', 'WGET output captured then printed'),
 ]
 
-_B1B_FENCE = _B1B_FENCE_EXEC + _B1B_FENCE_DATA + _B1B_FENCE_DL
+_B1B_FENCE = (_B1B_FENCE_EXEC + _B1B_FENCE_PATH + _B1B_FENCE_DATA
+              + _B1B_FENCE_DL)
 print("\n== item 1b / X-37: the false-positive fence ==")
 for _cmd, _lbl in _B1B_FENCE:
     differential("dependency-gate", bash(_cmd), "allow", _lbl)
@@ -3604,15 +3632,15 @@ for _cmd, _lbl in _B1B_FENCE:
 import re as _re
 
 _EXEC_OPENERS = ('eval "$(', "eval $(", "eval `", "source <(", ". <(",
-                 "bash <(", 'bash -c "$(', 'sh -c "$(', 'python3 -c "$(',
-                 "$(", '"$(', "`")
+                 "bash <(", 'bash -c "$(', 'sh -c "$(', 'python3 -c "$(')
+_PATH_OPENERS = ("$(", '"$(', "`", 'source "$(')
 _DL_WORDS = ("curl", "wget", "aria2c", "axel", "http", "fetch", "lwp-")
 
 check("[item 1b] fence: EXEC group is populated and distinct",
-      len({c for c, _ in _B1B_FENCE_EXEC}) >= 25,
+      len({c for c, _ in _B1B_FENCE_EXEC}) >= 22,
       f"{len({c for c, _ in _B1B_FENCE_EXEC})} distinct rows, need >= 25")
 check("[item 1b] fence: DATA group is populated and distinct",
-      len({c for c, _ in _B1B_FENCE_DATA}) >= 8,
+      len({c for c, _ in _B1B_FENCE_DATA}) >= 7,
       f"{len({c for c, _ in _B1B_FENCE_DATA})} distinct rows, need >= 8")
 check("[item 1b] fence: DL group is populated and distinct",
       len({c for c, _ in _B1B_FENCE_DL}) >= 5,
@@ -3621,13 +3649,21 @@ check("[item 1b] fence: every EXEC row STARTS with a strong opener",
       all(c.startswith(_EXEC_OPENERS) for c, _ in _B1B_FENCE_EXEC),
       "an EXEC row that does not start with a strong opener is not pinned at an "
       "execution position -- move it to _B1B_FENCE_DATA")
+check("[item 1b] fence: PATH group is populated and distinct",
+      len({c for c, _ in _B1B_FENCE_PATH}) >= 4,
+      f"{len({c for c, _ in _B1B_FENCE_PATH})} distinct rows, need >= 4 -- these carry "
+      f"the strongest constraint: the sub decides WHAT RUNS and must still allow")
+check("[item 1b] fence: every PATH row starts with a path-naming opener",
+      all(c.startswith(_PATH_OPENERS) for c, _ in _B1B_FENCE_PATH),
+      "a PATH row that does not start with one is misfiled")
 check("[item 1b] fence: no DATA or DL row starts with a strong opener",
-      not any(c.startswith(_EXEC_OPENERS) for c, _ in _B1B_FENCE_DATA + _B1B_FENCE_DL),
+      not any(c.startswith(_EXEC_OPENERS + _PATH_OPENERS)
+              for c, _ in _B1B_FENCE_DATA + _B1B_FENCE_DL),
       "a data-position row that looks like an execution position weakens both "
       "groups -- reclassify it by running the marker probe, not by reading it")
-check("[item 1b] fence: EXEC and DATA rows are downloader-free",
+check("[item 1b] fence: EXEC, PATH and DATA rows are downloader-free",
       all(not any(w in c for w in _DL_WORDS)
-          for c, _ in _B1B_FENCE_EXEC + _B1B_FENCE_DATA),
+          for c, _ in _B1B_FENCE_EXEC + _B1B_FENCE_PATH + _B1B_FENCE_DATA),
       "a downloader here cannot discriminate position from payload")
 check("[item 1b] fence: every DL row carries a downloader",
       all(any(w in c for w in _DL_WORDS) for c, _ in _B1B_FENCE_DL),
@@ -3643,8 +3679,9 @@ check("[item 1b] fence: DL group is not single-downloader",
       len({p for c, _ in _B1B_FENCE_DL
            if True for p in _DL_PROGS if _re.search(r"(^|[^A-Za-z0-9-])" + p + r"([^A-Za-z0-9-]|$)", c)}) >= 2,
       "one downloader word lets a rule key on that literal and still pass")
-check("[item 1b] fence: every strong opener is covered by an EXEC row",
-      all(any(c.startswith(o) for c, _ in _B1B_FENCE_EXEC) for o in _EXEC_OPENERS),
+check("[item 1b] fence: every opener is covered by a row of its own group",
+      all(any(c.startswith(o) for c, _ in _B1B_FENCE_EXEC) for o in _EXEC_OPENERS)
+      and all(any(c.startswith(o) for c, _ in _B1B_FENCE_PATH) for o in _PATH_OPENERS),
       "deleting every row of one spelling must fail here, not silently lose "
       "that spelling's only false-positive coverage")
 
