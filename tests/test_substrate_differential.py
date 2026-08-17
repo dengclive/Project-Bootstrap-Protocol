@@ -3494,11 +3494,14 @@ for _g, _cmd, _want, _lbl in _DQCS:
 # flips to `deny` anyway, plus `"$(npm bin)/eslint"` (:3275), which is a
 # PATH-COMPOSITION row (the substitution supplies a directory, not code) and so
 # constrains such a rule only incidentally. The other ~4,000 checks in this
-# suite are generated in loops and were NOT parsed by that pass, so this is a
-# LOWER BOUND on the corpus's blindness, not a proof of it. What it does
-# establish is that no row was written to defend the execution position on
-# purpose -- and three separate X-37 attempts were designed and reviewed
-# against this corpus. "The corpus is green" has never been evidence here.
+# suite are generated in loops and were NOT parsed by that pass. Note which way
+# that cuts, because an earlier draft of this note had it BACKWARDS: an unparsed
+# row can only ADD a constraint on a position-keyed rule, never remove one, so
+# 7-of-109 is an UPPER bound on the corpus's blindness -- the corpus may be less
+# blind than this, it cannot be more. What the pass does establish is that no row
+# was written to defend the execution position on purpose. Against that corpus
+# one X-37 attempt was built, measured green and withdrawn, and a second was
+# killed in plan review. "The corpus is green" has never been evidence here.
 #
 # EACH GROUP IS DERIVED BEHAVIOURALLY, NOT BY READING THE STRING. Every row was
 # run under real bash with the substitution's inner command replaced by a fake
@@ -3542,8 +3545,10 @@ for _g, _cmd, _want, _lbl in _DQCS:
 #     targets; pinning it `allow` would have written the exact inversion this
 #     block exists to prevent.
 #   * `sudo bash -c "$(cat ...)"` and `$(command -v python3) --version` --
-#     UNDECIDABLE by this harness (sudo unavailable; `command` is a bash builtin
-#     so the fake is never reached). Dropped rather than asserted.
+#     UNDECIDABLE by this harness -- `sudo -n` here answers "a password is
+#     required" (sudo IS installed; an earlier draft of this note said it was
+#     not, and that was wrong), and `command` is a bash BUILTIN so a fake of
+#     that name is never reached. Dropped rather than asserted.
 # --------------------------------------------------------------------------- #
 _B1B_FENCE_EXEC = [
     ('eval "$(ssh-agent -s)"', 'eval of ssh-agent init'),
@@ -3619,11 +3624,36 @@ _B1B_FENCE_DL = [
 _B1B_FENCE = (_B1B_FENCE_EXEC + _B1B_FENCE_PATH + _B1B_FENCE_DATA
               + _B1B_FENCE_DL)
 print("\n== item 1b / X-37: the false-positive fence ==")
+# [step 7, L2-3] The count is taken so the contract can guard the PINNING and
+# not merely the lists. The first draft guarded only the lists, so deleting
+# these two lines -- the cheapest possible way to gut the fence -- left all
+# checks green and the suite passing.
+_fence_before = passed + failed
 for _cmd, _lbl in _B1B_FENCE:
     differential("dependency-gate", bash(_cmd), "allow", _lbl)
+_fence_ran = passed + failed - _fence_before
 
-# THE CONTRACT. Without it this is 45 more rows that a later session can delete
-# or hollow out; with it, doing so fails here. `_EXEC_OPENERS` is a CLOSED set
+# THE CONTRACT, AND WHAT IT DOES *NOT* DO -- stated because the step-7 pass
+# found the first draft's version of this sentence to be false.
+#
+# It catches: deleting the pinning loop; deleting or emptying any group;
+# hollowing a group out to identical or junk rows; deleting every row of one
+# spelling; reducing the DL group to a single downloader; and moving a row
+# between groups in the direction that weakens a group's own claim. Seven such
+# mutations were built and run, and all seven fail a check.
+#
+# It does NOT catch, and no string-property contract can:
+#   * a row that genuinely IS at an execution position being PARKED in
+#     `_B1B_FENCE_DATA` and pinned `allow`. Check 5 anchors on the opener, and a
+#     parked row need not start with one. That is the same class as
+#     `bash -c "echo $(curl ...)"`, which this session did catch -- by RUNNING
+#     it, not by reading it. The marker probe is the instrument; this contract
+#     is only the tripwire.
+#   * the DL group being reduced to one consumer SHAPE (all `echo`), losing the
+#     build-arg, assignment-RHS, filename-operand, image-tag and rev-operand
+#     spellings while every check stays green.
+# Treat it as a guard against deletion and hollowing-out, not as evidence of
+# coverage. `_EXEC_OPENERS` is a CLOSED set
 # matched with startswith, never `in`: an earlier draft used `in` with a bare
 # `"$("` in the set, which made the execution-position check pass on any row
 # containing a substitution anywhere -- vacuous, and false of a third of the
@@ -3636,6 +3666,11 @@ _EXEC_OPENERS = ('eval "$(', "eval $(", "eval `", "source <(", ". <(",
 _PATH_OPENERS = ("$(", '"$(', "`", 'source "$(')
 _DL_WORDS = ("curl", "wget", "aria2c", "axel", "http", "fetch", "lwp-")
 
+check("[item 1b] fence: every fence row was actually RUN",
+      _fence_ran == len(_B1B_FENCE),
+      f"{_fence_ran} differential checks ran for {len(_B1B_FENCE)} rows -- the "
+      f"lists exist but the pinning loop does not, which is the cheapest way to "
+      f"gut this block while leaving every other check green")
 check("[item 1b] fence: EXEC group is populated and distinct",
       len({c for c, _ in _B1B_FENCE_EXEC}) >= 22,
       f"{len({c for c, _ in _B1B_FENCE_EXEC})} distinct rows, need >= 25")
@@ -3677,7 +3712,7 @@ check("[item 1b] fence: every DL row carries a downloader",
 _DL_PROGS = ("curl", "wget", "aria2c", "axel", "lwp-download")
 check("[item 1b] fence: DL group is not single-downloader",
       len({p for c, _ in _B1B_FENCE_DL
-           if True for p in _DL_PROGS if _re.search(r"(^|[^A-Za-z0-9-])" + p + r"([^A-Za-z0-9-]|$)", c)}) >= 2,
+           for p in _DL_PROGS if _re.search(r"(^|[^A-Za-z0-9-])" + p + r"([^A-Za-z0-9-]|$)", c)}) >= 2,
       "one downloader word lets a rule key on that literal and still pass")
 check("[item 1b] fence: every opener is covered by a row of its own group",
       all(any(c.startswith(o) for c, _ in _B1B_FENCE_EXEC) for o in _EXEC_OPENERS)
