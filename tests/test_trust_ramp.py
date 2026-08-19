@@ -345,8 +345,13 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # blast-radius claim reached main and was false -- `_INSTALL_HEAD` is vulnerable
 # too, and the reachable attack needs no downloader, no pipe and no
 # substitution: 133 bytes of ordinary words, zero jump bytes, 102.32 s).
+# 36th entry 2026-08-19: sdk-pipe-trigger-redos-fix, harmful (the fix for
+# entries 34/35 landed -- PR #81, merge 897d427 -- and the PR body reached
+# origin carrying four false claims, while the fix loop DIVERGED, 12 findings
+# at i=1 against 16 at i=2, and the operator intervened to strip the branch
+# back to its mechanically-verified core. Both limbs of `harmful`, not one.)
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 35, f"{len(es)} entries")
+      len(es) == 36, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
