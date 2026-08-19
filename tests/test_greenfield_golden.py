@@ -3149,8 +3149,12 @@ EXPECTED_DIGESTS = {
         # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
         # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
         # verified before this re-baseline, so a count move would have been E5
-        # rather than a silent digest.
-        "aa0252adaa59c0c3eaca66e9c737b66bd7c270217c4008afba0368fd94766a76",
+        # rather than a silent digest. [second wave, same exception: the
+        # step-7 review found the `#43 F1` cost rationale falsified by this
+        # change and still present tense in both emitted templates, so the
+        # layered correction moves the bodies again. Counts re-verified
+        # unchanged at 57 / 69 / 59.]
+        "73a7ca313ca53caff295eda00a6f1ca2662d620a885591456abadfcf8a1d1685",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3406,8 +3410,12 @@ EXPECTED_DIGESTS = {
         # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
         # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
         # verified before this re-baseline, so a count move would have been E5
-        # rather than a silent digest.
-        "1d6a39b5e469f5d3ebd7b144468f2376be9745e023b36a891abdda8227b30c67",
+        # rather than a silent digest. [second wave, same exception: the
+        # step-7 review found the `#43 F1` cost rationale falsified by this
+        # change and still present tense in both emitted templates, so the
+        # layered correction moves the bodies again. Counts re-verified
+        # unchanged at 57 / 69 / 59.]
+        "005169101d7bffc090e0f4d889cfeedf6972ba0e3d823dd6f29d30dca99a4661",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3610,8 +3618,12 @@ EXPECTED_DIGESTS = {
         # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
         # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
         # verified before this re-baseline, so a count move would have been E5
-        # rather than a silent digest.
-        "8aa56149e1adc94c6b3953f7f648f013dddc857b2295da464ec5a25612ae6b6a",
+        # rather than a silent digest. [second wave, same exception: the
+        # step-7 review found the `#43 F1` cost rationale falsified by this
+        # change and still present tense in both emitted templates, so the
+        # layered correction moves the bodies again. Counts re-verified
+        # unchanged at 57 / 69 / 59.]
+        "4ac1982f0280f250c6731df03fcc8ff6c1289ea18d1de9224f0435020a660ef9",
 }
 
 EXPECTED_ACTION_COUNTS = {

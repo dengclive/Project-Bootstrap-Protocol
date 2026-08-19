@@ -3042,6 +3042,15 @@ def _install_head_split(seg):
     whatever the harness default does while the shell substrate denies in
     about a second - the SDK-more-permissive direction.
 
+    [sdk-pipe-trigger-redos, 2026-08-19] THE SPELLING ABOVE IS GONE; THE
+    DECISION IT JUSTIFIES IS NOT. `(flag|positional)*` no longer exists - the
+    word run is now a single non-space-run-plus-separator star - and the
+    assignment arm now precedes the wrapper pivot, so it cannot reach past
+    `env`. That shape is no longer
+    quadratic: 0.0039/0.0155/0.0628 s at n=100/200/400 before, against
+    0.0001/0.0001/0.0003 s after. Attempting the match only where it can
+    succeed is still right; the cost figures above are HISTORY.
+
     The tail always ENDS on a verb or runner word (cmdpos.install_completers,
     derived from the same tables the tail is built from), so a match at any
     other token cannot succeed.

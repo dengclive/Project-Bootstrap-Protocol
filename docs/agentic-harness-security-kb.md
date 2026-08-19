@@ -1235,6 +1235,20 @@ open here — the engine backtracks". That sentence is true of matching and
 silently false of the slice taken from it, and it is the reason the defect
 survived several reviews: it read as a proof that this class could not exist.
 
+**[+2026-08-19] AND IT IS FALSE OF MATCHING TOO, WHICH IS THE HALF THIS ENTRY
+GAVE AWAY.** The sentence above concedes "true of matching" and that concession
+is wrong once cost is admitted as a failure mode. Backtracking is what makes the
+match *correct*; it is also what makes DECIDING expensive, and a control that has
+not decided by its deadline has an allow arm. Measured on this repo's own gate:
+an unbounded prefix run whose wrapper arm was ambiguous with itself cost the
+emitted `dependency-gate` **77.56 s CPU on 134 bytes with zero jump bytes**,
+against a declared 60 s timeout — after which the hook is cancelled and the
+command it carries proceeds unscanned, while the other substrate denied the same
+string in 0.03 s. **So the safe/unsafe split is not matching-vs-extraction. It is
+"does this regex have more than one parse of the same token", and that question
+has to be asked of the MATCH as well as of the span.** See §4.11 on worst-case
+cost being a control property, not a performance note.
+
 **Rule, two parts.** A differential over a deny-list control compares the
 **reason**, not only the verdict — for a refusal, the token or class named in
 the message is part of the observation. And wherever a matcher's *span* is used
@@ -1777,7 +1791,7 @@ Derived from the above; ordered by how much each would have caught here.
 - [ ] Every widening carries a **round budget decided in advance**, and an answer to "what if it does not converge". A widening that needs the attacker's full grammar is a parser, not a patch — price it that way, and remember that the honest fix for an over-refusal is often a better *refusal*. `[+2026-08-03]`
 - [ ] No release of a control ships without the **previous-release diff**: install the last tag and the candidate, run one corpus through both substrates of both, and require the "previously denied, now allowed" set to be empty. Cheap, unarguable, and it is the check that ends arguments about whether a fix converged. `[+2026-08-03]`
 - [ ] That diff compares the **reason, not only the verdict** — for a refusal, the token or class the message names is part of the observation. A control can reach the right exit code by inspecting the wrong token, and then a verdict-only differential records it as *unchanged* while a live fail-open sits one spelling away. Measured: `sudo pip install evil npx` was rc=0 while `sudo pip install evil npx more` was rc=2 **blaming `more` rather than `evil`**, in both releases, so the corpus that contained both could not see either. `[+2026-08-04]`
-- [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]`
+- [ ] Wherever a matcher's **matched span** is used to locate something else — arguments, an offset, a remainder — the choice of parse is a second decision needing its own argument. "Does it match" is safe under a greedy unbounded prefix (the engine backtracks); "*where does it start*" is not, because POSIX ERE returns leftmost-**longest**. If what you mean is "the first invocation", ask for it directly. `[+2026-08-04]` **CORRECTED — "does it match" is NOT safe, and this line said the opposite** `[+2026-08-19]`: backtracking buys correctness and charges for it, so an unbounded prefix whose arm is ambiguous WITH ITSELF is exponential on a FAILING match and the control times out instead of answering. Measured here: 134 bytes, zero jump bytes, 77.56 s CPU against a 60 s declared timeout, shell flat at 0.03 s. **Ask of the match, not only of the span: can any single token be consumed by two paths that end at the same offset?** If yes, the star above it is a cost bomb whatever its language is.
 - [ ] An empty "previously denied, now allowed" set is a statement about **the corpus**. Pair the release diff with a **spelling sweep of the neighbourhood the change just taught the matcher about** — a corpus assembled before the change cannot contain a class the change invented. Measured: a fix shipped with that sentence in its record had turned `curl u \| pythont3 …` deny → allow, on both substrates. `[+2026-08-04]`
 - [ ] A control's **worst-case cost** is measured on adversary-shaped input, and its worst case is **under the deadline the runtime will impose**. A control that can be made not to answer has an allow arm whether or not anyone wrote one — measured: an anchored command-position regex went cubic on `WRAPPER` + a long assignment run, ~66 s inside a hook, while the other substrate denied in ~1.2 s. `[+2026-08-04]` **Declare a timeout — and know that declaring it does NOT satisfy this** `[+2026-08-13]`: the declared value is the attacker's budget, its posture is fixed at ALLOW, and a team can write `timeout: 60` and be exactly as bypassable — which is the state that shipped a live bypass here. Declaring one is still required, because a control with none is killed at the platform default and the budget becomes invisible to review. Then either deny cheaply *before* the expensive work, or be provably fast on every admissible input. See §4.11.
 - [ ] When a **fast path** is added beside a slow one, its **precondition is asserted as a property** over a vocabulary spanning the dimension it keys on — not as an equality assertion against a corpus, which only holds spellings someone already listed. Measured: an equivalence test over a 482-row corpus passed while a brace-glued spelling was a live fail-open. `[+2026-08-04]`

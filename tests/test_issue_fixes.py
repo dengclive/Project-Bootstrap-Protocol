@@ -2438,7 +2438,13 @@ print("\n-- #43 F1: the leftmost-shortest scan is not cubic --")
 # embeds the prefix run's nested quantifiers, and on a `WRAPPER NAME=VALUE ...`
 # line an assignment is consumable by both the wrapper arm's positional branch
 # and the outer assignment arm - so ONE failing match is quadratic and the loop
-# made it CUBIC. Measured on the emitted SDK module: this exact command went
+# made it CUBIC.
+# [sdk-pipe-trigger-redos, 2026-08-19] THE SPELLING DESCRIBED ABOVE NO LONGER
+# EXISTS and the quadratic on that shape is gone with it (emitted _INSTALL_HEAD,
+# `env A0=0 ... make test`: 0.0039/0.0155/0.0628 s at n=100/200/400 before,
+# 0.0001/0.0001/0.0003 s after). The rows below still pin the right property -
+# the scan must not return to a superlinear class - so they stay; only the
+# stated CAUSE is history. Measured on the emitted SDK module: this exact command went
 # 0.064s (v2.7.0) -> 8.6s, and 7 KB of it took 67s inside an async callback.
 # `dependency-gate` is in no timeout table, so the harness default decides what
 # a hang becomes - with the shell denying in ~1s, i.e. SDK-more-permissive.

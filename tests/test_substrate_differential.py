@@ -4195,7 +4195,14 @@ import signal as _signal                                        # noqa: E402
 import time as _time                                            # noqa: E402
 
 _COST_BOUND = 10.0
-_COST_JUMP = b"()\"'`$"
+# Read the EMITTED constant, never a hand-copy of it. A hardcoded duplicate
+# would keep passing if `_JUMP_BYTES` gained `{` -- i.e. exactly when the
+# "invisible to _cost_guard" claim below stopped being true.
+_COST_JUMP = gates_mod._JUMP_BYTES
+check("the cost rows read the EMITTED _JUMP_BYTES, not a copy",
+      isinstance(_COST_JUMP, (bytes, bytearray)) and b"{" not in _COST_JUMP,
+      f"_JUMP_BYTES={_COST_JUMP!r} -- if `{{` is now a jump byte the rows below "
+      f"are measuring the wrong claim")
 
 
 class _CostCapped(Exception):

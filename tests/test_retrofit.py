@@ -2145,10 +2145,13 @@ def retrofit_digest_full(yaml_text):
 # every retrofit hook embeds, so both fixtures move. Language unchanged (decided
 # by an exact equivalence procedure over both dialects, not sampled); the COST
 # is what moved. Action counts UNCHANGED at 79 / 93, verified before the
-# re-baseline.
+# re-baseline. [second wave, same exception: the step-7 review found the
+# `#43 F1` rationale falsified by this change and still present tense in
+# both emitted templates; the layered correction moves the bodies again.
+# Counts re-verified unchanged at 79 / 93.]
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "008776fa0a9dbf01a6eef1e8b37080152c0da374e3447de03d9d49eb59451168",
-    "agent": "c03cafb1ac4257fb5dec2b8c5730668664bc790a7b373493ef7dd174b706cf12",
+    "service": "537a9f90abf013d38fca9d5d8be351ceb85c4f71579e66e4976c1144ec66650f",
+    "agent": "1619feedd3597baaf3c8ad69b5d694f460042c7925bb699be5c8afe0994dd30d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

