@@ -158,6 +158,48 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the SDK prefix-run ReDoS: the token-count cost axis (2026-08-19)
+
+**No version bump** (fix, not surface; freeze exception **72**). A live fail-open
+on `main`, found 2026-08-16 while designing X-37 attempt 2 and unrelated to X-37.
+
+**The defect.** `cmdpos.prefix_run()` was a star whose wrapper arm was ambiguous
+with itself, so a **failing** match was exponential. `curl … | ` + `env ` x22 +
+`zzz ; pip install evilpkg` is **134 bytes with zero jump bytes** and took the
+emitted `dependency-gate` **77.56 s CPU** against the **60 s** it declares in
+`_GATE_TIMEOUTS`; a cancelled hook exits 124/137/143 and only exit 2 blocks, so
+the command proceeded unadjudicated. The shell denied the same string in 0.03 s.
+`_cost_guard` measures length and jump density and can see neither term.
+
+**The fix.** At most one absorbing group: the non-wrapper arms lead as `nonabs*`,
+the wrapper arm becomes a single optional trailing group carrying the word run
+and the trailing brace star. Plain POSIX ERE, one source for both substrates.
+
+**The language is unchanged, decided rather than sampled.** An exact ERE/Python
+equivalence procedure explored the full product graph in both dialects with zero
+accept-disagreements, two-sided calibrated against deliberately broken variants,
+and corroborated independently at review by a second decider plus 648 real
+command shapes through both emitted substrates of both trees.
+
+**What is pinned, and it is pinned rather than asserted:** four cost rows in
+`tests/test_substrate_differential.py` (red before, green after, shell control on
+each); the brace-after-wrapper language guard and the multi-wrapper invariant in
+`tests/test_composition.py`, both calibrated red against the rejected candidate
+first.
+
+**Freeze exception 72.** Every emitted hook body and `gates.py` move, because
+`prefix_run` renders into the shared header. **Action counts unchanged** at
+57 / 69 / 59 greenfield and 79 / 93 retrofit, zero files added or removed,
+verified before the re-baseline — so a count move would have been E5 rather than
+a silent digest.
+
+**What this does NOT do: close the cost class.** It closes the token-count axis
+only. Other superlinear shapes reach this regex and its neighbours and survive
+this change; they are tracked in `.claude/readiness-queue.md` as their own item
+and are deliberately **not** enumerated here, because an unchecked count in a
+record is how this entry's first draft went wrong. **The readiness verdict does
+not move.**
+
 ## Post-2.8.0 — the PRD filename catches up with its own contents (2026-08-14)
 
 **`Bootstrap-Protocol-v2-6-0.md` and `Bootstrap-Protocol-Companion-v2-6-0.md`

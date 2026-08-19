@@ -35,10 +35,40 @@ buy.
   **`_cost_guard` CANNOT SEE IT.** It measures LENGTH (`_CMD_MAXLEN` 81920) and
   DENSITY (`_CMD_MAXJUMP` 8191); this payload is 134 bytes with **zero** jump
   bytes. The axis is **TOKEN COUNT at fixed length** and nothing measures it.
-  **BLAST RADIUS IS NARROWER THAN IT LOOKS, MEASURED:** of the three SDK regexes
-  carrying `prefix_run`, only `_PIPE_TO_SHELL` blows up. `_ANCHOR` and
-  `_INSTALL_HEAD` are flat at n=24, because the blowup needs a **failing tail**
-  after the prefix run and only `_PIPE_TO_SHELL` has one.
+  **BLAST RADIUS — THE FIRST STATEMENT OF IT WAS FALSE AND IS CORRECTED HERE
+  RATHER THAN REWRITTEN.** This row and ledger entry 34 first said *"only
+  `_PIPE_TO_SHELL` blows up; `_ANCHOR` and `_INSTALL_HEAD` are flat at n=24"*.
+  **`_INSTALL_HEAD` is NOT flat.** What was timed was `cmdpos.install_head_tail()`
+  — the TAIL BUILDER. The emitted object is a different thing:
+  `_CMD_PFX_RE` (gates.py:79) is the prefix run, `_PREFIX = _CMD_PFX_RE` (:1775),
+  and `_INSTALL_HEAD = re.compile(r"^\s*" + _PREFIX + _INSTALL_TAIL)` (:1801) —
+  prefix run followed by a failable tail, i.e. the vulnerable shape. Measured on
+  the emitted compiled objects, payload `"env " x n + "zzz"`:
+  `_INSTALL_HEAD` 0.013 / 0.204 / 0.824 / 3.289 / 13.160 s and `_PIPE_TO_SHELL`
+  0.016 / 0.254 / 1.016 / 4.116 / 16.405 s at n = 14 / 18 / 20 / 22 / 24.
+  **THREE of the emitted objects carry the prefix run and ALL THREE blow up**,
+  and `_ANCHOR` does not exist in the emitted module at all. The third is
+  `_GIT_VERB_TMPL` (gates.py:1739), which splices `_CMD_PFX_RE` and is compiled
+  per call as `pat = _GIT_VERB_TMPL % verb`; a scan for module-level COMPILED
+  patterns cannot see a template compiled at call time, which is how the first
+  two counts of this set were both wrong. Measured
+  `_GIT_VERB_TMPL % "commit"` on `"env " x n + "zzz"`: 0.0064 / 0.1032 / 0.4135
+  / 1.6492 / 6.6510 s at n = 14 / 18 / 20 / 22 / 24, the same base-2 shape.
+  **`_git_verb` is the FIRST statement of spec-gate-commit, test-gate and
+  eval-gate, so ONE 121-byte payload costs FOUR gates:** dependency-gate
+  12.867 s, eval-gate 7.757 s, spec-gate-commit 7.805 s, test-gate 7.787 s.
+  **AND THE COST IS NOT A COUNT — IT IS AN INTERLEAVING.** Measured end to end:
+  1 wrapper + 800 assignments is 3207 B / 802 tokens / **0.20 s**, while
+  6 wrappers x 16 assignments is 411 B / 103 tokens / **>95 s**. So no cap on
+  length, bytes or token count separates benign from attack, and any fence must
+  key on the parse/interleaving structure instead.
+  **AND THE REACHABLE ATTACK IS SIMPLER THAN FIRST REPORTED — no downloader, no
+  pipe, no substitution.** `"env " x n + "zzz ; pip install evilpkg"` end to end
+  on the emitted gate: n=24 121 B 13.20 s, n=25 125 B 26.44 s, n=26 129 B
+  51.62 s, **n=27 133 B 102.32 s** — 133 bytes of ordinary words, zero jump
+  bytes, past the 60 s ceiling, with a genuine `pip install` deny never
+  delivered. This makes the item MORE urgent, not less. `verify the artifact you
+  measured` — logged again.
   **TWO OBVIOUS FIXES ARE ALREADY DEAD, BY MEASUREMENT — DO NOT RE-PROPOSE:**
   atomic-grouping the whole prefix run (`(?>...)`) kills the cost completely
   (0.0000 s at n=2000) but turns **17 of 29** live denies into ALLOWS, every one
@@ -51,6 +81,47 @@ buy.
   Step 4 = a differential/behaviour row red on the current tree, plus a COST row
   on the token-count axis measured on the emitted `gates.py`. Freeze exception
   applies (emitted body moves). **Never batched.**
+
+- **[ready] prefix-run-cost-residuals** · `CODE` · eligible: **yes** · full
+  ceremony · scope TBD at plan time
+  **THE COST CLASSES THAT SURVIVE `sdk-pipe-trigger-redos`. FILED HERE BECAUSE
+  THE BACKLOG ROWS THAT DESCRIBED THEM WERE STRIPPED FROM PR #81 FOR BEING
+  WRONG — DO NOT RECOVER THEM FROM `git show`; RE-MEASURE.** PR #81 closes the
+  token-count axis on `prefix_run` and nothing else. **At least four superlinear
+  shapes reach that regex or its neighbours and are untouched by it**, all with
+  ZERO jump bytes and all far under `_CMD_MAXLEN` 81920, so `_cost_guard` is
+  structurally blind to every one. **Two of the four were mislabelled by me in
+  the stripped rows and the mislabelling ran in the direction that OVERSTATES
+  severity**, which is why re-measuring is mandatory:
+  * **wrapper × spaced-brace product** — `A=1/env ` matches the assignment arm
+    AND the path-prefixed wrapper arm at once, reopening the split at every
+    token. ~2.1 KB, > 200 s before / ~53 s after. Not a regression.
+  * **length axis, glued braces** — ~19 KB, ~21-22 s on BOTH trees, and **the
+    emitted `dependency-gate.sh` is quadratic here too** (~1.9 s at 9.6 KB →
+    ~7.2 s at 19 KB), so **the shell is NOT the safe substrate on this axis**.
+    That refutes the premise the whole item was planned on.
+  * **redirect arm, self-ambiguous** — `[0-9]*[<>]+ *[^ ]+ +` lets `[<>]+` and
+    `[^ ]+` consume the same characters, so `2>>o ` has two parses ending at
+    the same offset: ~2x per added token at ~110 B. **MEASURED allow/allow on
+    the bare payload — it is NOT the shell-DENY/SDK-BYPASS the stripped row
+    claimed.** With an install tail it is deny/deny, 135 B, ~5.4 s SDK against
+    ~0.03 s shell.
+  * **`_GIT_VERB_TMPL`'s own flag star** `(?:\s+-[Cc]\s+\S+|\s+-\S+)*` — a
+    `-C` token is consumable by BOTH arms: the SAME multi-absorbing-arm defect
+    PR #81 removes from `prefix_run`, spliced next to it and left in place.
+    Measured on the emitted object: 0.073 s at 107 B → **23.5 s at 143 B**,
+    ~1.62x per token; the same shape with a non-`-C` flag is 0.0005 s at 9 KB,
+    so the cost is the arm overlap alone. **MEASURED allow/allow**: the
+    exponential fires only when `_git_verb` FAILS, i.e. exactly when the gate
+    would allow anyway, so it is a CPU burn on an allow path, not a bypassed
+    deny — but `spec-gate-commit` and `eval-gate` carry **no `_GATE_TIMEOUTS`
+    entry at all**, so what a cancelled hook does there is undetermined and
+    worth establishing.
+  **METHOD THIS ITEM MUST CARRY, derived the expensive way on PR #81:** state
+  the VERDICT PAIR you measured, not the one the shape suggests — three
+  separate rows were written as `shell-DENY / SDK-BYPASS` without anyone
+  running the payload through both substrates and reading the exit codes.
+
 
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/cmdpos.py`, `lib/templates.py`, `lib/sdk_gates_template.py`,
@@ -129,6 +200,40 @@ buy.
 
 **Batch these.** One branch, one PR, one review, one checkpoint. They are
 separate items only because they were discovered separately.
+
+- **[ready] prefix-run-record-layer** · `DOC` · **batch with `x58-table-render`,
+  they touch the same rows** · scope `lib/cmdpos.py`, `lib/sdk_gates_template.py`,
+  `lib/templates.py`, `tests/test_issue_fixes.py`,
+  `docs/agentic-harness-security-kb.md`, `docs/deferred-backlog.md`
+  **THE RECORD WORK STRIPPED OUT OF PR #81 AT THE OPERATOR'S DIRECTION AFTER THE
+  FIX LOOP DIVERGED (E2, 12 findings → 16).** Every item below is a real defect
+  that was verified; they were removed because correcting them in the same PR
+  kept introducing NEW false claims, not because they are wrong.
+  * **The `#43 F1` cost rationale is falsified by PR #81 and still present
+    tense in six places**, two of them shipped bytes: `lib/cmdpos.py`,
+    `lib/sdk_gates_template.py` (emitted `gates.py`), `lib/templates.py`
+    (emitted `dependency-gate.sh`), `tests/test_issue_fixes.py`. It describes
+    `(flag|positional)*` and a two-path assignment that no longer exist.
+  * **`lib/sdk_gates_template.py` says "`dependency-gate` is in no timeout
+    table"** while the same file sets `"dependency-gate": 60.0`. **It is
+    shipped bytes and it negates the mechanism of the fail-open PR #81
+    closes.** Highest-value row here.
+  * **`docs/agentic-harness-security-kb.md` teaches that "does it match" is
+    safe under a greedy unbounded prefix**, including as a `- [ ]` reviewer
+    checklist item. Cost makes that false: an arm ambiguous with itself is
+    exponential on a FAILING match and the control times out instead of
+    answering.
+  * **X-58's line citations are stale by exactly +11 in ELEVEN places**, not
+    the four anyone has noticed. The seven row citations each land on a REAL
+    BUT DIFFERENT row (`:358` is X-32g, not X-36i), which reads as verified.
+  * **`prefix_run`'s docstring arm list** describes the pre-2026-08-19
+    structure. A minimal correction shipped with the fix; the fuller record
+    (why the star was exponential, and that it is INTRA-arm rather than a race
+    between arms) did not.
+  **DO NOT WRITE A MECHANISM NARRATIVE WITHOUT REBUILDING IT.** The stripped
+  version got the mechanism wrong twice — it said three arms raced when only
+  ONE arm can even start on the measured payload.
+
 
 - **[ready] x58-table-render** · `DOC` · scope `docs/deferred-backlog.md`
   Anchors drifted (header :333-334, blanks :360/:397). **Not mechanical** —

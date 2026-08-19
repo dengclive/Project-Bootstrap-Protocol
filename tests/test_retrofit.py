@@ -2140,9 +2140,14 @@ def retrofit_digest_full(yaml_text):
 # references repointed across 17 tracked files. Emitted bytes move only where
 # a template cites the PRD by filename (assumption-ledger.md in both fixtures,
 # loop.sh / goal-config.md in agent). No logic; counts unchanged.
+# [freeze-exception no. 72, 2026-08-19] sdk-pipe-trigger-redos --
+# `cmdpos.prefix_run()` renders into the shared header every retrofit hook
+# embeds, so both fixtures move. Language unchanged (decided, not sampled);
+# the cost is what moved. Action counts UNCHANGED at 79 / 93, verified before
+# the re-baseline.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "322f12ccfaea2fdbf3f4ee5677ef5e3e6f3a8ca006c29322370676473251a203",
-    "agent": "f8a2de4a9c7896ef72ca896fb9283f66563176da1d87e6819a3e8d65708d5679",
+    "service": "008776fa0a9dbf01a6eef1e8b37080152c0da374e3447de03d9d49eb59451168",
+    "agent": "c03cafb1ac4257fb5dec2b8c5730668664bc790a7b373493ef7dd174b706cf12",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

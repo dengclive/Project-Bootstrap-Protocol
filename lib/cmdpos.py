@@ -630,6 +630,17 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     same shape; a brace group or subshell; a redirection; a `VAR=value`
     assignment; a shell keyword.
 
+    [2026-08-19] THAT IS THE SET OF SHAPES ACCEPTED. IT IS NO LONGER THE
+    STRUCTURE. The four non-wrapper arms are a leading `nonabs*`; the wrapper
+    and NAMED-GROUP arms are one optional trailing group carrying the word run.
+    The accepted LANGUAGE is unchanged.
+
+    THE INVARIANT THAT SURVIVES ONLY BY CONSTRUCTION: a multi-wrapper run
+    (`sudo env time bash`) is re-absorbed by the word run inside the trailing
+    group. Bounding that run looks like a cost tightening and deletes those
+    runs from the language. It is pinned in tests/test_composition.py - bound
+    the run and those rows go red.
+
     UNBOUNDED after a wrapper word, deliberately - see the ARITY section of
     this module's docstring for the 16-of-27 measurement that killed the arity
     table, and for why unbounded consumption cannot fail open in a REGEX (the
@@ -662,19 +673,24 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     tests/test_composition.py, and `ifconfig -a` is pinned at the VERDICT in
     tests/test_substrate_differential.py - the two failures look nothing alike.
     """
-    return (
-        "((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")("
-        + space + "-" + nonspace + "*|"
-        + space + "[^- ]" + nonspace + "*)*" + space
-        + "|(" + alt(NAMED_GROUP_HEADS) + ")("
-        + space + "-" + nonspace + "*|"
-        + space + "[^- ]" + nonspace + "*)*" + space
-        + "|[({] *"
-        + "|[0-9]*[<>]+ *" + nonspace + "+" + space
-        + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
-        + "|(" + alt(KEYWORDS) + ")" + space
-        + ")*"
-    )
+    # the four arms that do not carry the wrapper word list
+    nonabs = ("([({] *"
+              + "|[0-9]*[<>]+ *" + nonspace + "+" + space
+              + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
+              + "|(" + alt(KEYWORDS) + ")" + space + ")")
+    # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
+    # one source compiles in both Python and bash, and bash has no lookahead
+    # and no atomic groups.
+    wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
+               + "|(" + alt(NAMED_GROUP_HEADS) + "))")
+    # The trailing `([({] *)*` sits INSIDE the trailing group, not at the star
+    # level. Both facts are load-bearing and both are pinned, not argued:
+    # deleting it flips the brace-after-wrapper rows in tests/test_composition.py
+    # deny -> allow; hoisting it to the star level is candidate C8, which the
+    # cost rows in tests/test_substrate_differential.py catch.
+    return (nonabs + "*"
+            + "(" + wrapper + space + "(" + nonspace + "+" + space + ")*"
+            + "([({] *)*)?")
 
 
 def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
