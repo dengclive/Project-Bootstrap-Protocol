@@ -653,14 +653,12 @@ try:
         # THE PREFIX-RUN LANGUAGE GUARD. Every row below is deny/deny on the
         # tree that shipped AND on the tree that fixes the cost defect, and
         # allow/allow on the rejected candidate that got the language wrong.
-        # THAT IS THE ONLY REASON THEY ARE HERE, and it is worth stating
-        # plainly: BEFORE these rows, NO TEST IN THE SUITE DISTINGUISHED THE
-        # FIX FROM THE BROKEN CANDIDATE. Both trees returned a byte-identical
-        # `9724 passed / 5 failed`; the only thing that moved when the
-        # load-bearing trailing `([({] *)*` was deleted was a DIGEST. A digest
-        # pin records that bytes changed. It does not know which way, and it
-        # cannot say that 13 of 36 live verdicts flipped deny->allow -- three
-        # of them verified live RCE. A digest is not a guard.
+        # THAT IS THE ONLY REASON THEY ARE HERE: before them, NO TEST IN THIS
+        # SUITE DISTINGUISHED THE FIX FROM THE BROKEN CANDIDATE -- both trees
+        # returned a byte-identical pass/fail count, so the only thing that
+        # moved when the load-bearing trailing `([({] *)*` was deleted was a
+        # DIGEST. A digest records that bytes changed; it does not know which
+        # way. A digest is not a guard.
         #
         # THE SHAPE NOTHING ELSE PINS IS A BRACE GLUED AFTER A WRAPPER. The
         # existing brace controls all put the brace at position 0

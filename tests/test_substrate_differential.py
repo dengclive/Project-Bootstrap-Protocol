@@ -4150,44 +4150,33 @@ for _g, _cmd, _want, _lbl in _B3:
     differential(_g, bash(_cmd), _want, _lbl)
 
 # --------------------------------------------------------------------------- #
-# THE PREFIX-RUN COST AXIS. This is the first COST row this differential
-# carries, and it exists because THE CORPUS CANNOT SEE THE DEFECT IT PINS: at
-# every row below the SDK still returns `deny`, just minutes late, so
-# `shell == sdk == deny` holds and every behavioural row in this file passes
-# while the gate is bypassed in production.
+# THE PREFIX-RUN COST AXIS. The first COST row this differential carries, and
+# it exists because THE CORPUS CANNOT SEE THE DEFECT IT PINS: the SDK still
+# returns `deny` on every row below, just far too late, so `shell == sdk ==
+# deny` holds and every behavioural row in this file passes.
 #
-# THE BYPASS IS THE TIMEOUT, NOT THE VERDICT. `dependency-gate` declares 60 s
-# in `_GATE_TIMEOUTS`. A hook cancelled at its timeout exits 124/137/143, and
-# ONLY exit 2 blocks (the X-51 correction, stated in the emitted file itself),
-# so the call PROCEEDS UNADJUDICATED -- the `pip install evilpkg` riding in the
-# same command is never seen by anything.
+# THE BYPASS IS THE TIMEOUT, NOT THE VERDICT. `dependency-gate` declares 60 s in
+# `_GATE_TIMEOUTS`; a hook cancelled at its timeout exits 124/137/143 and ONLY
+# exit 2 blocks (X-51, stated in the emitted file itself), so the call proceeds
+# unadjudicated.
 #
-# `_cost_guard` IS STRUCTURALLY BLIND TO THIS, and the two rows below pin that
-# rather than assert it. It measures LENGTH (`_CMD_MAXLEN` 81920) and JUMP
-# DENSITY (`_CMD_MAXJUMP` 8191, over `_JUMP_BYTES` = ()"'`$). These payloads are
-# 134-590 bytes with ZERO jump bytes. The axis is TOKEN COUNT AT FIXED LENGTH
-# and nothing else in the tree measures it.
+# EVERY CLAIM THESE ROWS MAKE, THEY PIN. The payload is under `_CMD_MAXLEN` and
+# carries no `_JUMP_BYTES` -- checked here against the EMITTED constants, not a
+# copy -- so `_cost_guard` cannot see it; the SDK answers inside the bound; the
+# verdict is still deny; and the shell denies the same string, which is the
+# control that makes the pair shell-DENY / SDK-slow.
 #
-# THE SHELL IS THE CONTROL, AND IT IS FLAT. bash's ERE engine does not
-# backtrack, so every payload here denies on the shell in ~0.03-0.06 s on both
-# the broken and the fixed tree. That is what makes each row a shell-DENY /
-# SDK-BYPASS pair -- the SDK-more-permissive direction the binding rule quoted
-# at the top of this file forbids outright.
-#
-# THE BOUND IS DELIBERATELY LOOSE, AND IT IS A COMPLEXITY-CLASS TRIPWIRE, NOT A
-# BENCHMARK. Measured 2026-08-19 on the emitted artifacts, min-of-3
-# `process_time`: broken is > 30 s (capped; it runs past 95 s uncapped), fixed
+# THE BOUND IS A COMPLEXITY-CLASS TRIPWIRE, NOT A BENCHMARK. Measured on the
+# emitted artifacts, min-of-3 `process_time`: broken is > 30 s (capped), fixed
 # is 0.0005-0.0020 s. 10 s is ~5000x headroom above the fix and far under the
-# defect, so it fails on the return of the exponential, not on a loaded box.
-# The measurement is itself capped, so a RED run costs seconds rather than the
-# minutes the defect actually takes.
+# defect, so it fails on the return of the exponential and not on a loaded box.
+# The measurement is itself capped, so a RED run costs seconds.
 #
-# WHAT THIS ROW DOES **NOT** CLAIM: that the cost class is closed. It closes
-# axis 1 (token count at fixed length). Three superlinear classes survive and
-# are filed as X-59 / X-60 / X-61 -- all with zero jump bytes, all under
-# `_CMD_MAXLEN`, all invisible to `_cost_guard`, and on the LENGTH axis the
-# emitted shell hook is quadratic too, so the shell is not the safe substrate
-# there. Do not read a green row here as a closed class.
+# WHAT THESE ROWS DO **NOT** CLAIM: that the cost class is closed. They close
+# ONE axis -- token count at fixed length. Other superlinear shapes reach this
+# regex and its neighbours; they are tracked in `.claude/readiness-queue.md`,
+# deliberately NOT summarised here, because a count in a comment is a claim
+# nothing checks. Do not read a green row here as a closed class.
 # --------------------------------------------------------------------------- #
 print("\n== prefix-run cost: token count at fixed length ==")
 

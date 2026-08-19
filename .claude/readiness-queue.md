@@ -82,6 +82,47 @@ buy.
   on the token-count axis measured on the emitted `gates.py`. Freeze exception
   applies (emitted body moves). **Never batched.**
 
+- **[ready] prefix-run-cost-residuals** · `CODE` · eligible: **yes** · full
+  ceremony · scope TBD at plan time
+  **THE COST CLASSES THAT SURVIVE `sdk-pipe-trigger-redos`. FILED HERE BECAUSE
+  THE BACKLOG ROWS THAT DESCRIBED THEM WERE STRIPPED FROM PR #81 FOR BEING
+  WRONG — DO NOT RECOVER THEM FROM `git show`; RE-MEASURE.** PR #81 closes the
+  token-count axis on `prefix_run` and nothing else. **At least four superlinear
+  shapes reach that regex or its neighbours and are untouched by it**, all with
+  ZERO jump bytes and all far under `_CMD_MAXLEN` 81920, so `_cost_guard` is
+  structurally blind to every one. **Two of the four were mislabelled by me in
+  the stripped rows and the mislabelling ran in the direction that OVERSTATES
+  severity**, which is why re-measuring is mandatory:
+  * **wrapper × spaced-brace product** — `A=1/env ` matches the assignment arm
+    AND the path-prefixed wrapper arm at once, reopening the split at every
+    token. ~2.1 KB, > 200 s before / ~53 s after. Not a regression.
+  * **length axis, glued braces** — ~19 KB, ~21-22 s on BOTH trees, and **the
+    emitted `dependency-gate.sh` is quadratic here too** (~1.9 s at 9.6 KB →
+    ~7.2 s at 19 KB), so **the shell is NOT the safe substrate on this axis**.
+    That refutes the premise the whole item was planned on.
+  * **redirect arm, self-ambiguous** — `[0-9]*[<>]+ *[^ ]+ +` lets `[<>]+` and
+    `[^ ]+` consume the same characters, so `2>>o ` has two parses ending at
+    the same offset: ~2x per added token at ~110 B. **MEASURED allow/allow on
+    the bare payload — it is NOT the shell-DENY/SDK-BYPASS the stripped row
+    claimed.** With an install tail it is deny/deny, 135 B, ~5.4 s SDK against
+    ~0.03 s shell.
+  * **`_GIT_VERB_TMPL`'s own flag star** `(?:\s+-[Cc]\s+\S+|\s+-\S+)*` — a
+    `-C` token is consumable by BOTH arms: the SAME multi-absorbing-arm defect
+    PR #81 removes from `prefix_run`, spliced next to it and left in place.
+    Measured on the emitted object: 0.073 s at 107 B → **23.5 s at 143 B**,
+    ~1.62x per token; the same shape with a non-`-C` flag is 0.0005 s at 9 KB,
+    so the cost is the arm overlap alone. **MEASURED allow/allow**: the
+    exponential fires only when `_git_verb` FAILS, i.e. exactly when the gate
+    would allow anyway, so it is a CPU burn on an allow path, not a bypassed
+    deny — but `spec-gate-commit` and `eval-gate` carry **no `_GATE_TIMEOUTS`
+    entry at all**, so what a cancelled hook does there is undetermined and
+    worth establishing.
+  **METHOD THIS ITEM MUST CARRY, derived the expensive way on PR #81:** state
+  the VERDICT PAIR you measured, not the one the shape suggests — three
+  separate rows were written as `shell-DENY / SDK-BYPASS` without anyone
+  running the payload through both substrates and reading the exit codes.
+
+
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/cmdpos.py`, `lib/templates.py`, `lib/sdk_gates_template.py`,
   `tests/test_substrate_differential.py`, `tests/test_composition.py`,
@@ -159,6 +200,40 @@ buy.
 
 **Batch these.** One branch, one PR, one review, one checkpoint. They are
 separate items only because they were discovered separately.
+
+- **[ready] prefix-run-record-layer** · `DOC` · **batch with `x58-table-render`,
+  they touch the same rows** · scope `lib/cmdpos.py`, `lib/sdk_gates_template.py`,
+  `lib/templates.py`, `tests/test_issue_fixes.py`,
+  `docs/agentic-harness-security-kb.md`, `docs/deferred-backlog.md`
+  **THE RECORD WORK STRIPPED OUT OF PR #81 AT THE OPERATOR'S DIRECTION AFTER THE
+  FIX LOOP DIVERGED (E2, 12 findings → 16).** Every item below is a real defect
+  that was verified; they were removed because correcting them in the same PR
+  kept introducing NEW false claims, not because they are wrong.
+  * **The `#43 F1` cost rationale is falsified by PR #81 and still present
+    tense in six places**, two of them shipped bytes: `lib/cmdpos.py`,
+    `lib/sdk_gates_template.py` (emitted `gates.py`), `lib/templates.py`
+    (emitted `dependency-gate.sh`), `tests/test_issue_fixes.py`. It describes
+    `(flag|positional)*` and a two-path assignment that no longer exist.
+  * **`lib/sdk_gates_template.py` says "`dependency-gate` is in no timeout
+    table"** while the same file sets `"dependency-gate": 60.0`. **It is
+    shipped bytes and it negates the mechanism of the fail-open PR #81
+    closes.** Highest-value row here.
+  * **`docs/agentic-harness-security-kb.md` teaches that "does it match" is
+    safe under a greedy unbounded prefix**, including as a `- [ ]` reviewer
+    checklist item. Cost makes that false: an arm ambiguous with itself is
+    exponential on a FAILING match and the control times out instead of
+    answering.
+  * **X-58's line citations are stale by exactly +11 in ELEVEN places**, not
+    the four anyone has noticed. The seven row citations each land on a REAL
+    BUT DIFFERENT row (`:358` is X-32g, not X-36i), which reads as verified.
+  * **`prefix_run`'s docstring arm list** describes the pre-2026-08-19
+    structure. A minimal correction shipped with the fix; the fuller record
+    (why the star was exponential, and that it is INTRA-arm rather than a race
+    between arms) did not.
+  **DO NOT WRITE A MECHANISM NARRATIVE WITHOUT REBUILDING IT.** The stripped
+  version got the mechanism wrong twice — it said three arms raced when only
+  ONE arm can even start on the measured payload.
+
 
 - **[ready] x58-table-render** · `DOC` · scope `docs/deferred-backlog.md`
   Anchors drifted (header :333-334, blanks :360/:397). **Not mechanical** —

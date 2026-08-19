@@ -5844,13 +5844,7 @@ while IFS= read -r nseg; do
   # [#43 review, F1] THE MATCH IS ATTEMPTED ONLY WHERE IT CAN SUCCEED. The
   # anchor embeds the prefix run's nested flag/positional quantifiers, so a
   # FAILING match on a `WRAPPER NAME=VALUE ...` line is already expensive and
-  # running it per token multiplied that.
-  # [sdk-pipe-trigger-redos, 2026-08-19] THAT SPELLING IS GONE - the word run
-  # is now a single `([^ ]+ +)*` and the assignment arm precedes the wrapper
-  # pivot - so the FAILING match on that shape is no longer expensive. The
-  # decision (attempt the match only where it can succeed) still stands; the
-  # reason above is HISTORY, kept so the decision is not re-litigated.
-  # The tail always ENDS on a verb or
+  # running it per token multiplied that. The tail always ENDS on a verb or
   # runner word, so a match anywhere else cannot succeed. The unguarded
   # second pass below is NOT the correctness guarantee - it runs only when the
   # guard finds NO match, and a wrong completer key makes the guard find a
