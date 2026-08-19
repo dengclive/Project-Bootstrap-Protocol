@@ -537,6 +537,36 @@ for _good in ("if ", "while ", "until ", "! ", "then ", "else ", "elif ",
               "if ! { ", "sudo "):
     check(f"prefix_run consumes {_good!r} as a head form", bool(_pr.match(_good)))
 
+# MULTI-WRAPPER RUNS, AND THE ONE EDIT THAT WOULD SILENTLY DELETE THEM.
+# Since 2026-08-19 prefix_run permits AT MOST ONE wrapper arm at the star
+# level; `sudo env time bash` survives only because the word run
+# `([^ ]+ +)*` inside the trailing group re-absorbs the later wrappers as
+# ordinary words. BOUNDING THAT WORD RUN LOOKS EXACTLY LIKE A COST TIGHTENING
+# AND IS NOT ONE. Verified by running it: replacing `([^ ]+ +)*` with
+# `([^ ]+ +)?` drops `sudo env time `, `sudo env time bash `,
+# `nohup sudo env ` and `/usr/bin/env sudo time ` from the language while
+# leaving `sudo `, `sudo env `, `env time ` and `time sudo ` matching -- so a
+# one-wrapper corpus cannot see the loss. These rows are what go red.
+for _multi in ("sudo env ", "sudo env time ", "sudo env time bash ",
+               "env time ", "time sudo ", "nohup sudo env ",
+               "/usr/bin/env sudo time "):
+    check(f"prefix_run consumes the MULTI-WRAPPER run {_multi!r}",
+          bool(_pr.match(_multi)),
+          "the word run inside the trailing group was bounded; multi-wrapper "
+          "runs are gone from the language")
+
+# The guard above is only evidence if it CAN fail, so calibrate it here rather
+# than trusting it: apply the tightening to a copy of the regex and require
+# that these same rows stop matching. A pin that cannot go red is not a pin.
+_bounded = cmdpos.prefix_run().replace("([^ ]+ +)*", "([^ ]+ +)?")
+check("the multi-wrapper guard is calibrated: the word run is spelled as "
+      "the rows above assume", _bounded != cmdpos.prefix_run())
+_pb = _re.compile("^" + _bounded + "$")
+check("the multi-wrapper guard CAN fail: bounding the word run drops "
+      "`sudo env time bash `",
+      not _pb.match("sudo env time bash "),
+      "the tightening this guard exists to catch is not caught by it")
+
 # --------------------------------------------------------------------------
 # 2. The sampled composition sweep, at GATE level, on BOTH substrates.
 # --------------------------------------------------------------------------

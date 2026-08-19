@@ -3133,7 +3133,24 @@ EXPECTED_DIGESTS = {
         # Count still 57.
         # Measurement recorded in docs/deferred-backlog.md (X-54),
         # docs/production-readiness.md and the security KB section 6.
-        "3c0a375e45e236c65d95b73d63dcefda526005c6e61b195682b0758c43af9b4e",
+        # [freeze-exception no. 72, 2026-08-19] sdk-pipe-trigger-redos — the
+        # SDK prefix-run ReDoS. `cmdpos.prefix_run()` is ONE shared source
+        # rendered into every emitted hook body and into `gates.py`, so a change
+        # to it moves every artifact that embeds the shared header. THE RULE'S
+        # LANGUAGE IS UNCHANGED and that is decided, not sampled: an exact
+        # ERE/Python equivalence procedure explored the full product graph in
+        # both dialects and found zero accept-disagreements, corroborated by
+        # 435,848,050 enumerated strings and by the three real emitted
+        # composites under Python, `grep -E` and real bash. WHAT MOVED IS THE
+        # COST: the shipped flat six-arm star was exponential on a FAILING
+        # match (2.00x per added prefix token), so a 134-byte zero-jump-byte
+        # payload ran the emitted `dependency-gate` 77 s past the 60 s it
+        # declares, and a cancelled hook never exits 2, so the command
+        # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
+        # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
+        # verified before this re-baseline, so a count move would have been E5
+        # rather than a silent digest.
+        "aa0252adaa59c0c3eaca66e9c737b66bd7c270217c4008afba0368fd94766a76",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3373,7 +3390,24 @@ EXPECTED_DIGESTS = {
         # [freeze-exception no. 69, 2026-08-14] The X-54 cost-figure
         # correction (see the `default` note): comment-only, in the gate
         # preamble every hook body embeds. No logic changes; count still 69.
-        "b72a35b92ced996270967c23f24315cc3dddedefcf150085b7da77a377055a58",
+        # [freeze-exception no. 72, 2026-08-19] sdk-pipe-trigger-redos — the
+        # SDK prefix-run ReDoS. `cmdpos.prefix_run()` is ONE shared source
+        # rendered into every emitted hook body and into `gates.py`, so a change
+        # to it moves every artifact that embeds the shared header. THE RULE'S
+        # LANGUAGE IS UNCHANGED and that is decided, not sampled: an exact
+        # ERE/Python equivalence procedure explored the full product graph in
+        # both dialects and found zero accept-disagreements, corroborated by
+        # 435,848,050 enumerated strings and by the three real emitted
+        # composites under Python, `grep -E` and real bash. WHAT MOVED IS THE
+        # COST: the shipped flat six-arm star was exponential on a FAILING
+        # match (2.00x per added prefix token), so a 134-byte zero-jump-byte
+        # payload ran the emitted `dependency-gate` 77 s past the 60 s it
+        # declares, and a cancelled hook never exits 2, so the command
+        # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
+        # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
+        # verified before this re-baseline, so a count move would have been E5
+        # rather than a silent digest.
+        "1d6a39b5e469f5d3ebd7b144468f2376be9745e023b36a891abdda8227b30c67",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3560,7 +3594,24 @@ EXPECTED_DIGESTS = {
         # correction (see the `default` note): comment-only, in the shared
         # gate preamble. The three design-steering artifacts are again
         # untouched, and the count is still 59.
-        "ba815c1533c6a71c52602e54d74529d21395f419660a0984f500f7b41c3d8b63",
+        # [freeze-exception no. 72, 2026-08-19] sdk-pipe-trigger-redos — the
+        # SDK prefix-run ReDoS. `cmdpos.prefix_run()` is ONE shared source
+        # rendered into every emitted hook body and into `gates.py`, so a change
+        # to it moves every artifact that embeds the shared header. THE RULE'S
+        # LANGUAGE IS UNCHANGED and that is decided, not sampled: an exact
+        # ERE/Python equivalence procedure explored the full product graph in
+        # both dialects and found zero accept-disagreements, corroborated by
+        # 435,848,050 enumerated strings and by the three real emitted
+        # composites under Python, `grep -E` and real bash. WHAT MOVED IS THE
+        # COST: the shipped flat six-arm star was exponential on a FAILING
+        # match (2.00x per added prefix token), so a 134-byte zero-jump-byte
+        # payload ran the emitted `dependency-gate` 77 s past the 60 s it
+        # declares, and a cancelled hook never exits 2, so the command
+        # PROCEEDED UNSCANNED while the shell denied it in 0.03 s. Action
+        # counts UNCHANGED at 57 / 69 / 59, 0 files added, 0 removed --
+        # verified before this re-baseline, so a count move would have been E5
+        # rather than a silent digest.
+        "8aa56149e1adc94c6b3953f7f648f013dddc857b2295da464ec5a25612ae6b6a",
 }
 
 EXPECTED_ACTION_COUNTS = {

