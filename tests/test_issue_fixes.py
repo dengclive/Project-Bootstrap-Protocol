@@ -3068,7 +3068,14 @@ print("\n== issue #50: the D20 run side must apply INTERP_SUFFIX ==")
 _h50 = open(os.path.join(HOOKS, "dependency-gate.sh"),
             encoding="utf-8").read()
 _g50 = open(GATES_PY, encoding="utf-8").read()
-_own_src = open(os.path.abspath(__file__), encoding="utf-8").read()
+# CODE ONLY, not comments. The block that deleted the ratio row QUOTES its
+# predicate in order to explain it, and a naive scan flags that quotation --
+# MENTION read as USE, which is a mistake this repo has made in both
+# directions before. Comment lines are stripped first.
+_own_src = "\n".join(
+    _ln for _ln in open(os.path.abspath(__file__), encoding="utf-8")
+                       .read().split("\n")
+    if not _ln.lstrip().startswith("#"))
 # A ratio of two elapsed-time accumulators, bounded by a multiplier -- the
 # shape of the row this section deleted, spelled so a rename does not evade it.
 _re50 = _re.compile(r"_e50b\s*<\s*_e50a\s*\*|"
@@ -4113,19 +4120,14 @@ print("\n-- (k) T8: the reduction is BOUNDED, on the LENGTH axis --")
 # quadratic (measured 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB), bounded it
 # is flat (0.005 / 0.011 / 0.021 s). A ratio, not an absolute, because the
 # absolute is machine-dependent and the shape of the curve is the claim.
-_w50a, _w50b = "python3" + "1" * 10000, "python3" + "1" * 80000
-_t0 = time.time()
-for _ in range(20):
-    gates_mod._int_word(_w50a)
-_e50a = time.time() - _t0
-_t0 = time.time()
-for _ in range(20):
-    gates_mod._int_word(_w50b)
-_e50b = time.time() - _t0
-check(f"#50 T8: the SDK reduction is FLAT in word length - 8x the word costs "
-      f"{(_e50b / _e50a if _e50a else 0):.1f}x, not 64x "
-      f"({_e50a * 1000:.1f}ms -> {_e50b * 1000:.1f}ms per 20 calls)",
-      _e50b < _e50a * 8, f"{_e50a:.4f}s -> {_e50b:.4f}s")
+# [2026-08-20] THE RATIO ROW THAT STOOD HERE IS DELETED. It timed `_int_word`
+# at two lengths and asserted `_e50b < _e50a * 8` on an input exactly 8x longer
+# -- sub-linearity of a reduction whose measured log-log exponent is 0.995. Its
+# whole margin was 0.202 us of fixed per-call overhead against 11.42 us of scan,
+# and it failed 5.53% of 33,498 trials idle and 82% on two pinned cores. The
+# invariant it meant to protect is pinned STRUCTURALLY in section (i) above, on
+# both substrates, with a mutation calibration -- no clock, no margin problem,
+# and it catches strictly more. The full argument is in that block.
 
 # (2) ON THE SHELL the bound is DEFENSIVE, not load-bearing, and this pin says
 # only what was verified: no long-word shape found reaches the reduction with

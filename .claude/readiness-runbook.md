@@ -180,7 +180,12 @@ if findings(i) >= findings(i-1): stop now   # divergence, not progress
 
 **9a — post merge-readiness evidence, then STOP.** CI green **on the PR head
 sha**, 0 confirmed findings, suite 25/0, tree clean, `git diff origin/main...`
-summarised. `#50 T8` flakes on wall-clock; one red is a re-run, two is **E7**.
+summarised. **`#50 T8` used to be named here as a wall-clock flake to
+tolerate — one red a re-run, two an E7. That row is DELETED** (2026-08-20):
+it bounded a linear reduction at exactly its linear ratio, duplicated a
+structural pin that catches strictly more, and this sentence is what took an
+unrelated item to E7 over it. **There is no longer a known-flaky check in the
+suite, so a red CI run is now a real signal — treat it as one.**
 Then flag the operator and **wait**.
 
 **9b — the operator reviews the diff and merges.** This is not a courtesy step
