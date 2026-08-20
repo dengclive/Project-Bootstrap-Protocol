@@ -3068,6 +3068,11 @@ print("\n== issue #50: the D20 run side must apply INTERP_SUFFIX ==")
 _h50 = open(os.path.join(HOOKS, "dependency-gate.sh"),
             encoding="utf-8").read()
 _g50 = open(GATES_PY, encoding="utf-8").read()
+_own_src = open(os.path.abspath(__file__), encoding="utf-8").read()
+# A ratio of two elapsed-time accumulators, bounded by a multiplier -- the
+# shape of the row this section deleted, spelled so a rename does not evade it.
+_re50 = _re.compile(r"_e50b\s*<\s*_e50a\s*\*|"
+                    r"check\([^)]*_int_word[^)]*\btime\.time\(\)")
 _U50 = "http://x.test/a"
 
 print("\n-- (a) the defect: 16 versioned spellings, BOTH substrates --")
@@ -3380,6 +3385,77 @@ check("#50: _INT_MAXLEN covers every interpreter",
 check("#50: the emitted SDK reduction caps its search at _INT_MAXLEN",
       "    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n"
       in _g50)
+# ...and the SHELL twin carries the same clamp, which NOTHING pinned until
+# 2026-08-20. Only the substitution VALUE was pinned (above); a grep for the
+# clamp LINE across tests/ returned zero hits. Pinning one substrate and not
+# the other is the D3 shape: the two drift, silently, and the suite says the
+# invariant is held while it is held on one side only.
+check("#50: the emitted SHELL reduction caps its search at the same bound",
+      ('  if [ "$_L" -gt %s ]; then _L=%s; fi\n'
+       % (gates_mod._INT_MAXLEN, gates_mod._INT_MAXLEN)) in _h50,
+      "the shell clamp line is not in the emitted hook, or its bound differs "
+      "from the SDK's")
+
+# THE MUTATION CALIBRATION. The two pins above are the ONLY thing standing
+# between this reduction and a return to O(n^2) - and until now neither had any
+# recorded proof that it CAN fail. A pin that has never been shown to go red is
+# a comment with a `check()` around it.
+#
+# Both mutations are built IN MEMORY. `.github/workflows/ic-self-check.yml`
+# fails a run whose suite writes into the working tree instead of its fixture.
+_g50_noclamp = _g50.replace(
+    "    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n",
+    "    n = len(base)\n")
+check("#50 CALIBRATION: the SDK clamp pin CAN fail - deleting the clamp is a "
+      "mutation the pin detects",
+      _g50_noclamp != _g50
+      and ("    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n"
+           not in _g50_noclamp),
+      "the mutation did not apply, so the pin above is not calibrated and its "
+      "green means nothing")
+
+_h50_noclamp = _h50.replace(
+    '  if [ "$_L" -gt %s ]; then _L=%s; fi\n'
+    % (gates_mod._INT_MAXLEN, gates_mod._INT_MAXLEN), "")
+check("#50 CALIBRATION: the SHELL clamp pin CAN fail - deleting the clamp is a "
+      "mutation the pin detects",
+      _h50_noclamp != _h50,
+      "the mutation did not apply, so the shell pin is not calibrated")
+
+# AND THE MUTATION IS THE REAL DEFECT, not a strawman: without the clamp the
+# loop runs len(base) times, each `fullmatch`-ing the suffix, so the reduction
+# goes from LINEAR to QUADRATIC. Measured on the emitted module with the clamp
+# deleted: log-log exponent 1.989 against the shipped 0.995, and 10.1 ms ->
+# 627 ms across 10 KB -> 80 KB of command word.
+
+# AND THE DECISION ITSELF IS PINNED, because a comment did not hold it.
+#
+# The block above says, and has said since #50 landed, that "a timing assertion
+# here would be a flaky pin on a real invariant". A timing assertion was added
+# anyway, ~670 lines below it: a wall-clock ratio bounding an 8x-longer input at
+# `< 8x`, on a reduction whose measured log-log exponent is 0.995. A CORRECT
+# implementation sat on that bound with 1.015x of headroom, its only margin
+# being 0.202 us of fixed per-call overhead against 11.42 us of scan. It failed
+# 5.53% of 33,498 trials idle, 82% pinned to two cores, and it took CI red
+# TWICE on a comments-only diff -- halting an unrelated item at E7.
+#
+# It caught exactly ONE regression (the clamp deleted), which the structural
+# pins above catch too, and it caught NOTHING they miss. Measured against six
+# mutations: an inflated _INT_MAXLEN 163x slower, a real ReDoS suffix pattern
+# taking 15.5 s, a `base[n:]` slice, swapped `and` operands, and a second
+# unbounded rescan all PASSED it.
+#
+# So the row is gone. This check is what stops it coming back a third time --
+# a rule nothing enforces is a rule that gets broken, and this file already
+# carries the prose version that did not hold.
+_ratio_pin = _re50.search(_own_src)
+check("#50: no wall-clock RATIO bound is asserted on the _int_word reduction",
+      _ratio_pin is None,
+      "found %r -- the invariant this would time is already pinned "
+      "structurally at the `_INT_MAXLEN` checks above, with no clock and no "
+      "margin problem. Time it and you get a check that fails on a slow "
+      "machine instead of on a return of the complexity class."
+      % (_ratio_pin.group(0) if _ratio_pin else ""))
 # The FILE_RUNNERS arm stays a bare membership test on BOTH substrates - the
 # F1/F2 fix is structural, so it is pinned structurally too.
 check("#50: the SDK FILE_RUNNERS arm is still a bare membership test",
