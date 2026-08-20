@@ -3182,9 +3182,14 @@ EXPECTED_DIGESTS = {
         # AMENDMENT to freeze exception no. 42 in this file says so in as many
         # words, and this comment quoted the probe number in a fixture claim
         # until it was caught at step 7. (An earlier revision of this sentence
-        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
-        # invented. Caught at step 8.3, in the correction commit for exactly
-        # this class of error.)
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:
@@ -3496,9 +3501,14 @@ EXPECTED_DIGESTS = {
         # AMENDMENT to freeze exception no. 42 in this file says so in as many
         # words, and this comment quoted the probe number in a fixture claim
         # until it was caught at step 7. (An earlier revision of this sentence
-        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
-        # invented. Caught at step 8.3, in the correction commit for exactly
-        # this class of error.)
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:
@@ -3757,9 +3767,14 @@ EXPECTED_DIGESTS = {
         # AMENDMENT to freeze exception no. 42 in this file says so in as many
         # words, and this comment quoted the probe number in a fixture claim
         # until it was caught at step 7. (An earlier revision of this sentence
-        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
-        # invented. Caught at step 8.3, in the correction commit for exactly
-        # this class of error.)
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:
