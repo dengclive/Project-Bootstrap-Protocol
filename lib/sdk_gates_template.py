@@ -1633,7 +1633,7 @@ def _spec_gate_commit(config):
 # was entirely single-line and unprefixed, which is why 107/107 held over
 # it; batch 1 added those shapes before this fix landed.
 _GIT_VERB_TMPL = (r"(?:^|[;&|()`\\n])\\s*" + _CMD_PFX_RE + r"(?:\\S*/)?git"
-                  r"(?:\\s+-[Cc]\\s+\\S+|\\s+-\\S+)*\\s+%s(?:\\s|$)")
+                  r"(?:\\s+-[Cc]\\s+(?:[^-\\s]\\S*|-)|\\s+-\\S+)*\\s+%s(?:\\s|$)")
 
 
 def _git_verb(cmd, verb):

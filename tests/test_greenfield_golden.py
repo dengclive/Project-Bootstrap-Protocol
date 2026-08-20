@@ -3144,7 +3144,40 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "aa0252adaa59c0c3eaca66e9c737b66bd7c270217c4008afba0368fd94766a76",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
+        # matched the assignment and path-prefixed wrapper arms at once
+        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while 9,763 checks stayed green. The landed spelling admits
+        # the lone `-` back and is proved equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
+        # reproduce byte-exactly from the substitutions alone.
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
+        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
+        # and ~7 s on the emitted shell hook, before and after. That is not an
+        # ambiguity to factor out; it needs a bound, which is a language
+        # change. Filed, not taken.
+        "dcd8eb28d90d48106913972a41645c667aecc873e9f8b49927cef887be8640d2",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3395,7 +3428,40 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "1d6a39b5e469f5d3ebd7b144468f2376be9745e023b36a891abdda8227b30c67",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
+        # matched the assignment and path-prefixed wrapper arms at once
+        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while 9,763 checks stayed green. The landed spelling admits
+        # the lone `-` back and is proved equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
+        # reproduce byte-exactly from the substitutions alone.
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
+        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
+        # and ~7 s on the emitted shell hook, before and after. That is not an
+        # ambiguity to factor out; it needs a bound, which is a language
+        # change. Filed, not taken.
+        "4002a6fe7df994e2384b4d0f4108fd1036906095db40aeffd63cba445bbe150a",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3593,7 +3659,40 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "8aa56149e1adc94c6b3953f7f648f013dddc857b2295da464ec5a25612ae6b6a",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
+        # matched the assignment and path-prefixed wrapper arms at once
+        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while 9,763 checks stayed green. The landed spelling admits
+        # the lone `-` back and is proved equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
+        # reproduce byte-exactly from the substitutions alone.
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
+        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
+        # and ~7 s on the emitted shell hook, before and after. That is not an
+        # ambiguity to factor out; it needs a bound, which is a language
+        # change. Filed, not taken.
+        "632d4c4aa8d30e2659c6b053b31d2516f803ea8ca3fdbbd00eb0a15b466b93ad",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -641,6 +641,13 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     runs from the language. It is pinned in tests/test_composition.py - bound
     the run and those rows go red.
 
+    [2026-08-20] AND SINCE THE TRAILING BRACE ARM BECAME SPACE-FREE, THAT WORD
+    RUN ALSO CARRIES EVERY SPACED BRACE AFTER A WRAPPER. `env { { ` used to
+    have a second home in `([({] *)*`; it no longer does. Same file, same
+    shape of pin, its own calibration - because with the run bounded to one
+    iteration a SINGLE spaced brace still matches, so only two or more can
+    detect the tightening.
+
     UNBOUNDED after a wrapper word, deliberately - see the ARITY section of
     this module's docstring for the 16-of-27 measurement that killed the arity
     table, and for why unbounded consumption cannot fail open in a REGEX (the
@@ -675,7 +682,14 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     """
     # the four arms that do not carry the wrapper word list
     nonabs = ("([({] *"
-              + "|[0-9]*[<>]+ *" + nonspace + "+" + space
+              # A' -- the two cases are disjoint on whether a space separates
+              # the operator run from its target, and in the no-space case
+              # exactly ONE leading `<`/`>` is taken. The middle ` +` is a
+              # LITERAL space run and must stay one: spelling it `space` is
+              # equivalent in ERE and a Python-only WIDENING (`<TAB0 `), which
+              # is the dialect drift `_py`'s X-36j note already records once.
+              + "|[0-9]*([<>]" + nonspace + "+|[<>]+ +" + nonspace
+              + "+)" + space
               + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
               + "|(" + alt(KEYWORDS) + ")" + space + ")")
     # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
@@ -683,14 +697,30 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # and no atomic groups.
     wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
                + "|(" + alt(NAMED_GROUP_HEADS) + "))")
-    # The trailing `([({] *)*` sits INSIDE the trailing group, not at the star
-    # level. Both facts are load-bearing and both are pinned, not argued:
-    # deleting it flips the brace-after-wrapper rows in tests/test_composition.py
-    # deny -> allow; hoisting it to the star level is candidate C8, which the
-    # cost rows in tests/test_substrate_differential.py catch.
+    # The trailing brace arm sits INSIDE the trailing group, not at the star
+    # level, and is SPACE-FREE. Both facts are load-bearing and both are
+    # pinned, not argued: deleting it flips the brace-after-wrapper rows in
+    # tests/test_composition.py deny -> allow; hoisting it to the star level is
+    # candidate C8, which the cost rows in tests/test_substrate_differential.py
+    # catch.
+    #
+    # [2026-08-20] IT USED TO BE `([({] *)*`, AND THE ` *` COST ~k*m^2 ON A
+    # FAILING MATCH: the word run before it also matches `{ `, so the boundary
+    # between the two fell anywhere in a spaced-brace run, and `A=1/env `
+    # matches the assignment arm AND the path-prefixed wrapper arm at once, so
+    # the handoff at the star was free too. Dropping the ` *` removes the
+    # duplicate parses and NOT ONE STRING - spaced braces are taken by the word
+    # run, so only the final space-free group needs this arm. Proved equivalent
+    # by an exact ERE/Python -> NFA -> product-BFS decision procedure in both
+    # dialects, unbounded in length, two-sided calibrated.
+    #
+    # SO THE WORD RUN IS NOW THE ONLY PATH FOR SPACED BRACES AFTER A WRAPPER.
+    # Bounding it deletes `env { { ` and `sudo { { { ` from the language as
+    # well as the multi-wrapper runs named below - tests/test_composition.py
+    # carries a row and a calibration for each.
     return (nonabs + "*"
             + "(" + wrapper + space + "(" + nonspace + "+" + space + ")*"
-            + "([({] *)*)?")
+            + "[({]*)?")
 
 
 def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
