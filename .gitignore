@@ -9,3 +9,9 @@ __pycache__/
 
 # Session checkpoints are local working notes, not release artifacts.
 .claude/checkpoints/
+
+# Session plans are working documents (.claude/readiness-runbook.md:101).
+# They were tracked ONCE, by a `git add -A` in a correction commit, and that
+# turned test_doc_citations red. A rule nothing enforces is a rule that gets
+# broken; this is the enforcement.
+.claude/sessions/

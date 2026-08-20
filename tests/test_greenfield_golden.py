@@ -3179,9 +3179,12 @@ EXPECTED_DIGESTS = {
         # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
         # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
         # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
-        # warning at the `no. 61` entry in this file says so in as many words,
-        # and this comment quoted the probe number in a fixture claim until it
-        # was caught at step 7.
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
+        # invented. Caught at step 8.3, in the correction commit for exactly
+        # this class of error.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:
@@ -3490,9 +3493,12 @@ EXPECTED_DIGESTS = {
         # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
         # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
         # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
-        # warning at the `no. 61` entry in this file says so in as many words,
-        # and this comment quoted the probe number in a fixture claim until it
-        # was caught at step 7.
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
+        # invented. Caught at step 8.3, in the correction commit for exactly
+        # this class of error.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:
@@ -3748,9 +3754,12 @@ EXPECTED_DIGESTS = {
         # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
         # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
         # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
-        # warning at the `no. 61` entry in this file says so in as many words,
-        # and this comment quoted the probe number in a fixture claim until it
-        # was caught at step 7.
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry. THERE IS NO SUCH ENTRY; the citation was
+        # invented. Caught at step 8.3, in the correction commit for exactly
+        # this class of error.)
         #
         # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
         # "expensive" is the wrong word for it:

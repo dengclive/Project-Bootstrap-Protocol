@@ -716,9 +716,12 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # WHAT IT DOES NOT REMOVE, AND SAYING SO IS THE POINT: `A=1/env ` matches
     # the assignment arm AND the path-prefixed wrapper arm at once, so the
     # handoff at the star is STILL free. That is a k factor and it is still
-    # quadratic on its own - measured identical here and at the parent commit,
-    # ~40 s at the largest length `_cost_guard` permits. It is filed, not
-    # fixed. Do not read the m^2 repair as having closed it.
+    # quadratic on its own, and MEASURED IDENTICAL here and at the parent:
+    # `curl ... | ` + `A=1/env ` x5120 + `zzz` is 40,984 bytes and costs 53.0 s
+    # at the parent, 51.2 s here, allow/allow. Quadratic, so it crosses the
+    # 60 s ceiling BELOW `_CMD_MAXLEN`; the value AT the cap is not measured
+    # here and is not asserted. Filed, not fixed - do not read the m^2 repair
+    # as having closed it.
     #
     # SO THE WORD RUN IS NOW THE ONLY PATH FOR SPACED BRACES AFTER A WRAPPER.
     # Bounding it deletes `env { { ` and `sudo { { { ` from the language as

@@ -222,7 +222,10 @@ and identical at the parent:
   with many URLs.
 
 None is an ambiguity to factor out; each needs a bound, and a bound is a
-language change. All three stay in `.claude/readiness-queue.md`.
+language change. The first two are already described in
+`.claude/readiness-queue.md`; **the third is not filed anywhere yet** — the
+queue row is rewritten at closeout, and until then this paragraph is its only
+record.
 
 **AND IT IS NOT PARETO.** The redirect arm now tests two `[<>]` classes per
 `[0-9]*` step, so digit-run payloads are slower: measured end to end on the
