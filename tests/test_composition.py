@@ -575,15 +575,18 @@ check("the multi-wrapper guard CAN fail: bounding the word run drops "
 # bounded the OLD regex still accepted `env { { ` and this one does not. So the
 # edit the guard exists to catch now deletes strictly more of the language than
 # the multi-wrapper rows above can see.
+# TWO OF THESE FOUR CANNOT GO RED AND ARE HERE AS LANGUAGE COVERAGE, NOT AS
+# GUARDS -- measured, with the word run bounded: `env { ` still matches (one
+# iteration is enough for a single spaced brace) and so does `env { {{` (the
+# word run takes `{ `, the space-free arm takes `{{`). Only TWO OR MORE spaced
+# braces detect the tightening, which is why the calibration below names
+# `env { { `. Saying which rows can fail is the difference between a guard and
+# a row that looks like one.
 for _sb in ("env { ", "env { { ", "sudo { { { ", "env { {{"):
     check(f"prefix_run consumes the SPACED-BRACE run {_sb!r}",
           bool(_pr.match(_sb)),
-          "the word run inside the trailing group was bounded; spaced-brace "
-          "runs after a wrapper are gone from the language")
+          "a spaced-brace run after a wrapper is gone from the language")
 
-# ...and its own calibration. Note the row is `env { { ` and not `env { `: with
-# the word run bounded to ONE iteration a single spaced brace still matches, so
-# `env { ` cannot detect the tightening and would be a pin that never goes red.
 check("the spaced-brace guard CAN fail: bounding the word run drops "
       "`env { { `",
       not _pb.match("env { { "),
@@ -680,7 +683,9 @@ try:
         # SUITE DISTINGUISHED THE FIX FROM THE BROKEN CANDIDATE -- both trees
         # returned a byte-identical pass/fail count, so the only thing that
         # moved when the load-bearing trailing `([({] *)*` was deleted was a
-        # DIGEST. A digest records that bytes changed; it does not know which
+        # DIGEST. (That spelling is itself superseded: freeze exception 73
+        # dropped the ` *`, so the arm reads `[({]*`. The history stands.)
+        # A digest records that bytes changed; it does not know which
         # way. A digest is not a guard.
         #
         # THE SHAPE NOTHING ELSE PINS IS A BRACE GLUED AFTER A WRAPPER. The

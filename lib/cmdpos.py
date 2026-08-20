@@ -704,15 +704,21 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # candidate C8, which the cost rows in tests/test_substrate_differential.py
     # catch.
     #
-    # [2026-08-20] IT USED TO BE `([({] *)*`, AND THE ` *` COST ~k*m^2 ON A
-    # FAILING MATCH: the word run before it also matches `{ `, so the boundary
-    # between the two fell anywhere in a spaced-brace run, and `A=1/env `
-    # matches the assignment arm AND the path-prefixed wrapper arm at once, so
-    # the handoff at the star was free too. Dropping the ` *` removes the
-    # duplicate parses and NOT ONE STRING - spaced braces are taken by the word
-    # run, so only the final space-free group needs this arm. Proved equivalent
-    # by an exact ERE/Python -> NFA -> product-BFS decision procedure in both
-    # dialects, unbounded in length, two-sided calibrated.
+    # [2026-08-20] IT USED TO BE `([({] *)*`, AND THE ` *` WAS AN m^2 FACTOR ON
+    # A FAILING MATCH: the word run before it also matches `{ `, so the
+    # boundary between the two fell anywhere in a spaced-brace run, and the
+    # brace run's own stopping point was a second free index. Dropping the ` *`
+    # removes those duplicate parses and NOT ONE STRING - spaced braces are
+    # taken by the word run, so only the final space-free group needs this arm.
+    # Proved equivalent by an exact ERE/Python -> NFA -> product-BFS decision
+    # procedure in both dialects, unbounded in length, two-sided calibrated.
+    #
+    # WHAT IT DOES NOT REMOVE, AND SAYING SO IS THE POINT: `A=1/env ` matches
+    # the assignment arm AND the path-prefixed wrapper arm at once, so the
+    # handoff at the star is STILL free. That is a k factor and it is still
+    # quadratic on its own - measured identical here and at the parent commit,
+    # ~40 s at the largest length `_cost_guard` permits. It is filed, not
+    # fixed. Do not read the m^2 repair as having closed it.
     #
     # SO THE WORD RUN IS NOW THE ONLY PATH FOR SPACED BRACES AFTER A WRAPPER.
     # Bounding it deletes `env { { ` and `sudo { { { ` from the language as

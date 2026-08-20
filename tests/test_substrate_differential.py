@@ -4401,10 +4401,10 @@ _SH_STAR = r"( +-[Cc] +([^- ][^ ]*|-)| +-[^ ]+)*"
 check("the SDK flag star carries the disambiguated spelling",
       _SDK_STAR in gates_mod._GIT_VERB_TMPL,
       f"not found in {gates_mod._GIT_VERB_TMPL!r}")
-_dep_body = open(os.path.join(HOOKS, "spec-gate-commit.sh"),
+_spec_body = open(os.path.join(HOOKS, "spec-gate-commit.sh"),
                  encoding="utf-8").read()
 check("the SHELL flag star carries the same rule, hand-written",
-      _SH_STAR in _dep_body,
+      _SH_STAR in _spec_body,
       "the two encodings of the git flag star have drifted -- this is the D3 "
       "shape prefix_run() exists to abolish, and it has no cmdpos renderer")
 

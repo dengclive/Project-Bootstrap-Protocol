@@ -3151,9 +3151,9 @@ EXPECTED_DIGESTS = {
         # arm let `[<>]+` and its target consume the same `<`/`>` characters
         # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
         # substrates, against a gate declaring 60 s), and the trailing
-        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
-        # matched the assignment and path-prefixed wrapper arms at once
-        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
         # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
         # exact ERE/Python -> NFA -> product-BFS decision procedure in both
         # dialects, unbounded in string length, two-sided calibrated.
@@ -3164,19 +3164,46 @@ EXPECTED_DIGESTS = {
         # lib/templates.py) and has no cmdpos renderer, so both move or
         # neither does. The first spelling tried for it was a BYPASS: it
         # dropped `git -C - commit`, a real invocation, and three gates stopped
-        # applying while 9,763 checks stayed green. The landed spelling admits
-        # the lone `-` back and is proved equivalent.
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
         #
         # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
         # verified BEFORE this re-baseline -- a count move would have been E5,
-        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
-        # reproduce byte-exactly from the substitutions alone.
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # warning at the `no. 61` entry in this file says so in as many words,
+        # and this comment quoted the probe number in a fixture claim until it
+        # was caught at step 7.
         #
-        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
-        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
-        # and ~7 s on the emitted shell hook, before and after. That is not an
-        # ambiguity to factor out; it needs a bound, which is a language
-        # change. Filed, not taken.
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
         "dcd8eb28d90d48106913972a41645c667aecc873e9f8b49927cef887be8640d2",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
@@ -3435,9 +3462,9 @@ EXPECTED_DIGESTS = {
         # arm let `[<>]+` and its target consume the same `<`/`>` characters
         # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
         # substrates, against a gate declaring 60 s), and the trailing
-        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
-        # matched the assignment and path-prefixed wrapper arms at once
-        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
         # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
         # exact ERE/Python -> NFA -> product-BFS decision procedure in both
         # dialects, unbounded in string length, two-sided calibrated.
@@ -3448,19 +3475,46 @@ EXPECTED_DIGESTS = {
         # lib/templates.py) and has no cmdpos renderer, so both move or
         # neither does. The first spelling tried for it was a BYPASS: it
         # dropped `git -C - commit`, a real invocation, and three gates stopped
-        # applying while 9,763 checks stayed green. The landed spelling admits
-        # the lone `-` back and is proved equivalent.
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
         #
         # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
         # verified BEFORE this re-baseline -- a count move would have been E5,
-        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
-        # reproduce byte-exactly from the substitutions alone.
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # warning at the `no. 61` entry in this file says so in as many words,
+        # and this comment quoted the probe number in a fixture claim until it
+        # was caught at step 7.
         #
-        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
-        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
-        # and ~7 s on the emitted shell hook, before and after. That is not an
-        # ambiguity to factor out; it needs a bound, which is a language
-        # change. Filed, not taken.
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
         "4002a6fe7df994e2384b4d0f4108fd1036906095db40aeffd63cba445bbe150a",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
@@ -3666,9 +3720,9 @@ EXPECTED_DIGESTS = {
         # arm let `[<>]+` and its target consume the same `<`/`>` characters
         # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
         # substrates, against a gate declaring 60 s), and the trailing
-        # `([({] *)*` shared `{ ` with the word run before it while `A=1/env `
-        # matched the assignment and path-prefixed wrapper arms at once
-        # (~k*m^2 -- 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
         # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
         # exact ERE/Python -> NFA -> product-BFS decision procedure in both
         # dialects, unbounded in string length, two-sided calibrated.
@@ -3679,19 +3733,46 @@ EXPECTED_DIGESTS = {
         # lib/templates.py) and has no cmdpos renderer, so both move or
         # neither does. The first spelling tried for it was a BYPASS: it
         # dropped `git -C - commit`, a real invocation, and three gates stopped
-        # applying while 9,763 checks stayed green. The landed spelling admits
-        # the lone `-` back and is proved equivalent.
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
         #
         # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
         # verified BEFORE this re-baseline -- a count move would have been E5,
-        # not a digest. Byte surgery: all 13 emitted hooks and gates.py
-        # reproduce byte-exactly from the substitutions alone.
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # warning at the `no. 61` entry in this file says so in as many words,
+        # and this comment quoted the probe number in a fixture claim until it
+        # was caught at step 7.
         #
-        # WHAT IT DOES NOT CLOSE, because a green suite will not say it: the
-        # glued-brace LENGTH axis is untouched -- `{`x19200 is ~21 s on the SDK
-        # and ~7 s on the emitted shell hook, before and after. That is not an
-        # ambiguity to factor out; it needs a bound, which is a language
-        # change. Filed, not taken.
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
         "632d4c4aa8d30e2659c6b053b31d2516f803ea8ca3fdbbd00eb0a15b466b93ad",
 }
 
