@@ -567,6 +567,29 @@ check("the multi-wrapper guard CAN fail: bounding the word run drops "
       not _pb.match("sudo env time bash "),
       "the tightening this guard exists to catch is not caught by it")
 
+# SPACED BRACES AFTER A WRAPPER, and why they need rows of their own. Since
+# 2026-08-20 the trailing brace arm is `[({]*` -- space-free -- so a spaced
+# brace run after a wrapper is absorbed ONLY by the word run above. Before that
+# the arm was `([({] *)*` and rescued them, which is why this guard did not
+# need these rows and now does: verified by running it, with the word run
+# bounded the OLD regex still accepted `env { { ` and this one does not. So the
+# edit the guard exists to catch now deletes strictly more of the language than
+# the multi-wrapper rows above can see.
+for _sb in ("env { ", "env { { ", "sudo { { { ", "env { {{"):
+    check(f"prefix_run consumes the SPACED-BRACE run {_sb!r}",
+          bool(_pr.match(_sb)),
+          "the word run inside the trailing group was bounded; spaced-brace "
+          "runs after a wrapper are gone from the language")
+
+# ...and its own calibration. Note the row is `env { { ` and not `env { `: with
+# the word run bounded to ONE iteration a single spaced brace still matches, so
+# `env { ` cannot detect the tightening and would be a pin that never goes red.
+check("the spaced-brace guard CAN fail: bounding the word run drops "
+      "`env { { `",
+      not _pb.match("env { { "),
+      "bounding the word run no longer deletes spaced-brace runs, so these "
+      "rows are not pinning what they claim to pin")
+
 # --------------------------------------------------------------------------
 # 2. The sampled composition sweep, at GATE level, on BOTH substrates.
 # --------------------------------------------------------------------------

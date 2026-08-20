@@ -4280,6 +4280,176 @@ for _lbl, _cmd in _COST_ROWS:
           shell_verdict("dependency-gate", bash(_cmd)) == "deny")
 
 # --------------------------------------------------------------------------- #
+# THE SELF-AMBIGUITY AXIS. The block above closes ONE axis -- token count at
+# fixed length. These rows close two more, and a third in a neighbouring
+# pattern. The defect is not the same one: those payloads were expensive
+# because there were many TOKENS, these are expensive because a single arm
+# accepts the same bytes along more than one PARSE, and a backtracking engine
+# walks every parse before it can report a failure.
+#
+#   * the redirect arm let `[<>]+` and its target consume the same `<`/`>`
+#     characters, so `2>>o ` has two parses ending at the same offset: 2x per
+#     token. MEASURED on the emitted dependency-gate, uncapped: 141 bytes,
+#     110.22 s CPU, allow/allow on BOTH substrates, against a gate that
+#     declares 60 s.
+#   * the trailing `([({] *)*` and the word run before it both matched `{ `, so
+#     their boundary was free; and `A=1/env ` matches the assignment arm AND
+#     the path-prefixed wrapper arm at once, so the handoff was free too. The
+#     product is ~k*m^2.
+#   * `_GIT_VERB_TMPL`'s flag star let a `-C` token match both of its arms, so
+#     a run of them has Fibonacci-many parses, ~1.62x per token.
+#
+# WHY THIS IS A SECOND BLOCK AND NOT MORE `_COST_ROWS`: that loop hardcodes
+# dependency-gate, asserts `deny`, and asserts the shell denies the same
+# string. Two of the rows here are allow/allow and one is on spec-gate-commit,
+# so folding them in would make three checks pass for the wrong reason.
+# --------------------------------------------------------------------------- #
+print("\n== prefix-run cost: the SELF-AMBIGUITY axis ==")
+
+_AMB_ROWS = [
+    ("dependency-gate", "class 1: wrapper x spaced-brace product",
+     _COST_HEAD + "A=1/env " * 64 + "{ " * 800 + _COST_TAIL, "deny"),
+    ("dependency-gate", "class 3: redirect arm, bare",
+     _COST_HEAD + "2>>o " * 24, "allow"),
+    ("dependency-gate", "class 3b: redirect arm + install tail",
+     _COST_HEAD + "2>>o " * 22 + _COST_TAIL, "deny"),
+    ("spec-gate-commit", "class 4: git flag star, -C x40",
+     "git " + "-C " * 40 + "zzz", "allow"),
+]
+
+_amb_before = passed + failed
+
+for _gate, _lbl, _cmd, _want in _AMB_ROWS:
+    _enc = _cmd.encode("utf-8")
+    _jumps = sum(_enc.count(bytes((_b,))) for _b in _COST_JUMP)
+    check(f"cost payload is invisible to _cost_guard: {_lbl}",
+          len(_enc) < gates_mod._CMD_MAXLEN
+          and _jumps <= gates_mod._CMD_MAXJUMP,
+          f"{len(_enc)} bytes / {gates_mod._CMD_MAXLEN}, "
+          f"{_jumps} jump bytes / {gates_mod._CMD_MAXJUMP}")
+    _dt, _v = _sdk_cost(_gate, _cmd)
+    check(f"[{_gate}] SDK adjudicates in < {_COST_BOUND:g}s: {_lbl}",
+          _dt < _COST_BOUND,
+          f"{len(_enc)} bytes took "
+          + ("> %g s (capped)" % (_COST_BOUND * 1.5) if _dt == float("inf")
+             else "%.4f s" % _dt)
+          + " -- spec-gate-commit and eval-gate declare NO timeout on either"
+            " substrate, so a crossing there spends the platform default"
+          if _gate == "spec-gate-commit" else
+          f"{len(_enc)} bytes took "
+          + ("> %g s (capped)" % (_COST_BOUND * 1.5) if _dt == float("inf")
+             else "%.4f s" % _dt)
+          + " -- past the 60 s _GATE_TIMEOUTS entry the hook is cancelled and"
+            " the call PROCEEDS")
+    # STATE THE VERDICT PAIR YOU MEASURED. `capped` is not a verdict, which is
+    # why the bound above has to pass before this line means anything.
+    check(f"[{_gate}] ...and the verdict is unchanged at {_want}: {_lbl}",
+          _v == _want, f"sdk verdict={_v}")
+    check(f"[{_gate}] CONTROL: the shell agrees at {_want}: {_lbl}",
+          shell_verdict(_gate, bash(_cmd)) == _want)
+
+# THE LANGUAGE GUARD. The cost rows above cannot see a language change at all:
+# candidate C5 deleted the trailing brace run, kept every cost row green, and
+# flipped three live RCE rows deny -> allow. Each row below is measured
+# deny/deny on the tree that carries the ambiguity and on the tree that
+# removes it.
+_AMB_LANG = [
+    ("wrapper + glued brace",        "env {pip install evil"),
+    ("wrapper + glued brace, sudo",  "sudo {npx evil install"),
+    ("wrapper + spaced then glued",  "env { {pip install evil"),
+    ("wrapper + double glued",       "env {{pip install evil"),
+    ("wrapper + paren glued",        "env (pip install evil"),
+    ("redirect, glued target",       "2>>o pip install evil"),
+    ("redirect, spaced target",      "2>> o pip install evil"),
+    ("redirect, pure operator run",  ">> pip install evil"),
+    ("redirect, three operators",    "2>>> pip install evil"),
+    ("redirect, target starts >",    "2>> >o pip install evil"),
+    ("redirect then wrapper",        "2>>o env {pip install evil"),
+    ("multi-wrapper run",            "sudo env time bash -c 'pip install evil'"),
+    # SPACED braces after a wrapper. The trailing arm is space-free now, so
+    # these are absorbed ONLY by the word run -- see the calibration in
+    # tests/test_composition.py, which is what goes red if that run is bounded.
+    ("spaced brace x1 after wrapper", "env { pip install evil"),
+    ("spaced brace x2 after wrapper", "env { { pip install evil"),
+    ("spaced brace x3, sudo",         "sudo { { { pip install evil"),
+]
+for _lbl, _tail in _AMB_LANG:
+    differential("dependency-gate", bash(_COST_HEAD + _tail), "deny",
+                 f"language guard: {_lbl}")
+
+# THE ONE THE CORPUS COULD NOT SEE. A `-C` whose argument is the single
+# character `-` is a real, executable git invocation -- `mkdir -- -; git -C -
+# commit` commits into a directory named `-`. A proposed narrowing of the flag
+# star dropped exactly these strings and NOTHING in 9,763 checks noticed:
+# differential, composition and hook_behavior were all green with the bypass
+# live, because the corpus only ever carries arguments that do not start with
+# `-`. Pin them at the emitted function.
+for _verb, _c in [("commit", "git -C - commit -m x"),
+                  ("commit", "git -c - commit -m x"),
+                  ("push",   "git -C - push"),
+                  ("commit", "sudo git -C - commit -m x"),
+                  ("commit", "git -C - -C - commit")]:
+    check(f"_git_verb still sees {_verb!r} in {_c!r}",
+          gates_mod._git_verb(_c, _verb),
+          "a `-C` argument of a single `-` fell out of the flag star; three "
+          "gates stop applying and deny becomes allow")
+
+# ...and the SHELL twin of that star is a SECOND, hand-written encoding with no
+# cmdpos renderer, so it can only be kept in step by pinning both spellings.
+_SDK_STAR = r"(?:\s+-[Cc]\s+(?:[^-\s]\S*|-)|\s+-\S+)*"
+_SH_STAR = r"( +-[Cc] +([^- ][^ ]*|-)| +-[^ ]+)*"
+check("the SDK flag star carries the disambiguated spelling",
+      _SDK_STAR in gates_mod._GIT_VERB_TMPL,
+      f"not found in {gates_mod._GIT_VERB_TMPL!r}")
+_dep_body = open(os.path.join(HOOKS, "spec-gate-commit.sh"),
+                 encoding="utf-8").read()
+check("the SHELL flag star carries the same rule, hand-written",
+      _SH_STAR in _dep_body,
+      "the two encodings of the git flag star have drifted -- this is the D3 "
+      "shape prefix_run() exists to abolish, and it has no cmdpos renderer")
+
+# THE DELETION CALIBRATION. The rows above are green on this tree; nothing in
+# them says they are green BECAUSE of the fix. So take the pattern off the
+# EMITTED module, undo the substitution, and require the reverted spelling to
+# be dramatically slower on the same payload. This cannot pass on a tree where
+# the fix was reverted: the reverse substitution then finds nothing to undo and
+# the first check below fails before any timing runs.
+_REV = [(r"[0-9]*(?:[<>]\S+|[<>]+ +\S+)\s+", r"[0-9]*[<>]+ *\S+\s+"),
+        (r"(?:\S+\s+)*[({]*", r"(?:\S+\s+)*(?:[({] *)*")]
+_emitted_pat = gates_mod._PIPE_TO_SHELL.pattern
+_reverted_pat = _emitted_pat
+for _new, _old in _REV:
+    _reverted_pat = _reverted_pat.replace(_new, _old)
+check("the cost rows are calibrated: the emitted pattern still carries the "
+      "disambiguated spelling",
+      _reverted_pat != _emitted_pat,
+      "the reverse substitution found nothing to undo -- either the fix is "
+      "gone or its spelling moved, and every cost row above is vacuous")
+
+_rev_rx = _re.compile(_reverted_pat)
+_fix_rx = _re.compile(_emitted_pat)
+for _lbl, _payload, _floor in [
+        ("redirect arm", _COST_HEAD + "2>>o " * 18, 20.0),
+        ("brace product",
+         _COST_HEAD + "A=1/env " * 24 + "{ " * 300 + _COST_TAIL, 10.0)]:
+    _t0 = _time.process_time(); _fix_rx.search(_payload)
+    _fixed_dt = _time.process_time() - _t0
+    _t0 = _time.process_time(); _rev_rx.search(_payload)
+    _rev_dt = _time.process_time() - _t0
+    check(f"the cost rows CAN fail: reverting the {_lbl} substitution is at "
+          f"least {_floor:g}x slower on the same payload",
+          _rev_dt > _floor * max(_fixed_dt, 1e-6),
+          f"emitted {_fixed_dt:.4f} s vs reverted {_rev_dt:.4f} s "
+          f"({_rev_dt / max(_fixed_dt, 1e-6):.0f}x) -- a guard that cannot go "
+          f"red is not a guard")
+
+_amb_ran = (passed + failed) - _amb_before
+check("the self-ambiguity block ran every row it declares",
+      _amb_ran == len(_AMB_ROWS) * 4 + len(_AMB_LANG) + 5 + 2 + 3,
+      f"{_amb_ran} checks recorded -- deleting a loop here must fail HERE, "
+      f"not silently reduce the count")
+
+# --------------------------------------------------------------------------- #
 # B5 -- THE COMMAND GATES, ARMED. Everything above ran against a tree whose
 # CONFIG sets commands.test/lint/format/ci_local to "true". Those gates RUN the
 # configured command and deny only when it FAILS, so under `"true"` test-gate,
