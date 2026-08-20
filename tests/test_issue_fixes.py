@@ -3414,28 +3414,39 @@ check("#50: the emitted SDK reduction caps its search at _INT_MAXLEN",
 # correct bar for the one bounded loop standing between this gate and a
 # quadratic scan.
 def _body50(src, name):
-    """The code lines of `name`, docstring/comments/blanks stripped."""
+    """(indent, statement) for each code line of `name`.
+
+    INDENT IS PART OF THE PIN. The first cut of this compared `.strip()`ed
+    lines, and indentation is control flow in Python: re-indenting `n -= 1` by
+    one level puts it after the `return` inside the `if`, where it is dead code
+    and the loop never decrements -- a HANG on any non-interpreter word, with
+    the stripped sequence byte-identical. Caught by attacking this pin rather
+    than by trusting it. Comments and blanks are still dropped so a comment
+    edit does not trip it; whitespace INSIDE a statement is normalised so
+    reflowing an argument list does not either.
+    """
     _i = src.index("def %s(" % name)
     _j = src.index("\ndef ", _i + 1)
-    _ls = [_l.strip() for _l in src[_i:_j].split("\n")]
-    _ls = [_l for _l in _ls if _l and not _l.startswith("#")]
-    _q = [_k for _k, _l in enumerate(_ls) if _l.startswith('"""')]
+    _raw = [_l for _l in src[_i:_j].split("\n")
+            if _l.strip() and not _l.strip().startswith("#")]
+    _ls = [(len(_l) - len(_l.lstrip()), " ".join(_l.split())) for _l in _raw]
+    _q = [_k for _k, (_d, _t) in enumerate(_ls) if _t.startswith('"""')]
     return _ls[:1] + _ls[_q[-1] + 1:] if len(_q) >= 2 else _ls
 
 
 _INT_BODY = [
-    "def _int_word(base):",
-    "if base in _INTERPRETERS:",
-    "return base",
-    "n = len(base)",
-    "if n > _INT_MAXLEN:",
-    "n = _INT_MAXLEN",
-    "while n > 0:",
-    "head = base[:n]",
-    "if head in _INTERPRETERS and _INT_SUFFIX_RE.fullmatch(base, n):",
-    "return head",
-    "n -= 1",
-    'return ""',
+    (0, "def _int_word(base):"),
+    (4, "if base in _INTERPRETERS:"),
+    (8, "return base"),
+    (4, "n = len(base)"),
+    (4, "if n > _INT_MAXLEN:"),
+    (8, "n = _INT_MAXLEN"),
+    (4, "while n > 0:"),
+    (8, "head = base[:n]"),
+    (8, "if head in _INTERPRETERS and _INT_SUFFIX_RE.fullmatch(base, n):"),
+    (12, "return head"),
+    (8, "n -= 1"),
+    (4, 'return ""'),
 ]
 check("#50: the emitted SDK reduction's BODY is exactly the bounded loop",
       _body50(_g50, "_int_word") == _INT_BODY,
@@ -3452,7 +3463,10 @@ for _lbl, _from, _to in [
         ("shadow _INT_MAXLEN locally",
          "    n = len(base)\n", "    _INT_MAXLEN = len(base)\n    n = len(base)\n"),
         ("loop on its own counter",
-         "    while n > 0:\n", "    n = len(base)\n    while n > 0:\n")]:
+         "    while n > 0:\n", "    n = len(base)\n    while n > 0:\n"),
+        ("re-indent `n -= 1` into the `if`, where it is dead code",
+         "            return head\n        n -= 1\n",
+         "            return head\n            n -= 1\n")]:
     _m50 = _g50.replace(_from, _to, 1)
     check("#50 CALIBRATION: the body pin rejects a clamp-preserving mutation "
           "(%s)" % _lbl,
