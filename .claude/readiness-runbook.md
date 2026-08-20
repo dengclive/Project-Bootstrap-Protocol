@@ -184,8 +184,15 @@ summarised. **`#50 T8` used to be named here as a wall-clock flake to
 tolerate — one red a re-run, two an E7. That row is DELETED** (2026-08-20):
 it bounded a linear reduction at exactly its linear ratio, duplicated a
 structural pin that catches strictly more, and this sentence is what took an
-unrelated item to E7 over it. **There is no longer a known-flaky check in the
-suite, so a red CI run is now a real signal — treat it as one.**
+unrelated item to E7 over it. **No check in the suite is now known to
+flake on an idle box, so a red CI run is worth investigating rather than
+re-running.** That is narrower than "flake-free" and deliberately so: wall-clock
+assertions remain, and the closest one — `_el50 < 30.0`, four lines below the
+deleted row — measures 3.2 / 4.2 s idle but **8.5 / 11.4 s pinned to two
+contended cores**, i.e. its headroom falls from ~7x to ~2.6x under exactly the
+conditions that killed T8. It has not flaked; it is not immune.
+**E7's threshold in §6 is unchanged at two reds on one head** — a single red is
+still not an E-code, it is now worth investigating rather than re-running.
 Then flag the operator and **wait**.
 
 **9b — the operator reviews the diff and merges.** This is not a courtesy step
