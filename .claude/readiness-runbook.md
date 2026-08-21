@@ -180,7 +180,25 @@ if findings(i) >= findings(i-1): stop now   # divergence, not progress
 
 **9a — post merge-readiness evidence, then STOP.** CI green **on the PR head
 sha**, 0 confirmed findings, suite 25/0, tree clean, `git diff origin/main...`
-summarised. `#50 T8` flakes on wall-clock; one red is a re-run, two is **E7**.
+summarised. **`#50 T8` used to be named here as a wall-clock flake to
+tolerate — one red a re-run, two an E7. That row is DELETED** (2026-08-21):
+it bounded a linear reduction at exactly its linear ratio, on a single
+un-repeated sample, and **this sentence is what took an unrelated item to E7
+over it**. It was 6 of the 14 CI failures this repo has ever had, the only red
+check in all six, once on `main`. **No check in the suite is now known to flake
+on an idle box, so a red CI run is worth investigating rather than
+re-running.**
+
+That is narrower than "flake-free" and deliberately so. Wall-clock assertions
+remain. There are three `_el50 < 30.0` rows a few lines below the deleted one,
+and **two of them are the exposure**: the run-side and prefixed-run rows measure
+3.2 s and 4.2 s idle but **14.6 s and 19.3 s pinned to two contended cores**
+(measured 2026-08-21), i.e. headroom falling from 9.4x/7.1x to **2.1x/1.6x**
+under exactly the conditions that killed T8. The third, pipe-side, is 0.2 s and
+not a candidate. Those two have not flaked; they are not immune, and they are
+what to look at first if something does.
+**E7's threshold in §6 is unchanged at two reds on one head** — a single red is
+still not an E-code, it is now worth investigating rather than re-running.
 Then flag the operator and **wait**.
 
 **9b — the operator reviews the diff and merges.** This is not a courtesy step
