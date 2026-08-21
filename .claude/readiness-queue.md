@@ -17,6 +17,61 @@ buy.
 *(`sdk-pipe-trigger-redos` closed 2026-08-19 — PR #81, merge `897d427`.
 See Done. The two items directly below are the work STRIPPED out of it.)*
 
+- **[blocked] c2-autonomous-dispatch** · `DECISION` · eligible: **no** · **E3 on
+  sight** · scope undecidable until the question below is answered
+  **THE SECOND OF THE VERDICT'S TWO REMAINING LEGS, AND UNTIL 2026-08-20 IT HAD
+  NO WORK ORDER AT ALL** — it is named in `docs/production-readiness.md` §1 and
+  in this file's own closing paragraph as a standing blocker, and nothing in any
+  tier proposed to do anything about it. **The queue could not reach "production
+  ready" no matter how faithfully it was worked.** That gap is the reason this
+  row exists.
+  **RE-DERIVED ON `main` @ `e3f2f57`, DRIVEN END TO END PAST THE ELIGIBILITY
+  GUARDS with a `loop_eligible: true` task under `.claude/specs/s1/tasks/`, a
+  stub `claude` first on `PATH`:**
+  * `auto.sh` → rc=1, *"Queue runner skeleton installed. Implement the dispatch
+    loop per Bootstrap-Protocol-v2-2-0.md Phase 9.7 before any unattended use."*
+  * `loop.sh` and `goal-loop.sh` → rc=1, *"No agent work was dispatched."*, both
+    naming the call they would make (`claude -p --worktree "wt-T-100"
+    --output-format stream-json --verbose`).
+  * **No real `claude` invocation was recorded by the stub.** The feature is
+    absent, not merely guarded.
+  **HALF OF THE RECORDED FINDING IS STALE AND THE STALE HALF IS THE DANGEROUS
+  ONE — IT WAS FIXED.** `docs/production-readiness.md`'s C-2 row (measured at
+  `e47d827`) says the wrappers *"announce that refusal on stderr while exiting 0
+  and recording a terminal-SUCCESS `exit_reason`"*, i.e. under `nohup` or cron a
+  skeleton that did nothing was indistinguishable from a clean overnight run.
+  **That is no longer true: all three exit 1**, and
+  `tests/test_wrapper_behavior.py` pins it as a PROPERTY (*"a wrapper that
+  dispatched nothing must not exit 0, and must not record a success code"*).
+  **What survives is only "dispatches nothing".** Re-measure before quoting the
+  C-2 row; do not copy it.
+  **WHY THIS IS A DECISION AND NOT A FIX.** Two resolutions are legitimate and
+  they are not the same project:
+  **(a) IMPLEMENT the dispatch loop** — per Phase 9.7. Large, security-sensitive
+  (it runs `claude -p` unattended in the ADOPTER's tree), and **in direct tension
+  with this repo's own trust ramp: R1 is literally *"`/loop` with a fixed prompt
+  — unattended iteration on one scoped task"*, and `bin/trust-ramp check --rung
+  R1` returns DENIED.** Shipping adopters a capability this project has not
+  earned for itself needs to be an explicit choice, not a default.
+  **(b) STOP CLAIMING IT** — make the emitted surface and the PRD honest about
+  autonomous modes being unimplemented skeletons, and drop them from the
+  readiness question. Cheap, and it moves the leg by removing the claim rather
+  than by building the feature. **Not covered by `t1-honest-labelling`**, which
+  scopes to security promises in `secrets.md` and flat reassurances, not to the
+  autonomous-mode claim.
+  **THE ONE QUESTION, which is the whole item:** *does the project SHIP
+  autonomous dispatch, or does it stop advertising it?* Tier it, size it, or
+  close it — a decision, not a fix, exactly as `a6-spec-gate-predicate` is.
+  **IF (a) IS CHOSEN, this is what any plan must carry, derived not guessed:**
+  `tests/test_wrapper_behavior.py` is deliberately written to SURVIVE a fix — its
+  checks assert the property, not the skeleton — **except one**:
+  `check("no wrapper dispatched a real `claude` call", not
+  os.path.exists(STUB_LOG))`. That single check flips the moment dispatch works,
+  and it is the correct place to re-state what "dispatched safely" means. The
+  other 64 checks in that file should still pass; if they do not, the fix is
+  wrong, not the pins.
+
+
 - **[ready] prefix-run-cost-residuals** · `CODE` · eligible: **yes** · full
   ceremony · scope TBD at plan time
   **THE COST CLASSES THAT SURVIVE `sdk-pipe-trigger-redos`. FILED HERE BECAUSE
@@ -287,10 +342,16 @@ than re-measured, and `git ls-files | grep -icE 'licen[cs]e'` now returns 1.
 wrappers dispatch nothing). *"C-1 alone settles it either way"* meant
 independently sufficient, never sole ground.
 
-**The next item is `sdk-pipe-trigger-redos`, not `x37-class-b`.** It is a LIVE
-fail-open on `main` in the SDK-more-permissive direction, reachable in 134
-bytes, and it outranks a hole that is `open` but static. `x37-class-b` stays
-ready behind it and now has a fence under it (PR #79).
+**[2026-08-20] `sdk-pipe-trigger-redos` is CLOSED** (PR #81, merge `897d427`;
+closeout #82) and the paragraph that used to stand here — *"the next item is
+`sdk-pipe-trigger-redos`, not `x37-class-b`"*, and *"`x37-class-b` is the only
+remaining A-tier row"* — is superseded rather than deleted, because both were
+true when written. **A now holds THREE rows**: `c2-autonomous-dispatch`
+(blocked on a decision), `prefix-run-cost-residuals` and `x37-class-b`.
+**AND THE SCOREBOARD IS BLOCKED ON A DECISION, NOT ON WORK:** of the verdict's
+two remaining legs, X-37 has a work order and C-2 has only a question. Clearing
+every buildable row in A would still leave §1 at *not production ready*.
+**`x37-class-b`** stays ready and now has a fence under it (PR #79).
 
 **On `x37-class-b`:** It is the only remaining A-tier
 row, it is `CODE`, and it gets full ceremony. **Attempt 1 (2026-08-14) was

@@ -3380,6 +3380,39 @@ check("#50: _INT_MAXLEN covers every interpreter",
 check("#50: the emitted SDK reduction caps its search at _INT_MAXLEN",
       "    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n"
       in _g50)
+
+
+# ...and the SHELL twin carries the same clamp, which nothing pinned until
+# 2026-08-21: on `origin/main` a `git grep` of `tests/` for `_L=@@INT_MAXLEN@@`,
+# for `-gt @@INT_MAXLEN@@` and for `_L" -gt` returns zero hits, all three.
+#
+# BEHAVIOUR CANNOT SUPPLY THIS PIN. Section (h) compares the two reductions on
+# 10,925 words; with this clamp line deleted that comparison is still zero
+# disagreements. The clamp is a COST bound, and a behavioural corpus is blind
+# to one.
+#
+# IT PINS PRESENCE, NOT SUFFICIENCY, AND ITS COVERAGE IS NARROW. Measured
+# 2026-08-21 on a worktree at `origin/main`: deleting the clamp line is already
+# caught by `test_greenfield_golden.py` (10 / 3), by `test_retrofit.py`
+# (269 / 2) and by the two `< 30 s` rows in section (k) (40.5 s / 42.0 s);
+# raising the bound to 4096 is caught by those same digests and by nothing
+# else; and appending `n = len(base)` after the SDK clamp defeats both clamp
+# pins outright. What this line adds is a named assertion in a suite rather
+# than a digest over emitted bytes.
+check("#50: the emitted SHELL reduction caps its search at the same bound",
+      ('  if [ "$_L" -gt %s ]; then _L=%s; fi\n'
+       % (gates_mod._INT_MAXLEN, gates_mod._INT_MAXLEN)) in _h50,
+      "the shell clamp line is not in the emitted hook, or its bound differs "
+      "from the SDK's")
+
+# Both clamp pins were mutation-tested out of band on 2026-08-21 -- shell clamp
+# deleted, shell bound raised to 4096, SDK clamp deleted -- against a detached
+# worktree at `origin/main`; the corresponding pin went red each time and the
+# output is in this change's commit message. It is not restated as an in-suite
+# `check()`: such a row would be true exactly when its own pin is true, so it
+# could not fail independently of it. The suite cannot emit a mutated tree to
+# do better either -- `.github/workflows/ic-self-check.yml` fails a run whose
+# suite writes into the working tree instead of its fixture.
 # The FILE_RUNNERS arm stays a bare membership test on BOTH substrates - the
 # F1/F2 fix is structural, so it is pinned structurally too.
 check("#50: the SDK FILE_RUNNERS arm is still a bare membership test",
@@ -4037,19 +4070,24 @@ print("\n-- (k) T8: the reduction is BOUNDED, on the LENGTH axis --")
 # quadratic (measured 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB), bounded it
 # is flat (0.005 / 0.011 / 0.021 s). A ratio, not an absolute, because the
 # absolute is machine-dependent and the shape of the curve is the claim.
-_w50a, _w50b = "python3" + "1" * 10000, "python3" + "1" * 80000
-_t0 = time.time()
-for _ in range(20):
-    gates_mod._int_word(_w50a)
-_e50a = time.time() - _t0
-_t0 = time.time()
-for _ in range(20):
-    gates_mod._int_word(_w50b)
-_e50b = time.time() - _t0
-check(f"#50 T8: the SDK reduction is FLAT in word length - 8x the word costs "
-      f"{(_e50b / _e50a if _e50a else 0):.1f}x, not 64x "
-      f"({_e50a * 1000:.1f}ms -> {_e50b * 1000:.1f}ms per 20 calls)",
-      _e50b < _e50a * 8, f"{_e50a:.4f}s -> {_e50b:.4f}s")
+# [2026-08-21] THE RATIO ROW THAT STOOD HERE IS DELETED. It timed `_int_word`
+# at 10 KB and 80 KB and asserted `_e50b < _e50a * 8` -- sub-linearity, on an
+# input exactly 8x longer, of a reduction whose measured log-log exponent is
+# 0.9951. Fitting t(L) = c + b*L gives c = 0.203 us against b*L(10k) of
+# 11.432 us, i.e. a predicted ratio of 7.878 against a bound of 8. Over five
+# runs of 20,000 trials on an idle 12-core box the MEDIAN ratio is 7.841 in all
+# five and the p95 is 8.002-8.040 -- over the bound in every run. The violation
+# RATE is not quoted here because it is not stable: 5.1%-7.2% across those five
+# runs, and 2.0%-16.1% for a reviewer measuring on another box. That spread is
+# the defect. The row is 6 of the 14 CI failures this repository has ever had,
+# across 7 attempts, the only red check in all six, once on `main` itself.
+#
+# WHAT WENT WITH IT. Against `n = len(base)` appended after the SDK clamp --
+# every pinned string byte-identical -- this row was the only red in this file
+# on `origin/main`, at 61.8x. What still catches that mutation is
+# `test_greenfield_golden.py`'s three plan digests (10 / 3);
+# `test_retrofit.py` does NOT (271 / 0). Recorded here and filed to
+# `.claude/readiness-queue.md` at step 10.
 
 # (2) ON THE SHELL the bound is DEFENSIVE, not load-bearing, and this pin says
 # only what was verified: no long-word shape found reaches the reduction with
