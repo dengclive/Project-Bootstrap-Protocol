@@ -4315,6 +4315,19 @@ _AMB_ROWS = [
      _COST_HEAD + "2>>o " * 22 + _COST_TAIL, "deny"),
     ("spec-gate-commit", "class 4: git flag star, -C x40",
      "git " + "-C " * 40 + "zzz", "allow"),
+    # [class 5] THE LEFT-EDGE AXIS, AT THE LARGEST COMMAND THE CAPS ADMIT.
+    # `nonabs*`'s `[({] *` arm absorbs a glued brace run, and the three
+    # unbounded `\S*` scans behind it -- the wrapper path arm, the interpreter
+    # path arm and the expansion arm -- each rescan the remainder at every one
+    # of the run's star boundaries. n boundaries x O(n) continuation, and
+    # NEITHER cost-guard predicate sees it: `{` is not a jump byte and the
+    # payload is one byte under the length cap. Measured on the emitted gate:
+    # 3.258 s at 8,040 B, 12.981 s at 16,040 B, exponent 1.99, ~326 s here.
+    # Past the 60 s `_GATE_TIMEOUTS` entry the hook is cancelled, only exit 2
+    # blocks, and the install PROCEEDS -- so the deny below is DISCARDED.
+    ("dependency-gate", "class 5: glued brace run behind a downloader pipe, "
+     "at one byte under _CMD_MAXLEN",
+     _COST_HEAD + "{" * 81879 + "pip install evilpkg", "deny"),
 ]
 
 _amb_before = passed + failed
@@ -4372,6 +4385,21 @@ _AMB_LANG = [
     ("spaced brace x1 after wrapper", "env { pip install evil"),
     ("spaced brace x2 after wrapper", "env { { pip install evil"),
     ("spaced brace x3, sudo",         "sudo { { { pip install evil"),
+    # THE LEFT-EDGE NARROWING'S OWN SURFACE. Closing class 5 narrows the FIRST
+    # character of each `\S*` scan to exclude what the absorber in front of it
+    # would already have taken -- `(\S*/)?` becomes `(/|[^\s({]\S*/)?`. These
+    # are the strings that must survive it, and deleting any of them from a
+    # DENY rule is a bypass. The corpus half of the equivalence claim; the
+    # ERE -> NFA -> product-BFS decider is the other half.
+    ("interpreter at a bare slash",      "/sh"),
+    ("interpreter behind a path",        "/usr/bin/sh"),
+    ("wrapper behind a path",            "/usr/bin/env pip install evil"),
+    ("wrapper behind a relative path",   "./bin/env pip install evil"),
+    ("absorbed brace then path wrapper", "{/usr/bin/env pip install evil"),
+    ("absorbed paren then path interp",  "(/bin/sh"),
+    ("expansion arm, bare",              "${SHELL}"),
+    ("expansion arm behind a path",      "/x/${SHELL}"),
+    ("expansion arm after an absorber",  "{${SHELL}"),
 ]
 for _lbl, _tail in _AMB_LANG:
     differential("dependency-gate", bash(_COST_HEAD + _tail), "deny",
@@ -4415,7 +4443,13 @@ check("the SHELL flag star carries the same rule, hand-written",
 # the fix was reverted: the reverse substitution then finds nothing to undo and
 # the first check below fails before any timing runs.
 _REV = [(r"[0-9]*(?:[<>]\S+|[<>]+ +\S+)\s+", r"[0-9]*[<>]+ *\S+\s+"),
-        (r"(?:\S+\s+)*[({]*", r"(?:\S+\s+)*(?:[({] *)*")]
+        (r"(?:\S+\s+)*[({]*", r"(?:\S+\s+)*(?:[({] *)*"),
+        # the left-edge narrowing, both sites. Undo it and class 5's payload
+        # returns to quadratic on the same string. Without this pair the
+        # calibration measures 1.00x on that payload -- i.e. it would certify
+        # a row it cannot see, which is what the guard below exists to stop.
+        (r"(?:/|[^\s({]\S*/)?", r"(?:\S*/)?"),
+        (r"(?:[$`]|[^\s({]\S*[$`])", r"\S*[$`]")]
 _emitted_pat = gates_mod._PIPE_TO_SHELL.pattern
 _reverted_pat = _emitted_pat
 for _new, _old in _REV:
@@ -4425,11 +4459,25 @@ check("the cost rows are calibrated: the emitted pattern still carries the "
       _reverted_pat != _emitted_pat,
       "the reverse substitution found nothing to undo -- either the fix is "
       "gone or its spelling moved, and every cost row above is vacuous")
+# ...and EVERY pair must bite, not just one of them. With a single `!=` a pair
+# whose spelling moved goes silently vacuous while the others keep the check
+# green -- which is how a calibration certifies a row it cannot see.
+_rev_dead = [_new for _new, _old in _REV if _new not in _emitted_pat]
+check("the cost rows are calibrated: every reverse substitution finds its "
+      "target",
+      not _rev_dead,
+      f"{len(_rev_dead)} of {len(_REV)} substitutions matched nothing: "
+      f"{_rev_dead!r}")
 
 _rev_rx = _re.compile(_reverted_pat)
 _fix_rx = _re.compile(_emitted_pat)
 for _lbl, _payload, _floor in [
         ("redirect arm", _COST_HEAD + "2>>o " * 18, 20.0),
+        # class 5's own shape. Without this row the left-edge pair in `_REV`
+        # is uncalibrated: it reverts a spelling no other payload exercises,
+        # and the two rows below measure 1.00x on a glued brace run.
+        ("left-edge narrowing", _COST_HEAD + "{" * 6000 + "pip install evil",
+         20.0),
         ("brace product",
          _COST_HEAD + "A=1/env " * 24 + "{ " * 300 + _COST_TAIL, 10.0)]:
     _t0 = _time.process_time(); _fix_rx.search(_payload)
@@ -4445,7 +4493,7 @@ for _lbl, _payload, _floor in [
 
 _amb_ran = (passed + failed) - _amb_before
 check("the self-ambiguity block ran every row it declares",
-      _amb_ran == len(_AMB_ROWS) * 4 + len(_AMB_LANG) + 5 + 2 + 3,
+      _amb_ran == len(_AMB_ROWS) * 4 + len(_AMB_LANG) + 5 + 2 + 5,
       f"{_amb_ran} checks recorded -- deleting a loop here must fail HERE, "
       f"not silently reduce the count")
 
