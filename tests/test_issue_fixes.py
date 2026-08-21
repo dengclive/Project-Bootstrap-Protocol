@@ -3382,73 +3382,37 @@ check("#50: the emitted SDK reduction caps its search at _INT_MAXLEN",
       in _g50)
 
 
-# ...and the SHELL twin carries the same clamp, which NOTHING pinned until
-# 2026-08-21. Only the substitution VALUE was pinned (above); on `origin/main`
-# a grep of `tests/` for the clamp LINE returns zero hits -- all three of
-# `_L=@@INT_MAXLEN@@`, `-gt @@INT_MAXLEN@@` and `_L" -gt` exit 1.
+# ...and the SHELL twin carries the same clamp, which nothing pinned until
+# 2026-08-21: on `origin/main` a `git grep` of `tests/` for `_L=@@INT_MAXLEN@@`,
+# for `-gt @@INT_MAXLEN@@` and for `_L" -gt` returns zero hits, all three.
 #
-# BEHAVIOUR CANNOT SUPPLY THAT PIN. The two reductions are held together by the
-# 10,925-word differential in section (h), and deleting this clamp changes NO
-# answer: re-run that corpus with the line removed and it is still zero
-# disagreements against the SDK. The clamp is a COST bound, and a behavioural
-# corpus is blind to one by construction.
+# BEHAVIOUR CANNOT SUPPLY THIS PIN. Section (h) compares the two reductions on
+# 10,925 words; with this clamp line deleted that comparison is still zero
+# disagreements. The clamp is a COST bound, and a behavioural corpus is blind
+# to one.
 #
-# WHAT THIS PIN IS WORTH, MEASURED -- because the first draft of this comment
-# overstated it and a reviewer was right to say so. Every mutation of the shell
-# clamp tried here is ALREADY caught on `origin/main`, by the plan digests,
-# which hash the emitted bytes. Full 25-suite runs on a worktree at e3f2f57:
-#
-#   clamp line DELETED     golden 10/3, retrofit 269/2, and the `< 30 s` rows
-#                          in section (k) at 40.5 s / 42.0 s   -> 9,756 / 7
-#   `-gt 7` -> `-gt 4096`  golden 10/3, retrofit 269/2, AND NOTHING ELSE: the
-#                          `< 30 s` rows read 4.6 s / 5.7 s and PASS
-#                                                              -> 9,758 / 5
-#
-# So this line's marginal coverage over the full suite is ZERO mutations today,
-# and claiming otherwise would be false. What it buys is the one thing a digest
-# cannot: IT SURVIVES A RE-BASELINE. Every intentional change to emitted bytes
-# moves those digests and re-baselines them -- freeze exceptions 72 and 73 are
-# two recent ones -- and a clamp quietly widened inside such a change rides
-# through untouched. A named structural assertion does not. That is the same
-# argument, and the only one, that the SDK-side pin above has rested on since
-# #50 landed. This gives the other substrate the same footing.
+# IT PINS PRESENCE, NOT SUFFICIENCY, AND ITS COVERAGE IS NARROW. Measured
+# 2026-08-21 on a worktree at `origin/main`: deleting the clamp line is already
+# caught by `test_greenfield_golden.py` (10 / 3), by `test_retrofit.py`
+# (269 / 2) and by the two `< 30 s` rows in section (k) (40.5 s / 42.0 s);
+# raising the bound to 4096 is caught by those same digests and by nothing
+# else; and appending `n = len(base)` after the SDK clamp defeats both clamp
+# pins outright. What this line adds is a named assertion in a suite rather
+# than a digest over emitted bytes.
 check("#50: the emitted SHELL reduction caps its search at the same bound",
       ('  if [ "$_L" -gt %s ]; then _L=%s; fi\n'
        % (gates_mod._INT_MAXLEN, gates_mod._INT_MAXLEN)) in _h50,
       "the shell clamp line is not in the emitted hook, or its bound differs "
       "from the SDK's")
 
-# CALIBRATED OUT OF BAND, AND DELIBERATELY NOT RESTATED AS A `check()`.
-# Both clamp pins were mutation-tested on 2026-08-21 against a detached
-# worktree at `origin/main` -- shell clamp deleted, shell bound inflated to
-# 4096, SDK clamp deleted -- and the corresponding pin went RED every time;
-# the pasted output is in this change's commit message. An in-suite version was
-# written and then REMOVED, because for a substring pin it is a tautology:
-# `s.replace(P, "") != s` is true exactly when `P in s`, so such a row is the
-# pin spelled a second time and cannot fail independently of it. Nor can the
-# suite emit a mutated tree to do better -- `.github/workflows/ic-self-check.yml`
-# fails a run whose suite writes into the working tree instead of its fixture.
-
-# AND THE MUTATION IS THE REAL DEFECT, not a strawman: without the clamp the
-# loop runs len(base) times, each `fullmatch`-ing the suffix, so the reduction
-# goes from LINEAR to QUADRATIC. Measured 2026-08-21 on the emitted module with
-# the clamp deleted -- behaviour-identical on every probe word -- 10.0 ms ->
-# 625.9 ms across 10 KB -> 80 KB of command word: 62.6x for 8x the length,
-# log-log exponent 1.989, against the shipped 11.6 us -> 91.5 us and 0.9951.
-#
-# WHAT THIS PIN DOES NOT DO, written down because a pin whose limit is unwritten
-# gets trusted past it. It reads that the clamp is PRESENT, not that it is
-# SUFFICIENT: append `n = len(base)` on the line after the SDK clamp and the
-# reduction is quadratic again with every pinned string byte-identical, and both
-# clamp pins stay green. Measured on that worktree, that mutation leaves ALL
-# FOUR #50 structural pins green and is red only in the plan digests. A
-# source-text pin on the whole statement sequence was built for exactly this and
-# WITHDRAWN: four spellings defeated it in four attempts -- an insertion after
-# the clamp, a re-indent of `n -= 1` into the `if`, a line hidden in the region
-# the parser discarded, and a second `def _int_word` that Python binds instead
-# of the pinned one. The gap is recorded here and filed to
-# `.claude/readiness-queue.md` at step 10; what the digest cannot survive is a
-# deliberate re-baseline.
+# Both clamp pins were mutation-tested out of band on 2026-08-21 -- shell clamp
+# deleted, shell bound raised to 4096, SDK clamp deleted -- against a detached
+# worktree at `origin/main`; the corresponding pin went red each time and the
+# output is in this change's commit message. It is not restated as an in-suite
+# `check()`: such a row would be true exactly when its own pin is true, so it
+# could not fail independently of it. The suite cannot emit a mutated tree to
+# do better either -- `.github/workflows/ic-self-check.yml` fails a run whose
+# suite writes into the working tree instead of its fixture.
 # The FILE_RUNNERS arm stays a bare membership test on BOTH substrates - the
 # F1/F2 fix is structural, so it is pinned structurally too.
 check("#50: the SDK FILE_RUNNERS arm is still a bare membership test",
@@ -4106,33 +4070,24 @@ print("\n-- (k) T8: the reduction is BOUNDED, on the LENGTH axis --")
 # quadratic (measured 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB), bounded it
 # is flat (0.005 / 0.011 / 0.021 s). A ratio, not an absolute, because the
 # absolute is machine-dependent and the shape of the curve is the claim.
-# [2026-08-21] THE RATIO ROW THAT STOOD HERE IS DELETED, and this is what it
-# said: it timed `_int_word` at 10 KB and 80 KB and asserted
-# `_e50b < _e50a * 8` -- sub-linearity, on an input exactly 8x longer, of a
-# reduction whose measured log-log exponent is 0.9951. Its entire margin was
-# 0.203 us of fixed per-call overhead against 11.432 us of scan: a predicted
-# ratio of 7.878 against a bound of 8, which is 1.0155x. Re-measured 2026-08-21
-# over FIVE independent runs of 20,000 trials of the row verbatim, idle 12-core
-# box: the MEDIAN ratio is 7.841 in all five and the p95 is 8.002-8.040 -- over
-# the bound in every run. The VIOLATION RATE is deliberately NOT quoted as a
-# figure, because it is not a stable statistic: 5.1%-7.2% across those five
-# runs, and an independent reviewer on another box measured 2.0%-16.1% over
-# eight. THAT SPREAD IS THE DEFECT. The row's verdict is decided by scheduler
-# noise rather than by the code under test. Pinned to two contended cores it
-# violates 81.7%-83.2% (three runs). It is 6 of the 14 CI failures this repo
-# has ever had, across 7 attempts, the ONLY red check in all six, once on
-# `main` itself.
+# [2026-08-21] THE RATIO ROW THAT STOOD HERE IS DELETED. It timed `_int_word`
+# at 10 KB and 80 KB and asserted `_e50b < _e50a * 8` -- sub-linearity, on an
+# input exactly 8x longer, of a reduction whose measured log-log exponent is
+# 0.9951. Fitting t(L) = c + b*L gives c = 0.203 us against b*L(10k) of
+# 11.432 us, i.e. a predicted ratio of 7.878 against a bound of 8. Over five
+# runs of 20,000 trials on an idle 12-core box the MEDIAN ratio is 7.841 in all
+# five and the p95 is 8.002-8.040 -- over the bound in every run. The violation
+# RATE is not quoted here because it is not stable: 5.1%-7.2% across those five
+# runs, and 2.0%-16.1% for a reviewer measuring on another box. That spread is
+# the defect. The row is 6 of the 14 CI failures this repository has ever had,
+# across 7 attempts, the only red check in all six, once on `main` itself.
 #
-# WHAT WENT WITH IT, stated rather than netted out. Against a clamp-preserving
-# re-widening of the SDK reduction -- `n = len(base)` appended after the clamp,
-# every pinned string byte-identical -- this row was the ONLY red in this file's
-# 3,381 checks on `origin/main`, at 61.8x; all four structural pins in section
-# (i) are green on it. That class is now carried by `test_greenfield_golden.py`
-# and `test_retrofit.py`'s plan digests, which DO go red on it -- a real
-# backstop with a real limit, since a deliberate re-baseline would carry the
-# mutation through. The trade is made on purpose: a check that fires on 5% of
-# GREEN trees cannot be the thing guarding a complexity class. The gap is
-# recorded here and filed to `.claude/readiness-queue.md` at step 10.
+# WHAT WENT WITH IT. Against `n = len(base)` appended after the SDK clamp --
+# every pinned string byte-identical -- this row was the only red in this file
+# on `origin/main`, at 61.8x. What still catches that mutation is
+# `test_greenfield_golden.py`'s three plan digests (10 / 3);
+# `test_retrofit.py` does NOT (271 / 0). Recorded here and filed to
+# `.claude/readiness-queue.md` at step 10.
 
 # (2) ON THE SHELL the bound is DEFENSIVE, not load-bearing, and this pin says
 # only what was verified: no long-word shape found reaches the reduction with
