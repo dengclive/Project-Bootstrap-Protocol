@@ -2822,7 +2822,7 @@ CMD_PFX='@@ANCHOR_ERE@@'
 # True if the command invokes `<tool> <subcommand>` at a command position.
 # The tool may carry a path (`/usr/bin/git commit`).
 cmd_has_verb(){
-  local _re="^ *${CMD_PFX}([^ ]*/)?$2( +-[Cc] +[^ ]+| +-[^ ]+)* +$3( |\\$)"
+  local _re="^ *${CMD_PFX}([^ ]*/)?$2( +-[Cc] +([^- ][^ ]*|-)| +-[^ ]+)* +$3( |\\$)"
   local _seg
   # `if`, not `[[ ]] && return` - a failing `&&` list as the last command of
   # a loop body trips `set -e` and would route every NON-match through the

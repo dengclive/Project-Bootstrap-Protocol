@@ -567,6 +567,32 @@ check("the multi-wrapper guard CAN fail: bounding the word run drops "
       not _pb.match("sudo env time bash "),
       "the tightening this guard exists to catch is not caught by it")
 
+# SPACED BRACES AFTER A WRAPPER, and why they need rows of their own. Since
+# 2026-08-20 the trailing brace arm is `[({]*` -- space-free -- so a spaced
+# brace run after a wrapper is absorbed ONLY by the word run above. Before that
+# the arm was `([({] *)*` and rescued them, which is why this guard did not
+# need these rows and now does: verified by running it, with the word run
+# bounded the OLD regex still accepted `env { { ` and this one does not. So the
+# edit the guard exists to catch now deletes strictly more of the language than
+# the multi-wrapper rows above can see.
+# TWO OF THESE FOUR CANNOT GO RED AND ARE HERE AS LANGUAGE COVERAGE, NOT AS
+# GUARDS -- measured, with the word run bounded: `env { ` still matches (one
+# iteration is enough for a single spaced brace) and so does `env { {{` (the
+# word run takes `{ `, the space-free arm takes `{{`). Only TWO OR MORE spaced
+# braces detect the tightening, which is why the calibration below names
+# `env { { `. Saying which rows can fail is the difference between a guard and
+# a row that looks like one.
+for _sb in ("env { ", "env { { ", "sudo { { { ", "env { {{"):
+    check(f"prefix_run consumes the SPACED-BRACE run {_sb!r}",
+          bool(_pr.match(_sb)),
+          "a spaced-brace run after a wrapper is gone from the language")
+
+check("the spaced-brace guard CAN fail: bounding the word run drops "
+      "`env { { `",
+      not _pb.match("env { { "),
+      "bounding the word run no longer deletes spaced-brace runs, so these "
+      "rows are not pinning what they claim to pin")
+
 # --------------------------------------------------------------------------
 # 2. The sampled composition sweep, at GATE level, on BOTH substrates.
 # --------------------------------------------------------------------------
@@ -657,7 +683,9 @@ try:
         # SUITE DISTINGUISHED THE FIX FROM THE BROKEN CANDIDATE -- both trees
         # returned a byte-identical pass/fail count, so the only thing that
         # moved when the load-bearing trailing `([({] *)*` was deleted was a
-        # DIGEST. A digest records that bytes changed; it does not know which
+        # DIGEST. (That spelling is itself superseded: freeze exception 73
+        # dropped the ` *`, so the arm reads `[({]*`. The history stands.)
+        # A digest records that bytes changed; it does not know which
         # way. A digest is not a guard.
         #
         # THE SHAPE NOTHING ELSE PINS IS A BRACE GLUED AFTER A WRAPPER. The

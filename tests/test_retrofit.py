@@ -2145,9 +2145,24 @@ def retrofit_digest_full(yaml_text):
 # embeds, so both fixtures move. Language unchanged (decided, not sampled);
 # the cost is what moved. Action counts UNCHANGED at 79 / 93, verified before
 # the re-baseline.
+# [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+# `cmdpos.prefix_run()` renders into the shared header every retrofit hook
+# embeds, so both fixtures move again. Two self-ambiguous arms lost their
+# duplicate parses -- the redirect arm and the trailing brace run -- and the
+# git flag star lost a third, in both of its encodings. Language unchanged and
+# PROVED so by an exact decision procedure over both dialects, unbounded in
+# length; the cost is what moved. Action counts UNCHANGED at 79 / 93, verified
+# before the re-baseline; 11 and 15 hook bodies move in these two fixtures.
+# NOT closed by this, and neither is "expensive": at the largest length
+# `_cost_guard` permits, the glued-brace axis is a live fail-open on BOTH
+# substrates on this tree -- 81,891 bytes, ZERO jump bytes, SDK 61.56 s and
+# emitted shell hook 119.32 s, both carrying a deny, both past 60 s, and
+# identical at the parent. The `A=1/env ` arm overlap is likewise untouched
+# (40,984 bytes: 53.0 s parent, 51.2 s here). See freeze exception 73 in
+# tests/test_greenfield_golden.py for the full statement.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "008776fa0a9dbf01a6eef1e8b37080152c0da374e3447de03d9d49eb59451168",
-    "agent": "c03cafb1ac4257fb5dec2b8c5730668664bc790a7b373493ef7dd174b706cf12",
+    "service": "33e0b46b62a4b1d041df12daecace011864289bb597db9426886fff99e82c5fd",
+    "agent": "9e18c9415fe7e58295622b0e519313ae45f1441b8940e0cb3f06281de274ff97",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

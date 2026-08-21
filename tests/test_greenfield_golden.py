@@ -3144,7 +3144,75 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "aa0252adaa59c0c3eaca66e9c737b66bd7c270217c4008afba0368fd94766a76",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
+        "dcd8eb28d90d48106913972a41645c667aecc873e9f8b49927cef887be8640d2",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3395,7 +3463,75 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "1d6a39b5e469f5d3ebd7b144468f2376be9745e023b36a891abdda8227b30c67",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
+        "4002a6fe7df994e2384b4d0f4108fd1036906095db40aeffd63cba445bbe150a",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3593,7 +3729,75 @@ EXPECTED_DIGESTS = {
         # UNCHANGED at 57 / 69 / 59, zero files added or removed, verified
         # BEFORE this re-baseline, so a count move would have been E5 rather
         # than a silent digest.
-        "8aa56149e1adc94c6b3953f7f648f013dddc857b2295da464ec5a25612ae6b6a",
+        # [freeze-exception no. 73, 2026-08-20] prefix-run-cost-residuals --
+        # THE PREFIX RUN STOPS RE-PARSING ITS OWN INPUT. Two arms of
+        # `prefix_run()` accepted the same bytes along more than one parse, and
+        # on a FAILING match the engine walked every one of them: the redirect
+        # arm let `[<>]+` and its target consume the same `<`/`>` characters
+        # (2x per token -- 141 bytes, 110.22 s CPU, allow/allow on BOTH
+        # substrates, against a gate declaring 60 s), and the trailing
+        # `([({] *)*` shared `{ ` with the word run before it and the brace
+        # run's own stopping point was a second free index (an m^2 factor --
+        # 2,158 bytes, capped past 45 s). Neither rewrite changes
+        # the accepted LANGUAGE; each removes duplicate parses, PROVED by an
+        # exact ERE/Python -> NFA -> product-BFS decision procedure in both
+        # dialects, unbounded in string length, two-sided calibrated.
+        #
+        # `_GIT_VERB_TMPL`'s flag star carried the same defect one file away
+        # and is fixed with it, in BOTH of its encodings -- the star is written
+        # twice (lib/sdk_gates_template.py and hand-written at
+        # lib/templates.py) and has no cmdpos renderer, so both move or
+        # neither does. The first spelling tried for it was a BYPASS: it
+        # dropped `git -C - commit`, a real invocation, and three gates stopped
+        # applying while the three BEHAVIOURAL suites stayed fully green --
+        # test_substrate_differential 4178/0, test_composition 147/0,
+        # test_hook_behavior 384/0 -- the corpus carrying no `-C` argument that
+        # begins with `-`. (The full run was 9,758/5, the 5 being digest pins;
+        # "9,763 green" was this comment's own error, corrected at step 7.)
+        # The landed spelling admits the lone `-` back and is proved
+        # equivalent.
+        #
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59, zero files added or removed,
+        # verified BEFORE this re-baseline -- a count move would have been E5,
+        # not a digest. Byte surgery: every moved artifact reproduces
+        # byte-exactly from the substitutions alone -- 12 / 16 / 12 artifacts
+        # across these three fixtures (11 / 15 / 11 hook `.sh` plus `gates.py`,
+        # 37 hook bodies in total), and 13 hooks plus `gates.py` on the
+        # ai-agent REVIEW PROBE. THE 13 IS THE PROBE'S, NOT A FIXTURE'S -- the
+        # AMENDMENT to freeze exception no. 42 in this file says so in as many
+        # words, and this comment quoted the probe number in a fixture claim
+        # until it was caught at step 7. (An earlier revision of this sentence
+        # cited a `no. 61` entry as the home of that warning. IT IS NOT: the
+        # warning is under no. 42's AMENDMENT at :1873. And the retraction
+        # that replaced it over-corrected -- it said no such entry EXISTS,
+        # when :2807 heads a RANGE, `no. 56-61`. A range head names a batch,
+        # not six individually citable entries, so `no. 61` is still not a
+        # thing to cite; "there is no such entry" was simply the wrong reason.
+        # Three passes on one sentence: invented, then mis-retracted, then
+        # this.)
+        #
+        # WHAT IT DOES NOT CLOSE, because a green suite will not say it, and
+        # "expensive" is the wrong word for it:
+        #   * the glued-brace LENGTH axis. `{`x19200 is ~21 s SDK / ~7 s shell
+        #     before AND after -- but at the largest length `_cost_guard`
+        #     permits it is a live fail-open on BOTH substrates, measured on
+        #     THIS tree: `{`x81870 + an install tail is 81,891 bytes with ZERO
+        #     jump bytes, and takes the SDK 61.56 s and the emitted shell hook
+        #     119.32 s, both carrying a deny, both past their 60 s ceiling.
+        #     Not a regression -- the parent commit is identical.
+        #   * the `A=1/env ` arm overlap, which is a k factor this repair does
+        #     NOT remove: 40,984 bytes is 53.0 s at the parent and 51.2 s here,
+        #     quadratic on both, allow/allow.
+        # Neither is an ambiguity to factor out; both need a bound, and a bound
+        # is a language change. Filed, not taken.
+        #
+        # AND IT IS NOT PARETO. The redirect arm now tests two `[<>]` classes
+        # per `[0-9]*` step, so digit-run payloads are SLOWER: measured end to
+        # end on the emitted dependency-gate, 4,047 / 16,047 / 40,047 bytes
+        # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
+        # 40 KB, and stated here because a table of wins alone would read as
+        # if there were none.
+        "632d4c4aa8d30e2659c6b053b31d2516f803ea8ca3fdbbd00eb0a15b466b93ad",
 }
 
 EXPECTED_ACTION_COUNTS = {

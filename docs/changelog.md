@@ -158,6 +158,81 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the prefix run stops re-parsing its own input (2026-08-20)
+
+**No version bump** (fix, not surface; freeze exception **73**). The direct
+continuation of the 2026-08-19 entry above, which closed the token-count axis
+and said in its own words that it did not close the class.
+
+**The defect, and it is a different one from 72's.** Three arms accepted the
+same bytes along more than one parse, so a **failing** match walked every parse:
+the redirect arm let `[<>]+` and its target consume the same `<`/`>` characters
+(2x per token); the trailing `([({] *)*` shared `{ ` with the word run before it
+while `A=1/env ` matched the assignment arm **and** the path-prefixed wrapper arm
+at once (~k*m^2); and `_GIT_VERB_TMPL`'s flag star let a `-C` token match both of
+its arms (Fibonacci-many parses, ~1.62x per token).
+
+**Measured on the emitted artifacts.** `curl … | ` + `2>>o ` x24 is **141 bytes
+with zero jump bytes** and took the emitted `dependency-gate` **110.22 s CPU**
+against the **60 s** it declares — and it is **allow/allow**, so it spends the
+whole budget on a command both substrates permit. `git ` + `-C ` x40 is **127
+bytes** and crosses the ceiling on `spec-gate-commit`, which declares no timeout
+on **either** substrate. `_cost_guard` measures length and jump density and can
+see neither term.
+
+**The fix removes duplicate parses and not one string.** Proved by an exact
+ERE/Python → NFA → product-BFS decision procedure over both dialects, unbounded
+in string length, two-sided calibrated against four deliberately broken variants.
+
+**The first spelling of the git fix was a bypass and the behavioural suites could
+not see it.** `(?:\s+-[Cc]\s+[^-\s]\S*|\s+-\S+)*` drops `git -C - commit` — a
+real invocation — and three gates stop applying, turning deny into allow, while
+`test_substrate_differential` (4178), `test_composition` (147) and
+`test_hook_behavior` (384) were **all green**. The landed spelling admits the
+lone `-` back; five rows now pin it. **Both encodings of that star move** — it is
+written twice, in `lib/sdk_gates_template.py` and hand-written in
+`lib/templates.py`, and has no `cmdpos` renderer.
+
+**What is pinned, and it is pinned rather than asserted:** four cost rows and
+fifteen language rows in `tests/test_substrate_differential.py`; a spaced-brace
+guard and its own calibration in `tests/test_composition.py`; and a **deletion
+calibration** the cost block never had — the emitted pattern with the
+substitution undone must be dramatically slower on the same payload, so the rows
+cannot be green for a reason other than the fix.
+
+**Freeze exception 73.** All five golden and retrofit fixtures move, because
+`prefix_run` renders into the shared header. **Action counts unchanged** at
+57 / 69 / 59 greenfield and 79 / 93 retrofit, zero files added or removed,
+verified before the re-baseline — so a count move would have been E5 rather than
+a silent digest.
+
+**What this does NOT do: close the cost class — and "expensive" is the wrong
+word for what survives.** Three axes are untouched, all measured on this tree
+and identical at the parent:
+
+* **glued braces.** `{` x19200 is ~21 s SDK / ~7 s shell. At the largest length
+  `_cost_guard` permits it is a **live fail-open on both substrates**:
+  `{` x81870 + an install tail is 81,891 bytes with **zero jump bytes**, SDK
+  **61.56 s** and emitted shell hook **119.32 s**, both carrying a deny, both
+  past their 60 s ceiling.
+* **the `A=1/env ` arm overlap** — a k factor this repair does not remove.
+  40,984 bytes: 53.0 s at the parent, 51.2 s here, quadratic, allow/allow.
+* **the downloader alternation against `[^;&]*`**, found during this item's
+  review: quadratic on **both** substrates and reachable by an ordinary `wget`
+  with many URLs.
+
+None is an ambiguity to factor out; each needs a bound, and a bound is a
+language change. The first two are already described in
+`.claude/readiness-queue.md`; **the third is not filed anywhere yet** — the
+queue row is rewritten at closeout, and until then this paragraph is its only
+record.
+
+**AND IT IS NOT PARETO.** The redirect arm now tests two `[<>]` classes per
+`[0-9]*` step, so digit-run payloads are slower: measured end to end on the
+emitted `dependency-gate`, 4,047 / 16,047 / 40,047 bytes cost **1.09x / 1.10x /
+1.15x**, deny/deny throughout. Linear, ~+6 ms at 40 KB — recorded because a
+table of wins alone would read as if there were none.
+
 ## Post-2.8.0 — the SDK prefix-run ReDoS: the token-count cost axis (2026-08-19)
 
 **No version bump** (fix, not surface; freeze exception **72**). A live fail-open
