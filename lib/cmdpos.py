@@ -609,7 +609,8 @@ def bash_case_alt(words, indent: str = "") -> str:
 # The wrapper arm is what fixes D9 and, on the SDK side, D3. `\S`-style
 # shorthands are avoided so the identical source works as a bash ERE.
 
-def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
+def prefix_run(space: str = " +", nonspace: str = "[^ ]",
+               head: str = "[^ ({]") -> str:
     """THE command-position prefix run, factored out so the anchor and the
     pipe trigger cannot encode command position differently.
 
@@ -695,7 +696,7 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
     # one source compiles in both Python and bash, and bash has no lookahead
     # and no atomic groups.
-    wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
+    wrapper = ("((/|" + head + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
                + "|(" + alt(NAMED_GROUP_HEADS) + "))")
     # The trailing brace arm sits INSIDE the trailing group, not at the star
     # level, and is SPACE-FREE. Both facts are load-bearing and both are
@@ -733,7 +734,8 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
 
 
 def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
-                     ws: str = "[[:space:]]") -> str:
+                     ws: str = "[[:space:]]",
+                     head: str = "[^ ({]") -> str:
     """The interpreter at a command position, as the pipe trigger sees it.
 
     [round-4 P1, finding 9] `[.0-9]*` is what makes `python3.12` and
@@ -772,15 +774,17 @@ def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
     shorter, and `curl u | ${SHELL}` stays the 0 -> 2 improvement over 2.6.1
     that it became.
     """
-    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")" + INTERP_SUFFIX
+    return ("((/|" + head + nonspace + "*/)?(" + alt(INTERPRETERS) + ")"
+            + INTERP_SUFFIX
             + "(" + ws + "|$|[;)])"
-            + "|" + nonspace + "*[$`]" + nonspace + "*"
+            + "|([$`]|" + head + nonspace + "*[$`])" + nonspace + "*"
             + "(" + ws + "|$|[;)])"
             + ")")
 
 
 def pipe_to_shell_regex(space: str = " +", nonspace: str = "[^ ]",
-                        ws: str = "[[:space:]]") -> str:
+                        ws: str = "[[:space:]]",
+                        head: str = "[^ ({]") -> str:
     r"""A downloader whose output reaches an interpreter through any number of
     pipes, with any prefix run in front of the interpreter.
 
@@ -794,8 +798,8 @@ def pipe_to_shell_regex(space: str = " +", nonspace: str = "[^ ]",
     cost.
     """
     return ("(" + alt(DOWNLOADERS) + ")[^;&]*[|] *"
-            + prefix_run(space, nonspace)
-            + interpreter_word(space, nonspace, ws))
+            + prefix_run(space, nonspace, head)
+            + interpreter_word(space, nonspace, ws, head))
 
 
 def runners_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
@@ -1068,7 +1072,8 @@ def install_head_tail(space: str = " +", nonspace: str = "[^ ]",
     )
 
 
-def anchor_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
+def anchor_regex(space: str = " +", nonspace: str = "[^ ]",
+                 head: str = "[^ ({]") -> str:
     """The prefix-run regex. `space`/`nonspace` are parameterised only so the
     Python side can keep its `\\s`/`\\S` spelling; the STRUCTURE - and every
     word in it - comes from this file for both.
@@ -1078,7 +1083,7 @@ def anchor_regex(space: str = " +", nonspace: str = "[^ ]") -> str:
     path arm on the wrapper word. Two near-copies of one rule is the shape
     finding 9 reports one function over.
     """
-    return prefix_run(space, nonspace)
+    return prefix_run(space, nonspace, head)
 
 
 # ---- [round-4 P4] THE COMMAND NORMALIZATION, one definition, both substrates

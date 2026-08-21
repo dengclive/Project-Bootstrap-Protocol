@@ -4655,13 +4655,20 @@ _xp_key(){{
 # cmdpos.completer_key.
 _CKEY=""
 _ckey(){{
-  local _t="${{1##*/}}"
-  while : ; do
-    case "$_t" in
-      "("*|"{{"*|":"*|"?"*) _t="${{_t#?}}" ;;
-      *) break ;;
-    esac
-  done
+  # [X-45] `${{1##*/}}` is a quadratic expansion on a slash-free word, and a word
+  # with no `/` is its own basename - ask first, exactly as the word walk does.
+  local _t
+  case "$1" in
+    */*) _t="${{1##*/}}" ;;
+    *) _t="$1" ;;
+  esac
+  # X-52 shape: the per-character `${{_t#?}}` rebuilt the WHOLE remainder once
+  # per glue byte, so a linear strip cost O(n^2). `%%` leaves the leading glue
+  # run; the remainder is then taken by OFFSET, not by a second pattern match -
+  # `${{_t#"$_g"}}` is itself quadratic in the length of `$_g`. Same idiom as the
+  # `_rest="${{_rest:${{#_w}}}}"` step in the word walk.
+  local _g="${{_t%%[!({{:?]*}}"
+  _t="${{_t:${{#_g}}}}"
   case "$_t" in -m*) _t="${{_t#-m}}" ;; esac
   _CKEY="$_t"
 }}

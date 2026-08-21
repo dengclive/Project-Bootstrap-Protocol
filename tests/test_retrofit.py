@@ -2161,8 +2161,27 @@ def retrofit_digest_full(yaml_text):
 # (40,984 bytes: 53.0 s parent, 51.2 s here). See freeze exception 73 in
 # tests/test_greenfield_golden.py for the full statement.
 EXPECTED_RETROFIT_DIGESTS = {
-    "service": "33e0b46b62a4b1d041df12daecace011864289bb597db9426886fff99e82c5fd",
-    "agent": "9e18c9415fe7e58295622b0e519313ae45f1441b8940e0cb3f06281de274ff97",
+    # [freeze-exception no. 74, 2026-08-21] THE LEFT-EDGE NARROWING.
+    # `(\S*/)?` -> `(/|[^\s({]\S*/)?` and `\S*[$`]` ->
+    # `([$`]|[^\s({]\S*[$`])` in cmdpos's wrapper, interpreter and
+    # expansion arms, plus `_ckey`'s per-character strip loop replaced by
+    # `%%` + an OFFSET. A scan may not begin on a character the star in
+    # front of it has already absorbed, so the boundary is forced instead
+    # of free: the glued-brace axis goes 12.981 s -> 0.051 s at 16,040 B,
+    # exponent 1.99 -> 1.00, and 81,919 B (one byte under `_CMD_MAXLEN`,
+    # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell.
+    # LANGUAGE UNCHANGED, DECIDED NOT SAMPLED: ERE/Python -> Thompson NFA
+    # -> product determinization -> BFS over a partition refining every
+    # atom, unbounded in length, EQUIVALENT in both dialects and on the
+    # anchor, two-sided calibrated 6/6 against deliberately broken
+    # variants. Corroborated by 4,235/0 differential and 152/0 composition.
+    # ACTION COUNTS UNCHANGED at 79 / 93 -- verified before the
+    # re-baseline; a move would have been E5. Byte surgery: 14 of the 16
+    # moved artifacts reproduce byte-exactly from the substitutions alone;
+    # the two that do not are `.installer-manifest.json` and
+    # `.bootstrap-state.json`, which digest the others.
+    "service": "61f765a10aed19bb1f76dcfeb21d485f2a9cbaecaae462dcd634ef7716bb6e9d",
+    "agent": "67a60fb8e43a035b5a5c33d64ad88aa9946f1486d9a0e749669461e40eda58b5",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

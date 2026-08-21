@@ -3212,7 +3212,26 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "dcd8eb28d90d48106913972a41645c667aecc873e9f8b49927cef887be8640d2",
+        # [freeze-exception no. 74, 2026-08-21] THE LEFT-EDGE NARROWING.
+        # `(\S*/)?` -> `(/|[^\s({]\S*/)?` and `\S*[$`]` ->
+        # `([$`]|[^\s({]\S*[$`])` in cmdpos's wrapper, interpreter and
+        # expansion arms, plus `_ckey`'s per-character strip loop replaced by
+        # `%%` + an OFFSET. A scan may not begin on a character the star in
+        # front of it has already absorbed, so the boundary is forced instead
+        # of free: the glued-brace axis goes 12.981 s -> 0.051 s at 16,040 B,
+        # exponent 1.99 -> 1.00, and 81,919 B (one byte under `_CMD_MAXLEN`,
+        # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell.
+        # LANGUAGE UNCHANGED, DECIDED NOT SAMPLED: ERE/Python -> Thompson NFA
+        # -> product determinization -> BFS over a partition refining every
+        # atom, unbounded in length, EQUIVALENT in both dialects and on the
+        # anchor, two-sided calibrated 6/6 against deliberately broken
+        # variants. Corroborated by 4,235/0 differential and 152/0 composition.
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the
+        # re-baseline; a move would have been E5. Byte surgery: 14 of the 16
+        # moved artifacts reproduce byte-exactly from the substitutions alone;
+        # the two that do not are `.installer-manifest.json` and
+        # `.bootstrap-state.json`, which digest the others.
+        "041bc82be122ddc975ed8a7cbcf98867ac958bb729d2bb8f6eb5cb047fcc4b4a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3531,7 +3550,7 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "4002a6fe7df994e2384b4d0f4108fd1036906095db40aeffd63cba445bbe150a",
+        "757d9d137583ad4124435aa75905e5a256d005444e8f756ad746c5d16ab8a1a5",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3797,7 +3816,7 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "632d4c4aa8d30e2659c6b053b31d2516f803ea8ca3fdbbd00eb0a15b466b93ad",
+        "27e68763103dbf6f953643232feb31dbeeaf5b02810a2dc3463382ffe0378be2",
 }
 
 EXPECTED_ACTION_COUNTS = {
