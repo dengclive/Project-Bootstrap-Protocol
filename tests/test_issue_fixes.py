@@ -3068,23 +3068,6 @@ print("\n== issue #50: the D20 run side must apply INTERP_SUFFIX ==")
 _h50 = open(os.path.join(HOOKS, "dependency-gate.sh"),
             encoding="utf-8").read()
 _g50 = open(GATES_PY, encoding="utf-8").read()
-# CODE ONLY, not comments. The block that deleted the ratio row QUOTES its
-# predicate in order to explain it, and a naive scan flags that quotation --
-# MENTION read as USE, which is a mistake this repo has made in both
-# directions. Comment lines are blanked (not dropped) so line numbers survive.
-_own_lines = ["" if _ln.lstrip().startswith("#") else _ln
-              for _ln in open(os.path.abspath(__file__), encoding="utf-8")
-                             .read().split("\n")]
-# PROXIMITY, NOT SPELLING. The first cut of this pin matched the deleted row's
-# variable names, and its comment claimed "a rename does not evade it". MEASURED
-# FALSE at step 7: renaming `_e50a/_e50b` to `_ta/_tb` revived the row with the
-# suite fully green, and the second alternative was DEAD -- `[^)]*` cannot cross
-# the `)` in `_int_word(...)`, so nothing could ever match it. What actually
-# identifies the shape is a CLOCK read near a call to the reduction, whatever
-# the variables are called.
-_re50 = _re.compile(r"\btime\.time\(\)|\bperf_counter\(\)"
-                    r"|\bprocess_time\(\)|\bmonotonic\(\)")
-_WIN50 = 15
 _U50 = "http://x.test/a"
 
 print("\n-- (a) the defect: 16 versioned spellings, BOTH substrates --")
@@ -3399,131 +3382,40 @@ check("#50: the emitted SDK reduction caps its search at _INT_MAXLEN",
       in _g50)
 
 
-# ...AND THE WHOLE BODY, not just that line. A SUBSTRING PIN IS DEFEATED BY AN
-# INSERTION: keep the three clamp lines byte-identical and re-widen `n` on the
-# next line, and the reduction is O(n^2) again while every substring pin above
-# stays green. MEASURED at step 7 on the emitted module -- behaviour-identical
-# on every probe word, log-log exponent 1.777 against the shipped 0.770 at the
-# same lengths, and 7,562 suite checks green on that tree. Three spellings of
-# it were found (re-widen `n`; give the loop its own unbounded counter; shadow
-# `_INT_MAXLEN` locally from `len(base)`) and all three survived every pin.
-#
-# So the pin is the STATEMENT SEQUENCE, comments and blank lines removed so a
-# comment edit does not trip it. Anything inserted, removed or reordered inside
-# the reduction fails here and has to be re-read on purpose -- which is the
-# correct bar for the one bounded loop standing between this gate and a
-# quadratic scan.
-def _body50(src, name):
-    """(indent, statement) for each code line of `name`.
-
-    INDENT IS PART OF THE PIN. The first cut of this compared `.strip()`ed
-    lines, and indentation is control flow in Python: re-indenting `n -= 1` by
-    one level puts it after the `return` inside the `if`, where it is dead code
-    and the loop never decrements -- a HANG on any non-interpreter word, with
-    the stripped sequence byte-identical. Caught by attacking this pin rather
-    than by trusting it. Comments and blanks are still dropped so a comment
-    edit does not trip it; whitespace INSIDE a statement is normalised so
-    reflowing an argument list does not either.
-    """
-    _i = src.index("def %s(" % name)
-    _j = src.index("\ndef ", _i + 1)
-    _raw = [_l for _l in src[_i:_j].split("\n")
-            if _l.strip() and not _l.strip().startswith("#")]
-    _ls = [(len(_l) - len(_l.lstrip()), " ".join(_l.split())) for _l in _raw]
-    _q = [_k for _k, (_d, _t) in enumerate(_ls) if _t.startswith('"""')]
-    return _ls[:1] + _ls[_q[-1] + 1:] if len(_q) >= 2 else _ls
-
-
-_INT_BODY = [
-    (0, "def _int_word(base):"),
-    (4, "if base in _INTERPRETERS:"),
-    (8, "return base"),
-    (4, "n = len(base)"),
-    (4, "if n > _INT_MAXLEN:"),
-    (8, "n = _INT_MAXLEN"),
-    (4, "while n > 0:"),
-    (8, "head = base[:n]"),
-    (8, "if head in _INTERPRETERS and _INT_SUFFIX_RE.fullmatch(base, n):"),
-    (12, "return head"),
-    (8, "n -= 1"),
-    (4, 'return ""'),
-]
-check("#50: the emitted SDK reduction's BODY is exactly the bounded loop",
-      _body50(_g50, "_int_word") == _INT_BODY,
-      "the reduction's statement sequence changed: %r" % (
-          [_l for _l in _body50(_g50, "_int_word") if _l not in _INT_BODY]
-          or _body50(_g50, "_int_word")))
-
-# The calibration that the clamp-only pin could not give. Each mutation keeps
-# EVERY pinned substring intact and re-widens the search; the body pin must
-# reject all three, or it is no stronger than the pin it supplements.
-for _lbl, _from, _to in [
-        ("re-widen n after the clamp",
-         "    n = _INT_MAXLEN\n", "    n = _INT_MAXLEN\n    n = len(base)\n"),
-        ("shadow _INT_MAXLEN locally",
-         "    n = len(base)\n", "    _INT_MAXLEN = len(base)\n    n = len(base)\n"),
-        ("loop on its own counter",
-         "    while n > 0:\n", "    n = len(base)\n    while n > 0:\n"),
-        ("re-indent `n -= 1` into the `if`, where it is dead code",
-         "            return head\n        n -= 1\n",
-         "            return head\n            n -= 1\n")]:
-    _m50 = _g50.replace(_from, _to, 1)
-    check("#50 CALIBRATION: the body pin rejects a clamp-preserving mutation "
-          "(%s)" % _lbl,
-          _m50 != _g50 and _body50(_m50, "_int_word") != _INT_BODY,
-          "the mutation did not apply, or the body pin accepted a reduction "
-          "that is quadratic with the clamp text still in place")
 # ...and the SHELL twin carries the same clamp, which NOTHING pinned until
-# 2026-08-20. Only the substitution VALUE was pinned (above); a grep for the
-# clamp LINE across tests/ returned zero hits. Pinning one substrate and not
-# the other is the D3 shape: the two drift, silently, and the suite says the
-# invariant is held while it is held on one side only.
+# 2026-08-21. Only the substitution VALUE was pinned (above); on `origin/main`
+# a grep of `tests/` for the clamp LINE returns zero hits -- all three of
+# `_L=@@INT_MAXLEN@@`, `-gt @@INT_MAXLEN@@` and `_L" -gt` exit 1.
+#
+# AND BEHAVIOUR CANNOT SUPPLY THE PIN. The two reductions are held together by
+# the 10,925-word differential in section (h), and deleting this clamp changes
+# NO answer: re-run that corpus with the line removed and it is still zero
+# disagreements against the SDK. The clamp is a COST bound, so a behavioural
+# corpus is blind to it by construction.
+#
+# What DID see a shell-only clamp DELETION, measured on a worktree at
+# `origin/main`: the three plan digests in `test_greenfield_golden.py`, and the
+# two `< 30 s` rows in section (k) -- which report it at 40.6 s and 41.4 s,
+# i.e. by spending 80 s of wall clock to say what this line says by reading one
+# string. So the gap is not "nothing notices" a deletion.
+#
+# BUT NOTHING IN THIS SUITE NOTICED AN INFLATED BOUND. Change `-gt 7` to
+# `-gt 4096` -- the clamp line still there, the loop 585x wider -- and the same
+# `< 30 s` rows read 4.6 s and 5.7 s against 3.2 s and 4.2 s shipped, and PASS.
+# Measured on that worktree, this pin and its calibration are the ONLY two of
+# the suite's 3,383 checks that go red. A cost bound that can be widened
+# without any behavioural or wall-clock row objecting is exactly what a
+# structural pin is for.
 check("#50: the emitted SHELL reduction caps its search at the same bound",
       ('  if [ "$_L" -gt %s ]; then _L=%s; fi\n'
        % (gates_mod._INT_MAXLEN, gates_mod._INT_MAXLEN)) in _h50,
       "the shell clamp line is not in the emitted hook, or its bound differs "
       "from the SDK's")
 
-# ...and, exactly as on the SDK side, the CLAMP LINE ALONE IS NOT ENOUGH.
-# Appending `_L=${#_b}` after it leaves that line byte-identical and makes the
-# shell reduction quadratic -- MEASURED at step 7 on the emitted `_xp_iw`:
-# 4 ms -> 19 ms across n=2000 -> 8000 shipped, against 115 ms -> 1603 ms
-# mutated (14x for 4x length). The first cut of this pin shipped with the same
-# blind spot it was added to close, which is why it is pinned as a SHAPE here.
-_XP_BODY = [
-    '_L=${#_b}',
-    'if [ "$_L" -gt %s ]; then _L=%s; fi' % (gates_mod._INT_MAXLEN,
-                                             gates_mod._INT_MAXLEN),
-    'while [ "$_L" -gt 0 ]; do',
-]
-_xp_src = _h50[_h50.index("_xp_iw(){"):]
-_xp_src = _xp_src[:_xp_src.index("\n}\n") + 2]
-_xp_code = [_l.strip() for _l in _xp_src.split("\n")
-            if _l.strip() and not _l.strip().startswith("#")]
-try:
-    _k = _xp_code.index(_XP_BODY[0])
-    _xp_seq = _xp_code[_k:_k + len(_XP_BODY)]
-except ValueError:
-    _xp_seq = []
-check("#50: nothing sits between the shell clamp and the loop it bounds",
-      _xp_seq == _XP_BODY,
-      "the shell reduction's length is set, clamped and consumed by the loop "
-      "with nothing in between; found %r" % (_xp_seq or _xp_code[:8]))
-
-check("#50 CALIBRATION: the shell shape pin rejects a clamp-preserving "
-      "mutation (re-widen _L after the clamp)",
-      (lambda _m: _m != _xp_src and [
-          _l.strip() for _l in _m.split("\n")
-          if _l.strip() and not _l.strip().startswith("#")
-      ][_k:_k + len(_XP_BODY)] != _XP_BODY)(
-          _xp_src.replace(_XP_BODY[1], _XP_BODY[1] + "\n  _L=${#_b}", 1)),
-      "the shell shape pin accepted a reduction that is quadratic with the "
-      "clamp line still in place")
-
-# THE MUTATION CALIBRATION. The two pins above are the ONLY thing standing
-# between this reduction and a return to O(n^2) - and until now neither had any
-# recorded proof that it CAN fail. A pin that has never been shown to go red is
-# a comment with a `check()` around it.
+# THE MUTATION CALIBRATION. Neither clamp pin -- the SDK one above, standing
+# since #50 landed, nor the shell one just added -- had any recorded proof that
+# it CAN fail. A pin that has never been shown to go red is a comment with a
+# `check()` around it.
 #
 # Both mutations are built IN MEMORY. `.github/workflows/ic-self-check.yml`
 # fails a run whose suite writes into the working tree instead of its fixture.
@@ -3548,51 +3440,25 @@ check("#50 CALIBRATION: the SHELL clamp pin CAN fail - deleting the clamp is a "
 
 # AND THE MUTATION IS THE REAL DEFECT, not a strawman: without the clamp the
 # loop runs len(base) times, each `fullmatch`-ing the suffix, so the reduction
-# goes from LINEAR to QUADRATIC. Measured on the emitted module with the clamp
-# deleted: log-log exponent 1.989 against the shipped 0.995, and 10.1 ms ->
-# 627 ms across 10 KB -> 80 KB of command word.
-
-# AND THE DECISION ITSELF IS PINNED, because a comment did not hold it.
+# goes from LINEAR to QUADRATIC. Measured 2026-08-21 on the emitted module with
+# the clamp deleted -- behaviour-identical on every probe word -- 10.0 ms ->
+# 625.9 ms across 10 KB -> 80 KB of command word: 62.6x for 8x the length,
+# log-log exponent 1.989, against the shipped 11.6 us -> 91.5 us and 0.9951.
 #
-# The block above says, and has said since #50 landed, that "a timing assertion
-# here would be a flaky pin on a real invariant". A timing assertion was added
-# anyway, ~670 lines below it: a wall-clock ratio bounding an 8x-longer input at
-# `< 8x`, on a reduction whose measured log-log exponent is 0.995. A CORRECT
-# implementation sat on that bound with 1.015x of headroom, its only margin
-# being 0.202 us of fixed per-call overhead against 11.42 us of scan. It failed
-# 5.53% of 33,498 trials idle, 82% pinned to two cores, and it took CI red
-# TWICE on a comments-only diff -- halting an unrelated item at E7.
-#
-# It caught exactly ONE regression (the clamp deleted), which the structural
-# pins above catch too. Measured against six mutations: an inflated _INT_MAXLEN
-# 163x slower, a real ReDoS suffix pattern taking 15.5 s, a `base[n:]` slice,
-# swapped `and` operands, and a second unbounded rescan all PASSED it.
-#
-# [CORRECTED at step 7] An earlier revision of this comment, and of PR #85's
-# body, added "and it caught NOTHING they miss". THAT WAS FALSE, and it was
-# false because the six mutations behind it all DELETED pinned text -- they
-# were chosen where the pins can see. A refuter built three that keep every
-# pinned substring byte-identical and re-widen the search anyway; the deleted
-# row failed all three at ~61x, and every pin then in place was green on them.
-# That is why the BODY pins above exist. The honest statement is: the row
-# caught one regression the pins already caught, and a class they did not --
-# so the class was closed rather than the claim repeated.
-#
-# So the row is gone. This check is what stops it coming back a third time --
-# a rule nothing enforces is a rule that gets broken, and this file already
-# carries the prose version that did not hold.
-_clocked50 = [
-    (_i + 1, _j + 1, _own_lines[_j].strip()[:60])
-    for _i, _l in enumerate(_own_lines) if "_int_word" in _l
-    for _j in range(max(0, _i - _WIN50), min(len(_own_lines), _i + _WIN50 + 1))
-    if _re50.search(_own_lines[_j])]
-check("#50: no clock is read near a call to the _int_word reduction",
-      not _clocked50,
-      "%s -- the invariant this would time is already pinned structurally at "
-      "the `_INT_MAXLEN` checks above, on both substrates, with no clock and "
-      "no margin problem. Time it and you get a check that fails on a slow "
-      "machine instead of on a return of the complexity class."
-      % (_clocked50[:3] or ""))
+# WHAT THESE TWO PINS DO NOT DO, written down because a pin whose limit is
+# unwritten gets trusted past it. They read that the clamp is PRESENT, not that
+# it is SUFFICIENT: append `n = len(base)` on the line after it and the
+# reduction is quadratic again with both pinned strings byte-identical, and
+# both pins stay green. Measured on a worktree at `origin/main`, that mutation
+# leaves ALL FOUR #50 structural pins green and is red only in
+# `test_greenfield_golden.py`, whose three plan digests hash the emitted bytes
+# (10 passed, 3 failed). A source-text pin on the whole statement sequence was
+# built for exactly this and WITHDRAWN: four spellings defeated it in four
+# attempts -- an insertion after the clamp, a re-indent of `n -= 1` into the
+# `if`, a line hidden in the region the parser discarded, and a second
+# `def _int_word` that Python binds instead of the pinned one. The residual is
+# FILED rather than papered over, and it is precise: what the digest cannot
+# survive is a deliberate re-baseline.
 # The FILE_RUNNERS arm stays a bare membership test on BOTH substrates - the
 # F1/F2 fix is structural, so it is pinned structurally too.
 check("#50: the SDK FILE_RUNNERS arm is still a bare membership test",
@@ -4250,14 +4116,28 @@ print("\n-- (k) T8: the reduction is BOUNDED, on the LENGTH axis --")
 # quadratic (measured 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB), bounded it
 # is flat (0.005 / 0.011 / 0.021 s). A ratio, not an absolute, because the
 # absolute is machine-dependent and the shape of the curve is the claim.
-# [2026-08-20] THE RATIO ROW THAT STOOD HERE IS DELETED. It timed `_int_word`
-# at two lengths and asserted `_e50b < _e50a * 8` on an input exactly 8x longer
-# -- sub-linearity of a reduction whose measured log-log exponent is 0.995. Its
-# whole margin was 0.202 us of fixed per-call overhead against 11.42 us of scan,
-# and it failed 5.53% of 33,498 trials idle and 82% on two pinned cores. The
-# invariant it meant to protect is pinned STRUCTURALLY in section (i) above, on
-# both substrates, with a mutation calibration -- no clock, no margin problem,
-# and it catches strictly more. The full argument is in that block.
+# [2026-08-21] THE RATIO ROW THAT STOOD HERE IS DELETED, and this is what it
+# said: it timed `_int_word` at 10 KB and 80 KB and asserted
+# `_e50b < _e50a * 8` -- sub-linearity, on an input exactly 8x longer, of a
+# reduction whose measured log-log exponent is 0.9951. Its entire margin was
+# 0.203 us of fixed per-call overhead against 11.432 us of scan: a predicted
+# ratio of 7.878 against a bound of 8, which is 1.0155x. Re-measured
+# 2026-08-21 on an idle 12-core box, 20,000 trials of the row verbatim: it
+# violates 5.08% of the time, and its p95 ratio is 8.002 -- already over the
+# bound. Pinned to two contended cores it violates 82.65%. It is 6 of the 14
+# CI failures this repo has ever had, across 7 attempts, the ONLY red check in
+# all six, once on `main` itself.
+#
+# WHAT WENT WITH IT, stated rather than netted out. Against a clamp-preserving
+# re-widening of the SDK reduction -- `n = len(base)` appended after the clamp,
+# every pinned string byte-identical -- this row was the ONLY red in this
+# suite's 3,381 checks, at 61.8x; all four structural pins in section (i) are
+# green on it. That class is now carried by `test_greenfield_golden.py`'s three
+# plan digests, which DO go red on it (10 passed, 3 failed, measured on a
+# worktree at `origin/main`) -- a real backstop with a real limit, since a
+# deliberate re-baseline would carry the mutation through. The trade is made on
+# purpose: a check that fires on 5% of GREEN trees cannot be the thing guarding
+# a complexity class. The residual is filed, not waved away.
 
 # (2) ON THE SHELL the bound is DEFENSIVE, not load-bearing, and this pin says
 # only what was verified: no long-word shape found reaches the reduction with

@@ -181,16 +181,20 @@ if findings(i) >= findings(i-1): stop now   # divergence, not progress
 **9a — post merge-readiness evidence, then STOP.** CI green **on the PR head
 sha**, 0 confirmed findings, suite 25/0, tree clean, `git diff origin/main...`
 summarised. **`#50 T8` used to be named here as a wall-clock flake to
-tolerate — one red a re-run, two an E7. That row is DELETED** (2026-08-20):
-it bounded a linear reduction at exactly its linear ratio, duplicated a
-structural pin that catches strictly more, and this sentence is what took an
-unrelated item to E7 over it. **No check in the suite is now known to
-flake on an idle box, so a red CI run is worth investigating rather than
-re-running.** That is narrower than "flake-free" and deliberately so: wall-clock
-assertions remain, and the closest one — `_el50 < 30.0`, four lines below the
-deleted row — measures 3.2 / 4.2 s idle but **8.5 / 11.4 s pinned to two
-contended cores**, i.e. its headroom falls from ~7x to ~2.6x under exactly the
-conditions that killed T8. It has not flaked; it is not immune.
+tolerate — one red a re-run, two an E7. That row is DELETED** (2026-08-21):
+it bounded a linear reduction at exactly its linear ratio, on a single
+un-repeated sample, and **this sentence is what took an unrelated item to E7
+over it**. It was 6 of the 14 CI failures this repo has ever had, the only red
+check in all six, once on `main`. **No check in the suite is now known to flake
+on an idle box, so a red CI run is worth investigating rather than
+re-running.**
+
+That is narrower than "flake-free" and deliberately so. Wall-clock assertions
+remain, and the closest one — the `_el50 < 30.0` trio a few lines below the
+deleted row — measures **3.2 / 4.2 s idle but 14.6 / 19.3 s pinned to two
+contended cores** (measured 2026-08-21), i.e. headroom of 9.5x/7.1x falling to
+**2.0x/1.6x** under exactly the conditions that killed T8. It has not flaked;
+it is not immune, and it is the next candidate if one does.
 **E7's threshold in §6 is unchanged at two reds on one head** — a single red is
 still not an E-code, it is now worth investigating rather than re-running.
 Then flag the operator and **wait**.
