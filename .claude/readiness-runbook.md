@@ -190,11 +190,13 @@ on an idle box, so a red CI run is worth investigating rather than
 re-running.**
 
 That is narrower than "flake-free" and deliberately so. Wall-clock assertions
-remain, and the closest one — the `_el50 < 30.0` trio a few lines below the
-deleted row — measures **3.2 / 4.2 s idle but 14.6 / 19.3 s pinned to two
-contended cores** (measured 2026-08-21), i.e. headroom of 9.5x/7.1x falling to
-**2.0x/1.6x** under exactly the conditions that killed T8. It has not flaked;
-it is not immune, and it is the next candidate if one does.
+remain. There are three `_el50 < 30.0` rows a few lines below the deleted one,
+and **two of them are the exposure**: the run-side and prefixed-run rows measure
+3.2 s and 4.2 s idle but **14.6 s and 19.3 s pinned to two contended cores**
+(measured 2026-08-21), i.e. headroom falling from 9.4x/7.1x to **2.1x/1.6x**
+under exactly the conditions that killed T8. The third, pipe-side, is 0.2 s and
+not a candidate. Those two have not flaked; they are not immune, and they are
+what to look at first if something does.
 **E7's threshold in §6 is unchanged at two reds on one head** — a single red is
 still not an E-code, it is now worth investigating rather than re-running.
 Then flag the operator and **wait**.
