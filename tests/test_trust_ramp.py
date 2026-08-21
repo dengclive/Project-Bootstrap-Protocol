@@ -351,7 +351,7 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # at i=1 against 16 at i=2, and the operator intervened to strip the branch
 # back to its mechanically-verified core. Both limbs of `harmful`, not one.)
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 36, f"{len(es)} entries")
+      len(es) == 38, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
