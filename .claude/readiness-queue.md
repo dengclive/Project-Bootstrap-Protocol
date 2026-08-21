@@ -72,46 +72,47 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   wrong, not the pins.
 
 
-- **[ready] prefix-run-cost-residuals** · `CODE` · eligible: **yes** · full
+- **[ready] prefix-run-cost-residuals-2** · `CODE` · eligible: **yes** · full
   ceremony · scope TBD at plan time
-  **THE COST CLASSES THAT SURVIVE `sdk-pipe-trigger-redos`. FILED HERE BECAUSE
-  THE BACKLOG ROWS THAT DESCRIBED THEM WERE STRIPPED FROM PR #81 FOR BEING
-  WRONG — DO NOT RECOVER THEM FROM `git show`; RE-MEASURE.** PR #81 closes the
-  token-count axis on `prefix_run` and nothing else. **At least four superlinear
-  shapes reach that regex or its neighbours and are untouched by it**, all with
-  ZERO jump bytes and all far under `_CMD_MAXLEN` 81920, so `_cost_guard` is
-  structurally blind to every one. **Two of the four were mislabelled by me in
-  the stripped rows and the mislabelling ran in the direction that OVERSTATES
-  severity**, which is why re-measuring is mandatory:
-  * **wrapper × spaced-brace product** — `A=1/env ` matches the assignment arm
-    AND the path-prefixed wrapper arm at once, reopening the split at every
-    token. ~2.1 KB, > 200 s before / ~53 s after. Not a regression.
-  * **length axis, glued braces** — ~19 KB, ~21-22 s on BOTH trees, and **the
-    emitted `dependency-gate.sh` is quadratic here too** (~1.9 s at 9.6 KB →
-    ~7.2 s at 19 KB), so **the shell is NOT the safe substrate on this axis**.
-    That refutes the premise the whole item was planned on.
-  * **redirect arm, self-ambiguous** — `[0-9]*[<>]+ *[^ ]+ +` lets `[<>]+` and
-    `[^ ]+` consume the same characters, so `2>>o ` has two parses ending at
-    the same offset: ~2x per added token at ~110 B. **MEASURED allow/allow on
-    the bare payload — it is NOT the shell-DENY/SDK-BYPASS the stripped row
-    claimed.** With an install tail it is deny/deny, 135 B, ~5.4 s SDK against
-    ~0.03 s shell.
-  * **`_GIT_VERB_TMPL`'s own flag star** `(?:\s+-[Cc]\s+\S+|\s+-\S+)*` — a
-    `-C` token is consumable by BOTH arms: the SAME multi-absorbing-arm defect
-    PR #81 removes from `prefix_run`, spliced next to it and left in place.
-    Measured on the emitted object: 0.073 s at 107 B → **23.5 s at 143 B**,
-    ~1.62x per token; the same shape with a non-`-C` flag is 0.0005 s at 9 KB,
-    so the cost is the arm overlap alone. **MEASURED allow/allow**: the
-    exponential fires only when `_git_verb` FAILS, i.e. exactly when the gate
-    would allow anyway, so it is a CPU burn on an allow path, not a bypassed
-    deny — but `spec-gate-commit` and `eval-gate` carry **no `_GATE_TIMEOUTS`
-    entry at all**, so what a cancelled hook does there is undetermined and
-    worth establishing.
-  **METHOD THIS ITEM MUST CARRY, derived the expensive way on PR #81:** state
-  the VERDICT PAIR you measured, not the one the shape suggests — three
-  separate rows were written as `shell-DENY / SDK-BYPASS` without anyone
-  running the payload through both substrates and reading the exit codes.
+  **WHAT PR #84 DID NOT CLOSE, IN ITS OWN WORDS. RE-MEASURE BEFORE QUOTING —
+  the parent item's rows were wrong twice in the direction that overstates
+  severity, and #84's body says these were measured at ITS head, not at
+  `3ea405a`.**
+  * **THE GLUED-BRACE LENGTH AXIS IS A LIVE FAIL-OPEN ON BOTH SUBSTRATES, and
+    it is NOT a regression — the parent is identical.** `{`×81870 plus an
+    install tail is **81,891 bytes with zero jump bytes**, i.e. invisible to
+    `_cost_guard` (`_CMD_MAXLEN` 81920), and costs the SDK **61.56 s** and the
+    emitted shell hook **119.32 s**, both carrying a deny, both past the 60 s
+    ceiling their gate declares. Past that ceiling a `PreToolUse` hook is
+    cancelled and only exit 2 blocks, so the command proceeds unadjudicated.
+    **This is the highest-severity row in this file that is not X-37.**
+  * **the `A=1/env ` arm overlap** — a k factor #84 does not remove: 40,984
+    bytes is 53.0 s at the parent and 51.2 s at #84's head, quadratic on both,
+    allow/allow.
+  * **the downloader alternation against `[^;&]*`** — found during #84's
+    review, quadratic on both substrates, reachable by an ordinary `wget` with
+    many URLs. Never measured end to end.
 
+- **[ready] int-word-clamp-sufficiency** · `TEST-CONTRACT` · eligible: **yes**
+  · 2 lenses · scope `tests/` only
+  **THE GAP PR #85 CLOSED HALF OF, AND SAID SO.** Both `_int_word` clamp pins —
+  the SDK one at `tests/test_issue_fixes.py` and the shell one #85 added — read
+  that the clamp is PRESENT, not that it is SUFFICIENT. Append `n = len(base)`
+  on the line after the SDK clamp and the reduction is **quadratic again with
+  every pinned string byte-identical**, and both pins stay green. Measured
+  2026-08-21 on a worktree at `e3f2f57`: that mutation is red ONLY in
+  `test_greenfield_golden.py` (10 / 3) — `test_retrofit.py` is 271 / 0, because
+  a retrofit plan emits no `gates.py` — and it was previously also caught by the
+  `#50 T8` ratio row, at 61.8x, which #85 deleted for being a 1.02x-margin
+  clock. **So the surviving backstop is a digest, and a deliberate re-baseline
+  carries the mutation through.**
+  **DO NOT CLOSE THIS WITH A SOURCE-TEXT PIN.** One was built on `#85`'s branch
+  and withdrawn: four spellings defeated it in four attempts — an insertion
+  after the clamp, a re-indent of `n -= 1` into the `if` (dead code, the loop
+  HANGS), a line hidden in the region the parser discarded, and a second
+  `def _int_word` that Python binds instead of the pinned one. **The instrument
+  was wrong, not the increment.** A behavioural or cost-shaped check with real
+  headroom is the direction, if any is.
 
 - **[ready] x37-class-b** · `CODE` · eligible: **yes** · full ceremony
   · scope `lib/cmdpos.py`, `lib/templates.py`, `lib/sdk_gates_template.py`,
@@ -156,6 +157,15 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   exception applies. **Never batched.**
 
 ## B — makes shipping-with-known-risk honest
+
+- **[ready] sdk-template-basen-comment** · `EMITTED` · eligible: **yes** · full
+  ceremony (a freeze exception is why)
+  `lib/sdk_gates_template.py`'s comment that `fullmatch(base[n:])` *"would put
+  the O(len^2) straight back"* is **FALSE with the clamp present** — measured
+  exponent 0.994 and +1.1% wall. The quadratic returns only WITHOUT the clamp.
+  It is a false claim in **emitted bytes**, so correcting it moves a digest and
+  needs a freeze exception. Filed by `t8-ratio-bound`, which could not take it:
+  a moved digest there would have been E5.
 
 - **[ready] t1-honest-labelling** · `EMITTED` · eligible: **partial**
   · scope `lib/templates.py`, `lib/sdk_gates_template.py`, emitted
@@ -264,6 +274,40 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
+**`prefix-run-cost-residuals` PR #84 `3ea405a` — three self-ambiguous arms lose
+their duplicate parses.** Closed 2026-08-21. A backtracking engine walks every
+parse before it can report a FAILING match, so the cost was the number of
+parses, not the length of the input. `HEAD` + `2>>o `×24 is **141 bytes with
+zero jump bytes** and cost the SDK **110.22 s CPU** against a gate declaring
+60 s; it is now 0.000 s. Language equivalence PROVED by ERE/Python → NFA →
+product-BFS deciders in both dialects, unbounded in length, two-sided
+calibrated. Freeze exception **73**. Suite **9,763 → 9,810**; differential
+4,178 → **4,220**; composition 147 → **152**; golden 13/0 and retrofit 271/0
+unchanged. Verified on `main` after merge, not on the branch.
+**IT HALTED AT E7 FOR A DAY OVER AN UNRELATED CHECK** — `#50 T8`, deleted by
+`t8-ratio-bound` below — and the branch was updated by MERGE rather than rebase,
+because an intermediate commit tracks the ten files `git add -A` swept in and
+replaying it would have deleted the operator's untracked working files.
+**THE VERDICT DID NOT MOVE.** Residuals: `prefix-run-cost-residuals-2` (A) —
+and the glued-brace length axis in it is a live fail-open on both substrates at
+81,891 bytes, which is not a regression and is not closed.
+
+**`t8-ratio-bound` PR #85 `827a19e` — a 1.02x-margin clock deleted, and the
+shell twin's clamp pinned.** Closed 2026-08-21. `#50 T8` bounded a LINEAR
+reduction (measured log-log exponent 0.9951) at exactly its linear ratio: 8x the
+input, a `< 8x` bound, and a margin made entirely of 0.203 µs of fixed per-call
+overhead against 11.432 µs of scan. Over five runs of 20,000 trials the median
+ratio is **7.841 in all five** and the p95 is **8.002–8.040, over the bound in
+every run**; the violation RATE is not a stable statistic (5.1–7.2% here,
+2.0–16.1% for a reviewer) and that spread is the defect. **It was 6 of the 14
+CI failures this repository has ever had, across 7 attempts, the only red check
+in all six, once on `main`.** Net: two files, +70/−14, no product code, no
+digest; suite 9,763 → **9,763**, one row deleted and one added.
+**THE RUNBOOK LINE WENT WITH IT** — §3 step 9a told every session to tolerate a
+red on that row, which is the sentence that took #84 to E7.
+**IT HIT E2 TWICE, BOTH TIMES IN PROSE, NEVER IN CODE.** Residuals:
+`int-word-clamp-sufficiency` (A) and `sdk-template-basen-comment` (B).
+
 **`sdk-pipe-trigger-redos` PR #81 `897d427` — the SDK prefix-run ReDoS, and a
 fix loop that DIVERGED and was stripped rather than continued.** `prefix_run()`
 was a star whose wrapper arm was ambiguous with itself, so a FAILING match was
@@ -348,6 +392,14 @@ closeout #82) and the paragraph that used to stand here — *"the next item is
 remaining A-tier row"* — is superseded rather than deleted, because both were
 true when written. **A now holds THREE rows**: `c2-autonomous-dispatch`
 (blocked on a decision), `prefix-run-cost-residuals` and `x37-class-b`.
+
+**[2026-08-21] `prefix-run-cost-residuals` is CLOSED** (PR #84, merge
+`3ea405a`), together with `t8-ratio-bound` (PR #85, merge `827a19e`) — see Done.
+**A now holds FOUR rows**: `c2-autonomous-dispatch` (blocked on a decision),
+`prefix-run-cost-residuals-2`, `int-word-clamp-sufficiency` and `x37-class-b`.
+**X-37 remains the only A-tier row that moves the verdict**, and it is
+unchanged: neither closed item touched it or C-2, so
+`docs/production-readiness.md` §1 still reads **not production ready**.
 **AND THE SCOREBOARD IS BLOCKED ON A DECISION, NOT ON WORK:** of the verdict's
 two remaining legs, X-37 has a work order and C-2 has only a question. Clearing
 every buildable row in A would still leave §1 at *not production ready*.
