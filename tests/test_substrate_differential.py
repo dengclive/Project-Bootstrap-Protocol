@@ -4322,7 +4322,8 @@ _AMB_ROWS = [
     # of the run's star boundaries. n boundaries x O(n) continuation, and
     # NEITHER cost-guard predicate sees it: `{` is not a jump byte and the
     # payload is one byte under the length cap. Measured on the emitted gate:
-    # 3.258 s at 8,040 B, 12.981 s at 16,040 B, exponent 1.99, ~326 s here.
+    # 3.258 s at 8,040 B, 12.981 s at 16,040 B, exponent 1.99, and ~326 s here
+    # by EXTRAPOLATION from those two points -- it is not a measured value.
     # Past the 60 s `_GATE_TIMEOUTS` entry the hook is cancelled, only exit 2
     # blocks, and the install PROCEEDS -- so the deny below is DISCARDED.
     ("dependency-gate", "class 5: glued brace run behind a downloader pipe, "
@@ -4392,20 +4393,19 @@ _AMB_LANG = [
     # DENY rule is a bypass. The corpus half of the equivalence claim; the
     # ERE -> NFA -> product-BFS decider is the other half.
     #
-    # [step-8 fix loop, 2026-08-22] FOUR OF THESE ROWS USED TO PIN NOTHING, AND
-    # A ROW THAT PINS NOTHING IS THE DEFECT THIS REPO HAS ALREADY PAID FOR.
-    # The tails were `.../env pip install evil` and `/x/${SHELL}`; measured on
-    # the emitted gates of BOTH trees, all four still returned `deny` with
+    # [step-8, 2026-08-22] FOUR OF THESE ROWS USED TO PIN NOTHING. The tails
+    # were `.../env pip install evil` and `/x/${SHELL}`; measured on the
+    # emitted gates of BOTH trees, all four still returned `deny` with
     # `_PIPE_TO_SHELL` replaced by a pattern matching nothing -- three because
     # `pip` is not an interpreter, so the wrapper arm never completes and the
     # string is pipe-to-pip rather than pipe-to-shell, and the fourth because
     # `_download_then_run` denies it independently. Per-site deletion on the
-    # emitted pattern then showed the cover they were written for was empty:
+    # emitted pattern showed the cover they were written for was empty:
     # deleting the wrapper path arm turned 0 of the 9 rows red, and deleting
     # the expansion arm's path half turned 0 red. The tails below end in an
-    # interpreter or a bare-prefixed expansion instead, so each one loses its
-    # deny when the site it names is deleted. Deny on both substrates, both
-    # trees, verified before the swap.
+    # interpreter or a bare-prefixed expansion, so each loses its deny when the
+    # site it names is deleted. Deny on both substrates, both trees, checked
+    # before the swap.
     ("interpreter at a bare slash",      "/sh"),
     ("interpreter behind a path",        "/usr/bin/sh"),
     ("wrapper behind a path",            "/usr/bin/env sh"),
@@ -4419,28 +4419,6 @@ _AMB_LANG = [
 for _lbl, _tail in _AMB_LANG:
     differential("dependency-gate", bash(_COST_HEAD + _tail), "deny",
                  f"language guard: {_lbl}")
-
-# THE HEAD CLASS IS A SET, AND A ROW PER STRING CANNOT PIN A SET. `head` is one
-# character class shared by three emitted left edges AND by both substrates, so
-# adding a single character to it deletes every string whose first left-edge
-# character is that one -- from the SDK and the shell at the same time. Every
-# row above is a `differential()`, which asserts shell == sdk, so it is
-# STRUCTURALLY BLIND to a symmetric deletion; and between them the nine rows
-# witness only `/`. Measured 2026-08-22 on the emitted objects: all 94 x 3 rows
-# below are `deny` on the SDK gate and rc=2 on `.claude/hooks/dependency-gate.sh`
-# at this commit, 0 substrate disagreements; on a tree built with `head`
-# over-narrowed by one character, exactly that character's three rows read
-# `allow` on both substrates and nothing else moves. That is the marginal
-# coverage a pin has to have -- the whole-suite red under that mutation was
-# otherwise a digest and a spelling check, not a verdict. ~4 s for the block.
-_HEAD_CLASS = [(chr(_o), _site, chr(_o) + _tail)
-               for _o in range(33, 127)
-               for _site, _tail in (("interpreter", "bin/sh"),
-                                    ("wrapper", "bin/env sh"),
-                                    ("expansion", "$FOO"))]
-for _c, _site, _tail in _HEAD_CLASS:
-    differential("dependency-gate", bash(_COST_HEAD + _tail), "deny",
-                 f"head class admits {_c!r} at a {_site} left edge")
 
 # THE ONE THE CORPUS COULD NOT SEE. A `-C` whose argument is the single
 # character `-` is a real, executable git invocation -- `mkdir -- -; git -C -
@@ -4500,17 +4478,17 @@ check("the cost rows are calibrated: the emitted pattern still carries the "
 # whose spelling moved goes silently vacuous while the others keep the check
 # green -- which is how a calibration certifies a row it cannot see.
 #
-# [step-8 fix loop, 2026-08-22] TWO QUESTIONS, NOT ONE. `_new not in
-# _emitted_pat` asks whether the pinned spelling is still in the emitted
-# object. It does NOT ask whether this pair still bites, because the loop above
-# applies each `.replace()` to the PROGRESSIVELY reverted string, and an
-# earlier pair can rewrite a later pair's target -- the replace then does
-# nothing while `_new` is still present in the untouched `_emitted_pat`, so the
-# list stays empty and the `!=` above stays green on the other pairs. That is
-# the silent vacuity this guard exists to stop, measured through the guard's
-# own blind spot. Today all four pairs bite (601 -> 589 -> 595 -> 577 -> 561
-# characters, no no-ops, the four target spans disjoint), so this is latent --
-# but a calibration that cannot see its own vacuity is not a calibration.
+# [step-8, 2026-08-22] TWO QUESTIONS, NOT ONE. `_new not in _emitted_pat` asks
+# whether the pinned spelling is still in the emitted object. It does NOT ask
+# whether this pair still BITES, because the loop above applies each
+# `.replace()` to the PROGRESSIVELY reverted string: an earlier pair can
+# rewrite a later pair's target, and the replace is then a no-op while `_new`
+# is still present in the untouched `_emitted_pat`. The loop below asks the
+# second question too.
+# IT IS QUIET TODAY FOR A REASON THAT IS NOT A PROPERTY OF THE EMITTED PATTERN:
+# with these four pairs no `_new` contains another and no proper suffix of one
+# is a prefix of another, so the interference cannot arise for ANY pattern. The
+# guard is here for the next edit to `_REV`, not for this one.
 _rev_dead = [_new for _new, _old in _REV if _new not in _emitted_pat]
 _rev_step = _emitted_pat
 for _new, _old in _REV:
@@ -4548,8 +4526,7 @@ for _lbl, _payload, _floor in [
 
 _amb_ran = (passed + failed) - _amb_before
 check("the self-ambiguity block ran every row it declares",
-      _amb_ran == (len(_AMB_ROWS) * 4 + len(_AMB_LANG) + len(_HEAD_CLASS)
-                   + 5 + 2 + 5),
+      _amb_ran == len(_AMB_ROWS) * 4 + len(_AMB_LANG) + 5 + 2 + 5,
       f"{_amb_ran} checks recorded -- deleting a loop here must fail HERE, "
       f"not silently reduce the count")
 

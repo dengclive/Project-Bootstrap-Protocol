@@ -2169,32 +2169,25 @@ EXPECTED_RETROFIT_DIGESTS = {
     # front of it has already absorbed, so the boundary is forced instead
     # of free: the glued-brace axis goes 12.981 s -> 0.051 s at 16,040 B,
     # exponent 1.99 -> 1.00, and 81,919 B (one byte under `_CMD_MAXLEN`,
-    # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell. THE ~326 s IS
-    # AN EXTRAPOLATION and is labelled one everywhere it appears: the only
-    # thing ever observed at that payload on the pristine SDK is
-    # `_sdk_cost`'s SIGALRM firing at 15 s and returning "capped".
+    # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell. The ~326 s
+    # is an EXTRAPOLATION from 3.258 s at 8,040 B at the measured exponent
+    # 1.9847, and is labelled one everywhere it appears.
     # LANGUAGE UNCHANGED, DECIDED NOT SAMPLED: ERE/Python -> Thompson NFA
     # -> product determinization -> BFS over a partition refining every
     # atom, unbounded in length, EQUIVALENT in both dialects and on the
     # anchor, two-sided calibrated 6/6 against deliberately broken
-    # variants. Corroborated by 152/0 in composition and, at the time this
-    # block was written, 4,235/0 in the differential -- which the step-8 fix
-    # loop then took to 4,517/0 with the head-class rows it added to
-    # `tests/test_substrate_differential.py` -- so read that figure as the
-    # corroboration it was, not as a live count.
+    # variants. Corroborated by 4,235/0 differential and 152/0 composition.
     # ACTION COUNTS UNCHANGED at 79 / 93 -- verified before the
     # re-baseline; a move would have been E5.
-    # [step-8 fix loop, 2026-08-22] A "Byte surgery: 14 of the 16 moved
-    # artifacts reproduce byte-exactly from the substitutions alone; the two
-    # that do not are `.installer-manifest.json` and `.bootstrap-state.json`"
-    # line stood here and has been DELETED rather than recounted. It is a
-    # verbatim copy-forward from PR #84's plan, derived for a change that was a
-    # pure single-string substitution; this one also carries `_ckey`'s
-    # `%%`+offset rewrite and the X-45 slash guard, which are not
-    # substitutions. AND A RETROFIT NEVER WRITES `.bootstrap-state.json` --
-    # `lib/installer.py:35-36` and `:312-313` write `.claude/.retrofit-state.json`
-    # for this path -- so the sentence named a file this fixture does not have.
-    # No replacement count has been derived, so none is published.
+    # [step-8, 2026-08-22] A "Byte surgery: 14 of the 16 moved artifacts
+    # reproduce byte-exactly from the substitutions alone; the two that do not
+    # are `.installer-manifest.json` and `.bootstrap-state.json`" line stood
+    # here and is DELETED rather than recounted. It is a verbatim copy-forward
+    # from PR #84, whose change WAS a pure single-string substitution; this one
+    # also carries `_ckey`'s `%%`+offset rewrite and the X-45 slash guard,
+    # neither of which is a substitution. It also named a file this fixture
+    # never writes -- a retrofit writes `.claude/.retrofit-state.json`. No
+    # replacement count has been derived, so none is published.
     "service": "61f765a10aed19bb1f76dcfeb21d485f2a9cbaecaae462dcd634ef7716bb6e9d",
     "agent": "67a60fb8e43a035b5a5c33d64ad88aa9946f1486d9a0e749669461e40eda58b5",
 }
