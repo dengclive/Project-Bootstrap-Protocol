@@ -3216,7 +3216,7 @@ EXPECTED_DIGESTS = {
         # REBUILDING THE WORD. The completer-key helper took leading
         # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
         # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
-        # stripping n glue bytes cost O(n^2). `%` now takes the glue run in one
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
         # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
         # itself be quadratic in `$_g`, so the offset form is the one that pays.
         # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
@@ -3244,7 +3244,7 @@ EXPECTED_DIGESTS = {
         # narrowing that would have closed it was DROPPED from this item -- it cost
         # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
         # the same 60 s ceiling, and four candidate spellings were built, emitted
-        # and measured without recovering it. Filed with the SDK axis to
+        # and measured without recovering it. It goes, with the SDK axis, to
         # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
         "925869eb4dbf9f97cb4e9cd7c0c1f1393e14727a434eba9e28c463ec05e51cc9",
     #   Adversarial-review round-2 additions inside the same exception
@@ -3569,7 +3569,7 @@ EXPECTED_DIGESTS = {
         # REBUILDING THE WORD. The completer-key helper took leading
         # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
         # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
-        # stripping n glue bytes cost O(n^2). `%` now takes the glue run in one
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
         # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
         # itself be quadratic in `$_g`, so the offset form is the one that pays.
         # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
@@ -3597,7 +3597,7 @@ EXPECTED_DIGESTS = {
         # narrowing that would have closed it was DROPPED from this item -- it cost
         # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
         # the same 60 s ceiling, and four candidate spellings were built, emitted
-        # and measured without recovering it. Filed with the SDK axis to
+        # and measured without recovering it. It goes, with the SDK axis, to
         # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
         "8adc4317370f52bad2ebf759acf64db3d596081094792ad98b684a1a29afc973",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
@@ -3869,7 +3869,7 @@ EXPECTED_DIGESTS = {
         # REBUILDING THE WORD. The completer-key helper took leading
         # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
         # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
-        # stripping n glue bytes cost O(n^2). `%` now takes the glue run in one
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
         # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
         # itself be quadratic in `$_g`, so the offset form is the one that pays.
         # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
@@ -3897,7 +3897,7 @@ EXPECTED_DIGESTS = {
         # narrowing that would have closed it was DROPPED from this item -- it cost
         # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
         # the same 60 s ceiling, and four candidate spellings were built, emitted
-        # and measured without recovering it. Filed with the SDK axis to
+        # and measured without recovering it. It goes, with the SDK axis, to
         # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
         "8b77d1ae14db73a540c6f16b9315264fb666f7e5c7ad4389fd541ca48a234603",
 }

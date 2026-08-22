@@ -2165,7 +2165,7 @@ EXPECTED_RETROFIT_DIGESTS = {
     # REBUILDING THE WORD. The completer-key helper took leading
     # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
     # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
-    # stripping n glue bytes cost O(n^2). `%` now takes the glue run in one
+    # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
     # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
     # itself be quadratic in `$_g`, so the offset form is the one that pays.
     # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
@@ -2193,7 +2193,7 @@ EXPECTED_RETROFIT_DIGESTS = {
     # narrowing that would have closed it was DROPPED from this item -- it cost
     # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
     # the same 60 s ceiling, and four candidate spellings were built, emitted
-    # and measured without recovering it. Filed with the SDK axis to
+    # and measured without recovering it. It goes, with the SDK axis, to
     # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
     "service": "01ac39ae4701b67ef41fbf2398ec4da0807f45acdd494f284e042a59f9bdd7db",
     "agent": "d8f62b112adc5008bb040cab13e3d357fc17cdaa32bad3195d7ff8790be8cb88",
