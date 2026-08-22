@@ -350,8 +350,18 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # origin carrying four false claims, while the fix loop DIVERGED, 12 findings
 # at i=1 against 16 at i=2, and the operator intervened to strip the branch
 # back to its mechanically-verified core. Both limbs of `harmful`, not one.)
+# 39th entry 2026-08-22: prefix-run-cost-residuals-2, harmful (PR #87, merge
+# 96cc730. Both limbs. Something wrong reached origin -- a 282-row pin whose
+# headline property was generalised from a five-character sample I chose, where
+# `|` and `$` move ZERO rows and 27 of the 282 pin nothing; a body block with 13
+# claims a re-review confirmed false; a reviewer's figure quoted as my own; a
+# title asserting "linear" the tree's own exponents refute -- AND the operator
+# intervened three times: strip after E2, repair-before-merge, then drop the
+# narrowing. The fix loop diverged for the third time on this line, 13 confirmed
+# and all 13 new on my own fix. What merged is the `_ckey` half only, shell-only,
+# with gates.py byte-identical to the parent.)
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 38, f"{len(es)} entries")
+      len(es) == 39, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

