@@ -4135,12 +4135,24 @@ print("\n-- X-45/X-52: `_ckey`'s glue strip is ~15x cheaper, on the shell --")
 # after it is exactly linear. The bound below tests a ratio, which is all that
 # was measured; it does not test an order.
 #
-# AND MOST OF WHAT IT TIMES IS NOT THE STRIP. Holding length constant and
-# swapping the glue out (`?`xn against `x`xn, same tail) the strip is 0.011 s of
-# a 0.353 s reading at n=16,000 -- about 3%. The rest is the word walk this file
-# already documents as quadratic. That is fine for a REGRESSION row, because
-# main reads 4.9 s on the identical string, but it is why the detail below names
-# the walk as well as the strip.
+# WHAT SHARE OF THE READING IS THE STRIP? Hold the length constant and swap the
+# glue out -- `?`xn against `x`xn, same tail -- and the difference is the strip.
+# Min of 5 on the emitted hooks:
+#
+#            n        glue `?`     plain `x`     the strip
+#   head  16,000       0.3278 s      0.3210 s     0.0068 s    2.1%
+#   head  32,000       1.0725 s      1.0602 s     0.0123 s    1.1%
+#   main  16,000       4.8706 s      0.3788 s     4.4918 s   92.2%
+#   main  32,000      18.7722 s      1.2715 s    17.5007 s   93.2%
+#
+# THAT IS THE SHAPE A REGRESSION ROW WANTS: the quantity under test is ~92% of
+# the parent's reading and ~2% of this tree's. The remainder, on both trees, is
+# the word walk this file already documents as quadratic -- which is why the
+# detail below names the walk as well as the strip.
+# [corrected] an earlier draft of this comment and the message of `7b77ee2` say
+# "0.011 s of a 0.353 s reading ... about 3%", taken from the review that raised
+# the point rather than re-derived. The min-of-5 figures above are this
+# session's own, and they carry main's column, which the 3% figure omitted.
 #
 # THE SHAPE IS DELIBERATELY DOWNLOADER-FREE AND PIPE-FREE. `?` is
 # `cmdpos.COMPLETER_GLUE`, the verdict is `allow` on both trees, and no regex
