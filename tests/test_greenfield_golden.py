@@ -3220,17 +3220,30 @@ EXPECTED_DIGESTS = {
         # front of it has already absorbed, so the boundary is forced instead
         # of free: the glued-brace axis goes 12.981 s -> 0.051 s at 16,040 B,
         # exponent 1.99 -> 1.00, and 81,919 B (one byte under `_CMD_MAXLEN`,
-        # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell.
+        # 0 jump bytes) goes ~326 s -> 0.223 s SDK / 16.204 s shell. THE ~326 s IS
+        # AN EXTRAPOLATION and is labelled one everywhere it appears: the only
+        # thing ever observed at that payload on the pristine SDK is
+        # `_sdk_cost`'s SIGALRM firing at 15 s and returning "capped".
         # LANGUAGE UNCHANGED, DECIDED NOT SAMPLED: ERE/Python -> Thompson NFA
         # -> product determinization -> BFS over a partition refining every
         # atom, unbounded in length, EQUIVALENT in both dialects and on the
         # anchor, two-sided calibrated 6/6 against deliberately broken
-        # variants. Corroborated by 4,235/0 differential and 152/0 composition.
+        # variants. Corroborated by 152/0 in composition and, at the time this
+        # block was written, 4,235/0 in the differential -- which the step-8 fix
+        # loop then took to 4,517/0 with the head-class rows it added to
+        # `tests/test_substrate_differential.py` -- so read that figure as the
+        # corroboration it was, not as a live count.
         # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the
-        # re-baseline; a move would have been E5. Byte surgery: 14 of the 16
-        # moved artifacts reproduce byte-exactly from the substitutions alone;
-        # the two that do not are `.installer-manifest.json` and
-        # `.bootstrap-state.json`, which digest the others.
+        # re-baseline; a move would have been E5.
+        # [step-8 fix loop, 2026-08-22] A "Byte surgery: 14 of the 16 moved
+        # artifacts reproduce byte-exactly from the substitutions alone" line
+        # stood here and has been DELETED rather than recounted. It is a
+        # verbatim copy-forward from PR #84's plan, where it was derived for a
+        # change that was a pure single-string substitution. THIS change also
+        # carries `_ckey`'s `%%`+offset rewrite and the X-45 slash guard, and
+        # neither is a substitution, so `dependency-gate.sh` cannot reproduce
+        # from `_REV` alone and the sentence cannot be true as pasted. No
+        # replacement count has been derived, so none is published.
         "041bc82be122ddc975ed8a7cbcf98867ac958bb729d2bb8f6eb5cb047fcc4b4a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
