@@ -158,6 +158,57 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — `_ckey`'s glue strip stops rebuilding the word (2026-08-22)
+
+**No version bump** (fix, not surface; freeze exception **74**). What is left of
+`prefix-run-cost-residuals-2` after its left-edge half was dropped — see the
+closing note below, which is the more useful half of this entry.
+
+**The defect.** `_ckey` takes the leading `cmdpos.COMPLETER_GLUE` off a word so
+the completer key can be matched. It did that one character at a time with
+`_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so stripping n
+glue bytes cost O(n^2). `%%` now takes the glue run in a single expansion and
+the remainder is taken by OFFSET — `${_t#"$_g"}` would itself be quadratic in
+`$_g`, so the offset form is the one that pays. Plus the X-45 guard on
+`${1##*/}`, which is quadratic on a slash-free word: ask whether the word has a
+slash first, exactly as the word walk does.
+
+**SHELL ONLY, and that is the whole blast radius.** The emitted
+`.claude/sdk_gates/gates.py` is byte-identical to the parent; `lib/cmdpos.py`
+and `lib/sdk_gates_template.py` are untouched. One hook body moves,
+`.claude/hooks/dependency-gate.sh`, plus the two files that digest it. Action
+counts unchanged at 57 / 69 / 59 and 79 / 93.
+
+**Measured on the emitted hooks**, min of 2, both trees in the same run:
+`?`x16000 with no downloader and no pipe **4.871 s → 0.323 s** (allow); a glued
+brace run at 81,919 B **131.196 s → 16.431 s** (deny); `{`x81870 +
+`; pip install evilpkg` **120.588 s → 6.149 s** (deny). **The last two were live
+fail-opens on this substrate** — both past the 60 s ceiling the emitted
+`settings.json` declares for this hook, and past it a `PreToolUse` hook is
+cancelled and only exit 2 blocks. The second is PR #84's own filed payload.
+
+**It is a constant-factor win, not an order change**, and the step-4 row says so:
+through the emitted hook the landed form still rises, exponents 1.05 / 1.40 /
+1.68 over 4k → 8k → 16k → 32k against the parent's 1.80 / 1.98 / 1.95, because
+`${_t%%[!({:?]*}` is itself quadratic. Behaviour is unchanged and checked rather
+than argued: the old, candidate and landed spellings agree on 196 alphabet cases
+with 0 disagreements, and the emitted body agrees with `cmdpos.completer_key` on
+every glue form in the `#45 D1` census.
+
+**WHAT WAS DROPPED, AND WHY IT IS THE USEFUL PART OF THIS ENTRY.** This item also
+carried a left-edge regex narrowing that closed the SDK's own glued-brace axis.
+It was dropped: it cost 1.09–1.12x on the deny-carrying `A=1/env ` axis and moved
+that deny across the same 60 s ceiling, and **four candidate spellings were
+built, emitted and measured without recovering it** — factoring the shared suffix
+was worse, disjoint-by-first-character was neutral, a zero-width lookahead
+halved it and was still over the ceiling, and a one-alternative narrowing was
+worse and narrower. Constraining a left edge costs whatever spelling is used, and
+on a quadratic axis the constant multiplies. **Shaving a constant off a quadratic
+does not move a crossing.** The SDK axis and the `A=1/env ` axis share one cause —
+the assignment arm and the path-prefixed wrapper arm both matching `A=1/env `, so
+the handoff at the star is free — and both go to
+`prefix-run-assignment-wrapper-overlap`, which removes it rather than bounding it.
+
 ## Post-2.8.0 — the prefix run stops re-parsing its own input (2026-08-20)
 
 **No version bump** (fix, not surface; freeze exception **73**). The direct

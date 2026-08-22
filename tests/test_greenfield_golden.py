@@ -3212,7 +3212,41 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "dcd8eb28d90d48106913972a41645c667aecc873e9f8b49927cef887be8640d2",
+        # [freeze-exception no. 74, 2026-08-22] `_ckey`'s GLUE STRIP STOPS
+        # REBUILDING THE WORD. The completer-key helper took leading
+        # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
+        # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
+        # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
+        # itself be quadratic in `$_g`, so the offset form is the one that pays.
+        # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
+        # word: ask whether the word has a slash first, as the word walk does.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. `.claude/sdk_gates/
+        # gates.py` is BYTE-IDENTICAL to the parent -- the SDK carries no part of
+        # this change. One hook body moves, `.claude/hooks/dependency-gate.sh`,
+        # plus the two files that digest it.
+        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: the old, candidate and
+        # landed `_ckey` spellings agree on 196 alphabet cases, 0 disagreements,
+        # and the EMITTED body agrees with `cmdpos.completer_key` -- the reference
+        # the SDK uses -- on every glue form in the #45 D1 census.
+        # MEASURED ON THE EMITTED HOOKS, min of 2, both trees in the same run:
+        #   `?`x16000, no downloader, no pipe    4.871 s -> 0.323 s   15x   allow
+        #   glued brace run at 81,919 B        131.196 s -> 16.431 s  8.0x  deny
+        #   `{`x81870 + `; pip install evilpkg` 120.588 s -> 6.149 s 19.6x  deny
+        # THE LAST TWO WERE LIVE FAIL-OPENS ON THIS SUBSTRATE -- both past the 60 s
+        # ceiling the emitted `settings.json` declares for this hook, and past it a
+        # PreToolUse hook is cancelled and only exit 2 blocks. The second is PR
+        # #84's own filed payload.
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
+        # would have been E5.
+        # WHAT THIS DOES NOT DO: the SDK's own glued-brace axis is untouched and
+        # still crosses its ceiling well under `_CMD_MAXLEN`. The left-edge
+        # narrowing that would have closed it was DROPPED from this item -- it cost
+        # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
+        # the same 60 s ceiling, and four candidate spellings were built, emitted
+        # and measured without recovering it. It goes, with the SDK axis, to
+        # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
+        "925869eb4dbf9f97cb4e9cd7c0c1f1393e14727a434eba9e28c463ec05e51cc9",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3531,7 +3565,41 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "4002a6fe7df994e2384b4d0f4108fd1036906095db40aeffd63cba445bbe150a",
+        # [freeze-exception no. 74, 2026-08-22] `_ckey`'s GLUE STRIP STOPS
+        # REBUILDING THE WORD. The completer-key helper took leading
+        # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
+        # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
+        # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
+        # itself be quadratic in `$_g`, so the offset form is the one that pays.
+        # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
+        # word: ask whether the word has a slash first, as the word walk does.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. `.claude/sdk_gates/
+        # gates.py` is BYTE-IDENTICAL to the parent -- the SDK carries no part of
+        # this change. One hook body moves, `.claude/hooks/dependency-gate.sh`,
+        # plus the two files that digest it.
+        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: the old, candidate and
+        # landed `_ckey` spellings agree on 196 alphabet cases, 0 disagreements,
+        # and the EMITTED body agrees with `cmdpos.completer_key` -- the reference
+        # the SDK uses -- on every glue form in the #45 D1 census.
+        # MEASURED ON THE EMITTED HOOKS, min of 2, both trees in the same run:
+        #   `?`x16000, no downloader, no pipe    4.871 s -> 0.323 s   15x   allow
+        #   glued brace run at 81,919 B        131.196 s -> 16.431 s  8.0x  deny
+        #   `{`x81870 + `; pip install evilpkg` 120.588 s -> 6.149 s 19.6x  deny
+        # THE LAST TWO WERE LIVE FAIL-OPENS ON THIS SUBSTRATE -- both past the 60 s
+        # ceiling the emitted `settings.json` declares for this hook, and past it a
+        # PreToolUse hook is cancelled and only exit 2 blocks. The second is PR
+        # #84's own filed payload.
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
+        # would have been E5.
+        # WHAT THIS DOES NOT DO: the SDK's own glued-brace axis is untouched and
+        # still crosses its ceiling well under `_CMD_MAXLEN`. The left-edge
+        # narrowing that would have closed it was DROPPED from this item -- it cost
+        # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
+        # the same 60 s ceiling, and four candidate spellings were built, emitted
+        # and measured without recovering it. It goes, with the SDK axis, to
+        # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
+        "8adc4317370f52bad2ebf759acf64db3d596081094792ad98b684a1a29afc973",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -3797,7 +3865,41 @@ EXPECTED_DIGESTS = {
         # cost 1.09x / 1.10x / 1.15x, deny/deny throughout. Linear, ~+6 ms at
         # 40 KB, and stated here because a table of wins alone would read as
         # if there were none.
-        "632d4c4aa8d30e2659c6b053b31d2516f803ea8ca3fdbbd00eb0a15b466b93ad",
+        # [freeze-exception no. 74, 2026-08-22] `_ckey`'s GLUE STRIP STOPS
+        # REBUILDING THE WORD. The completer-key helper took leading
+        # `cmdpos.COMPLETER_GLUE` off a word one character at a time with
+        # `_t="${_t#?}"`, and each of those rebuilds the WHOLE remainder, so
+        # stripping n glue bytes cost O(n^2). `%%` now takes the glue run in one
+        # expansion and the remainder is taken by OFFSET -- `${_t#"$_g"}` would
+        # itself be quadratic in `$_g`, so the offset form is the one that pays.
+        # Plus the X-45 guard on `${1##*/}`, which is quadratic on a slash-free
+        # word: ask whether the word has a slash first, as the word walk does.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. `.claude/sdk_gates/
+        # gates.py` is BYTE-IDENTICAL to the parent -- the SDK carries no part of
+        # this change. One hook body moves, `.claude/hooks/dependency-gate.sh`,
+        # plus the two files that digest it.
+        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: the old, candidate and
+        # landed `_ckey` spellings agree on 196 alphabet cases, 0 disagreements,
+        # and the EMITTED body agrees with `cmdpos.completer_key` -- the reference
+        # the SDK uses -- on every glue form in the #45 D1 census.
+        # MEASURED ON THE EMITTED HOOKS, min of 2, both trees in the same run:
+        #   `?`x16000, no downloader, no pipe    4.871 s -> 0.323 s   15x   allow
+        #   glued brace run at 81,919 B        131.196 s -> 16.431 s  8.0x  deny
+        #   `{`x81870 + `; pip install evilpkg` 120.588 s -> 6.149 s 19.6x  deny
+        # THE LAST TWO WERE LIVE FAIL-OPENS ON THIS SUBSTRATE -- both past the 60 s
+        # ceiling the emitted `settings.json` declares for this hook, and past it a
+        # PreToolUse hook is cancelled and only exit 2 blocks. The second is PR
+        # #84's own filed payload.
+        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
+        # would have been E5.
+        # WHAT THIS DOES NOT DO: the SDK's own glued-brace axis is untouched and
+        # still crosses its ceiling well under `_CMD_MAXLEN`. The left-edge
+        # narrowing that would have closed it was DROPPED from this item -- it cost
+        # 1.09-1.12x on the deny-carrying `A=1/env` axis and moved that deny across
+        # the same 60 s ceiling, and four candidate spellings were built, emitted
+        # and measured without recovering it. It goes, with the SDK axis, to
+        # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
+        "8b77d1ae14db73a540c6f16b9315264fb666f7e5c7ad4389fd541ca48a234603",
 }
 
 EXPECTED_ACTION_COUNTS = {

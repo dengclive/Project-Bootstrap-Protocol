@@ -4118,6 +4118,68 @@ for _label, _cmd in (
     check(f"#50 T8: {_label} completes far inside the 60 s fail-closed "
           f"ceiling ({_el50:.1f}s)", _el50 < 30.0, f"{_el50:.1f}s")
 
+print("\n-- X-45/X-52: `_ckey`'s glue strip is ~15x cheaper, on the shell --")
+# THE STEP-4 ROW FOR THIS CHANGE, AND IT IS A COST ROW BECAUSE THE CHANGE IS A
+# PURE COST CHANGE. `_ckey` took the leading completer glue off a word one
+# character at a time with `_t="${_t#?}"`, and each of those rebuilds the WHOLE
+# remainder, so stripping n glue bytes cost O(n^2). `%%` now takes the whole
+# glue run and the remainder is taken by OFFSET. Nothing about the accepted
+# language moves, so NO verdict row can see this -- a digest can, and a digest
+# sees any byte change, which is the coverage this row exists to add.
+#
+# IT IS A CONSTANT-FACTOR WIN, NOT AN ORDER CHANGE, and an earlier draft of this
+# row said "linear" and was wrong. Measured through the emitted hook on this very
+# shape at 4k / 8k / 16k / 32k, the landed form still RISES -- exponents
+# 1.05 / 1.40 / 1.68 against main's 1.80 / 1.98 / 1.95 -- because
+# `${_t%%[!({:?]*}` is itself quadratic even though the `${_t:${#_g}}` offset
+# after it is exactly linear. The bound below tests a ratio, which is all that
+# was measured; it does not test an order.
+#
+# WHAT SHARE OF THE READING IS THE STRIP? Hold the length constant and swap the
+# glue out -- `?`xn against `x`xn, same tail -- and the difference is the strip.
+# Min of 5 on the emitted hooks:
+#
+#            n        glue `?`     plain `x`     the strip
+#   head  16,000       0.3278 s      0.3210 s     0.0068 s    2.1%
+#   head  32,000       1.0725 s      1.0602 s     0.0123 s    1.1%
+#   main  16,000       4.8706 s      0.3788 s     4.4918 s   92.2%
+#   main  32,000      18.7722 s      1.2715 s    17.5007 s   93.2%
+#
+# THAT IS THE SHAPE A REGRESSION ROW WANTS: the quantity under test is ~92% of
+# the parent's reading and ~2% of this tree's. The remainder, on both trees, is
+# the word walk this file already documents as quadratic -- which is why the
+# detail below names the walk as well as the strip.
+# [corrected] an earlier draft of this comment and the message of `7b77ee2` say
+# "0.011 s of a 0.353 s reading ... about 3%", taken from the review that raised
+# the point rather than re-derived. The min-of-5 figures above are this
+# session's own, and they carry main's column, which the 3% figure omitted.
+#
+# THE SHAPE IS DELIBERATELY DOWNLOADER-FREE AND PIPE-FREE. `?` is
+# `cmdpos.COMPLETER_GLUE`, the verdict is `allow` on both trees, and no regex
+# axis is involved -- so this row moves only if the glue strip regresses.
+#
+# THE MARGIN IS STATED BECAUSE THE LAST WALL-CLOCK ROW IN THIS FILE WAS DELETED
+# FOR NOT HAVING ONE. Measured 2026-08-22 on the emitted hooks, min of 2, idle
+# 12-core box: `origin/main` 4.871 / 4.940 s, this tree 0.323 / 0.330 s -- a
+# 15x reduction. The bound below is 3.0 s: 9x above this tree's idle figure and
+# 1.6x below main's, so it is red on the parent and green here. The readiness
+# runbook records the TWO rows above that it measured under contention
+# degrading ~4.6x when pinned to two contended cores -- it names the third,
+# pipe-side, as "0.2 s and not a candidate". At that factor this row reads
+# ~1.5 s and still has 2x.
+# DO NOT tighten this bound toward the measured value -- that is exactly what
+# took `#50 T8`'s ratio row to E7, at a 1.02x margin.
+_t0 = time.time()
+_rcck, _ = shell_run("dependency-gate",
+                    bash_payload("?" * 16000 + " pip install evilpkg"))
+_elck = time.time() - _t0
+check(f"X-45/X-52: a 16,000-character glue run and an `allow` verdict, "
+      f"well inside the bound ({_elck:.2f}s, bound 3.0s, main measured 4.9s)",
+      _elck < 3.0 and _rcck == 0,
+      f"{_elck:.2f}s rc={_rcck} -- the per-character `${{_t#?}}` strip is back, "
+      f"OR the word-walk quadratic above it got worse, OR a cost-guard "
+      f"short-circuit has made this row vacuous")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 
