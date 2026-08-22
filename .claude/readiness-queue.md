@@ -133,12 +133,6 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   projected 2026-08-22: **`main` 341.645 s, PR #87's branch 330.457 s** — 5.5–5.7×
   the 60 s ceiling. Earlier records say "~133–152 s"; those are superseded.
 
-- **[ready] shell-walk-residual-superlinear** · `CODE` · eligible: **yes**
-  The shell at the 81,919 B length cap is **16.4 s after PR #87**, down from
-  131.2 s and no longer past the ceiling — but still superlinear, and bounded
-  only because no command may be longer. **PR #87's 2×2 attributes the whole
-  win to `_ckey`:** main 134.121 → regex-only 131.429 → ckey-only 16.663 →
-  both 16.461 s.
 
 - **[ready] jump-bytes-emission-divergence** · `CODE` · eligible: **yes**
   Filed out of `prefix-run-cost-residuals-2` rev 2e E2, where it was dropped as
@@ -208,6 +202,13 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   exception applies. **Never batched.**
 
 ## B — makes shipping-with-known-risk honest
+
+- **[ready] shell-walk-residual-superlinear** · `CODE` · eligible: **yes**
+  The shell at the 81,919 B length cap is **16.4 s after PR #87**, down from
+  131.2 s and no longer past the ceiling — but still superlinear, and bounded
+  only because no command may be longer. **PR #87's 2×2 attributes the whole
+  win to `_ckey`:** main 134.121 → regex-only 131.429 → ckey-only 16.663 →
+  both 16.461 s.
 
 - **[ready] sdk-template-basen-comment** · `EMITTED` · eligible: **yes** · full
   ceremony (a freeze exception is why)
@@ -470,10 +471,25 @@ independently sufficient, never sole ground.
 `96cc730`) and **THE VERDICT DID NOT MOVE**: `docs/production-readiness.md` §1
 still reads **NOT PRODUCTION READY** on the same two legs, **X-37** and **C-2**,
 neither of which this item touches. It closed two live SHELL fail-opens and left
-the SDK's own glued-brace axis open, filed above. **A now holds FIVE rows** —
-`c2-autonomous-dispatch` (blocked), `x37-class-b`,
-`prefix-run-assignment-wrapper-overlap`, `pipe-rule-url-pipe-cubic` (the
-operator's committed next item) and `install-tail-path-scan-quadratic`.
+the SDK's own glued-brace axis open, filed above.
+
+**[CORRECTED 2026-08-22, and the correction is the point.** The sentence that
+stood here said *"A now holds FIVE rows"* and named five. **A holds EIGHT**, and
+the five it named omitted `pipe-run-glued-pipe-axis`,
+`jump-bytes-emission-divergence` and `int-word-clamp-sufficiency`, which were all
+in A when it was written. `shell-walk-residual-superlinear` was ALSO in A while
+PR #88's own body tiers it **B**; it has been moved to B, which is why the count
+is eight and not nine. **A count asserted from the rows I had just added rather
+than read off the file** — the same error this item was graded `harmful` for,
+committed in the commit that closed it. Counts below are derived from the
+section headers, not from memory.**]
+
+**A holds 8** — `c2-autonomous-dispatch` (blocked on a decision),
+`prefix-run-assignment-wrapper-overlap` (**take this before any left-edge
+work**), `pipe-rule-url-pipe-cubic` (the operator's committed next item),
+`install-tail-path-scan-quadratic`, `pipe-run-glued-pipe-axis`,
+`jump-bytes-emission-divergence`, `int-word-clamp-sufficiency` and
+`x37-class-b`. **B holds 6**, `shell-walk-residual-superlinear` among them.
 
 **[2026-08-20] `sdk-pipe-trigger-redos` is CLOSED** (PR #81, merge `897d427`;
 closeout #82) and the paragraph that used to stand here — *"the next item is
