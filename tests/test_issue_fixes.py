@@ -4118,6 +4118,35 @@ for _label, _cmd in (
     check(f"#50 T8: {_label} completes far inside the 60 s fail-closed "
           f"ceiling ({_el50:.1f}s)", _el50 < 30.0, f"{_el50:.1f}s")
 
+print("\n-- X-45/X-52: `_ckey`'s glue strip is LINEAR, on the shell --")
+# THE STEP-4 ROW FOR THIS CHANGE, AND IT IS A COST ROW BECAUSE THE CHANGE IS A
+# PURE COST CHANGE. `_ckey` took the leading completer glue off a word one
+# character at a time with `_t="${_t#?}"`, and each of those rebuilds the WHOLE
+# remainder, so stripping n glue bytes cost O(n^2). `%%` now takes the whole
+# glue run and the remainder is taken by OFFSET. Nothing about the accepted
+# language moves, so NO verdict row can see this -- a digest can, and a digest
+# sees any byte change, which is the coverage this row exists to add.
+#
+# THE SHAPE IS DELIBERATELY DOWNLOADER-FREE AND PIPE-FREE. `?` is
+# `cmdpos.COMPLETER_GLUE`, the verdict is `allow` on both trees, and no regex
+# axis is involved -- so this row moves only if the glue strip regresses.
+#
+# THE MARGIN IS STATED BECAUSE THE LAST WALL-CLOCK ROW IN THIS FILE WAS DELETED
+# FOR NOT HAVING ONE. Measured 2026-08-22 on the emitted hooks, min of 2, idle
+# 12-core box: `origin/main` 4.871 / 4.940 s, this tree 0.323 / 0.330 s -- a
+# 15x reduction. The bound below is 3.0 s: 9x above this tree's idle figure and
+# 1.6x below main's, so it is red on the parent and green here. The readiness
+# runbook records the three rows above degrading ~4.6x when pinned to two
+# contended cores; at that factor this row reads ~1.5 s and still has 2x.
+# DO NOT tighten this bound toward the measured value -- that is exactly what
+# took `#50 T8`'s ratio row to E7, at a 1.02x margin.
+_t0 = time.time()
+shell_run("dependency-gate", bash_payload("?" * 16000 + " pip install evilpkg"))
+_elck = time.time() - _t0
+check(f"X-45/X-52: a 16,000-character glue run strips in linear time "
+      f"({_elck:.2f}s, bound 3.0s, main measured 4.9s)",
+      _elck < 3.0, f"{_elck:.2f}s -- the per-character `${{_t#?}}` strip is back")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 
