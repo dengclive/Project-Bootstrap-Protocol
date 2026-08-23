@@ -360,8 +360,21 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # narrowing. The fix loop diverged for the third time on this line, 13 confirmed
 # and all 13 new on my own fix. What merged is the `_ckey` half only, shell-only,
 # with gates.py byte-identical to the parent.)
+# 40th entry 2026-08-23: pipe-rule-url-pipe-cubic, clean (NO PR -- the item was
+# worked to step 4 and stopped there, shipping no fix and filing four residuals,
+# which the plan named in advance as a legitimate outcome). Nothing wrong reached
+# the tree and the operator ratified the recommendation rather than correcting
+# course, which is what separates `clean` from `corrected` here. The candidate --
+# a third `_cost_guard` term on the product of run x pipes x downloaders -- died
+# on measurement in BOTH forms: the global form has 1.24x-11x separation
+# depending on corpus (the plan's "667,000x" divided a whole-command attack
+# product by a PER-LINE benign maximum), and the segmented form is unsound
+# because `_redirect_norm` maps `|&` -> `|`, so a raw-string segmenter reads 21
+# on a payload costing 60.191 s at 17,645 B with the guard passing. That is the
+# raw-string-vs-derived-string error this ledger already records, made again and
+# caught by the adversarial pass rather than by me.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 39, f"{len(es)} entries")
+      len(es) == 40, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))

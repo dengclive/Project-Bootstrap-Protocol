@@ -99,7 +99,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   disappears, and only then is a narrowing worth revisiting.
 
 - **[ready] pipe-rule-url-pipe-cubic** · `CODE` · eligible: **yes** · full
-  ceremony · **the operator's committed next item**
+  ceremony · **taken 2026-08-23 as the operator's committed next item, worked
+  to step 4, and CLOSED OUT WITH NO FIX — the defect stands, the candidate does
+  not. Anyone taking this row next starts from the refutation at the bottom.**
   **CUBIC, BENIGN-REACHABLE, AND IT CARRIES A DENY — settled by measurement
   2026-08-22 after a step-7 lens reported it `allow` at every size.** The lens
   measured the BARE form only. An ordinary `cat > f.json <<'EOF'` heredoc whose
@@ -113,10 +115,70 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   ```
   Exponents **2.93–3.05**; the deny-carrying form crosses 60 s **between
   12,645 B and 14,745 B** — one fifth the byte count of any other axis.
-  Untouched by #84 and #87. **No candidate fix exists**; anchoring the downloader
-  alternation is REFUTED (the only class that pays deletes `` x=`curl u | sh` ``
-  and `{curl u | sh`, the latter pinned at
-  `tests/test_substrate_differential.py:4356`).
+  Untouched by #84 and #87.
+
+  **THE COST IS A PRODUCT OF THREE FACTORS** — downloader starts × pipes
+  reachable through `[^;&]*` × the whitespace-free run rescanned per probe.
+  Re-derived 2026-08-23 on an idle box, on the emitted object: ablating one
+  factor at a time costs **142×** (`spaced`), **159×** (`onehttp`),
+  **1135×** (`onepipe`). Knock out any one and it is quadratic. It is NOT
+  slash backtracking — `noslash` stays cubic at a flat ~1.9×.
+  **THE AXIS IS SDK-ONLY**: the shell walks 1.68–1.92 and answers in 1.8–2.7 s
+  where the SDK is at 15–51 s, against the same 60 s ceiling.
+
+  **CORRECTION 2026-08-23 — THE PIN THIS ROW USED TO CITE DOES NOT EXIST.** It
+  said `{curl u | sh` is pinned at `tests/test_substrate_differential.py:4356`.
+  That line is `_AMB_LANG = [`, and was already that at `cb58a23` when the row
+  was written; `git grep '{curl'` over the tree returns only this row asserting
+  it. Anchoring the downloader alternation is still REFUTED, but on its measured
+  merits: six downloader-arrival shapes are live denies pinned **nowhere**, so
+  anchoring would delete them with the suite green — see
+  `downloader-arrival-shapes-unpinned`.
+
+  **STEP 4, 2026-08-23 — A THIRD `_cost_guard` TERM BOUNDING THE PRODUCT IS
+  REFUTED IN BOTH FORMS, AND THIS ITEM SHIPPED NO FIX. READ THIS BEFORE
+  RE-PROPOSING ONE.**
+  * **Its bash half DOES pay**, which was the risk the plan flagged. A two-pass
+    guard — cheap global bound first, per-segment pass only on overflow — costs
+    **1.6–1.8 s** worst case at `_CMD_MAXLEN` against a shipped guard at
+    ~0.086 s and a 60 s ceiling; three independent measurements agreed, and the
+    worst payload is 40,958 two-byte `|;` segments plus one downloader.
+    **A SPELLING TRAP SITS NEXT TO IT:** the downloader count written as a bash
+    extglob alternation `${_g//@(curl|wget|…)/}` is **quadratic — 118.9–130.3 s
+    at 81,920 B**, crossing 1 s at ~7.4 KB. The guard would itself be the DoS.
+    Ten plain substring substitutions cost 0.005–0.04 s. Use those.
+  * **The GLOBAL (whole-command) form has NO demonstrated separation.** The
+    plan's headline "~667,000×" divided a whole-command attack product by a
+    **per-line** benign maximum (6,804) — the wrong instrument, and both review
+    lenses agree. Measured whole-command over real artifacts the separation
+    collapses to **1.24×–11×** depending on the corpus, and under the plan's own
+    downloader spelling the benign maximum **EXCEEDS** the attack (0.79×). Four
+    predicates over two populations disagree by five orders of magnitude and
+    have never been run as one predicate over one population — see
+    `benign-corpus-reconciliation`. `_CMD_MAXJUMP`'s own row already records a
+    ~10× separation as a **rejected** trade.
+  * **The SEGMENTED form has headroom and is UNSOUND.** `[^;&]*` cannot cross a
+    `;` or `&`, so scoring the product per `[;&]` segment drops the real-artifact
+    benign maximum to 90,068 while leaving the attack at 4.536e9 — 50,362×. **It
+    is computed on a string the regex does not read.** `_redirect_norm` maps
+    `|&` → `|`, and the rule searches `_redirect_norm(norm)` among its five
+    derived strings (`lib/sdk_gates_template.py:3124-3129`), so writing `|&` for
+    `|` shatters the RAW string into 2-byte segments while the copy the regex
+    reads is **byte-identical** to the baseline — `_redirect_norm(decoy) ==
+    filed` is `True`. Measured on the emitted object:
+    ```
+      n=300   6,645 B  segmented 21   3.295 s     n=600  13,245 B  segmented 21  25.480 s
+      n=400   8,845 B  segmented 21   7.652 s     n=800  17,645 B  segmented 21  60.191 s  ** OVER **
+    ```
+    Exponents 2.95 / 2.98 / 3.00 — still cubic. At 17,645 B the guard PASSES,
+    the hook is killed and the command runs unscanned, while the segmented
+    product reads **21** — 324× below the plan's own benign maximum. The general
+    rule this exposes is filed as `cost-guard-raw-string-soundness`.
+
+  **THE ONE REDUCIBLE FACTOR IS NOT THIS ROW'S.** The unbounded `nonspace*` scan
+  belongs to `prefix-run-assignment-wrapper-overlap`, the A-tier row directly
+  above. Remove the arm overlap and this axis is linear; a cap bolted on top of a
+  cubic moves a crossing, it does not remove one — PR #87's own recorded lesson.
 
 - **[ready] install-tail-path-scan-quadratic** · `CODE` · eligible: **yes**
   **PR #84's OWN FILED PAYLOAD, ON THE SDK.** `{`×81870 + `; pip install
@@ -209,6 +271,42 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   only because no command may be longer. **PR #87's 2×2 attributes the whole
   win to `_ckey`:** main 134.121 → regex-only 131.429 → ckey-only 16.663 →
   both 16.461 s.
+
+- **[ready] cost-guard-raw-string-soundness** · `CODE` · eligible: **yes**
+  **A SOUNDNESS RULE FOR ANY FUTURE `_cost_guard` TERM, PAID FOR BY A REFUTED
+  ONE.** `_cost_guard` is handed `_rc_raw` — the RAW command — but the rules it
+  protects search **five derived strings** (`lib/sdk_gates_template.py:3124-3129`:
+  `norm`, `_xp_unquote(norm)`, `_redirect_norm(norm)`, `_xp_unquote(_rn)` and the
+  parked copy). **A bound computed on the raw string is sound only if no
+  derivation can RAISE the quantity it bounds.** `_redirect_norm` violates that:
+  it maps `|&` → `|` with no space inserted, so a payload can look segmented and
+  cheap raw while the copy the regex reads is byte-identical to an expensive one.
+  Demonstrated on the emitted object at 17,645 B — **60.191 s, guard PASS, hook
+  killed** — while a `[;&]`-segmented product reads 21. `_xp_unquote` and
+  `_xp_park` are **unswept** for the same property. Note the asymmetry that DOES
+  hold and is worth keeping: a guard that DENIES on exceeding a bound is safe to
+  compute on the raw string; a filter that SKIPS on failing a condition is not.
+  Filed by `pipe-rule-url-pipe-cubic`, which this killed.
+
+- **[ready] run-length-substrate-whitespace-split** · `CODE` · eligible: **yes**
+  **A RUN-LENGTH TERM CANNOT BE "ONE ENCODING AT ONE SITE" UNTIL THIS IS
+  PINNED.** Any guard term measuring a longest whitespace-free run must split on
+  whitespace, and the two substrates do not agree on what whitespace is.
+  Measured on `a\xc2\xa0b` (U+00A0 between two letters): bash under
+  `local LC_ALL=C` with the default IFS sees **one word, maxrun 4**; Python's
+  `str.split()` sees **two words, maxrun 1**. Any threshold between 1 and 4 makes
+  the substrates disagree on a verdict — the manufactured divergence a
+  parity-justified change exists to avoid. Adjacent to X-53's locale/whitespace
+  three-way split. Filed by `pipe-rule-url-pipe-cubic`.
+
+- **[ready] downloader-arrival-shapes-unpinned** · `TEST-CONTRACT` · eligible:
+  **yes**
+  **SIX LIVE DENIES PINNED NOWHERE**, so a narrowing that deletes them passes a
+  green suite. `curl … | sh`, `{curl …`, `` x=`curl …` ``, `x=$(curl …)`,
+  `{ curl …`, `(curl …`. This is the *real* reason anchoring the downloader
+  alternation is refused; the pin the cubic row used to cite for it
+  (`tests/test_substrate_differential.py:4356`) does not exist and never did.
+  Filed by `pipe-rule-url-pipe-cubic`.
 
 - **[ready] sdk-template-basen-comment** · `EMITTED` · eligible: **yes** · full
   ceremony (a freeze exception is why)
@@ -311,6 +409,20 @@ separate items only because they were discovered separately.
   harness exists and takes `HC_HEADS`.
 - **[ready] x55-rerun** · `MEASUREMENT` · eligible: **yes**
   `>240 s KILLED` not re-run; stated as owed in the KB.
+- **[ready] benign-corpus-reconciliation** · `MEASUREMENT` · eligible: **yes**
+  **"THE BENIGN MAXIMUM" IS NOT A NUMBER YET, AND ONE PREDICATE OVER ONE
+  POPULATION IS THE WHOLE JOB.** Four predicates for the same quantity (longest
+  run × pipes × downloaders) currently disagree by five orders of magnitude:
+  per-line over `git ls-files` **6,804**; whole-command, guard-admitted, exact
+  downloader count **412,391,664**; whole-command, box-wide, no `https`/`http`
+  double count **3,670,510,800**; the same under the plan's own substring
+  counter **5,753,058,912**. Against an attack product of 4,536,000,000 those
+  give 667,000×, 11×, 1.24× and 0.79× respectively — i.e. the answer to "does a
+  constant exist" is chosen by the corpus, which is the failure the plan's own
+  ordering was written to prevent. Needs: one predicate in both substrates'
+  shipped spellings, fixed before scoring; one population with the guard's
+  admission conditions applied; a headroom rule fixed before the number is
+  known. Filed by `pipe-rule-url-pipe-cubic`.
 
 ## External — not ours to take
 
@@ -490,6 +602,16 @@ work**), `pipe-rule-url-pipe-cubic` (the operator's committed next item),
 `install-tail-path-scan-quadratic`, `pipe-run-glued-pipe-axis`,
 `jump-bytes-emission-divergence`, `int-word-clamp-sufficiency` and
 `x37-class-b`. **B holds 6**, `shell-walk-residual-superlinear` among them.
+
+**[2026-08-23] THE COUNT ABOVE IS SUPERSEDED, NOT WRONG WHEN WRITTEN.**
+`pipe-rule-url-pipe-cubic` was worked to step 4 and **shipped no fix**; it stays
+in A, unfixed, carrying the refutation of the third-`_cost_guard`-term candidate.
+Three residuals it exposed were filed in **B** and one in **Measurement
+residuals**. **Derived off the section headers just now, not counted from
+memory: A = 8, B = 9, C = 5, measurement residuals = 3.** The new B rows are
+`cost-guard-raw-string-soundness`, `run-length-substrate-whitespace-split` and
+`downloader-arrival-shapes-unpinned`; the new measurement row is
+`benign-corpus-reconciliation`.
 
 **[2026-08-20] `sdk-pipe-trigger-redos` is CLOSED** (PR #81, merge `897d427`;
 closeout #82) and the paragraph that used to stand here — *"the next item is
