@@ -123,8 +123,12 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   factor at a time costs **142×** (`spaced`), **159×** (`onehttp`),
   **1135×** (`onepipe`). Knock out any one and it is quadratic. It is NOT
   slash backtracking — `noslash` stays cubic at a flat ~1.9×.
-  **THE AXIS IS SDK-ONLY**: the shell walks 1.68–1.92 and answers in 1.8–2.7 s
-  where the SDK is at 15–51 s, against the same 60 s ceiling.
+  **THE AXIS IS SDK-ONLY**: shell exponents 1.68–1.92, and at the SAME payload
+  size on each row — 8,445 B shell 1.83 s / SDK 15.13 s; 12,645 B shell 4.10 s /
+  SDK 53.31 s — against the same 60 s ceiling. *(An earlier revision of this row
+  paired "shell 1.8–2.7 s" against "SDK 15–51 s"; those ranges end at different
+  payload sizes, so the pairing overstated the gap. The SDK-only conclusion is
+  unchanged — the shell stays an order of magnitude under the ceiling.)*
 
   **CORRECTION 2026-08-23 — THE PIN THIS ROW USED TO CITE DOES NOT EXIST.** It
   said `{curl u | sh` is pinned at `tests/test_substrate_differential.py:4356`.
@@ -141,8 +145,12 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   * **Its bash half DOES pay**, which was the risk the plan flagged. A two-pass
     guard — cheap global bound first, per-segment pass only on overflow — costs
     **1.6–1.8 s** worst case at `_CMD_MAXLEN` against a shipped guard at
-    ~0.086 s and a 60 s ceiling; three independent measurements agreed, and the
-    worst payload is 40,958 two-byte `|;` segments plus one downloader.
+    ~0.086 s and a 60 s ceiling; three independent measurements agreed. The worst
+    payload is 81,916 B holding **40,956** two-byte `|;` units — 40,957
+    `[;&]`-segments, the last of which is the trailing `http` that makes the
+    global bound overflow. *(This row first said "40,958 segments"; that is a
+    third file's count, and the two records disagreed by one on a quantity that
+    should be identical.)*
     **A SPELLING TRAP SITS NEXT TO IT:** the downloader count written as a bash
     extglob alternation `${_g//@(curl|wget|…)/}` is **quadratic — 118.9–130.3 s
     at 81,920 B**, crossing 1 s at ~7.4 KB. The guard would itself be the DoS.
@@ -157,10 +165,10 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     have never been run as one predicate over one population — see
     `benign-corpus-reconciliation`. `_CMD_MAXJUMP`'s own row already records a
     ~10× separation as a **rejected** trade.
-  * **The SEGMENTED form has headroom and is UNSOUND.** `[^;&]*` cannot cross a
-    `;` or `&`, so scoring the product per `[;&]` segment drops the real-artifact
-    benign maximum to 90,068 while leaving the attack at 4.536e9 — 50,362×. **It
-    is computed on a string the regex does not read.** `_redirect_norm` maps
+  * **The SEGMENTED form is UNSOUND, and it has no headroom either.** `[^;&]*`
+    cannot cross a `;` or `&`, so scoring the product per `[;&]` segment looks
+    like the right instrument. It fails twice.
+    **(a) It is computed on a string the regex does not read.** `_redirect_norm` maps
     `|&` → `|`, and the rule searches `_redirect_norm(norm)` among its five
     derived strings (`lib/sdk_gates_template.py:3124-3129`), so writing `|&` for
     `|` shatters the RAW string into 2-byte segments while the copy the regex
@@ -172,8 +180,22 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     ```
     Exponents 2.95 / 2.98 / 3.00 — still cubic. At 17,645 B the guard PASSES,
     the hook is killed and the command runs unscanned, while the segmented
-    product reads **21** — 324× below the plan's own benign maximum. The general
-    rule this exposes is filed as `cost-guard-raw-string-soundness`.
+    product reads **21**. The general rule this exposes is filed as
+    `cost-guard-raw-string-soundness`.
+    **(b) CORRECTED 2026-08-23, AFTER REVIEW — the "50,362× headroom" this row
+    first published was wrong, and wrong by the same mistake it convicts the
+    GLOBAL form of.** That figure divided the attack by 90,068, the segmented
+    product of `ajv.min.js` — **a payload the SHIPPED guard already BLOCKS**
+    (9,993 jump bytes against `_CMD_MAXJUMP` 8,191), so it has no headroom to
+    lose and must never have been scored as benign. Re-run over 3,037 real
+    artifacts ≥50 kB with the guard's own admission conditions applied, the
+    segmented benign maximum is **15,220,348** — `en-GB.json`, an ordinary i18n
+    locale file — giving **298×**, and a reviewer's scan of a different root
+    reached 2.02e9 for **2.24×**. **For every one of those files GLOBAL ==
+    SEGMENTED**, because locale JSON holds no `;` or `&`: segmentation buys
+    nothing on the real benign maximum, and the apparent 50,362× came entirely
+    from picking a semicolon-dense minified file that was already denied.
+    **So both forms lack separation, and the segmented one is unsound as well.**
 
   **THE ONE REDUCIBLE FACTOR IS NOT THIS ROW'S.** The unbounded `nonspace*` scan
   belongs to `prefix-run-assignment-wrapper-overlap`, the A-tier row directly
@@ -301,11 +323,22 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
 
 - **[ready] downloader-arrival-shapes-unpinned** · `TEST-CONTRACT` · eligible:
   **yes**
-  **SIX LIVE DENIES PINNED NOWHERE**, so a narrowing that deletes them passes a
-  green suite. `curl … | sh`, `{curl …`, `` x=`curl …` ``, `x=$(curl …)`,
-  `{ curl …`, `(curl …`. This is the *real* reason anchoring the downloader
-  alternation is refused; the pin the cubic row used to cite for it
+  **THREE downloader-arrival shapes are live denies pinned nowhere**, so a
+  narrowing that deletes them passes a green suite: `` x=`curl …` ``, `{curl …`
+  and `{ curl …` — `grep` over `tests/` and `lib/` returns nothing for any of
+  them. This is the *real* reason anchoring the downloader alternation is
+  refused; the pin the cubic row used to cite for it
   (`tests/test_substrate_differential.py:4356`) does not exist and never did.
+  **CORRECTED 2026-08-23, AFTER REVIEW. This row first said SIX, and inherited
+  that count from the plan instead of deriving it — the same error the row
+  exists to correct.** Two of the six are pinned: `curl … | sh` is a deny at
+  `tests/test_sdk_gates.py:462` and `tests/test_hook_behavior.py:625`, so
+  deleting it takes two rows red rather than passing green. And `x=$(curl …)` is
+  pinned at `tests/test_substrate_differential.py:3358` **as an `allow`** —
+  "assignment RHS is data" — so it is not a live deny at all and never belonged
+  in a list of them. `(curl …` needs its own check before being counted either
+  way; `tests/test_issue_fixes.py:46` records `( curl … | python3 )` as a
+  historical fail-open, which is a mention, not a pin.
   Filed by `pipe-rule-url-pipe-cubic`.
 
 - **[ready] sdk-template-basen-comment** · `EMITTED` · eligible: **yes** · full

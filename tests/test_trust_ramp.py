@@ -360,19 +360,25 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # narrowing. The fix loop diverged for the third time on this line, 13 confirmed
 # and all 13 new on my own fix. What merged is the `_ckey` half only, shell-only,
 # with gates.py byte-identical to the parent.)
-# 40th entry 2026-08-23: pipe-rule-url-pipe-cubic, clean (NO PR -- the item was
-# worked to step 4 and stopped there, shipping no fix and filing four residuals,
-# which the plan named in advance as a legitimate outcome). Nothing wrong reached
-# the tree and the operator ratified the recommendation rather than correcting
-# course, which is what separates `clean` from `corrected` here. The candidate --
-# a third `_cost_guard` term on the product of run x pipes x downloaders -- died
-# on measurement in BOTH forms: the global form has 1.24x-11x separation
-# depending on corpus (the plan's "667,000x" divided a whole-command attack
-# product by a PER-LINE benign maximum), and the segmented form is unsound
-# because `_redirect_norm` maps `|&` -> `|`, so a raw-string segmenter reads 21
-# on a payload costing 60.191 s at 17,645 B with the guard passing. That is the
-# raw-string-vs-derived-string error this ledger already records, made again and
-# caught by the adversarial pass rather than by me.
+# 40th entry 2026-08-23: pipe-rule-url-pipe-cubic, harmful (PR #90). The item was
+# worked to step 4 and shipped NO FIX, filing four residuals, which the plan named
+# in advance as a legitimate outcome -- and the WORK is not what earns the grade.
+# `aac14a5` and the PR #90 body reached ORIGIN carrying four false claims, which
+# is the limb of the vocabulary that does not care how the error happened. It was
+# first written `clean` and regraded after the step-7 review, so this comment is
+# also the record of a grade I got wrong. The blocking one: I convicted the GLOBAL
+# form of resting on an under-searched corpus, published that correction, and left
+# the SEGMENTED form's number uncorrected in the same paragraph -- "50,362x
+# headroom" divided the attack by the segmented product of `ajv.min.js`, a payload
+# the shipped guard ALREADY BLOCKS at 9,993 jumps against `_CMD_MAXJUMP` 8,191.
+# Over guard-admitted real artifacts the segmented benign maximum is 15,220,348
+# for 298x, and GLOBAL == SEGMENTED on every one of them, so segmentation buys
+# nothing. The conclusion (no fix, both forms lack separation) is unchanged; the
+# published reasoning was wrong. The candidate still died in both forms, the
+# segmented one also because `_redirect_norm` maps `|&` -> `|` so a raw-string
+# segmenter reads 21 on a payload costing 60.191 s at 17,645 B with the guard
+# passing -- the raw-string-vs-derived-string error this ledger already records,
+# made again and caught by the adversarial pass rather than by me.
 check("shipped ledger parses to the expected number of entries",
       len(es) == 40, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
