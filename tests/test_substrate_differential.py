@@ -4278,6 +4278,29 @@ _COST_ROWS = [
      _COST_HEAD + "2>x/env " * 2700 + _COST_TAIL),
     ("CONTROL, non-wrapper basename, 2>x/foo x2700",
      _COST_HEAD + "2>x/foo " * 2700 + _COST_TAIL),
+    # [prefix-run-assignment-wrapper-overlap, second commit] THE LEFT EDGE.
+    # A glued brace run is ONE token, and `nonabs`'s `[({] *` arm takes one
+    # brace per iteration, so the trailing group is tried at every position
+    # inside it -- and at each one the wrapper arm's `(NS*/)?` and
+    # `interpreter_word`'s two scans re-read the whole remaining token looking
+    # for a `/` or a `$`. O(n) positions x O(n) scan.
+    #
+    # Narrowing the FIRST character of those three scans to exclude what the
+    # preceding star has already absorbed makes each attempt O(1). This is
+    # PR #87's repair, which that item built, proved equivalent and then DROPPED
+    # because it cost 1.09-1.12x on the `A=1/env ` axis and moved that deny
+    # across the same 60 s ceiling. With the row above making that axis LINEAR,
+    # the same constant lands on a linear axis instead of on a crossing: it now
+    # costs 1.3% there (0.0859 -> 0.0886 s at 43,246 B).
+    #
+    # THIS ROW DOES NOT CLAIM THE AXIS IS CLOSED, AND IT IS NOT. It stays
+    # quadratic: `_PIPE_TO_SHELL` is linearised (attribution 84.0% -> 2.4% of a
+    # much smaller total) and what remains is `_INSTALL_HEAD`, whose residual is
+    # `_INSTALL_TAIL`'s ten un-narrowed path scans. Narrowing THOSE is not
+    # language-preserving -- it deletes `python -m {x/pip install evil` -- and
+    # they are `install-tail-path-scan-quadratic`, a filed row of its own.
+    ("glued brace run x the left edge of every scan, { x15000",
+     _COST_HEAD + "{" * 15000 + " " + _COST_TAIL),
 ]
 
 for _lbl, _cmd in _COST_ROWS:
