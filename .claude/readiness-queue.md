@@ -99,8 +99,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   disappears, and only then is a narrowing worth revisiting.
 
 - **[ready] pipe-rule-url-pipe-cubic** · `CODE` · eligible: **yes** · full
-  ceremony · **taken 2026-08-23, worked to step 4, CLOSED OUT WITH NO FIX. The
-  defect stands; the candidate does not. Start from the refutation below.**
+  ceremony · **taken 2026-08-23, worked to step 4, CLOSED OUT WITH NO FIX —
+  PR #90, merge `36fef02`. The defect STANDS and this row stays in A; only the
+  candidate died. Start from the refutation below.**
   **CUBIC, BENIGN-REACHABLE, AND IT CARRIES A DENY — settled by measurement
   2026-08-22 after a step-7 lens reported it `allow` at every size.** The lens
   measured the BARE form only. An ordinary `cat > f.json <<'EOF'` heredoc whose
