@@ -609,6 +609,103 @@ def bash_case_alt(words, indent: str = "") -> str:
 # The wrapper arm is what fixes D9 and, on the SDK side, D3. `\S`-style
 # shorthands are avoided so the identical source works as a bash ERE.
 
+# ---- [prefix-run-assignment-wrapper-overlap] the two overlapping arms ------ #
+#
+# `A=1/env ` matched the assignment arm below AND the path-prefixed wrapper arm
+# of the trailing group at once, so the boundary between `nonabs*` and the
+# trailing group fell anywhere in a run of them and a FAILING match walked every
+# one. `2>x/env ` does the same thing on the GLUED REDIRECT arm -- same shape,
+# one column over, and it was missed the first time this was written.
+#
+# MEASURED, on the emitted object, ONE run on the parent tree, at identical
+# byte counts (21,646 B, same token count, both deny, both `_cost_guard` PASS):
+# `A=1/env ` x2700 costs 14.4002 s where `A=1/foo ` x2700 -- one character
+# apart, same column -- costs 0.0569 s, against a gate declaring 60 s.
+#
+# THE NARROWED READING IS REDUNDANT, WHICH IS WHY REMOVING IT CHANGES NO STRING.
+# Every string `prefix_run` accepts either ends in a space or ends in a maximal
+# run of `(`/`{`, and the trailing `[({]*` takes exactly that; so a token that
+# both arms can read may always be read as the wrapper pivot, after which the
+# unbounded word run -- pinned unbounded in tests/test_composition.py -- takes
+# the rest. The word run alone does NOT suffice: its every iteration ends in a
+# space, so the trailing `[({]*` is load-bearing in this argument.
+#
+# THE OTHER DIRECTION IS A FAIL-OPEN, MEASURED RATHER THAN ARGUED: refusing the
+# token to the WRAPPER arm loses `"A"=1/env -i pip install evilpkg`, which this
+# suite denies today and which bash really runs -- a QUOTED name is not an
+# assignment, so `env` is the program.
+_DIALECT = {
+    "[^ ]": {"noslash": "[^/ ]", "head": "[^ ({]"},
+    "\\S": {"noslash": "[^/\\s]", "head": "[^\\s({]"},
+}
+
+
+def _dialect(nonspace: str) -> dict:
+    r"""The classes derived from `nonspace`, per dialect.
+
+    A DICTIONARY AND NOT A DEFAULTED PARAMETER: an unregistered dialect raises
+    here rather than silently rendering the ERE class into the Python one, where
+    `[^ ({]` admits a TAB and `[^\s({]` does not. It does not catch a WRONG
+    value written into this table -- only the equivalence decider does that.
+    """
+    try:
+        return _DIALECT[nonspace]
+    except KeyError:
+        raise ValueError("no dialect entry registered for %r" % nonspace)
+
+
+def not_words(words, cls: str) -> str:
+    r"""`cls*` minus the exact finite set `words`.
+
+    A string leaves the set either by DIVERGING -- taking a character no word
+    continues, after which anything may follow -- or by STOPPING on a trie node
+    that is not itself a word:
+
+        cls* \ words  ==  D cls*  |  Q
+
+    THE SINK IS WRITTEN ONCE. Emitting `cls*` at every trie node instead is the
+    same language and 1.34x longer for nothing.
+
+    NO NULL ALTERNATIVE. "Stopping here is allowed" is `(...)?`, never `(...|)`:
+    POSIX leaves a null alternative undefined and a strictly conforming
+    `regcomp` REJECTS the whole pattern, on which every `[[ =~ ]]` in the
+    emitted hooks returns 2 and the surrounding `if` reads it as false -- the
+    gate goes silently permissive. glibc accepts it, so this box cannot see it.
+    """
+    assert cls.startswith("[^") and cls.endswith("]"), cls
+    root = {}
+    for w in sorted(words):
+        d = root
+        for ch in w:
+            d = d.setdefault(ch, {})
+        d["\0"] = True
+
+    def group(arms):
+        return arms[0] if len(arms) == 1 else "(" + "|".join(arms) + ")"
+
+    def minus(kids):
+        return "[" + cls[1:-1] + "".join(kids) + "]" if kids else cls
+
+    def dnode(n):
+        kids = sorted(k for k in n if k != "\0")
+        return group([minus(kids)] + [k + dnode(n[k]) for k in kids])
+
+    def qnode(n):
+        arms = []
+        for k in sorted(k for k in n if k != "\0"):
+            sub = qnode(n[k])
+            if sub is not None:
+                arms.append(k + sub)
+        stop_ok = "\0" not in n
+        if not arms:
+            return "" if stop_ok else None
+        body = group(arms)
+        return "(" + body + ")?" if stop_ok else body
+
+    d, q = dnode(root), qnode(root)
+    return "(" + d + cls + "*" + ("|" + q if q else "") + ")"
+
+
 def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     """THE command-position prefix run, factored out so the anchor and the
     pipe trigger cannot encode command position differently.
@@ -681,6 +778,12 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     tests/test_substrate_differential.py - the two failures look nothing alike.
     """
     # the four arms that do not carry the wrapper word list
+    # The assignment arm and the GLUED redirect arm share one copy of the
+    # complement: both lose only the reading where the token is a path whose
+    # basename is a wrapper word, which the wrapper arm below already takes.
+    _seg = _dialect(nonspace)["noslash"]
+    _asg = "[A-Za-z_][A-Za-z0-9_]*[+]?="
+    _red = "[0-9]*[<>]"
     nonabs = ("([({] *"
               # A' -- the two cases are disjoint on whether a space separates
               # the operator run from its target, and in the no-space case
@@ -688,9 +791,13 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
               # LITERAL space run and must stay one: spelling it `space` is
               # equivalent in ERE and a Python-only WIDENING (`<TAB0 `), which
               # is the dialect drift `_py`'s X-36j note already records once.
-              + "|[0-9]*([<>]" + nonspace + "+|[<>]+ +" + nonspace
-              + "+)" + space
-              + "|[A-Za-z_][A-Za-z0-9_]*[+]?=" + nonspace + "*" + space
+              # The SPACED form's first token is operators-only, so it carries
+              # no wrapper reading and is left exactly as it was.
+              + "|(" + _asg + _seg + "*"
+              + "|" + _red + _seg + "+"
+              + "|(" + _asg + "|" + _red + ")" + nonspace + "*/"
+              + not_words(ALL_PREFIXES, _seg) + ")" + space
+              + "|[0-9]*[<>]+ +" + nonspace + "+" + space
               + "|(" + alt(KEYWORDS) + ")" + space + ")")
     # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
     # one source compiles in both Python and bash, and bash has no lookahead

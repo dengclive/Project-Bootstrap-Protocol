@@ -4440,7 +4440,17 @@ check("the SHELL flag star carries the same rule, hand-written",
 # be dramatically slower on the same payload. This cannot pass on a tree where
 # the fix was reverted: the reverse substitution then finds nothing to undo and
 # the first check below fails before any timing runs.
-_REV = [(r"[0-9]*(?:[<>]\S+|[<>]+ +\S+)\s+", r"[0-9]*[<>]+ *\S+\s+"),
+# [prefix-run-assignment-wrapper-overlap] THE FIRST ENTRY'S NEW SIDE MOVED, AND
+# THE CALIBRATION MOVED WITH IT RATHER THAN BEING DROPPED. The glued redirect
+# arm is no longer written as one alternation beside the spaced one: it is split
+# into a no-slash form and a shared path form, because it carried the same
+# overlap with the path-prefixed wrapper arm that the assignment arm did. What
+# freeze-73 fixed is unchanged and is what these two substrings still encode --
+# the GLUED form takes exactly ONE `[<>]`, so it cannot consume the operator run
+# the SPACED form is there for. Reverting either one to `[<>]+ *` puts the two
+# back in competition, which is the defect being calibrated.
+_REV = [(r"[0-9]*[<>][^/\s]+", r"[0-9]*[<>]+ *[^/\s]+"),
+        (r"|[0-9]*[<>])\S*/", r"|[0-9]*[<>]+ *)\S*/"),
         (r"(?:\S+\s+)*[({]*", r"(?:\S+\s+)*(?:[({] *)*")]
 _emitted_pat = gates_mod._PIPE_TO_SHELL.pattern
 _reverted_pat = _emitted_pat

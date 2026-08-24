@@ -2195,8 +2195,67 @@ EXPECTED_RETROFIT_DIGESTS = {
     # the same 60 s ceiling, and four candidate spellings were built, emitted
     # and measured without recovering it. It goes, with the SDK axis, to
     # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
-    "service": "01ac39ae4701b67ef41fbf2398ec4da0807f45acdd494f284e042a59f9bdd7db",
-    "agent": "d8f62b112adc5008bb040cab13e3d357fc17cdaa32bad3195d7ff8790be8cb88",
+    # [freeze-exception no. 75, 2026-08-24] prefix-run-assignment-wrapper-
+    # overlap -- THE PREFIX RUN STOPS HAVING TWO READINGS OF ONE TOKEN.
+    # `A=1/env ` matched `prefix_run`'s assignment arm AND its
+    # path-prefixed wrapper arm at once, so the boundary between `nonabs*`
+    # and the trailing group fell anywhere in a run of them and a FAILING
+    # match walked every one -- quadratic. `2>x/env ` did the identical
+    # thing on the GLUED REDIRECT arm, which was NOT on record and which a
+    # step-3 lens found by sweeping the arms rather than reading the one the
+    # queue row names. BOTH ARMS ARE CLOSED HERE, sharing ONE copy of the
+    # complement; the SPACED redirect form carries no wrapper reading and is
+    # untouched.
+    # THE ACCEPTED LANGUAGE IS UNCHANGED, DECIDED AND NOT SAMPLED: the exact
+    # ERE/Python -> NFA -> product-BFS procedure, both dialects, unbounded in
+    # string length, over `prefix_run` AND `pipe_to_shell_regex` -- four rows,
+    # all EQUIVALENT, selfchecked against Python's own `re` on 37,060 /
+    # 40,495 / 106,080 strings. Two-sided: the opposite repair, narrowing the
+    # WRAPPER arm instead, is caught False with witness `/env ` -- and that
+    # direction is the FAIL-OPEN one, because it loses
+    # `"A"=1/env -i pip install evilpkg`, which bash really runs (a quoted
+    # NAME is not an assignment) and which this suite denies today.
+    # WHY REMOVING THE OTHER READING CHANGES NO STRING: every string
+    # `prefix_run` accepts either ends in a space or ends in a maximal run of
+    # `(`/`{`; the word run takes the first and the trailing `[({]*` takes
+    # the second, so an overlapping token can always be read as the wrapper
+    # pivot instead. The word run ALONE does not suffice -- each of its
+    # iterations ends in a space -- and saying only "the word run absorbs it"
+    # was the gap step 3 caught in the plan.
+    # VERDICTS: 370 commands x 7 gates = 2,590 verdicts, 331 of them deny,
+    # ZERO differences against the parent.
+    # MEASURED ON THE EMITTED OBJECT, min-of-3 `process_time`, SDK
+    # `dependency-gate`, both trees in ONE run, 0 jump bytes and
+    # `_cost_guard` PASS and `deny` on every row:
+    #   A=1/env x2700   21,646 B   14.0645 s -> 0.0464 s
+    #   A=1/env x5400   43,246 B   56.0672 s -> 0.0859 s   653x
+    #   2>x/env x2700   21,646 B   14.0314 s -> 0.0476 s   295x
+    #   exponents        2.0 -> 0.9 on both axes: an ORDER change, not a
+    #                    constant. The one-arm spelling first proposed for
+    #                    this item measured 14.0105 s on the second axis --
+    #                    a one-character edit to the payload undid it.
+    # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
+    # costs a little: the glued-brace axis is 1.02x of the parent, and the
+    # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
+    # THE SHELL SUBSTRATE IS UNCHANGED AND WAS MEASURED, not assumed: both
+    # axes are SDK-only. Through the emitted hook, 21,646 B: 0.793 -> 0.791 s
+    # and 2.102 -> 2.109 s.
+    # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
+    # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
+    # undefined and a strictly conforming engine REJECTS the whole pattern,
+    # on which every emitted `[[ =~ ]]` returns 2 and the surrounding `if`
+    # reads it as false -- silently permissive. glibc accepts it, so this box
+    # cannot see it; `ugrep` rejects it and was used as the control.
+    # ACTION COUNTS UNCHANGED at 79 / 93, zero files added or removed,
+    # verified BEFORE this re-baseline -- a count move would have been E5,
+    # not a silent digest.
+    # WHAT THIS DOES NOT DO: the glued-brace axis is untouched by THIS
+    # commit. Its left-edge repair is the next commit, and even with it the
+    # axis stays quadratic -- the residual is `_INSTALL_TAIL`'s ten
+    # un-narrowed path scans, which is `install-tail-path-scan-quadratic`
+    # and not this item.
+    "service": "ea2e908874e128a3766f362fe92a19d7f9bdb55ecaded90481e2d8263c577166",
+    "agent": "9de82197ea5499c1bf273a37469f0e36d26924735194cc497d0029420fd8d46d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
