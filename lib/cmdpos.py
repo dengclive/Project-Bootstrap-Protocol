@@ -802,7 +802,17 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # the wrapper/named-group arm, ONCE, as a fixed pivot. Plain POSIX ERE:
     # one source compiles in both Python and bash, and bash has no lookahead
     # and no atomic groups.
-    wrapper = ("((" + nonspace + "*/)?(" + alt(ALL_PREFIXES) + ")"
+    # [second commit] THE LEFT EDGE. A scan may not BEGIN with a
+    # character the preceding `[({] *` arm has already absorbed, so a scan
+    # starting at one is unreachable and the attempt is O(1) instead of a
+    # re-read of the whole remaining token. The `/|` alternative keeps the
+    # prefix that is the single byte `/`. PR #87 built, proved and then
+    # DROPPED this because it cost 1.09-1.12x on the `A=1/env ` axis and
+    # moved that deny across the 60 s ceiling; with that axis linear it now
+    # costs 1.3% there. Same language, decided again here rather than
+    # inherited.
+    wrapper = ("((/|" + _dialect(nonspace)["head"] + nonspace
+               + "*/)?(" + alt(ALL_PREFIXES) + ")"
                + "|(" + alt(NAMED_GROUP_HEADS) + "))")
     # The trailing brace arm sits INSIDE the trailing group, not at the star
     # level, and is SPACE-FREE. Both facts are load-bearing and both are
@@ -879,9 +889,11 @@ def interpreter_word(space: str = " +", nonspace: str = "[^ ]",
     shorter, and `curl u | ${SHELL}` stays the 0 -> 2 improvement over 2.6.1
     that it became.
     """
-    return ("((" + nonspace + "*/)?(" + alt(INTERPRETERS) + ")" + INTERP_SUFFIX
+    return ("((/|" + _dialect(nonspace)["head"] + nonspace
+            + "*/)?(" + alt(INTERPRETERS) + ")" + INTERP_SUFFIX
             + "(" + ws + "|$|[;)])"
-            + "|" + nonspace + "*[$`]" + nonspace + "*"
+            + "|([$`]|" + _dialect(nonspace)["head"] + nonspace
+            + "*[$`])" + nonspace + "*"
             + "(" + ws + "|$|[;)])"
             + ")")
 

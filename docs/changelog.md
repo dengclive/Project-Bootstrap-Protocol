@@ -218,10 +218,39 @@ Action counts unchanged at **57 / 69 / 59** and **79 / 93**, zero files added or
 removed, verified before the re-baseline — a count move would have been E5, not
 a silent digest.
 
-**What it does not do.** The glued-brace axis is a separate commit's business,
-and even with that commit it stays quadratic: the residual is `_INSTALL_TAIL`'s
-ten un-narrowed path scans, which is `install-tail-path-scan-quadratic` and not
-this item.
+**The second commit — the left edge.** `prefix_run`'s wrapper path arm and
+`interpreter_word`'s two scans may no longer *begin* with a character the
+preceding `[({] *` arm has already absorbed, so an attempt at a position inside
+a glued brace run is O(1) instead of a re-read of the whole remaining token.
+PR #87 built this, proved it equivalent, and dropped it — it cost 1.09–1.12× on
+the `A=1/env ` axis and moved that deny across the 60 s ceiling. With the first
+commit making that axis linear the same constant costs **1.3%** there
+(0.0859 → 0.0886 s at 43,246 B). That ordering is PR #87's own conclusion: the
+overlap first, the left edge after it. Equivalence was decided again rather than
+inherited, and this time over `pipe_to_shell_regex` as well — the earlier proof
+covered `prefix_run` only, which left both `interpreter_word` edits unproved.
+
+| glued braces | bytes | first commit | both |
+|---|---|---|---|
+| `{`×5000 | 5,047 | 1.4847 s | **0.2307 s** |
+| `{`×10000 | 10,047 | 5.8487 s | **0.8761 s** |
+| `{`×20000 | 20,047 | 23.3415 s | **3.4078 s** |
+| `{`×81872 | 81,919 | 391.4576 s | **56.2891 s** |
+
+The 81,919 B row is one byte under `_CMD_MAXLEN`; its parent figure is a single
+reading (a 150 s cap stopped it after the first rep) and the 56.2891 s is
+min-of-3.
+
+**That is a live fail-open turned into a pass, and not much more.** The axis is
+**still quadratic** — exponents 1.94 / 1.97 — so 6.95× is a constant, the margin
+at the guard's own maximum is **6.2%**, and it is min-of-3 CPU time against a
+wall-clock deadline, which is not the same quantity. Attribution on the same
+payload: `_PIPE_TO_SHELL` goes 84.0% → 2.4% while `_INSTALL_HEAD` does not move.
+
+**What neither commit does.** `_INSTALL_TAIL`'s ten un-narrowed path scans are
+what the brace axis is now made of. Narrowing them is **not**
+language-preserving — it deletes `python -m {x/pip install evil` — and they are
+`install-tail-path-scan-quadratic`, a filed row of its own.
 
 ## Post-2.8.0 — `_ckey`'s glue strip stops rebuilding the word (2026-08-22)
 

@@ -2254,8 +2254,40 @@ EXPECTED_RETROFIT_DIGESTS = {
     # axis stays quadratic -- the residual is `_INSTALL_TAIL`'s ten
     # un-narrowed path scans, which is `install-tail-path-scan-quadratic`
     # and not this item.
-    "service": "ea2e908874e128a3766f362fe92a19d7f9bdb55ecaded90481e2d8263c577166",
-    "agent": "9de82197ea5499c1bf273a37469f0e36d26924735194cc497d0029420fd8d46d",
+    # [AMENDMENT to no. 75, same item, second commit] THE LEFT EDGE.
+    # `prefix_run`'s wrapper path arm and `interpreter_word`'s two scans may
+    # no longer BEGIN with a character the preceding `[({] *` arm has already
+    # absorbed, so an attempt at a position inside a glued brace run is O(1)
+    # instead of a re-read of the whole remaining token. PR #87 built this,
+    # proved it equivalent and DROPPED it, because it cost 1.09-1.12x on the
+    # `A=1/env ` axis and moved that deny across the 60 s ceiling. The commit
+    # above makes that axis linear, so the same constant now costs 1.3%
+    # there (0.0859 -> 0.0886 s at 43,246 B). THE ORDERING WAS THE WHOLE
+    # POINT and it is PR #87's own words: the overlap first, the left edge
+    # after it.
+    # Equivalence decided again rather than inherited, and this time over
+    # `pipe_to_shell_regex` as well -- the earlier proof covered `prefix_run`
+    # only, which left BOTH `interpreter_word` edits unproved.
+    # MEASURED, min-of-3 `process_time`, both trees in ONE run, guard PASS,
+    # 0 jump bytes, deny throughout:
+    #    5,047 B    1.4847 s -> 0.2307 s
+    #   10,047 B    5.8487 s -> 0.8761 s
+    #   20,047 B   23.3415 s -> 3.4078 s
+    #   81,919 B  391.4576 s -> 56.2891 s   -- one byte under _CMD_MAXLEN.
+    #             The parent figure is ONE reading (a 150 s cap stopped it
+    #             after the first rep); the 56.2891 s is min-of-3.
+    # THAT IS A LIVE FAIL-OPEN TURNED INTO A PASS, AND NOT MUCH MORE. The
+    # axis is STILL QUADRATIC -- exponents 1.94 / 1.97 -- so 6.95x is a
+    # constant, the margin at the guard's own maximum is 6.2%, and it is
+    # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
+    # quantity. What is left is `_INSTALL_HEAD`: attribution on the same
+    # payload goes `_PIPE_TO_SHELL` 84.0% -> 2.4% while `_INSTALL_HEAD` does
+    # not move, and its residual is `_INSTALL_TAIL`'s ten un-narrowed path
+    # scans. Narrowing THOSE is not language-preserving -- it deletes
+    # `python -m {x/pip install evil` -- and they are
+    # `install-tail-path-scan-quadratic`, a filed row of its own.
+    "service": "125af48c1dc2f4e846856ad85e65864b5480c99a6b46bc9efadd833857187b07",
+    "agent": "3075c76e38281143c9fa5911d412e44e21553a9fd6d8b8122ab91e14f015943d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
