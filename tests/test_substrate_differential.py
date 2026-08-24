@@ -4252,6 +4252,32 @@ _COST_ROWS = [
      _COST_HEAD + ("env " + "A=1 " * 16) * 6 + _COST_TAIL),
     ("wrapper x assignment interleave, 8 x 16",
      _COST_HEAD + ("env " + "A=1 " * 16) * 8 + _COST_TAIL),
+    # [prefix-run-assignment-wrapper-overlap] THE ARM OVERLAP. A token that
+    # `nonabs` and the path-prefixed wrapper arm BOTH read leaves the boundary
+    # between the star and the trailing group free, so a failing match walks
+    # every one of them -- quadratic in the token count, at a fixed 8 bytes per
+    # token, against a gate declaring 60 s.
+    #
+    # TWO ARMS, NOT ONE. The assignment arm was the one on record; the GLUED
+    # redirect arm has the identical shape one column over and was missed until
+    # a step-3 lens swept for it. The rows are a PAIR on purpose: a fix that
+    # closes only the first leaves the second at its full cost, which is what
+    # the first candidate for this item did (14.01 s where the shipped tree is
+    # 14.03 s -- a one-character edit to the payload undoes the whole repair).
+    #
+    # THE CONTROL IS THE POINT OF THE `foo` ROWS: same byte count, same token
+    # count, same verdict, same guard state, ONE character different -- the
+    # basename is not a wrapper word, so the two readings do not both exist and
+    # the axis is linear on every tree. If those rows ever go red the payloads
+    # have stopped isolating the overlap and these four measure nothing.
+    ("assignment arm x path-prefixed wrapper arm, A=1/env x2700",
+     _COST_HEAD + "A=1/env " * 2700 + _COST_TAIL),
+    ("CONTROL, non-wrapper basename, A=1/foo x2700",
+     _COST_HEAD + "A=1/foo " * 2700 + _COST_TAIL),
+    ("glued redirect arm x path-prefixed wrapper arm, 2>x/env x2700",
+     _COST_HEAD + "2>x/env " * 2700 + _COST_TAIL),
+    ("CONTROL, non-wrapper basename, 2>x/foo x2700",
+     _COST_HEAD + "2>x/foo " * 2700 + _COST_TAIL),
 ]
 
 for _lbl, _cmd in _COST_ROWS:
