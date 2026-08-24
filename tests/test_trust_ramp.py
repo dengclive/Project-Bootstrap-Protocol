@@ -360,7 +360,7 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # narrowing. The fix loop diverged for the third time on this line, 13 confirmed
 # and all 13 new on my own fix. What merged is the `_ckey` half only, shell-only,
 # with gates.py byte-identical to the parent.)
-# 40th entry 2026-08-23: pipe-rule-url-pipe-cubic, harmful (PR #90). Worked to
+# 40th entry 2026-08-24: pipe-rule-url-pipe-cubic, harmful (PR #90). Worked to
 # step 4, shipped NO FIX, filed four residuals -- and the WORK is not what earns
 # the grade. False claims reached ORIGIN twice: in the closeout, and again in the
 # commit correcting it. The fix loop then hit E2 (4 confirmed, then 9 with eight
