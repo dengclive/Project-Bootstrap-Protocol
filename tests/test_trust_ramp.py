@@ -360,8 +360,27 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # narrowing. The fix loop diverged for the third time on this line, 13 confirmed
 # and all 13 new on my own fix. What merged is the `_ckey` half only, shell-only,
 # with gates.py byte-identical to the parent.)
+# 40th entry 2026-08-24: pipe-rule-url-pipe-cubic, harmful (PR #90). Worked to
+# step 4, shipped NO FIX, filed four residuals -- and the WORK is not what earns
+# the grade. False claims reached ORIGIN twice: in the closeout, and again in the
+# commit correcting it. The fix loop then hit E2 (4 confirmed, then 9 with eight
+# new on the fix), and what ended it was the operator ruling "keep only what
+# survived review" -- a STRIP, which is the only thing that has ever ended a fix
+# loop on this line. What survived: the candidate is refuted, its bash half pays
+# (1.6139 s vs the shipped term's 0.0872 s), and the SEGMENTED form is UNSOUND
+# because _redirect_norm maps `|&` -> `|` and the rule searches it among five
+# derived strings, so a raw-string segmenter reads 21 on a payload costing
+# 60.191 s at 17,645 B with the guard passing. What was DELETED rather than
+# re-derived: every benign-separation number, because four attempts scored four
+# corpora under four predicates and two were faulted; and every count of the
+# unpinned downloader shapes, because two published counts were wrong in three
+# days and both were inherited rather than derived. The method lesson is one
+# sentence -- A CORRECTION IS A CLAIM AND NEEDS THE SAME SWEEP THE ORIGINAL
+# NEEDED -- with two instruments to distrust: sorting by one column and reading a
+# property off another is not a sweep, and a corpus scored for headroom must
+# first be filtered by what the code already rejects.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 39, f"{len(es)} entries")
+      len(es) == 40, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
