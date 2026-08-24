@@ -132,9 +132,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   **CORRECTION 2026-08-23 — THE PIN THIS ROW USED TO CITE DOES NOT EXIST.** It
   said `{curl u | sh` is pinned at `tests/test_substrate_differential.py:4356`.
   That line is `_AMB_LANG = [`, and was already that at `cb58a23` when the row
-  was written; `git grep '{curl'` over the tree returns only this row asserting
-  it. Anchoring the downloader alternation is still refused, but on measured
-  merits — see `downloader-arrival-shapes-unpinned`.
+  was written; `git grep '{curl'` over the tree returns **no pin** — only prose,
+  this row's included. Anchoring the downloader alternation is still refused,
+  but on measured merits — see `downloader-arrival-shapes-unpinned`.
 
   **STEP 4, 2026-08-23 — A THIRD `_cost_guard` TERM BOUNDING THE PRODUCT IS
   REFUTED. NO FIX SHIPPED. READ THIS BEFORE RE-PROPOSING ONE.**
