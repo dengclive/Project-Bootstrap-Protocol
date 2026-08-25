@@ -615,7 +615,7 @@ def bash_case_alt(words, indent: str = "") -> str:
 # of the trailing group at once, so the boundary between `nonabs*` and the
 # trailing group fell anywhere in a run of them and a FAILING match walked every
 # one. `2>x/env ` does the same thing on the GLUED REDIRECT arm -- same shape,
-# one column over, and it was missed the first time this was written.
+# in the same place, and it was missed the first time this was written.
 #
 # MEASURED, on the emitted object, ONE run on the parent tree, at identical
 # byte counts (21,646 B, same token count, both deny, both `_cost_guard` PASS):
@@ -836,14 +836,14 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     #
     # WHAT IT DID NOT REMOVE, AND WHAT SINCE CLOSED IT: `A=1/env ` matched the
     # assignment arm AND the path-prefixed wrapper arm at once, so the handoff
-    # at the star was free - filed by the m^2 repair rather than fixed by it,
-    # and measured AT THAT TIME on THAT COMMIT's pair of trees:
-    # `curl ... | ` + `A=1/env ` x5120 + `zzz` is 40,984 bytes and cost 53.0 s
-    # at the parent, 51.2 s at it, allow/allow. Quadratic, so it crossed the
-    # 60 s ceiling BELOW `_CMD_MAXLEN`; the value AT the cap is not measured
-    # here and was not asserted. `prefix-run-assignment-wrapper-overlap` closed
-    # it, on that arm AND on the glued redirect arm, which carried the identical
-    # shape one column over; see the block above `prefix_run`.
+    # at the star was free - filed by the m^2 repair rather than fixed by it.
+    # THAT FILING'S OWN FIGURES ARE NOT REPEATED HERE. PR #87's review found
+    # them to be one substrate's numbers read as two: the SDK crosses, the
+    # shell does not, and the `allow/allow` they carried understates the class,
+    # because the same padding with an install tail DENIES at the same cost.
+    # `prefix-run-assignment-wrapper-overlap` closed it, on that arm AND on the
+    # glued redirect arm, which carried the same shape; see the block above
+    # `prefix_run`.
     #
     # SO THE WORD RUN IS NOW THE ONLY PATH FOR SPACED BRACES AFTER A WRAPPER.
     # Bounding it deletes `env { { ` and `sudo { { { ` from the language as

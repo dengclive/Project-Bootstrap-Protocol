@@ -4259,7 +4259,7 @@ _COST_ROWS = [
     # token, against a gate declaring 60 s.
     #
     # TWO ARMS, NOT ONE. The assignment arm was the one on record; the GLUED
-    # redirect arm has the identical shape one column over and was missed until
+    # redirect arm has the identical shape in the same place and was missed until
     # a step-3 lens swept for it. The rows are a PAIR on purpose: a fix that
     # closes only the first leaves the second at its full cost, which is what
     # the first candidate for this item did (14.01 s where the shipped tree is

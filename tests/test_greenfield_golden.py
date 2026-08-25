@@ -3288,11 +3288,14 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
-        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
-        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
-        # NOT differentiated by this item. Filed, not claimed.
+        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
+        # unchanged and those two axes are SDK-only: through the emitted hook at
+        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
+        # (The glued-brace axis is quadratic on the shell too; it is not one of
+        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
+        # arm this item touches is pinned on THIS tree by the shell control each
+        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
+        # shell's verdicts.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -3333,11 +3336,9 @@ EXPECTED_DIGESTS = {
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
         # quantity. What is left is `_INSTALL_HEAD`, whose residual is
-        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
-        # attribution was taken during design, but on a SUPERSEDED candidate
-        # tree and at a different payload size, so no share for THIS tree is
-        # published.) Narrowing those scans is not language-preserving -- it
-        # deletes
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. No per-pattern share
+        # for THIS tree is published. Narrowing those scans is not
+        # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "ea7729f1059346cd3ca23e48ad8a50a04dbedd7527aa3b62a348aeab0ca7bea1",
@@ -3735,11 +3736,14 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
-        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
-        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
-        # NOT differentiated by this item. Filed, not claimed.
+        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
+        # unchanged and those two axes are SDK-only: through the emitted hook at
+        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
+        # (The glued-brace axis is quadratic on the shell too; it is not one of
+        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
+        # arm this item touches is pinned on THIS tree by the shell control each
+        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
+        # shell's verdicts.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -3780,11 +3784,9 @@ EXPECTED_DIGESTS = {
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
         # quantity. What is left is `_INSTALL_HEAD`, whose residual is
-        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
-        # attribution was taken during design, but on a SUPERSEDED candidate
-        # tree and at a different payload size, so no share for THIS tree is
-        # published.) Narrowing those scans is not language-preserving -- it
-        # deletes
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. No per-pattern share
+        # for THIS tree is published. Narrowing those scans is not
+        # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "b8f81ead8ff90b372c6785ebf06774660aba871cda299dc21fcf2ebe571169c5",
@@ -4129,11 +4131,14 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
-        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
-        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
-        # NOT differentiated by this item. Filed, not claimed.
+        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
+        # unchanged and those two axes are SDK-only: through the emitted hook at
+        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
+        # (The glued-brace axis is quadratic on the shell too; it is not one of
+        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
+        # arm this item touches is pinned on THIS tree by the shell control each
+        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
+        # shell's verdicts.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -4174,11 +4179,9 @@ EXPECTED_DIGESTS = {
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
         # quantity. What is left is `_INSTALL_HEAD`, whose residual is
-        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
-        # attribution was taken during design, but on a SUPERSEDED candidate
-        # tree and at a different payload size, so no share for THIS tree is
-        # published.) Narrowing those scans is not language-preserving -- it
-        # deletes
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. No per-pattern share
+        # for THIS tree is published. Narrowing those scans is not
+        # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "6e36a5ee3dbd4dd96e49e6b5c049263979efaba7adde8e3589b26aceefbd3a69",

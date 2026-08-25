@@ -203,11 +203,13 @@ payloads it does not help the longer pattern costs a little: the glued-brace
 axis is **1.02×** of the parent, and the non-overlapping control `2>x/foo `×2700
 goes **0.0304 → 0.0368 s**.
 
-**The shell substrate.** Its *cost* is unchanged and both quadratic axes are
-SDK-only — through the emitted hook at 21,646 B, 0.793 → 0.791 s and
-2.102 → 2.109 s, wall clock, min of 2. That is a cost reading and nothing more:
-the shell's `CMD_PFX` did change, and its *verdicts* are **not** differentiated
-by this item. Filed, not claimed.
+**The shell substrate.** Its *cost* on the two assignment/redirect axes is
+unchanged, and those two axes are SDK-only — through the emitted hook at
+21,646 B, 0.793 → 0.791 s and 2.102 → 2.109 s, wall clock, min of 2. (The
+glued-brace axis is quadratic on the shell too; it is not one of the two.) The
+shell's `CMD_PFX` did change, and its verdict on every arm this item touches is
+pinned on this tree by the shell control each cost row carries. What was **not**
+done is a parent-vs-HEAD sweep of the shell's verdicts.
 
 **No null alternatives.** The generated complement spells "stopping here is
 allowed" as `(...)?`, never `(...|)`. POSIX leaves a null alternative undefined
@@ -247,9 +249,7 @@ min-of-3.
 **still quadratic** — exponents 1.94 / 1.97 — so 6.95× is a constant, the margin
 at the guard's own maximum is **6.2%**, and it is min-of-3 CPU time against a
 wall-clock deadline, which is not the same quantity. What remains is
-`_INSTALL_HEAD`. A per-pattern attribution was taken during design, but on a
-superseded candidate tree and at a different payload size, so no share for this
-tree is published.
+`_INSTALL_HEAD`. No per-pattern share for this tree is published.
 
 **What neither commit does.** `_INSTALL_TAIL`'s ten un-narrowed path scans are
 what the brace axis is now made of. Narrowing them is **not**
