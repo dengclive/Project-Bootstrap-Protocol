@@ -379,8 +379,20 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # NEEDED -- with two instruments to distrust: sorting by one column and reading a
 # property off another is not a sweep, and a corpus scored for headroom must
 # first be filtered by what the code already rejects.
+# 41st entry 2026-08-25: prefix-run-assignment-wrapper-overlap, harmful
+# (PR #92, merge abe3f48). The best technical result on this line and still
+# `harmful`: four false claims are permanently on `main` in 3c3c11b's commit
+# message, and the merge shipped with 10 confirmed findings open on an
+# explicit operator ruling, 9a's criterion stated as UNMET. The defect was on
+# TWO arms, not the one the row named -- the one-arm candidate measured
+# 14.01 s where the parent measures 14.03 s -- and the first spelling emitted
+# 81 null alternatives a conforming ERE engine rejects outright. Both came
+# from review, not from me. Fourth divergence on this line, and the sharper
+# lesson: A ROUND THAT ALSO ADDS CODE IS NOT A SUBTRACTION ROUND -- six of ten
+# MAJOR/BLOCKER findings were on the guards the round added, and a reviewer's
+# prescription is still a claim.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 40, f"{len(es)} entries")
+      len(es) == 41, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
