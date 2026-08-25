@@ -203,13 +203,14 @@ payloads it does not help the longer pattern costs a little: the glued-brace
 axis is **1.02×** of the parent, and the non-overlapping control `2>x/foo `×2700
 goes **0.0304 → 0.0368 s**.
 
-**The shell substrate.** Its *cost* on the two assignment/redirect axes is
-unchanged, and those two axes are SDK-only — through the emitted hook at
-21,646 B, 0.793 → 0.791 s and 2.102 → 2.109 s, wall clock, min of 2. (The
-glued-brace axis is quadratic on the shell too; it is not one of the two.) The
-shell's `CMD_PFX` did change, and its verdict on every arm this item touches is
-pinned on this tree by the shell control each cost row carries. What was **not**
-done is a parent-vs-HEAD sweep of the shell's verdicts.
+**The shell substrate — cost only.** Through the emitted hook, wall clock,
+min of 2, parent → here: `A=1/env `×2700 at 21,646 B, 0.793 → 0.791 s;
+`2>x/env `×2700 at 21,646 B, 2.102 → 2.109 s; `{`×20000 at 20,047 B,
+1.009 → 1.016 s. All three unchanged. The shell's `CMD_PFX` did change.
+**No claim is made here about shell verdict coverage.** This item ran no
+parent-vs-HEAD sweep of shell verdicts, and two attempts to characterise what
+the suite does cover were both wrong, in opposite directions — so the third
+attempt is to state only what was measured.
 
 **No null alternatives.** The generated complement spells "stopping here is
 allowed" as `(...)?`, never `(...|)`. POSIX leaves a null alternative undefined

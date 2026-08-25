@@ -3288,14 +3288,16 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
-        # unchanged and those two axes are SDK-only: through the emitted hook at
-        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
-        # (The glued-brace axis is quadratic on the shell too; it is not one of
-        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
-        # arm this item touches is pinned on THIS tree by the shell control each
-        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
-        # shell's verdicts.
+        # THE SHELL SUBSTRATE, COST ONLY. Through the emitted hook, wall clock,
+        # min of 2, parent -> here:
+        #   21,646 B  `A=1/env ` x2700   0.793 -> 0.791 s
+        #   21,646 B  `2>x/env ` x2700   2.102 -> 2.109 s
+        #   20,047 B  `{` x20000         1.009 -> 1.016 s
+        # All three unchanged. The shell's `CMD_PFX` DID change.
+        # NO CLAIM IS MADE HERE ABOUT SHELL VERDICT COVERAGE. This item ran no
+        # parent-vs-HEAD sweep of shell verdicts, and two attempts to
+        # characterise what the suite does cover were BOTH wrong, in opposite
+        # directions - so the third attempt is to state only what was measured.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -3736,14 +3738,16 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
-        # unchanged and those two axes are SDK-only: through the emitted hook at
-        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
-        # (The glued-brace axis is quadratic on the shell too; it is not one of
-        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
-        # arm this item touches is pinned on THIS tree by the shell control each
-        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
-        # shell's verdicts.
+        # THE SHELL SUBSTRATE, COST ONLY. Through the emitted hook, wall clock,
+        # min of 2, parent -> here:
+        #   21,646 B  `A=1/env ` x2700   0.793 -> 0.791 s
+        #   21,646 B  `2>x/env ` x2700   2.102 -> 2.109 s
+        #   20,047 B  `{` x20000         1.009 -> 1.016 s
+        # All three unchanged. The shell's `CMD_PFX` DID change.
+        # NO CLAIM IS MADE HERE ABOUT SHELL VERDICT COVERAGE. This item ran no
+        # parent-vs-HEAD sweep of shell verdicts, and two attempts to
+        # characterise what the suite does cover were BOTH wrong, in opposite
+        # directions - so the third attempt is to state only what was measured.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -4131,14 +4135,16 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE. Its COST on the two assignment/redirect axes is
-        # unchanged and those two axes are SDK-only: through the emitted hook at
-        # 21,646 B, 0.793 -> 0.791 s and 2.102 -> 2.109 s, wall clock, min of 2.
-        # (The glued-brace axis is quadratic on the shell too; it is not one of
-        # the two.) The shell's `CMD_PFX` DID change, and its VERDICT on every
-        # arm this item touches is pinned on THIS tree by the shell control each
-        # cost row carries. What was NOT done is a parent-vs-HEAD sweep of the
-        # shell's verdicts.
+        # THE SHELL SUBSTRATE, COST ONLY. Through the emitted hook, wall clock,
+        # min of 2, parent -> here:
+        #   21,646 B  `A=1/env ` x2700   0.793 -> 0.791 s
+        #   21,646 B  `2>x/env ` x2700   2.102 -> 2.109 s
+        #   20,047 B  `{` x20000         1.009 -> 1.016 s
+        # All three unchanged. The shell's `CMD_PFX` DID change.
+        # NO CLAIM IS MADE HERE ABOUT SHELL VERDICT COVERAGE. This item ran no
+        # parent-vs-HEAD sweep of shell verdicts, and two attempts to
+        # characterise what the suite does cover were BOTH wrong, in opposite
+        # directions - so the third attempt is to state only what was measured.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
