@@ -72,31 +72,58 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   wrong, not the pins.
 
 
-- **[ready] prefix-run-assignment-wrapper-overlap** · `CODE` · eligible: **yes**
-  · full ceremony · scope `lib/cmdpos.py`, `tests/`
-  **ONE CAUSE UNDER TWO LIVE FAIL-OPENS, AND IT IS ALSO WHAT MAKES A LEFT-EDGE
-  NARROWING AFFORDABLE — SO IT COMES FIRST.** `A=1/env ` matches `prefix_run`'s
-  assignment arm **and** its path-prefixed wrapper arm at once, so the handoff at
-  the star is free and the axis is quadratic. Two things ride on it:
-  * **the SDK glued-brace axis** — `HEAD` + `{`×81879 + an install tail is
-    **81,919 B with ZERO jump bytes**, `_cost_guard` PASS, and the SDK spends
-    ~326 s (EXTRAPOLATED; the only observation is `_sdk_cost`'s 15 s SIGALRM cap)
-    against a declared 60 s, carrying a deny. **Still open on `main`.**
-  * **the `A=1/env ` axis, which CARRIES A DENY** — `HEAD` + `A=1/env `×5400 +
-    `zzz ; pip install evilpkg` is **43,246 B, 0 jump bytes, guard PASS**, and
-    `main` measures **57.1–59.1 s**, i.e. inside the ceiling but not by much.
-  **PR #87 TRIED THE LEFT-EDGE NARROWING AND DROPPED IT — READ THIS BEFORE
-  RE-PROPOSING ONE.** Narrowing the first character of each scan closed the SDK
-  axis (~326 s → 0.223 s) but cost **1.09–1.12×** on the `A=1/env ` axis, which
-  put that deny at **62.7–65.0 s — OVER the ceiling** where `main` is under.
-  **Four candidate spellings were built as real trees, emitted, and measured;
-  none recovered the cost:** factoring the shared suffix 1.27–1.35× (worse),
-  disjoint-by-first-character 1.10× (neutral), a zero-width lookahead 1.05×
-  (halves it, still over at the crossing payload), and a one-alternative
-  narrowing 1.14× (worse, and narrower language). **Constraining a left edge
-  costs whatever spelling is used, and shaving a constant off a quadratic does
-  not move a crossing.** Remove the overlap and the axis is linear, the crossing
-  disappears, and only then is a narrowing worth revisiting.
+- **[ready] prefix-run-language-guard** · `CODE` · eligible: **yes**
+  · full ceremony · scope `lib/cmdpos.py`, `tests/test_composition.py`,
+  `tests/test_substrate_differential.py`
+  **`CODE`, NOT `TEST-CONTRACT`, and the distinction is the runbook's own:**
+  bullet 2 below prescribes a predicate change in `lib/cmdpos.py`, and §2 puts
+  anything touching `lib/` at full ceremony. Two lenses is the level under which
+  these same additions drew six of ten MAJOR/BLOCKER findings.
+  **THE THREE THINGS PR #92 PROVED IT NEEDED AND DID NOT SHIP.** Its guards were
+  written, reviewed, and STRIPPED at E2 because the round that added them
+  diverged (20 → 22 findings, six of the ten MAJOR/BLOCKER ones on the additions
+  themselves). They are real; they belong here, where each gets a red row of its
+  own instead of riding a fix commit.
+  * **The language claim has no in-repo check that can go red.** `prefix_run`'s
+    assignment and glued-redirect arms stopped accepting one READING of a token
+    on the argument that the wrapper arm already takes it. A step-7 lens mutated
+    one call — `not_words(ALL_PREFIXES, _seg)` → `not_words(ALL_PREFIXES +
+    ("foo",), _seg)` — emitted a probe, and got `A=1/foo pip install evilpkg`
+    deny → **ALLOW** on both substrates while **9,826 of 9,831 checks stayed
+    green — exactly 5 move**, and all five are opaque golden digests, which is
+    what a freeze exception re-baselines. (A figure of "8,658" circulated during
+    the item; it counts a subset of suites and is withdrawn.) The stripped shape was 18 rows at the regex plus a
+    calibration applying that exact mutation; **a step-8 lens then showed those
+    rows pin ONE substitution, not the class** — of four ordinary narrowings
+    tried, **two walked through with both suites green** (`noplus`, dropping
+    `[+]?`; and `asgbound`, bounding the assignment run). The other two are
+    caught, but only by the FULL differential and not by these rows:
+    `redbound` → 4,244/1, `pathbound` → 4,241/4. Any row taken here must cover
+    the class, not the one mutation.
+  * **`not_words` does class arithmetic on raw word bytes.** `minus()` appends
+    word characters straight into a bracket expression and nothing guards
+    `words`. Measured on this tree: `time-machine` forms a RANGE and silently
+    rejects `timeXy`/`time0y`/`timeAy`/`time_y`/`timeZy`; `time]x` closes the
+    class early; `time\\x` makes the pattern uncompilable **in Python** -- bash's
+    `regcomp` accepts it and re-parses the group structure instead, because
+    in ERE `\\(` is a literal `(`, so the SDK fails at `gates.py` import
+    while the shell silently changes what the pattern means. The "returns 2
+    and reads as false" consequence belongs to the NULL-ALTERNATIVE hazard,
+    not this one. **`isalnum()` IS NOT THE PREDICATE**: it admits non-ASCII, and a
+    bracket expression carrying one is locale-dependent in bash and not in
+    Python — a lens drove `timç` to `A=1/timé pip install evilpkg` denying under
+    `LC_ALL=C.UTF-8` and **ALLOWING under `LC_ALL=C`** on the shell while the
+    SDK denied. `_w.isascii() and _w.isalnum()`.
+  * **Shell verdict coverage on the changed arms is uncharacterised, and TWO
+    attempts to describe it were wrong in OPPOSITE directions** — first "not
+    differentiated by this item" (false), then "pinned by the shell control each
+    cost row carries" (also false: the control asserts `deny` for every row
+    including the `foo` controls, so it is invariant to the arm's reading, and
+    `interpreter_word`'s two narrowed scans are reached by no cost payload —
+    none contains a `$`, a backtick or an interpreter word). PR #92 ships the
+    third attempt, which states only the measurements. Real coverage exists in
+    the `differential()` and `_AMB_LANG` rows; **naming it precisely is the
+    work**, and it is why this bullet is a row rather than a sentence.
 
 - **[ready] pipe-rule-url-pipe-cubic** · `CODE` · eligible: **yes** · full
   ceremony · **taken 2026-08-23, worked to step 4, CLOSED OUT WITH NO FIX —
@@ -178,7 +205,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     bound.
 
   **THE ONE REDUCIBLE FACTOR IS NOT THIS ROW'S.** The unbounded `nonspace*` scan
-  belongs to `prefix-run-assignment-wrapper-overlap`, the A-tier row directly
+  belonged to `prefix-run-assignment-wrapper-overlap` — **closed 2026-08-25,
+  PR #92 `abe3f48`, see Done; the overlap is removed, so read this paragraph as
+  history** — which was then the A-tier row directly
   above. Remove the arm overlap and this axis is linear; a cap bolted on top of a
   cubic moves a crossing, it does not remove one — PR #87's own lesson.
 
@@ -462,6 +491,64 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
+**`prefix-run-assignment-wrapper-overlap` PR #92 `abe3f48` — the prefix run
+stops having two readings of one token.** Closed 2026-08-25. Seven commits:
+`8796db1` step-4 reds, `f8745bf` the fix, `e9120eb` the second red, `3c3c11b`
+the left edge, then `6aae3ee` / `db46e1b` / `96d046d`, three record commits.
+Freeze exception **75**, five golden digests, action counts unchanged at
+57 / 69 / 59 and 79 / 93. Suite 9,811 → **9,831**.
+
+**THE ROW NAMED ONE ARM AND THE DEFECT WAS ON TWO.** `A=1/env ` matched the
+assignment arm and the path-prefixed wrapper arm at once, so the boundary
+between `nonabs*` and the trailing group fell anywhere in a run of them and a
+failing match walked every one. **`2>x/env ` did the identical thing on the
+GLUED REDIRECT arm** — on no queue row, in no comment, found by a step-3 lens
+sweeping the arms instead of reading the one the record names. The one-arm
+candidate this item started with measured **14.01 s** on that axis where the
+parent measures 14.03 s: a one-character edit to the payload would have undone
+the entire repair. Both arms are closed, sharing one copy of the complement;
+the SPACED redirect form carries no wrapper reading and is untouched.
+
+**THE LANGUAGE IS UNCHANGED AND DECIDED, NOT SAMPLED** — the exact
+ERE/Python → NFA → product-BFS procedure over `prefix_run` **and**
+`pipe_to_shell_regex`, both dialects, unbounded in string length, selfchecked on
+37,060 / 40,495 / 106,080 strings, two-sided (the opposite repair is caught with
+witness `/env `, and that direction is the FAIL-OPEN one: it loses
+`"A"=1/env -i pip install evilpkg`, which bash really runs because a quoted NAME
+is not an assignment). 370 commands × 7 gates = **2,590 verdicts, 331 deny, zero
+differences**.
+
+**MEASURED ON THE EMITTED OBJECT**, min-of-3 `process_time`, `49c402d` → merged:
+
+```
+  A=1/env x2700  21,646 B   14.0645 s -> 0.0477 s    exponent 2.0 -> 0.9
+  A=1/env x5400  43,246 B   56.0672 s -> 0.0886 s
+  2>x/env x2700  21,646 B   14.0314 s -> 0.0485 s
+  { x20000       20,047 B   22.9029 s -> 3.4078 s    STILL QUADRATIC
+  { x81872       81,919 B  391.1999 s -> 56.2891 s   6.2% margin, not headroom
+```
+
+**IT IS NOT PARETO**: the brace axis is 1.02× of the parent after commit 1, and
+the non-overlapping control `2>x/foo `×2700 goes 0.0304 → 0.0368 s. The shell's
+cost is unchanged on all three axes.
+
+**THE FIX LOOP DIVERGED AND THE OPERATOR STRIPPED IT** — 20 → 22 findings at
+step 8, E2. The stripped commit had done two things, subtracted step-7's record
+defects **and** added two guards, and six of the ten MAJOR/BLOCKER findings were
+on the additions; the strip kept the subtractions and dropped the additions. Two
+further rounds went 10 → 10 and the loop was stopped rather than run to its
+bound. **32 of 32 agents completed across the five review fan-outs, 0 errors**, after
+a sixth attempt — the first run of the step-3 review — lost 5 of 5 to a
+transient `529` and was re-run with a retry wrapper.
+
+**THE VERDICT DID NOT MOVE** — `docs/production-readiness.md` is untouched; this
+item is not one of its two remaining legs. Residual filed:
+`prefix-run-language-guard` (A, the three things PR #92 proved it needed and did
+not ship). **Ten findings were open at merge and are posted on the PR**, not
+papered over: step 9a's "0 confirmed findings" criterion was UNMET and the
+merge was an explicit operator ruling with that stated.
+
+
 **`prefix-run-cost-residuals-2` PR #87 `96cc730` — `_ckey`'s glue strip stops
 rebuilding the word.** Closed 2026-08-22. **THE ITEM SHIPPED HALF OF WHAT IT
 PLANNED, ON AN OPERATOR RULING, AND THE HALF IT DROPPED IS THE MORE USEFUL
@@ -486,9 +573,13 @@ emitted body agrees with `cmdpos.completer_key` on every glue form in the
 written 3× in `test_greenfield_golden.py` and 1× in `test_retrofit.py`, matching
 nos. 72 and 73. Suite **9,810 → 9,811** — one row, a cost row, RED on `main` at
 5.01 s against its 3.0 s bound. Action counts unchanged at 57/69/59 and 79/93.
-**THE LEFT-EDGE NARROWING WAS DROPPED AND IS NOT COMING BACK CHEAPLY** — see
-`prefix-run-assignment-wrapper-overlap` above, which carries the four refuted
-spellings so nobody re-proposes one. **THE VERDICT DID NOT MOVE.**
+**THE LEFT-EDGE NARROWING WAS DROPPED AND IS NOT COMING BACK CHEAPLY.** The
+four refuted left-edge spellings (factoring the suffix 1.27-1.35x;
+disjoint-by-first-character 1.10x; a zero-width lookahead 1.05x, still over at
+62.7-65.0 s on the crossing payload; a one-alternative narrowing 1.14x) were
+carried by `prefix-run-assignment-wrapper-overlap`, **closed 2026-08-25, PR #92
+`abe3f48`** -- repeated here so the pointer does not dangle, and the left edge
+itself LANDED in that item. **THE VERDICT DID NOT MOVE.**
 
 
 **`prefix-run-cost-residuals` PR #84 `3ea405a` — three self-ambiguous arms lose
@@ -589,6 +680,15 @@ operator — the first merge in this run the loop did not perform itself**, whic
 is exactly what 9b now requires.
 
 ## Owed
+
+**[2026-08-25]** `prefix-run-assignment-wrapper-overlap` closed, PR #92
+merge `abe3f48`. **THE VERDICT DID NOT MOVE** -- it is neither of the two
+remaining legs (X-37 Class B; C-2 autonomous dispatch), both still standing.
+A holds **8**: one row left for Done and `prefix-run-language-guard` was filed
+in its place. **`docs/production-readiness.md` is now 70 commits behind its
+last edit (`5a570ec`, 2026-08-14) and no row covers that** -- `priority-reading`
+(C) owns only its stale Snapshot header. Left deliberately: C-tier work while
+six A rows are ready.
 
 *(Nothing. The PR #72 ledger entry that was owed here is discharged as entry
 29; the harness work is entry 30. Ledger at 30, pin moved in the same commit.)*
