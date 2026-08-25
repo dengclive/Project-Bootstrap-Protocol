@@ -4252,6 +4252,55 @@ _COST_ROWS = [
      _COST_HEAD + ("env " + "A=1 " * 16) * 6 + _COST_TAIL),
     ("wrapper x assignment interleave, 8 x 16",
      _COST_HEAD + ("env " + "A=1 " * 16) * 8 + _COST_TAIL),
+    # [prefix-run-assignment-wrapper-overlap] THE ARM OVERLAP. A token that
+    # `nonabs` and the path-prefixed wrapper arm BOTH read leaves the boundary
+    # between the star and the trailing group free, so a failing match walks
+    # every one of them -- quadratic in the token count, at a fixed 8 bytes per
+    # token, against a gate declaring 60 s.
+    #
+    # TWO ARMS, NOT ONE. The assignment arm was the one on record; the GLUED
+    # redirect arm has the identical shape in the same place and was missed until
+    # a step-3 lens swept for it. The rows are a PAIR on purpose: a fix that
+    # closes only the first leaves the second at its full cost, which is what
+    # the first candidate for this item did (14.01 s where the shipped tree is
+    # 14.03 s -- a one-character edit to the payload undoes the whole repair).
+    #
+    # THE CONTROL IS THE POINT OF THE `foo` ROWS: same byte count, same token
+    # count, same verdict, same guard state, ONE character different -- the
+    # basename is not a wrapper word, so the two readings do not both exist and
+    # the axis is linear on every tree. If those rows ever go red the payloads
+    # have stopped isolating the overlap and these four measure nothing.
+    ("assignment arm x path-prefixed wrapper arm, A=1/env x2700",
+     _COST_HEAD + "A=1/env " * 2700 + _COST_TAIL),
+    ("CONTROL, non-wrapper basename, A=1/foo x2700",
+     _COST_HEAD + "A=1/foo " * 2700 + _COST_TAIL),
+    ("glued redirect arm x path-prefixed wrapper arm, 2>x/env x2700",
+     _COST_HEAD + "2>x/env " * 2700 + _COST_TAIL),
+    ("CONTROL, non-wrapper basename, 2>x/foo x2700",
+     _COST_HEAD + "2>x/foo " * 2700 + _COST_TAIL),
+    # [prefix-run-assignment-wrapper-overlap, second commit] THE LEFT EDGE.
+    # A glued brace run is ONE token, and `nonabs`'s `[({] *` arm takes one
+    # brace per iteration, so the trailing group is tried at every position
+    # inside it -- and at each one the wrapper arm's `(NS*/)?` and
+    # `interpreter_word`'s two scans re-read the whole remaining token looking
+    # for a `/` or a `$`. O(n) positions x O(n) scan.
+    #
+    # Narrowing the FIRST character of those three scans to exclude what the
+    # preceding star has already absorbed makes each attempt O(1). This is
+    # PR #87's repair, which that item built, proved equivalent and then DROPPED
+    # because it cost 1.09-1.12x on the `A=1/env ` axis and moved that deny
+    # across the same 60 s ceiling. With the row above making that axis LINEAR,
+    # the same constant lands on a linear axis instead of on a crossing
+    # (0.0859 -> 0.0886 s at 43,246 B).
+    #
+    # THIS ROW DOES NOT CLAIM THE AXIS IS CLOSED, AND IT IS NOT. It stays
+    # quadratic: `_PIPE_TO_SHELL` is linearised and what remains is
+    # `_INSTALL_HEAD`, whose residual is
+    # `_INSTALL_TAIL`'s ten un-narrowed path scans. Narrowing THOSE is not
+    # language-preserving -- it deletes `python -m {x/pip install evil` -- and
+    # they are `install-tail-path-scan-quadratic`, a filed row of its own.
+    ("glued brace run x the left edge of every scan, { x15000",
+     _COST_HEAD + "{" * 15000 + " " + _COST_TAIL),
 ]
 
 for _lbl, _cmd in _COST_ROWS:
@@ -4414,7 +4463,17 @@ check("the SHELL flag star carries the same rule, hand-written",
 # be dramatically slower on the same payload. This cannot pass on a tree where
 # the fix was reverted: the reverse substitution then finds nothing to undo and
 # the first check below fails before any timing runs.
-_REV = [(r"[0-9]*(?:[<>]\S+|[<>]+ +\S+)\s+", r"[0-9]*[<>]+ *\S+\s+"),
+# [prefix-run-assignment-wrapper-overlap] THE FIRST ENTRY'S NEW SIDE MOVED, AND
+# THE CALIBRATION MOVED WITH IT RATHER THAN BEING DROPPED. The glued redirect
+# arm is no longer written as one alternation beside the spaced one: it is split
+# into a no-slash form and a shared path form, because it carried the same
+# overlap with the path-prefixed wrapper arm that the assignment arm did. What
+# freeze-73 fixed is unchanged and is what these two substrings still encode --
+# the GLUED form takes exactly ONE `[<>]`, so it cannot consume the operator run
+# the SPACED form is there for. Reverting either one to `[<>]+ *` puts the two
+# back in competition, which is the defect being calibrated.
+_REV = [(r"[0-9]*[<>][^/\s]+", r"[0-9]*[<>]+ *[^/\s]+"),
+        (r"|[0-9]*[<>])\S*/", r"|[0-9]*[<>]+ *)\S*/"),
         (r"(?:\S+\s+)*[({]*", r"(?:\S+\s+)*(?:[({] *)*")]
 _emitted_pat = gates_mod._PIPE_TO_SHELL.pattern
 _reverted_pat = _emitted_pat

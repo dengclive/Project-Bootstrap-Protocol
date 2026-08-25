@@ -158,6 +158,105 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the prefix run stops having two readings of one token (2026-08-24)
+
+**No version bump** (fix, not surface; freeze exception **75**).
+`prefix-run-assignment-wrapper-overlap`, the item PR #87 named as the one that
+had to come first.
+
+**The defect.** `A=1/env ` matched `prefix_run`'s assignment arm **and** its
+path-prefixed wrapper arm at once, so the boundary between `nonabs*` and the
+trailing group fell anywhere in a run of such tokens and a failing match walked
+every one — quadratic in the token count at a fixed 8 bytes per token, against a
+gate declaring 60 s. **`2>x/env ` did the identical thing on the glued redirect
+arm.** That second arm was on no queue row and in no comment; a step-3 lens
+found it by sweeping the arms instead of reading the one the record names, and
+the first candidate for this item — which closed only the assignment arm —
+measured **14.01 s** on it where the parent measures 14.03 s. Both arms are
+closed here, sharing one copy of the complement. The **spaced** redirect form
+carries no wrapper reading and is untouched.
+
+**The accepted language is unchanged, decided rather than sampled.** The exact
+ERE/Python → NFA → product-BFS procedure, both dialects, unbounded in string
+length, over `prefix_run` **and** `pipe_to_shell_regex`: four rows, all
+equivalent, each selfchecked against Python's own `re`. Two-sided: the opposite
+repair — narrowing the *wrapper* arm — is caught with witness `/env `, and that
+direction is the fail-open one, because it loses
+`"A"=1/env -i pip install evilpkg`, which bash really runs (a quoted NAME is not
+an assignment) and which this suite denies today. 370 commands × 7 gates =
+**2,590 verdicts, 331 of them deny, zero differences** against the parent.
+
+**Measured on the emitted object**, min-of-3 `process_time`, SDK
+`dependency-gate`, both trees in one run, zero jump bytes and `_cost_guard`
+PASS and `deny` on every row:
+
+| payload | bytes | parent | here |
+|---|---|---|---|
+| `A=1/env `×2700 | 21,646 | 14.0645 s | **0.0464 s** |
+| `A=1/env `×5400 | 43,246 | 56.0672 s | **0.0859 s** |
+| `2>x/env `×2700 | 21,646 | 14.0314 s | **0.0476 s** |
+
+Exponents go **2.0 → 0.9** on both axes: an order change, not a constant.
+
+**It is not Pareto**, and a table of wins alone would read as if it were. On
+payloads it does not help the longer pattern costs a little: the glued-brace
+axis is **1.02×** of the parent, and the non-overlapping control `2>x/foo `×2700
+goes **0.0304 → 0.0368 s**.
+
+**The shell substrate — cost only.** Through the emitted hook, wall clock,
+min of 2, parent → here: `A=1/env `×2700 at 21,646 B, 0.793 → 0.791 s;
+`2>x/env `×2700 at 21,646 B, 2.102 → 2.109 s; `{`×20000 at 20,047 B,
+1.009 → 1.016 s. All three unchanged. The shell's `CMD_PFX` did change.
+**No claim is made here about shell verdict coverage.** This item ran no
+parent-vs-HEAD sweep of shell verdicts, and two attempts to characterise what
+the suite does cover were both wrong, in opposite directions — so the third
+attempt is to state only what was measured.
+
+**No null alternatives.** The generated complement spells "stopping here is
+allowed" as `(...)?`, never `(...|)`. POSIX leaves a null alternative undefined
+and a strictly conforming engine rejects the whole pattern — on which every
+emitted `[[ =~ ]]` returns 2 and the surrounding `if` reads it as false, i.e.
+the gate goes silently permissive. glibc accepts it, so this box cannot see it;
+`ugrep` rejects it and was the control.
+
+Action counts unchanged at **57 / 69 / 59** and **79 / 93**, zero files added or
+removed, verified before the re-baseline — a count move would have been E5, not
+a silent digest.
+
+**The second commit — the left edge.** `prefix_run`'s wrapper path arm and
+`interpreter_word`'s two scans may no longer *begin* with a character the
+preceding `[({] *` arm has already absorbed, so an attempt at a position inside
+a glued brace run is O(1) instead of a re-read of the whole remaining token.
+PR #87 built this, proved it equivalent, and dropped it — it cost 1.09–1.12× on
+the `A=1/env ` axis and moved that deny across the 60 s ceiling. With the first
+commit making that axis linear, the same constant lands on a linear axis
+instead of on a crossing (0.0859 → 0.0886 s at 43,246 B). PR #87 reached the
+same ordering, though it stopped short of committing to the left edge at all.
+Equivalence was decided again rather than inherited, over `prefix_run` **and**
+`pipe_to_shell_regex`, against this tree's spelling of the arms.
+
+| glued braces | bytes | first commit | both |
+|---|---|---|---|
+| `{`×5000 | 5,047 | 1.4847 s | **0.2307 s** |
+| `{`×10000 | 10,047 | 5.8487 s | **0.8761 s** |
+| `{`×20000 | 20,047 | 23.3415 s | **3.4078 s** |
+| `{`×81872 | 81,919 | 391.4576 s | **56.2891 s** |
+
+The 81,919 B row is one byte under `_CMD_MAXLEN`; its parent figure is a single
+reading (a 150 s cap stopped it after the first rep) and the 56.2891 s is
+min-of-3.
+
+**That is a live fail-open turned into a pass, and not much more.** The axis is
+**still quadratic** — exponents 1.94 / 1.97 — so 6.95× is a constant, the margin
+at the guard's own maximum is **6.2%**, and it is min-of-3 CPU time against a
+wall-clock deadline, which is not the same quantity. What remains is
+`_INSTALL_HEAD`. No per-pattern share for this tree is published.
+
+**What neither commit does.** `_INSTALL_TAIL`'s ten un-narrowed path scans are
+what the brace axis is now made of. Narrowing them is **not**
+language-preserving — it deletes `python -m {x/pip install evil` — and they are
+`install-tail-path-scan-quadratic`, a filed row of its own.
+
 ## Post-2.8.0 — `_ckey`'s glue strip stops rebuilding the word (2026-08-22)
 
 **No version bump** (fix, not surface; freeze exception **74**). What is left of

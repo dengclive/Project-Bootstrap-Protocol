@@ -2195,8 +2195,105 @@ EXPECTED_RETROFIT_DIGESTS = {
     # the same 60 s ceiling, and four candidate spellings were built, emitted
     # and measured without recovering it. It goes, with the SDK axis, to
     # `prefix-run-assignment-wrapper-overlap`, which removes the shared cause.
-    "service": "01ac39ae4701b67ef41fbf2398ec4da0807f45acdd494f284e042a59f9bdd7db",
-    "agent": "d8f62b112adc5008bb040cab13e3d357fc17cdaa32bad3195d7ff8790be8cb88",
+    # [freeze-exception no. 75, 2026-08-24] prefix-run-assignment-wrapper-
+    # overlap -- THE PREFIX RUN STOPS HAVING TWO READINGS OF ONE TOKEN.
+    # `A=1/env ` matched `prefix_run`'s assignment arm AND its
+    # path-prefixed wrapper arm at once, so the boundary between `nonabs*`
+    # and the trailing group fell anywhere in a run of them and a FAILING
+    # match walked every one -- quadratic. `2>x/env ` did the identical
+    # thing on the GLUED REDIRECT arm, which was NOT on record and which a
+    # step-3 lens found by sweeping the arms rather than reading the one the
+    # queue row names. BOTH ARMS ARE CLOSED HERE, sharing ONE copy of the
+    # complement; the SPACED redirect form carries no wrapper reading and is
+    # untouched.
+    # THE ACCEPTED LANGUAGE IS UNCHANGED, DECIDED AND NOT SAMPLED: the exact
+    # ERE/Python -> NFA -> product-BFS procedure, both dialects, unbounded in
+    # string length, over `prefix_run` AND `pipe_to_shell_regex` -- four rows,
+    # all EQUIVALENT, selfchecked against Python's own `re` on 37,060 /
+    # 40,495 / 106,080 strings. Two-sided: the opposite repair, narrowing the
+    # WRAPPER arm instead, is caught False with witness `/env ` -- and that
+    # direction is the FAIL-OPEN one, because it loses
+    # `"A"=1/env -i pip install evilpkg`, which bash really runs (a quoted
+    # NAME is not an assignment) and which this suite denies today.
+    # WHY REMOVING THE OTHER READING CHANGES NO STRING: every string
+    # `prefix_run` accepts either ends in a space or ends in a maximal run of
+    # `(`/`{`; the word run takes the first and the trailing `[({]*` takes
+    # the second, so an overlapping token can always be read as the wrapper
+    # pivot instead. The word run ALONE does not suffice -- each of its
+    # iterations ends in a space -- and saying only "the word run absorbs it"
+    # was the gap step 3 caught in the plan.
+    # VERDICTS: 370 commands x 7 gates = 2,590 verdicts, 331 of them deny,
+    # ZERO differences against the parent.
+    # MEASURED ON THE EMITTED OBJECT, min-of-3 `process_time`, SDK
+    # `dependency-gate`, both trees in ONE run, 0 jump bytes and
+    # `_cost_guard` PASS and `deny` on every row:
+    #   A=1/env x2700   21,646 B   14.0645 s -> 0.0464 s
+    #   A=1/env x5400   43,246 B   56.0672 s -> 0.0859 s   653x
+    #   2>x/env x2700   21,646 B   14.0314 s -> 0.0476 s   295x
+    #   exponents        2.0 -> 0.9 on both axes: an ORDER change, not a
+    #                    constant. The one-arm spelling first proposed for
+    #                    this item measured 14.0105 s on the second axis --
+    #                    a one-character edit to the payload undid it.
+    # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
+    # costs a little: the glued-brace axis is 1.02x of the parent, and the
+    # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
+    # THE SHELL SUBSTRATE, COST ONLY. Through the emitted hook, wall clock,
+    # min of 2, parent -> here:
+    #   21,646 B  `A=1/env ` x2700   0.793 -> 0.791 s
+    #   21,646 B  `2>x/env ` x2700   2.102 -> 2.109 s
+    #   20,047 B  `{` x20000         1.009 -> 1.016 s
+    # All three unchanged. The shell's `CMD_PFX` DID change.
+    # NO CLAIM IS MADE HERE ABOUT SHELL VERDICT COVERAGE. This item ran no
+    # parent-vs-HEAD sweep of shell verdicts, and two attempts to
+    # characterise what the suite does cover were BOTH wrong, in opposite
+    # directions - so the third attempt is to state only what was measured.
+    # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
+    # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
+    # undefined and a strictly conforming engine REJECTS the whole pattern,
+    # on which every emitted `[[ =~ ]]` returns 2 and the surrounding `if`
+    # reads it as false -- silently permissive. glibc accepts it, so this box
+    # cannot see it; `ugrep` rejects it and was used as the control.
+    # ACTION COUNTS UNCHANGED at 79 / 93, zero files added or removed,
+    # verified BEFORE this re-baseline -- a count move would have been E5,
+    # not a silent digest.
+    # WHAT THIS DOES NOT DO: the glued-brace axis is untouched by THIS
+    # commit. Its left-edge repair is the next commit, and even with it the
+    # axis stays quadratic -- the residual is `_INSTALL_TAIL`'s ten
+    # un-narrowed path scans, which is `install-tail-path-scan-quadratic`
+    # and not this item.
+    # [AMENDMENT to no. 75, same item, second commit] THE LEFT EDGE.
+    # `prefix_run`'s wrapper path arm and `interpreter_word`'s two scans may
+    # no longer BEGIN with a character the preceding `[({] *` arm has already
+    # absorbed, so an attempt at a position inside a glued brace run is O(1)
+    # instead of a re-read of the whole remaining token. PR #87 built this,
+    # proved it equivalent and DROPPED it, because it cost 1.09-1.12x on the
+    # `A=1/env ` axis and moved that deny across the 60 s ceiling. The commit
+    # above makes that axis linear, so the same constant lands on a linear
+    # axis instead of on a crossing: 0.0859 -> 0.0886 s at 43,246 B. THE
+    # ORDERING WAS THE WHOLE POINT, and PR #87 reached it too -- though it
+    # stopped short of committing to the left edge at all.
+    # Equivalence decided again rather than inherited, over `prefix_run` AND
+    # `pipe_to_shell_regex`, against THIS tree's spelling of the arms.
+    # MEASURED, min-of-3 `process_time`, both trees in ONE run, guard PASS,
+    # 0 jump bytes, deny throughout:
+    #    5,047 B    1.4847 s -> 0.2307 s
+    #   10,047 B    5.8487 s -> 0.8761 s
+    #   20,047 B   23.3415 s -> 3.4078 s
+    #   81,919 B  391.4576 s -> 56.2891 s   -- one byte under _CMD_MAXLEN.
+    #             The parent figure is ONE reading (a 150 s cap stopped it
+    #             after the first rep); the 56.2891 s is min-of-3.
+    # THAT IS A LIVE FAIL-OPEN TURNED INTO A PASS, AND NOT MUCH MORE. The
+    # axis is STILL QUADRATIC -- exponents 1.94 / 1.97 -- so 6.95x is a
+    # constant, the margin at the guard's own maximum is 6.2%, and it is
+    # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
+    # quantity. What is left is `_INSTALL_HEAD`, whose residual is
+    # `_INSTALL_TAIL`'s ten un-narrowed path scans. No per-pattern share
+    # for THIS tree is published. Narrowing those scans is not
+    # language-preserving -- it deletes
+    # `python -m {x/pip install evil` -- and they are
+    # `install-tail-path-scan-quadratic`, a filed row of its own.
+    "service": "125af48c1dc2f4e846856ad85e65864b5480c99a6b46bc9efadd833857187b07",
+    "agent": "3075c76e38281143c9fa5911d412e44e21553a9fd6d8b8122ab91e14f015943d",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
