@@ -4290,12 +4290,12 @@ _COST_ROWS = [
     # PR #87's repair, which that item built, proved equivalent and then DROPPED
     # because it cost 1.09-1.12x on the `A=1/env ` axis and moved that deny
     # across the same 60 s ceiling. With the row above making that axis LINEAR,
-    # the same constant lands on a linear axis instead of on a crossing: it now
-    # costs 1.3% there (0.0859 -> 0.0886 s at 43,246 B).
+    # the same constant lands on a linear axis instead of on a crossing
+    # (0.0859 -> 0.0886 s at 43,246 B).
     #
     # THIS ROW DOES NOT CLAIM THE AXIS IS CLOSED, AND IT IS NOT. It stays
-    # quadratic: `_PIPE_TO_SHELL` is linearised (attribution 84.0% -> 2.4% of a
-    # much smaller total) and what remains is `_INSTALL_HEAD`, whose residual is
+    # quadratic: `_PIPE_TO_SHELL` is linearised and what remains is
+    # `_INSTALL_HEAD`, whose residual is
     # `_INSTALL_TAIL`'s ten un-narrowed path scans. Narrowing THOSE is not
     # language-preserving -- it deletes `python -m {x/pip install evil` -- and
     # they are `install-tail-path-scan-quadratic`, a filed row of its own.

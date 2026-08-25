@@ -619,8 +619,9 @@ def bash_case_alt(words, indent: str = "") -> str:
 #
 # MEASURED, on the emitted object, ONE run on the parent tree, at identical
 # byte counts (21,646 B, same token count, both deny, both `_cost_guard` PASS):
-# `A=1/env ` x2700 costs 14.4002 s where `A=1/foo ` x2700 -- one character
-# apart, same column -- costs 0.0569 s, against a gate declaring 60 s.
+# `A=1/env ` x2700 costs 14.4002 s where `A=1/foo ` x2700 -- same length,
+# same column, a basename that is simply not a wrapper word -- costs 0.0569 s,
+# against a gate declaring 60 s.
 #
 # THE NARROWED READING IS REDUNDANT, WHICH IS WHY REMOVING IT CHANGES NO STRING.
 # Every string `prefix_run` accepts either ends in a space or ends in a maximal
@@ -663,8 +664,8 @@ def not_words(words, cls: str) -> str:
 
         cls* \ words  ==  D cls*  |  Q
 
-    THE SINK IS WRITTEN ONCE. Emitting `cls*` at every trie node instead is the
-    same language and 1.34x longer for nothing.
+    THE SINK IS WRITTEN ONCE. Emitting it at every trie node instead is the
+    same language and longer for nothing.
 
     NO NULL ALTERNATIVE. "Stopping here is allowed" is `(...)?`, never `(...|)`:
     POSIX leaves a null alternative undefined and a strictly conforming
@@ -721,8 +722,10 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     which makes this arm strictly more load-bearing than it was: whatever the
     trigger does not match is not refused by anything downstream.
 
-    The arms, in order: a wrapper word (with the optional `([^ ]*/)?` path
-    arm, so `/usr/bin/env python3` is a prefix run and not an unknown word)
+    The arms, in order: a wrapper word (with the optional path arm, so
+    `/usr/bin/env python3` is a prefix run and not an unknown word; its scan is
+    left-narrowed - see `_dialect` - so it cannot begin on a character the
+    brace arm has already absorbed)
     followed by any run of flags and positionals; a NAMED GROUP head with the
     same shape; a brace group or subshell; a redirection; a `VAR=value`
     assignment; a shell keyword.
@@ -808,8 +811,9 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # re-read of the whole remaining token. The `/|` alternative keeps the
     # prefix that is the single byte `/`. PR #87 built, proved and then
     # DROPPED this because it cost 1.09-1.12x on the `A=1/env ` axis and
-    # moved that deny across the 60 s ceiling; with that axis linear it now
-    # costs 1.3% there. Same language, decided again here rather than
+    # moved that deny across the 60 s ceiling; with that axis linear the same
+    # constant lands on a linear axis instead of on a crossing (0.0859 ->
+    # 0.0886 s at 43,246 B). Same language, decided again here rather than
     # inherited.
     wrapper = ("((/|" + _dialect(nonspace)["head"] + nonspace
                + "*/)?(" + alt(ALL_PREFIXES) + ")"
@@ -830,15 +834,16 @@ def prefix_run(space: str = " +", nonspace: str = "[^ ]") -> str:
     # Proved equivalent by an exact ERE/Python -> NFA -> product-BFS decision
     # procedure in both dialects, unbounded in length, two-sided calibrated.
     #
-    # WHAT IT DOES NOT REMOVE, AND SAYING SO IS THE POINT: `A=1/env ` matches
-    # the assignment arm AND the path-prefixed wrapper arm at once, so the
-    # handoff at the star is STILL free. That is a k factor and it is still
-    # quadratic on its own, and MEASURED IDENTICAL here and at the parent:
-    # `curl ... | ` + `A=1/env ` x5120 + `zzz` is 40,984 bytes and costs 53.0 s
-    # at the parent, 51.2 s here, allow/allow. Quadratic, so it crosses the
+    # WHAT IT DID NOT REMOVE, AND WHAT SINCE CLOSED IT: `A=1/env ` matched the
+    # assignment arm AND the path-prefixed wrapper arm at once, so the handoff
+    # at the star was free - filed by the m^2 repair rather than fixed by it,
+    # and measured AT THAT TIME on THAT COMMIT's pair of trees:
+    # `curl ... | ` + `A=1/env ` x5120 + `zzz` is 40,984 bytes and cost 53.0 s
+    # at the parent, 51.2 s at it, allow/allow. Quadratic, so it crossed the
     # 60 s ceiling BELOW `_CMD_MAXLEN`; the value AT the cap is not measured
-    # here and is not asserted. Filed, not fixed - do not read the m^2 repair
-    # as having closed it.
+    # here and was not asserted. `prefix-run-assignment-wrapper-overlap` closed
+    # it, on that arm AND on the glued redirect arm, which carried the identical
+    # shape one column over; see the block above `prefix_run`.
     #
     # SO THE WORD RUN IS NOW THE ONLY PATH FOR SPACED BRACES AFTER A WRAPPER.
     # Bounding it deletes `env { { ` and `sudo { { { ` from the language as

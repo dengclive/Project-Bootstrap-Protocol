@@ -203,9 +203,11 @@ payloads it does not help the longer pattern costs a little: the glued-brace
 axis is **1.02×** of the parent, and the non-overlapping control `2>x/foo `×2700
 goes **0.0304 → 0.0368 s**.
 
-**The shell substrate is unchanged, and that was measured rather than assumed** —
-both axes are SDK-only. Through the emitted hook at 21,646 B: 0.793 → 0.791 s
-and 2.102 → 2.109 s.
+**The shell substrate.** Its *cost* is unchanged and both quadratic axes are
+SDK-only — through the emitted hook at 21,646 B, 0.793 → 0.791 s and
+2.102 → 2.109 s, wall clock, min of 2. That is a cost reading and nothing more:
+the shell's `CMD_PFX` did change, and its *verdicts* are **not** differentiated
+by this item. Filed, not claimed.
 
 **No null alternatives.** The generated complement spells "stopping here is
 allowed" as `(...)?`, never `(...|)`. POSIX leaves a null alternative undefined
@@ -224,11 +226,11 @@ preceding `[({] *` arm has already absorbed, so an attempt at a position inside
 a glued brace run is O(1) instead of a re-read of the whole remaining token.
 PR #87 built this, proved it equivalent, and dropped it — it cost 1.09–1.12× on
 the `A=1/env ` axis and moved that deny across the 60 s ceiling. With the first
-commit making that axis linear the same constant costs **1.3%** there
-(0.0859 → 0.0886 s at 43,246 B). That ordering is PR #87's own conclusion: the
-overlap first, the left edge after it. Equivalence was decided again rather than
-inherited, and this time over `pipe_to_shell_regex` as well — the earlier proof
-covered `prefix_run` only, which left both `interpreter_word` edits unproved.
+commit making that axis linear, the same constant lands on a linear axis
+instead of on a crossing (0.0859 → 0.0886 s at 43,246 B). PR #87 reached the
+same ordering, though it stopped short of committing to the left edge at all.
+Equivalence was decided again rather than inherited, over `prefix_run` **and**
+`pipe_to_shell_regex`, against this tree's spelling of the arms.
 
 | glued braces | bytes | first commit | both |
 |---|---|---|---|
@@ -244,8 +246,10 @@ min-of-3.
 **That is a live fail-open turned into a pass, and not much more.** The axis is
 **still quadratic** — exponents 1.94 / 1.97 — so 6.95× is a constant, the margin
 at the guard's own maximum is **6.2%**, and it is min-of-3 CPU time against a
-wall-clock deadline, which is not the same quantity. Attribution on the same
-payload: `_PIPE_TO_SHELL` goes 84.0% → 2.4% while `_INSTALL_HEAD` does not move.
+wall-clock deadline, which is not the same quantity. What remains is
+`_INSTALL_HEAD`. A per-pattern attribution was taken during design, but on a
+superseded candidate tree and at a different payload size, so no share for this
+tree is published.
 
 **What neither commit does.** `_INSTALL_TAIL`'s ten un-narrowed path scans are
 what the brace axis is now made of. Narrowing them is **not**

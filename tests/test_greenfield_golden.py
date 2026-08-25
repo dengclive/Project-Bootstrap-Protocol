@@ -3288,9 +3288,11 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE IS UNCHANGED AND WAS MEASURED, not assumed: both
-        # axes are SDK-only. Through the emitted hook, 21,646 B: 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s.
+        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
+        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
+        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
+        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
+        # NOT differentiated by this item. Filed, not claimed.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -3312,13 +3314,12 @@ EXPECTED_DIGESTS = {
         # instead of a re-read of the whole remaining token. PR #87 built this,
         # proved it equivalent and DROPPED it, because it cost 1.09-1.12x on the
         # `A=1/env ` axis and moved that deny across the 60 s ceiling. The commit
-        # above makes that axis linear, so the same constant now costs 1.3%
-        # there (0.0859 -> 0.0886 s at 43,246 B). THE ORDERING WAS THE WHOLE
-        # POINT and it is PR #87's own words: the overlap first, the left edge
-        # after it.
-        # Equivalence decided again rather than inherited, and this time over
-        # `pipe_to_shell_regex` as well -- the earlier proof covered `prefix_run`
-        # only, which left BOTH `interpreter_word` edits unproved.
+        # above makes that axis linear, so the same constant lands on a linear
+        # axis instead of on a crossing: 0.0859 -> 0.0886 s at 43,246 B. THE
+        # ORDERING WAS THE WHOLE POINT, and PR #87 reached it too -- though it
+        # stopped short of committing to the left edge at all.
+        # Equivalence decided again rather than inherited, over `prefix_run` AND
+        # `pipe_to_shell_regex`, against THIS tree's spelling of the arms.
         # MEASURED, min-of-3 `process_time`, both trees in ONE run, guard PASS,
         # 0 jump bytes, deny throughout:
         #    5,047 B    1.4847 s -> 0.2307 s
@@ -3331,10 +3332,12 @@ EXPECTED_DIGESTS = {
         # axis is STILL QUADRATIC -- exponents 1.94 / 1.97 -- so 6.95x is a
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
-        # quantity. What is left is `_INSTALL_HEAD`: attribution on the same
-        # payload goes `_PIPE_TO_SHELL` 84.0% -> 2.4% while `_INSTALL_HEAD` does
-        # not move, and its residual is `_INSTALL_TAIL`'s ten un-narrowed path
-        # scans. Narrowing THOSE is not language-preserving -- it deletes
+        # quantity. What is left is `_INSTALL_HEAD`, whose residual is
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
+        # attribution was taken during design, but on a SUPERSEDED candidate
+        # tree and at a different payload size, so no share for THIS tree is
+        # published.) Narrowing those scans is not language-preserving -- it
+        # deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "ea7729f1059346cd3ca23e48ad8a50a04dbedd7527aa3b62a348aeab0ca7bea1",
@@ -3732,9 +3735,11 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE IS UNCHANGED AND WAS MEASURED, not assumed: both
-        # axes are SDK-only. Through the emitted hook, 21,646 B: 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s.
+        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
+        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
+        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
+        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
+        # NOT differentiated by this item. Filed, not claimed.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -3756,13 +3761,12 @@ EXPECTED_DIGESTS = {
         # instead of a re-read of the whole remaining token. PR #87 built this,
         # proved it equivalent and DROPPED it, because it cost 1.09-1.12x on the
         # `A=1/env ` axis and moved that deny across the 60 s ceiling. The commit
-        # above makes that axis linear, so the same constant now costs 1.3%
-        # there (0.0859 -> 0.0886 s at 43,246 B). THE ORDERING WAS THE WHOLE
-        # POINT and it is PR #87's own words: the overlap first, the left edge
-        # after it.
-        # Equivalence decided again rather than inherited, and this time over
-        # `pipe_to_shell_regex` as well -- the earlier proof covered `prefix_run`
-        # only, which left BOTH `interpreter_word` edits unproved.
+        # above makes that axis linear, so the same constant lands on a linear
+        # axis instead of on a crossing: 0.0859 -> 0.0886 s at 43,246 B. THE
+        # ORDERING WAS THE WHOLE POINT, and PR #87 reached it too -- though it
+        # stopped short of committing to the left edge at all.
+        # Equivalence decided again rather than inherited, over `prefix_run` AND
+        # `pipe_to_shell_regex`, against THIS tree's spelling of the arms.
         # MEASURED, min-of-3 `process_time`, both trees in ONE run, guard PASS,
         # 0 jump bytes, deny throughout:
         #    5,047 B    1.4847 s -> 0.2307 s
@@ -3775,10 +3779,12 @@ EXPECTED_DIGESTS = {
         # axis is STILL QUADRATIC -- exponents 1.94 / 1.97 -- so 6.95x is a
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
-        # quantity. What is left is `_INSTALL_HEAD`: attribution on the same
-        # payload goes `_PIPE_TO_SHELL` 84.0% -> 2.4% while `_INSTALL_HEAD` does
-        # not move, and its residual is `_INSTALL_TAIL`'s ten un-narrowed path
-        # scans. Narrowing THOSE is not language-preserving -- it deletes
+        # quantity. What is left is `_INSTALL_HEAD`, whose residual is
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
+        # attribution was taken during design, but on a SUPERSEDED candidate
+        # tree and at a different payload size, so no share for THIS tree is
+        # published.) Narrowing those scans is not language-preserving -- it
+        # deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "b8f81ead8ff90b372c6785ebf06774660aba871cda299dc21fcf2ebe571169c5",
@@ -4123,9 +4129,11 @@ EXPECTED_DIGESTS = {
         # AND IT IS NOT PARETO. On payloads it does not help the longer pattern
         # costs a little: the glued-brace axis is 1.02x of the parent, and the
         # non-overlapping control `2>x/foo ` x2700 goes 0.0304 -> 0.0368 s.
-        # THE SHELL SUBSTRATE IS UNCHANGED AND WAS MEASURED, not assumed: both
-        # axes are SDK-only. Through the emitted hook, 21,646 B: 0.793 -> 0.791 s
-        # and 2.102 -> 2.109 s.
+        # THE SHELL SUBSTRATE. Its COST is unchanged and both quadratic axes
+        # are SDK-only: through the emitted hook at 21,646 B, 0.793 -> 0.791 s
+        # and 2.102 -> 2.109 s, wall clock, min of 2. THAT IS A COST READING AND
+        # NOTHING MORE -- the shell's `CMD_PFX` DID change, and its VERDICTS are
+        # NOT differentiated by this item. Filed, not claimed.
         # NO NULL ALTERNATIVES. The generated complement spells "stopping here is
         # allowed" as `(...)?`, never `(...|)`: POSIX leaves a null alternative
         # undefined and a strictly conforming engine REJECTS the whole pattern,
@@ -4147,13 +4155,12 @@ EXPECTED_DIGESTS = {
         # instead of a re-read of the whole remaining token. PR #87 built this,
         # proved it equivalent and DROPPED it, because it cost 1.09-1.12x on the
         # `A=1/env ` axis and moved that deny across the 60 s ceiling. The commit
-        # above makes that axis linear, so the same constant now costs 1.3%
-        # there (0.0859 -> 0.0886 s at 43,246 B). THE ORDERING WAS THE WHOLE
-        # POINT and it is PR #87's own words: the overlap first, the left edge
-        # after it.
-        # Equivalence decided again rather than inherited, and this time over
-        # `pipe_to_shell_regex` as well -- the earlier proof covered `prefix_run`
-        # only, which left BOTH `interpreter_word` edits unproved.
+        # above makes that axis linear, so the same constant lands on a linear
+        # axis instead of on a crossing: 0.0859 -> 0.0886 s at 43,246 B. THE
+        # ORDERING WAS THE WHOLE POINT, and PR #87 reached it too -- though it
+        # stopped short of committing to the left edge at all.
+        # Equivalence decided again rather than inherited, over `prefix_run` AND
+        # `pipe_to_shell_regex`, against THIS tree's spelling of the arms.
         # MEASURED, min-of-3 `process_time`, both trees in ONE run, guard PASS,
         # 0 jump bytes, deny throughout:
         #    5,047 B    1.4847 s -> 0.2307 s
@@ -4166,10 +4173,12 @@ EXPECTED_DIGESTS = {
         # axis is STILL QUADRATIC -- exponents 1.94 / 1.97 -- so 6.95x is a
         # constant, the margin at the guard's own maximum is 6.2%, and it is
         # min-of-3 CPU time against a WALL-CLOCK deadline, which is not the same
-        # quantity. What is left is `_INSTALL_HEAD`: attribution on the same
-        # payload goes `_PIPE_TO_SHELL` 84.0% -> 2.4% while `_INSTALL_HEAD` does
-        # not move, and its residual is `_INSTALL_TAIL`'s ten un-narrowed path
-        # scans. Narrowing THOSE is not language-preserving -- it deletes
+        # quantity. What is left is `_INSTALL_HEAD`, whose residual is
+        # `_INSTALL_TAIL`'s ten un-narrowed path scans. (A per-pattern
+        # attribution was taken during design, but on a SUPERSEDED candidate
+        # tree and at a different payload size, so no share for THIS tree is
+        # published.) Narrowing those scans is not language-preserving -- it
+        # deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         "6e36a5ee3dbd4dd96e49e6b5c049263979efaba7adde8e3589b26aceefbd3a69",
