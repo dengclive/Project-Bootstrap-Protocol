@@ -72,9 +72,13 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   wrong, not the pins.
 
 
-- **[ready] prefix-run-language-guard** · `TEST-CONTRACT` · eligible: **yes**
-  · 2 lenses · scope `lib/cmdpos.py`, `tests/test_composition.py`,
+- **[ready] prefix-run-language-guard** · `CODE` · eligible: **yes**
+  · full ceremony · scope `lib/cmdpos.py`, `tests/test_composition.py`,
   `tests/test_substrate_differential.py`
+  **`CODE`, NOT `TEST-CONTRACT`, and the distinction is the runbook's own:**
+  bullet 2 below prescribes a predicate change in `lib/cmdpos.py`, and §2 puts
+  anything touching `lib/` at full ceremony. Two lenses is the level under which
+  these same additions drew six of ten MAJOR/BLOCKER findings.
   **THE THREE THINGS PR #92 PROVED IT NEEDED AND DID NOT SHIP.** Its guards were
   written, reviewed, and STRIPPED at E2 because the round that added them
   diverged (20 → 22 findings, six of the ten MAJOR/BLOCKER ones on the additions
@@ -85,22 +89,27 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     on the argument that the wrapper arm already takes it. A step-7 lens mutated
     one call — `not_words(ALL_PREFIXES, _seg)` → `not_words(ALL_PREFIXES +
     ("foo",), _seg)` — emitted a probe, and got `A=1/foo pip install evilpkg`
-    deny → **ALLOW** on both substrates with **8,658 checks green**. Only the
-    opaque golden digests moved, and a digest move is what a freeze exception
-    re-baselines. The stripped shape was 18 rows at the regex plus a
+    deny → **ALLOW** on both substrates while **9,826 of 9,831 checks stayed
+    green — exactly 5 move**, and all five are opaque golden digests, which is
+    what a freeze exception re-baselines. (A figure of "8,658" circulated during
+    the item; it counts a subset of suites and is withdrawn.) The stripped shape was 18 rows at the regex plus a
     calibration applying that exact mutation; **a step-8 lens then showed those
-    rows pin ONE substitution, not the class** — `noplus` (drop `[+]?`),
-    `asgbound`, `redbound` and `pathbound` all walked through with both suites
-    green. Any row taken here must cover the class, not the one mutation.
+    rows pin ONE substitution, not the class** — of four ordinary narrowings
+    tried, **two walked through with both suites green** (`noplus`, dropping
+    `[+]?`; and `asgbound`, bounding the assignment run). The other two are
+    caught, but only by the FULL differential and not by these rows:
+    `redbound` → 4,244/1, `pathbound` → 4,241/4. Any row taken here must cover
+    the class, not the one mutation.
   * **`not_words` does class arithmetic on raw word bytes.** `minus()` appends
     word characters straight into a bracket expression and nothing guards
     `words`. Measured on this tree: `time-machine` forms a RANGE and silently
     rejects `timeXy`/`time0y`/`timeAy`/`time_y`/`timeZy`; `time]x` closes the
-    class early; `time\x` makes the pattern uncompilable, on which every
-    emitted `[[ =~ ]]` returns 2 and the surrounding `if` reads it as false.
-    Nothing fires today because every wrapper word is lowercase alpha — and
-    `lwp-download` in the same file shows the house already has hyphenated
-    words. **`isalnum()` IS NOT THE PREDICATE**: it admits non-ASCII, and a
+    class early; `time\\x` makes the pattern uncompilable **in Python** -- bash's
+    `regcomp` accepts it and re-parses the group structure instead, because
+    in ERE `\\(` is a literal `(`, so the SDK fails at `gates.py` import
+    while the shell silently changes what the pattern means. The "returns 2
+    and reads as false" consequence belongs to the NULL-ALTERNATIVE hazard,
+    not this one. **`isalnum()` IS NOT THE PREDICATE**: it admits non-ASCII, and a
     bracket expression carrying one is locale-dependent in bash and not in
     Python — a lens drove `timç` to `A=1/timé pip install evilpkg` denying under
     `LC_ALL=C.UTF-8` and **ALLOWING under `LC_ALL=C`** on the shell while the
@@ -196,7 +205,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     bound.
 
   **THE ONE REDUCIBLE FACTOR IS NOT THIS ROW'S.** The unbounded `nonspace*` scan
-  belongs to `prefix-run-assignment-wrapper-overlap`, the A-tier row directly
+  belonged to `prefix-run-assignment-wrapper-overlap` — **closed 2026-08-25,
+  PR #92 `abe3f48`, see Done; the overlap is removed, so read this paragraph as
+  history** — which was then the A-tier row directly
   above. Remove the arm overlap and this axis is linear; a cap bolted on top of a
   cubic moves a crossing, it does not remove one — PR #87's own lesson.
 
@@ -526,9 +537,9 @@ step 8, E2. The stripped commit had done two things, subtracted step-7's record
 defects **and** added two guards, and six of the ten MAJOR/BLOCKER findings were
 on the additions; the strip kept the subtractions and dropped the additions. Two
 further rounds went 10 → 10 and the loop was stopped rather than run to its
-bound. **24 of 24 agents completed across five fan-outs, 0 errors**, after the
-first attempt lost 5 of 5 to a transient `529` and was re-run with a retry
-wrapper.
+bound. **32 of 32 agents completed across the five review fan-outs, 0 errors**, after
+a sixth attempt — the first run of the step-3 review — lost 5 of 5 to a
+transient `529` and was re-run with a retry wrapper.
 
 **THE VERDICT DID NOT MOVE** — `docs/production-readiness.md` is untouched; this
 item is not one of its two remaining legs. Residual filed:
@@ -562,9 +573,13 @@ emitted body agrees with `cmdpos.completer_key` on every glue form in the
 written 3× in `test_greenfield_golden.py` and 1× in `test_retrofit.py`, matching
 nos. 72 and 73. Suite **9,810 → 9,811** — one row, a cost row, RED on `main` at
 5.01 s against its 3.0 s bound. Action counts unchanged at 57/69/59 and 79/93.
-**THE LEFT-EDGE NARROWING WAS DROPPED AND IS NOT COMING BACK CHEAPLY** — see
-`prefix-run-assignment-wrapper-overlap` above, which carries the four refuted
-spellings so nobody re-proposes one. **THE VERDICT DID NOT MOVE.**
+**THE LEFT-EDGE NARROWING WAS DROPPED AND IS NOT COMING BACK CHEAPLY.** The
+four refuted left-edge spellings (factoring the suffix 1.27-1.35x;
+disjoint-by-first-character 1.10x; a zero-width lookahead 1.05x, still over at
+62.7-65.0 s on the crossing payload; a one-alternative narrowing 1.14x) were
+carried by `prefix-run-assignment-wrapper-overlap`, **closed 2026-08-25, PR #92
+`abe3f48`** -- repeated here so the pointer does not dangle, and the left edge
+itself LANDED in that item. **THE VERDICT DID NOT MOVE.**
 
 
 **`prefix-run-cost-residuals` PR #84 `3ea405a` — three self-ambiguous arms lose
@@ -665,6 +680,15 @@ operator — the first merge in this run the loop did not perform itself**, whic
 is exactly what 9b now requires.
 
 ## Owed
+
+**[2026-08-25]** `prefix-run-assignment-wrapper-overlap` closed, PR #92
+merge `abe3f48`. **THE VERDICT DID NOT MOVE** -- it is neither of the two
+remaining legs (X-37 Class B; C-2 autonomous dispatch), both still standing.
+A holds **8**: one row left for Done and `prefix-run-language-guard` was filed
+in its place. **`docs/production-readiness.md` is now 70 commits behind its
+last edit (`5a570ec`, 2026-08-14) and no row covers that** -- `priority-reading`
+(C) owns only its stale Snapshot header. Left deliberately: C-tier work while
+six A rows are ready.
 
 *(Nothing. The PR #72 ledger entry that was owed here is discharged as entry
 29; the harness work is entry 30. Ledger at 30, pin moved in the same commit.)*
