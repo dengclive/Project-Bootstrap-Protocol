@@ -302,6 +302,14 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   only because no command may be longer. **PR #87's 2×2 attributes the whole
   win to `_ckey`:** main 134.121 → regex-only 131.429 → ckey-only 16.663 →
   both 16.461 s.
+  **[SCOPED 2026-08-26 by `x54-deny-shape`.] "16.4 s / no longer past the ceiling"
+  is TRUE FOR THIS SHAPE ONLY — the brace-glue run PR #87 measured (`_ckey`'s
+  cost).** A DIFFERENT cap-legal shape still crosses at the cap: the **X-54
+  completer/wrapper class** costs **99–167 s** (completer `x`/`i` at the 81,920 B
+  length cap, 0 jumps; the `sudo` wrapper at 80,022 B / 4,000 jumps — measured `f4cc8c8`,
+  a separate mechanism — the `_cand` in-loop join at `dependency-gate.sh:3954`, not
+  `_ckey`). So the length cap is not a single-number ceiling; read this row's figure
+  as the brace-glue shape's, and see X-54 for the shape that is still a fail-open.
 
 - **[ready] cost-guard-raw-string-soundness** · `CODE` · eligible: **yes**
   **A SOUNDNESS RULE FOR ANY FUTURE `_cost_guard` TERM, PAID FOR BY A REFUTED
@@ -449,11 +457,21 @@ separate items only because they were discovered separately.
 
 ## Measurement residuals
 
-- **[ready] x54-deny-shape** · `MEASUREMENT` · eligible: **yes**
-  The gap the 2026-08-14 pass left in its own claim: same 80004 B / 4000 jumps
-  padding, but a payload that **would otherwise DENY**, through the emitted
-  60 s timeout. That *demonstrates* X-54's bypass rather than sizing it. The
-  harness exists and takes `HC_HEADS`.
+- **[done 2026-08-26] x54-deny-shape** · `MEASUREMENT` · on `f4cc8c8`, emitted
+  `dependency-gate.sh` md5 `18aba3cf`. The gap the 2026-08-14 pass left in its own
+  claim — same padding but a **would-otherwise-DENY** payload through the emitted
+  60 s timeout — is now measured and **execution-proven**. Carrying
+  `; pip install evil` (denies unpadded, rc 2), every shape cap-legal and KILLED at
+  60 s (rc 124, fail-OPEN), fake-`pip` marker fired: `sudo`+2000 runs (80,022 B /
+  4,000 jumps) **167.15 s**; `x`×40,951 (81,920 B / 0 jumps) **104.29 s**; `i`×40,951
+  **99.44 s**. The `y`-padded control at the same 81,920 B DENIES in 4.34 s (`f4cc8c8`, idle), pinning the
+  cost to the one-character COMPLETER KEYS `i`/`x`, not length. Hot site is a COUPLED O(n²) pair over the growing `_cand`:
+  the append `_cand="$_cand $_CJ"` (`:3954`) and the `[[ "$_cand" =~ $HEAD ]]` regex
+  (`:3956`) that rescans it each iteration — ablation base 96.0 s → drop either to
+  31–48 s → drop both to 4.5 s. A second O(n²) beyond X-52's `_UQW` fix. Full record on the **X-54** backlog row. Harness
+  `.claude/checkpoints/x52-harnesses/x54_denyshape_demo.py`. **The X-54 cost class is
+  NOT fixed by this — this row only demonstrated the bypass; the CODE fix is still
+  open under X-54.**
 - **[ready] x55-rerun** · `MEASUREMENT` · eligible: **yes**
   `>240 s KILLED` not re-run; stated as owed in the KB.
 - **[ready] benign-corpus-reconciliation** · `MEASUREMENT` · eligible: **yes**
