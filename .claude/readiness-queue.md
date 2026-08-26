@@ -457,7 +457,7 @@ separate items only because they were discovered separately.
 
 ## Measurement residuals
 
-- **[done 2026-08-26] x54-deny-shape** · `MEASUREMENT` · on `f4cc8c8`, emitted
+- **[done 2026-08-26] x54-deny-shape** · `MEASUREMENT` · PR #94, merge `69395f1` · on `f4cc8c8`, emitted
   `dependency-gate.sh` md5 `18aba3cf`. The gap the 2026-08-14 pass left in its own
   claim — same padding but a **would-otherwise-DENY** payload through the emitted
   60 s timeout — is now measured and **execution-proven**. Carrying

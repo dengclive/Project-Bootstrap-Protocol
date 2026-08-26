@@ -391,8 +391,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # lesson: A ROUND THAT ALSO ADDS CODE IS NOT A SUBTRACTION ROUND -- six of ten
 # MAJOR/BLOCKER findings were on the guards the round added, and a reviewer's
 # prescription is still a claim.
+# +1 on 2026-08-26 for x54-deny-shape: the MEASUREMENT item that demonstrates
+# X-54's fail-open with a would-otherwise-DENY payload (PR #94, merge 69395f1),
+# graded `corrected` -- the item's own step-7 review caught two record defects
+# in the first commit (a :3937->:3941 line citation and a :3954-only hot-site
+# attribution) and both were fixed before any push, so nothing wrong reached
+# origin. Moving this pin IS the "pin moved in the same commit" the runbook's
+# step 10b requires; a new ledger entry with the pin left at 41 is a red suite.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 41, f"{len(es)} entries")
+      len(es) == 42, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
