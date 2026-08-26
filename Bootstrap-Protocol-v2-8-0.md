@@ -1357,6 +1357,14 @@ Surface these to the operator only if they ask or the profile suggests they'd be
 <a id="phase-9-5"></a>
 ## Phase 9.5 — Autonomous Loop Mode (Optional)
 
+> **SHIPS UNIMPLEMENTED.** This phase specifies the DESIGN of loop mode. The
+> installer emits a **guarded skeleton** (`loop.sh`) whose dispatch loop is
+> intentionally unimplemented — it dispatches nothing and exits 1 until an
+> operator completes it against the comment contract below. Nothing here runs
+> unattended out of the box. This is not a readiness blocker (see
+> `docs/production-readiness.md`); it is a disclosed, deliberately-deferred
+> capability.
+
 **Goal:** Install a first-class autonomous-iteration mode for individual tasks, while preserving every existing enforcement guarantee. **Default: skipped.** Operators who declined at Phase 0 reach this section and skip past it; the rest of this section applies only when `loop_mode_enabled` is true.
 
 **What loop mode is:** an opt-in per-task execution mode where the agent iterates on a single task — completion check after each iteration, restart on failure with prior context primed — until completion criteria are met, max-iterations is hit, or an urgent escalation halts the run. Operators get hands-off execution on bounded tasks; the protocol's safety properties (tier 3 enforcement, urgent escalation, reviewer subagent, spec gate, integrator) are unchanged.
@@ -1583,6 +1591,12 @@ The wizard surfaces these to the operator before generating loop-mode artifacts:
 <a id="phase-9-6"></a>
 ## Phase 9.6 — Goal-Supervised Mode (Optional)
 
+> **SHIPS UNIMPLEMENTED.** This phase specifies the DESIGN of goal-supervised
+> mode. The installer emits a **guarded skeleton** (`goal-loop.sh`) whose
+> dispatch loop is intentionally unimplemented — it dispatches nothing and
+> exits 1 until an operator completes it. A disclosed, deliberately-deferred
+> capability, not a readiness blocker (see `docs/production-readiness.md`).
+
 **Goal:** Install a sibling autonomous-iteration mode alongside loop mode, adding a small-model judge (Haiku by default) as an *advisory* signal on top of the existing deterministic gates. Opens a middle tier between fully-autonomous loop mode and operator-only. **Default: skipped.** Operators who declined at Phase 0 reach this section and skip past it; the rest of this section applies only when `goal_supervised_mode_enabled` is true.
 
 Phase 9.6 is **independent of Phase 9.5**. A project may enable goal-supervised mode without loop mode, or both together, or neither. All four combinations are valid; the wizard runs only the phases the operator opted into.
@@ -1771,6 +1785,12 @@ The wizard surfaces these to the operator before generating goal-supervised-mode
 
 <a id="phase-9-7"></a>
 ## Phase 9.7 — Autonomous Queue Mode (Optional)
+
+> **SHIPS UNIMPLEMENTED.** This phase specifies the DESIGN of queue mode. The
+> installer emits a **guarded skeleton** (`auto.sh`) whose dispatch loop is
+> intentionally unimplemented — it dispatches nothing and exits 1 until an
+> operator completes it. A disclosed, deliberately-deferred capability, not a
+> readiness blocker (see `docs/production-readiness.md`).
 
 **Goal:** Install a coordination layer above the per-task autonomous mechanisms — a runner that dispatches pre-classified tasks from a backlog file in sequence to the appropriate per-task wrapper, while preserving every per-task and existing enforcement guarantee. **Default: skipped.** **Gated on:** `queue_mode_enabled: true` in `.bootstrap-state.json`. If false, skip entirely. **Additionally gated on** at least one of `loop_mode_enabled` or `goal_supervised_mode_enabled` being true; if neither is, refuse to set up queue mode and explain why — the runner has nothing to dispatch with no per-task mechanism enabled.
 

@@ -3793,7 +3793,17 @@ EXPECTED_DIGESTS = {
         # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
-        "b8f81ead8ff90b372c6785ebf06774660aba871cda299dc21fcf2ebe571169c5",
+        # [freeze-exception no. 76, 2026-08-26] c2-autonomous-dispatch (b) — the
+        # emitted `CLAUDE.md` queue-mode coordination section was made honest:
+        # `.claude/auto.sh` no longer PRESENT-TENSE "dispatches per-task
+        # wrappers" (it is an unimplemented skeleton that dispatches nothing and
+        # exits 1). ONE body moves — `CLAUDE.md` — in this queue-mode-on fixture;
+        # every other body byte-identical, 0 added, 0 removed, **count still 69**
+        # (a comment/prose honesty change moves no gate action — E5 verified).
+        # No `lib/` gate logic, no hook behaviour, no SDK change. See
+        # docs/production-readiness.md's 2026-08-26 layer (C-2 retired by
+        # disclosure).
+        "2c2daa25de8f43f4f8b2e09599bb3a4ffeeedc9810270ed510aac815c803c452",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
