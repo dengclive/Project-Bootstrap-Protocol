@@ -1,5 +1,28 @@
 # Production-readiness analysis — `main`
 
+**C-2 RETIRED BY DISCLOSURE, 2026-08-26 — the autonomous-mode leg is no longer a
+readiness blocker.** §1's leg **(b)** (*"the autonomous-mode wrappers dispatch
+nothing"*, C-2) is resolved not by building the Phase 9.7 dispatch loop but by
+making the surface honest and DROPPING autonomous dispatch from the readiness
+question. Operator decision 2026-08-26: the protocol does not ship autonomous
+dispatch; it ships **guarded skeletons** that dispatch nothing and exit 1, now
+disclosed as such at every surface that PRESENTS the modes as operable — the
+emitted `auto.sh` / `loop.sh` / `goal-loop.sh` (already so), the emitted
+`CLAUDE.md` queue-mode section, the greenfield interview offer (`scaffold-only`),
+and the PRD Phase 9.5/9.6/9.7 headers (**SHIPS UNIMPLEMENTED** banners). The
+design-reference docs — the Companion and the emitted `assumption-ledger.md` —
+describe the modes as a *designed* capability and already caveat them as
+optional/opt-in throughout; audited and left, carrying no present-tense false
+operability claim of the `CLAUDE.md`-"dispatches" class. Autonomous dispatch is a
+deliberately-deferred, disclosed capability, not a promise the release fails to
+keep — so it is out of the readiness bar. **THE VERDICT DOES NOT MOVE:** `main`
+is still **NOT PRODUCTION READY**, now on the security legs alone — leg (a), the
+emitted gates are not yet a proven boundary (X-37 Class B open; the cost-class
+fail-opens X-54 etc. open). Retiring C-2 removes a leg by disclosure; it closes
+no security hole. The C-2 finding row (§ C-1..C-8 table) and leg-(b) text below
+are preserved unedited per this document's append-only rule; this layer
+supersedes their *blocker* status, not their measurements.
+
 **Subject:** `main` @ **053a367** (re-based 2026-08-13; the layers below were
 written against `560588c` and earlier) · **Baseline:** annotated tag `v2.7.4` →
 `d884a43`, which is where this analysis started and against which every delta

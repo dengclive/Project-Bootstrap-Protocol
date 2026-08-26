@@ -450,11 +450,15 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         p["deps"]["rationale"],
     ])
     am = p["autonomous_modes"]
-    section("Autonomous modes", [
+    section("Autonomous modes (scaffold-only)", [
         "**Proposed:** all OFF "
         f"_(confidence: {_CONF_BADGE[am['confidence']]})_",
         "",
         am["rationale"],
+        "",
+        "_These modes ship as UNIMPLEMENTED skeletons: enabling one emits a "
+        "wrapper that dispatches nothing (exits 1) until you complete the "
+        "dispatch loop (Bootstrap-Protocol-v2-0-0.md Phase 9.5/9.6/9.7)._",
         "",
         "_Constraint: queue mode requires loop or goal mode "
         "(Bootstrap-Protocol-v2-0-0.md Phase 9.7). The tool will not emit an invalid combo._",
@@ -839,9 +843,10 @@ def run_interactive(prd_text: str, *, instream, outstream,
     ans["deps_enabled"] = v.lower() in ("true", "1", "yes", "on")
 
     show("Autonomous modes", p["autonomous_modes"]["rationale"])
-    for mk, label in (("loop_mode_enabled", "Loop mode"),
-                      ("goal_supervised_mode_enabled", "Goal-supervised mode"),
-                      ("queue_mode_enabled", "Queue mode")):
+    for mk, label in (("loop_mode_enabled", "Loop mode (scaffold-only)"),
+                      ("goal_supervised_mode_enabled",
+                       "Goal-supervised mode (scaffold-only)"),
+                      ("queue_mode_enabled", "Queue mode (scaffold-only)")):
         v = _ask(f"{label} enabled? true|false",
                  str(ans[mk]).lower(),
                  instream=instream, outstream=outstream, eof=eof)

@@ -7755,9 +7755,11 @@ def _claude_md(cfg):
     if flags["queue_mode_enabled"]:
         queue_section = (
             "\n## Queue mode coordination layer\n\n"
-            "`.claude/auto.sh` dispatches per-task wrappers from "
-            "`.claude/queue/backlog.md`. The runner does not load this file; "
-            "the queue is the coordination surface.\n")
+            "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped it "
+            "dispatches nothing and exits 1. When you complete the dispatch "
+            "loop (Bootstrap-Protocol-v2-0-0.md Phase 9.7), it dispatches "
+            "per-task wrappers from `.claude/queue/backlog.md`; the runner "
+            "does not load this file, the queue is the coordination surface.\n")
     return f"""# CLAUDE.md
 
 Thin by design. Steering lives in `.claude/steering/`. This file is the
@@ -9024,9 +9026,11 @@ def _retrofit_claude_md(cfg):
     if queue_in:
         queue_section = (
             "\n## Queue mode coordination layer (R8.I — scaffold-but-defer)\n\n"
-            "`.claude/auto.sh` dispatches per-task wrappers from "
-            "`.claude/queue/backlog.md`. The runner does not load this "
-            "file; the queue is the coordination surface. "
+            "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped it "
+            "dispatches nothing and exits 1. When completed (Phase 9.7) it "
+            "dispatches per-task wrappers from "
+            "`.claude/queue/backlog.md`; the runner does not load this "
+            "file, the queue is the coordination surface. "
             "`queue_mode_enabled: false`. The R8.I milestone is "
             "R8.G's three conditions PLUS all hooks at blocking (not "
             "just spec+test) PLUS >=4 weeks of real per-task autonomous "
