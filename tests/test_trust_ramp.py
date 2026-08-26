@@ -398,8 +398,13 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # attribution) and both were fixed before any push, so nothing wrong reached
 # origin. Moving this pin IS the "pin moved in the same commit" the runbook's
 # step 10b requires; a new ledger entry with the pin left at 41 is a red suite.
+# +1 on 2026-08-27 for c2-autonomous-dispatch: resolution (b) STOP ADVERTISING
+# (PR #96, merge 75eef0a) — the C-2 readiness leg retired by DISCLOSURE, graded
+# `corrected` (a one-clause "every surface" overclaim self-caught by the step-7
+# review and fixed before push). The runbook's step-10b "pin moved in the same
+# commit".
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 42, f"{len(es)} entries")
+      len(es) == 43, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
