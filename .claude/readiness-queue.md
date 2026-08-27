@@ -17,8 +17,21 @@ buy.
 *(`sdk-pipe-trigger-redos` closed 2026-08-19 — PR #81, merge `897d427`.
 See Done. The two items directly below are the work STRIPPED out of it.)*
 
-- **[blocked] c2-autonomous-dispatch** · `DECISION` · eligible: **no** · **E3 on
-  sight** · scope undecidable until the question below is answered
+- **[done 2026-08-27] c2-autonomous-dispatch** · resolved via **(b) STOP
+  ADVERTISING** · PR #96, merge `75eef0a`. Operator chose resolution (b): the
+  protocol does not ship autonomous dispatch; it ships guarded skeletons, now
+  disclosed as unimplemented at every surface that presents them as operable
+  (emitted `CLAUDE.md` queue section, greenfield interview `scaffold-only`, PRD
+  Phase 9.5/9.6/9.7 **SHIPS UNIMPLEMENTED** banners), and the C-2 readiness leg
+  is **retired by disclosure** in `docs/production-readiness.md` (new dated
+  layer). **THE VERDICT DID NOT MOVE:** `main` stays NOT PRODUCTION READY on the
+  security legs alone (X-37, cost-class fail-opens). EMITTED class; freeze
+  exception 76; action counts stable 57/69/59 (E5 clear); suite 25/9,831/0;
+  citations 38/0 (C4 = option (i), PRD banners below the pins). Ledger entry 43.
+  **The original DECISION row is preserved below for the record** (the two
+  resolutions and why it was a decision, not a fix).
+
+- **[was blocked, now resolved — see above] c2-autonomous-dispatch (original DECISION row)** · `DECISION`
   **THE SECOND OF THE VERDICT'S TWO REMAINING LEGS, AND UNTIL 2026-08-20 IT HAD
   NO WORK ORDER AT ALL** — it is named in `docs/production-readiness.md` §1 and
   in this file's own closing paragraph as a standing blocker, and nothing in any
