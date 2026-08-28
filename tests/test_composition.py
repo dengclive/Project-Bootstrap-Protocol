@@ -305,7 +305,9 @@ check("_cs_scan's post-loop token walk does not rebuild its remainder",
 # the string is built with, and an array join per token would be the same order
 # for more code. It is also unreachable while the #45 D1 census in
 # tests/test_issue_fixes.py holds: every HEAD match ends on a completer, so the
-# guarded loop tests that prefix first and breaks. Pinned at ONE so the guarded
+# guarded loop finds that prefix first. [X-54] It no longer tests and breaks
+# inside the loop - it records the completer marks and binary-searches them
+# after it - but the reachability argument is unchanged. Pinned at ONE so the
 # loop cannot quietly regain the append; if the census property is ever broken,
 # this fallback becomes reachable and quadratic and must be revisited then.
 check("the D20 install-head candidate does not re-copy per token",
@@ -315,10 +317,9 @@ check("the D20 install-head candidate does not re-copy per token",
       # whole reduced segment and is joined ONCE after it, so the only
       # `_cparts=()` left is the per-segment initialiser. X-52's concern -
       # whole-array marshalling at EVERY completer - is answered by the JOIN
-      # COUNT, not by clearing: 2 + ceil(log2 m) per segment, <= 18 against
-      # 40,951 marks at the byte cap. Measured on the emitted artifact,
-      # `i` x 40,951 goes 105.75 s KILLED -> 4.48 s DENY, against the
-      # non-completer control's 4.43 s.
+      # COUNT, not by clearing: the joins are now logarithmic in the number of
+      # completer marks rather than one per mark. The cost itself is fenced by
+      # the behavioural rows in tests/test_issue_fixes.py, not by this pin.
       and _tmpl.count("_cparts=()") == 1,
       "appending to one growing string per token is O(total^2) - the same "
       "shape B4 fixed in the walk and X-50 in norm_cmd")
@@ -335,7 +336,7 @@ check("the D20 install-head candidate does not re-copy per token",
 # loop no longer joins at a completer at all: it collects into `_cparts`, joins
 # ONCE after the loop, tests `HEAD` ONCE, and then BINARY-SEARCHES the completer
 # marks. `_cand="$_CJ"` was forbidden while it ran once per completer; it now
-# runs once per SEGMENT. Whole-array/prefix joins go from m to 2 + ceil(log2 m).
+# runs once per SEGMENT, and the prefix joins are logarithmic in the marks.
 # The pin below is a SHAPE pin and does NOT bound cost - text cannot say "this
 # loop is bounded", only "this loop currently looks like X". The cost fence is
 # the ratio row in tests/test_issue_fixes.py, which is behavioural.
@@ -431,8 +432,9 @@ check("the candidate joins ONCE after the loop, never per completer",
                   'else _cand="$_cand $_CJ"; fi') == 0,
       "[X-54] a fold means a join per completer, which is the X-52 shape. "
       "With `_cparts` never cleared, a fold ALSO re-joins the segment onto an "
-      "already-whole `_cand` and doubles it - measured 1.90 s DENY -> 79.07 s "
-      "KILLED at the 60 s ceiling, a fail-OPEN this suite sees NOWHERE ELSE")
+      "already-whole `_cand` and doubles it, which takes the hook back over "
+      "the production ceiling - the fail-OPEN the X-54 rows in "
+      "tests/test_issue_fixes.py measure")
 check("the candidate join fixes its own separator",
       "_cjoin(){{\n  local IFS=' '" in _tmpl
       and _tmpl.count('_CJ="${{*-}}"') == 1,

@@ -4193,13 +4193,10 @@ check(f"X-45/X-52: a 16,000-character glue run and an `allow` verdict, "
 # --------------------------------------------------------------------------- #
 # [X-54] THE PRODUCTION 60 s CEILING, WHICH NO TEST IN THIS REPO HAS EVER APPLIED
 # --------------------------------------------------------------------------- #
-# `docs/deferred-backlog.md:406` says it in its own status cell: "the suite
-# cannot see it because no test applies the emitted timeout". That was derived
-# again here by `ast.walk` over every tests/*.py - SEVEN call sites in SIX files
-# execute the emitted `dependency-gate.sh` and NOT ONE passes `timeout=`, and no
-# ceiling arrives by any other route either (no `**kwargs` pass-through, no
-# defaulted parameter, no SIGALRM on the shell side, no per-suite budget in
-# `bin/run-tests`). These rows close that gap.
+# The X-54 row in `docs/deferred-backlog.md` says it in its own status cell:
+# "the suite cannot see it because no test applies the emitted timeout". No
+# caller of the emitted `dependency-gate.sh` passed `timeout=`, and no ceiling
+# arrived by any other route. These rows close that gap.
 #
 # A cancelled PreToolUse hook exits 124, and ONLY exit 2 blocks - so crossing the
 # ceiling turns a DENY into an ALLOW. Every row below carries the same
@@ -4230,8 +4227,8 @@ check(f"X-54: completer-padded DENY survives the production 60 s ceiling "
       _rc54 == 2,
       "rc 124 is the hook being CANCELLED at the emitted `\"timeout\": 60`. Only "
       "exit 2 blocks, so the deny became an allow: `pip install evil` runs. The "
-      "padding is 40,951 single-character completer keys (`x`, "
-      "`dependency-gate.sh:3941`), cap-legal at 81,920 B and ZERO jump targets")
+      "padding is single-character completer keys (`x` is one, via bash's "
+      "`install_completers()`), and the guard above pins the shape cap-legal")
 
 # ROW 2 - CONTROL, CAUSE NOT LENGTH. Identical byte count, non-completer padding.
 # Green on BOTH trees: if this ever goes red the cost is length, not completers,
@@ -4239,12 +4236,12 @@ check(f"X-54: completer-padded DENY survives the production 60 s ceiling "
 _t0 = time.time()
 _rcy54, _ = shell_run("dependency-gate", bash_payload(_X54_CTL), timeout=60)
 _ely54 = time.time() - _t0
-check(f"X-54 control: the SAME 81,920 B padded with a non-completer denies "
+check(f"X-54 control: the same byte count padded with a non-completer denies "
       f"({_ely54:.1f}s, rc={_rcy54})",
       _rcy54 == 2,
-      "`y` is not a completer key, so it produces no marks for the search to "
-      "probe - and on the parent it never folded or re-matched either. Either "
-      "way this row is what proves row 1 is about COMPLETERS, not length")
+      "`y` is not a completer key, so the guarded loop never folds and never "
+      "re-matches - this row is what proves row 1 is about COMPLETERS and not "
+      "about command length")
 
 # ROW 3 - CONTROL, THE UNPADDED DENY. Proves the tail is a deny to begin with.
 _rcu54, _ = shell_run("dependency-gate", bash_payload("pip install evil"))
@@ -4253,12 +4250,11 @@ check("X-54 control: the unpadded tail denies on its own",
       "if `pip install evil` does not deny, rows 1 and 2 are vacuous")
 
 # ROW 4 - RATIO, CONTENTION-ROBUST. The absolute rows above are this file's known
-# flake exposure: the readiness runbook records two `_el50` rows measuring 3.2 s
-# and 4.2 s idle but 14.6 s and 19.3 s PINNED TO TWO CONTENDED CORES, a ~4.6x
-# degradation. A ratio against a control at the identical byte count degrades
-# with it. Measured after the fix: 1.14x. The bound is 4x - 3.5x of headroom.
-# DO NOT tighten it toward the measured value: that is exactly what took
-# `#50 T8`'s ratio row to E7, at a 1.02x margin.
+# flake exposure: the readiness runbook records `_el50` rows that degrade badly
+# when pinned to contended cores. A ratio against a control at the identical
+# byte count degrades with it, so it survives contention that would flake an
+# absolute bound. DO NOT tighten the bound toward whatever this run measures -
+# a ratio row narrowed onto its own measurement is what took `#50 T8` to E7.
 check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
       f"({_el54:.1f}s vs {_ely54:.1f}s = {_el54 / max(_ely54, 1e-9):.2f}x)",
       _el54 < 4.0 * _ely54,
@@ -4266,18 +4262,16 @@ check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
       "materially more than the same byte count without them")
 
 # ROW 5 - THE BOUNDARY OF THE CLOSURE. NOT an acceptance criterion for X-54's
-# completer fix - it is red-by-design on BOTH trees, and it is here so that row 1
-# going green is never read as "the cap-legal token-count fail-open class is
-# gone on this hook".
+# completer fix. It asserts `rc == 124`, so it PASSES on both trees; it is here
+# so that row 1 going green is never read as "the cap-legal token-count
+# fail-open class is gone on this hook".
 #
 # Same completer padding, but under a REAL install head (`bun x`), so `head_txt`
 # is set and `rest` flows into the ARGUMENT SCANNER - which the completer fix
 # does not touch. Two defects share that loop: `blocked="$blocked $name_only"`
 # is an O(n^2) growing-string append (the B4 / X-50 / X-52 shape), and
-# `name_only="$(pkg_name "$tok")"` forks one subshell per token (both line
-# numbers are the BASE artifact's; subtract 17 for the emitted one). Measured
-# cap-legal at 81,920 B / 0 jumps, KILLED at 60 s BEFORE and AFTER the fix.
-# Filed as its own A-tier row; see `docs/deferred-backlog.md`.
+# `name_only="$(pkg_name "$tok")"` forks one subshell per token. The guard above
+# pins the shape cap-legal; it is KILLED at 60 s BEFORE and AFTER the fix.
 #
 # COSTS A FULL 60 s EVERY RUN, deliberately: `rc == 124` is the flake-SAFE
 # direction, because contention can only make a cancellation more likely. WHEN

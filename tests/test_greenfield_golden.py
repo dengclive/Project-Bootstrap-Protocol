@@ -3344,59 +3344,38 @@ EXPECTED_DIGESTS = {
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. `HEAD` is a
-        # 2,111-character anchored ERE and bash RECOMPILES IT ON EVERY `[[ =~ ]]`:
-        # ~716 us of fixed compile cost that a shorter subject cannot reduce -- a 10-byte
-        # subject costs 716 us, a 40 KB one 1,170 us, so shortening the SUBJECT removes at
-        # most ~40% of the term. X-52 had already taken the fold from per-TOKEN to
-        # per-COMPLETER and that was still enough, because `i` is a one-character
-        # `INSTALL_VERB` and `x` a one-character RUNNER verb, and both are completer
-        # keys: 40,951 of them is cap-legal at
-        # 81,920 B with ZERO jump targets. THE NUMBER OF EVALUATIONS IS THE COST, NOT
-        # THEIR SUBJECT. The loop now only COLLECTS -- reduced words into `_cparts`,
-        # never cleared, and each completer's element count and token index into
-        # `_cen`/`_cet` -- then joins ONCE after it, tests `HEAD` ONCE to ask whether any
-        # head exists, and BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at
-        # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the forward
-        # walk was a linear scan of a sorted array. At most 2 + ceil(log2 m) evaluations
-        # -- 18 at the byte cap, and just 2 on a segment with NO head -- against ~41,000.
-        # The CODE hunk is -17 source lines; this change also ships a comment block, so
-        # the emitted body grows 590 bytes net.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. Exactly ONE emitted hook
-        # body moves, `.claude/hooks/dependency-gate.sh`, plus the two
-        # files that digest it. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL to
-        # origin/main -- verified by emitting both trees under one config and `cmp`, not
-        # asserted.
+        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
+        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
+        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
+        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
+        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
+        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
+        # measured and rejected.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
+        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
+        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees under one
+        # config and `cmp`, not asserted.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; plus a 190,494-case census against
-        # the emitted artifact's OWN `HEAD` confirming the predicate is monotone and that
-        # the forward walk and the binary search return the SAME `(head_txt, token
-        # index)`, 0 violations.
+        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
+        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
+        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
         # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951 (81,920 B / 0 jumps) 106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer `y`x40,951, same B    4.55 s DENY  ->  4.50 s DENY
-        #   the step-4 row at the production 60 s cap  rc 124 (60.0 s) -> rc 2 (4.4 s)
+        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
+        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
+        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
+        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
+        # became an allow. A step-4 row now applies that ceiling for the first time.
         # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head now walks all its tokens instead of stopping at it.
-        # Measured on three cap-legal head-bearing shapes: 1.23x-1.38x, +26-30 us/token,
-        # bounded at ~1.3 s by `_CMD_MAXLEN`. Answers unchanged; only cost moves.
-        # THE FIRST WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted
-        # `settings.json` declares for this hook a PreToolUse hook is CANCELLED, and only
-        # exit 2 blocks, so the deny became an allow.
-        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
-        # would have been E5.
+        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
+        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
         # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends `rest` into the argument scanner, which forks
-        # one subshell per package token AND appends to a growing `blocked` string --
-        # O(n^2), the same B4 / X-50 / X-52 shape. `bun x ` + `x `x40,948 and
-        # `pip install ` + `q `x40,954 are both cap-legal at 81,920 B / 0 jumps and both
-        # KILLED at 60 s BEFORE AND AFTER this change; the second carries NO completer at
-        # all, so the surviving axis is argument-token count, not completers. TO BE FILED as its own row
-        # at step 10 -- it is NOT filed at this commit. The step-4 boundary row asserts
-        # it stays rc 124 so this closure is
-        # never read as the whole class. The X-54 wrapper member (`sudo` + 2,000 quoted
-        # runs) goes through `_cs_isinv` and is likewise untouched.
-        "963264b38587bf1551aedc1cf7ef8ff5e62df490b88a5798209c76a9853bac21",
+        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
+        # which forks one subshell per package token AND appends to a growing `blocked`
+        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
+        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
+        # this closure is never read as the whole class. The X-54 wrapper member goes
+        # through `_cs_isinv` and is likewise untouched.
+        "d44de09163c2b53e9a2634deb56808679180bbe1f0403bc42b2bd16cbef825a2",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3857,59 +3836,38 @@ EXPECTED_DIGESTS = {
         # docs/production-readiness.md's 2026-08-26 layer (C-2 retired by
         # disclosure).
         # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. `HEAD` is a
-        # 2,111-character anchored ERE and bash RECOMPILES IT ON EVERY `[[ =~ ]]`:
-        # ~716 us of fixed compile cost that a shorter subject cannot reduce -- a 10-byte
-        # subject costs 716 us, a 40 KB one 1,170 us, so shortening the SUBJECT removes at
-        # most ~40% of the term. X-52 had already taken the fold from per-TOKEN to
-        # per-COMPLETER and that was still enough, because `i` is a one-character
-        # `INSTALL_VERB` and `x` a one-character RUNNER verb, and both are completer
-        # keys: 40,951 of them is cap-legal at
-        # 81,920 B with ZERO jump targets. THE NUMBER OF EVALUATIONS IS THE COST, NOT
-        # THEIR SUBJECT. The loop now only COLLECTS -- reduced words into `_cparts`,
-        # never cleared, and each completer's element count and token index into
-        # `_cen`/`_cet` -- then joins ONCE after it, tests `HEAD` ONCE to ask whether any
-        # head exists, and BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at
-        # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the forward
-        # walk was a linear scan of a sorted array. At most 2 + ceil(log2 m) evaluations
-        # -- 18 at the byte cap, and just 2 on a segment with NO head -- against ~41,000.
-        # The CODE hunk is -17 source lines; this change also ships a comment block, so
-        # the emitted body grows 590 bytes net.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. Exactly ONE emitted hook
-        # body moves, `.claude/hooks/dependency-gate.sh`, plus the two
-        # files that digest it. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL to
-        # origin/main -- verified by emitting both trees under one config and `cmp`, not
-        # asserted.
+        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
+        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
+        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
+        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
+        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
+        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
+        # measured and rejected.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
+        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
+        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees under one
+        # config and `cmp`, not asserted.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; plus a 190,494-case census against
-        # the emitted artifact's OWN `HEAD` confirming the predicate is monotone and that
-        # the forward walk and the binary search return the SAME `(head_txt, token
-        # index)`, 0 violations.
+        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
+        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
+        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
         # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951 (81,920 B / 0 jumps) 106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer `y`x40,951, same B    4.55 s DENY  ->  4.50 s DENY
-        #   the step-4 row at the production 60 s cap  rc 124 (60.0 s) -> rc 2 (4.4 s)
+        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
+        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
+        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
+        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
+        # became an allow. A step-4 row now applies that ceiling for the first time.
         # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head now walks all its tokens instead of stopping at it.
-        # Measured on three cap-legal head-bearing shapes: 1.23x-1.38x, +26-30 us/token,
-        # bounded at ~1.3 s by `_CMD_MAXLEN`. Answers unchanged; only cost moves.
-        # THE FIRST WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted
-        # `settings.json` declares for this hook a PreToolUse hook is CANCELLED, and only
-        # exit 2 blocks, so the deny became an allow.
-        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
-        # would have been E5.
+        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
+        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
         # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends `rest` into the argument scanner, which forks
-        # one subshell per package token AND appends to a growing `blocked` string --
-        # O(n^2), the same B4 / X-50 / X-52 shape. `bun x ` + `x `x40,948 and
-        # `pip install ` + `q `x40,954 are both cap-legal at 81,920 B / 0 jumps and both
-        # KILLED at 60 s BEFORE AND AFTER this change; the second carries NO completer at
-        # all, so the surviving axis is argument-token count, not completers. TO BE FILED as its own row
-        # at step 10 -- it is NOT filed at this commit. The step-4 boundary row asserts
-        # it stays rc 124 so this closure is
-        # never read as the whole class. The X-54 wrapper member (`sudo` + 2,000 quoted
-        # runs) goes through `_cs_isinv` and is likewise untouched.
-        "c4dfbd0b3e4b78f18b9bdbcf817daff9881ee15a1ef6420d8fd3994bdbf0606f",
+        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
+        # which forks one subshell per package token AND appends to a growing `blocked`
+        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
+        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
+        # this closure is never read as the whole class. The X-54 wrapper member goes
+        # through `_cs_isinv` and is likewise untouched.
+        "a0deac499624c0be4cc123026ebdaaa2ff35f8963f5881fcf860807500bd0b54",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4307,59 +4265,38 @@ EXPECTED_DIGESTS = {
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
         # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. `HEAD` is a
-        # 2,111-character anchored ERE and bash RECOMPILES IT ON EVERY `[[ =~ ]]`:
-        # ~716 us of fixed compile cost that a shorter subject cannot reduce -- a 10-byte
-        # subject costs 716 us, a 40 KB one 1,170 us, so shortening the SUBJECT removes at
-        # most ~40% of the term. X-52 had already taken the fold from per-TOKEN to
-        # per-COMPLETER and that was still enough, because `i` is a one-character
-        # `INSTALL_VERB` and `x` a one-character RUNNER verb, and both are completer
-        # keys: 40,951 of them is cap-legal at
-        # 81,920 B with ZERO jump targets. THE NUMBER OF EVALUATIONS IS THE COST, NOT
-        # THEIR SUBJECT. The loop now only COLLECTS -- reduced words into `_cparts`,
-        # never cleared, and each completer's element count and token index into
-        # `_cen`/`_cet` -- then joins ONCE after it, tests `HEAD` ONCE to ask whether any
-        # head exists, and BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at
-        # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the forward
-        # walk was a linear scan of a sorted array. At most 2 + ceil(log2 m) evaluations
-        # -- 18 at the byte cap, and just 2 on a segment with NO head -- against ~41,000.
-        # The CODE hunk is -17 source lines; this change also ships a comment block, so
-        # the emitted body grows 590 bytes net.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. Exactly ONE emitted hook
-        # body moves, `.claude/hooks/dependency-gate.sh`, plus the two
-        # files that digest it. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL to
-        # origin/main -- verified by emitting both trees under one config and `cmp`, not
-        # asserted.
+        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
+        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
+        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
+        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
+        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
+        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
+        # measured and rejected.
+        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
+        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
+        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees under one
+        # config and `cmp`, not asserted.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; plus a 190,494-case census against
-        # the emitted artifact's OWN `HEAD` confirming the predicate is monotone and that
-        # the forward walk and the binary search return the SAME `(head_txt, token
-        # index)`, 0 violations.
+        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
+        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
+        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
         # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951 (81,920 B / 0 jumps) 106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer `y`x40,951, same B    4.55 s DENY  ->  4.50 s DENY
-        #   the step-4 row at the production 60 s cap  rc 124 (60.0 s) -> rc 2 (4.4 s)
+        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
+        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
+        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
+        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
+        # became an allow. A step-4 row now applies that ceiling for the first time.
         # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head now walks all its tokens instead of stopping at it.
-        # Measured on three cap-legal head-bearing shapes: 1.23x-1.38x, +26-30 us/token,
-        # bounded at ~1.3 s by `_CMD_MAXLEN`. Answers unchanged; only cost moves.
-        # THE FIRST WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted
-        # `settings.json` declares for this hook a PreToolUse hook is CANCELLED, and only
-        # exit 2 blocks, so the deny became an allow.
-        # ACTION COUNTS UNCHANGED at 57 / 69 / 59 -- verified before the re-baseline; a move
-        # would have been E5.
+        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
+        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
         # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends `rest` into the argument scanner, which forks
-        # one subshell per package token AND appends to a growing `blocked` string --
-        # O(n^2), the same B4 / X-50 / X-52 shape. `bun x ` + `x `x40,948 and
-        # `pip install ` + `q `x40,954 are both cap-legal at 81,920 B / 0 jumps and both
-        # KILLED at 60 s BEFORE AND AFTER this change; the second carries NO completer at
-        # all, so the surviving axis is argument-token count, not completers. TO BE FILED as its own row
-        # at step 10 -- it is NOT filed at this commit. The step-4 boundary row asserts
-        # it stays rc 124 so this closure is
-        # never read as the whole class. The X-54 wrapper member (`sudo` + 2,000 quoted
-        # runs) goes through `_cs_isinv` and is likewise untouched.
-        "1f4bbd76997a758e51f4f20d101f63472854bf6b823b4432b28611ece378faf1",
+        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
+        # which forks one subshell per package token AND appends to a growing `blocked`
+        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
+        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
+        # this closure is never read as the whole class. The X-54 wrapper member goes
+        # through `_cs_isinv` and is likewise untouched.
+        "f0fbdf8334fd4eea250df0adba42ccef699772312faa0877e05f393d6131c6a0",
 }
 
 EXPECTED_ACTION_COUNTS = {

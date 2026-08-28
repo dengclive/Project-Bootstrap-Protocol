@@ -5869,37 +5869,9 @@ while IFS= read -r nseg; do
   # the loop is linear in the shapes that have no completer - which is exactly
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
-  # [X-54] THE PARAGRAPH ABOVE IS X-52's AND IS NOW HISTORY, NOT DESCRIPTION.
-  # Its last claim - "the join runs only at a COMPLETER token, where the
-  # `[[ =~ ]]` below already pays O(n) anyway" - stopped being true of this
-  # loop: the loop no longer joins AT ALL and no longer evaluates `HEAD` at
-  # all. Both moved below it. X-52 removed the per-token copy and left a
-  # per-COMPLETER one, and that was still enough: `HEAD` is a 2,111-character
-  # anchored ERE and bash RECOMPILES IT ON EVERY `[[ =~ ]]`, ~716 us of fixed
-  # compile cost that a shorter subject cannot reduce. At 40,951 completer
-  # keys - `x` and `i` are one character each and both are completers - that
-  # is 100-265 s against a 60 s PreToolUse ceiling, and a cancelled hook exits
-  # 124 while only exit 2 blocks, so the deny became an ALLOW.
-  # THE NUMBER OF `HEAD` EVALUATIONS IS THE COST, NOT THEIR SUBJECT. So the
-  # loop below only COLLECTS - reduced words into `_cparts`, never cleared,
-  # and each completer's element count and token index into `_cen`/`_cet`.
-  # One join after it, ONE `HEAD` test to ask whether any head exists, and
-  # then a BINARY SEARCH over the marks: `HEAD` is anchored `^` and open at
-  # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the
-  # forward walk was a linear scan of a sorted array. ~17 evaluations instead
-  # of ~41,000 at the byte cap, and just 2 on a segment with NO head. Same
-  # `(head_txt, token index)` - checked against the
-  # forward walk over a 190,494-case census, and 11,000 differential commands
-  # base-vs-patched on `(rc, stderr)` with 0 diffs.
-  # WHAT IT DOES NOT CLOSE, because the completer axis was not the only one:
-  # a segment carrying a REAL install head sends `rest` into the argument
-  # scanner below, which forks one subshell per package token AND appends to
-  # a growing `blocked` string - the same O(n^2) shape as above. That crosses
-  # the ceiling before and after this change, and is TO BE FILED as its own row.
-  # ONE RESIDUAL, ACCEPTED AND STATED: this loop lost its early `break`, so a
-  # segment that CARRIES a head now walks all its tokens instead of stopping at
-  # it - 1.23x-1.38x on cap-legal head-bearing shapes, bounded at ~1.3 s by
-  # `_CMD_MAXLEN`. Answers unchanged; only cost moves.
+  # [X-54] THAT LAST CLAUSE IS NOW HISTORY, NOT DESCRIPTION. This loop no
+  # longer joins and no longer evaluates `HEAD` at all; both moved below it,
+  # where one join and a binary search over the completer marks replace them.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to
