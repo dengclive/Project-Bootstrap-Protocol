@@ -158,6 +158,55 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the install-head loop stops evaluating `HEAD` once per completer (2026-08-28)
+
+**No version bump** (fix, not surface; freeze exception **77**).
+`x54-completer-cost`, the completer member of the X-54 cost class.
+
+**The defect.** `HEAD` is a 2,111-character anchored ERE, and bash **recompiles
+it on every `[[ =~ ]]`** — ~716 µs of fixed compile cost that a shorter subject
+cannot reduce (a 10-byte subject costs 716 µs; a 40 KB one 1,170 µs, so
+shortening the subject removes at most ~40% of the term). The install-head
+candidate loop evaluated it **once per completer token**. X-52 had already taken
+the fold from per-token to per-completer, and that was still enough: `x` and `i`
+are one-character `INSTALL_VERB`s that are themselves completers, so 40,951 of
+them is cap-legal at 81,920 B with **zero jump targets**. **The number of
+evaluations is the cost, not their subject** — which is why the recorded fix
+direction, a bounded subject, was measured and rejected.
+
+**The fix.** The loop only **collects** now: reduced words into `_cparts`, never
+cleared, and each completer's element count and token index into two parallel
+arrays. Then one join, **one** `HEAD` test to ask whether a head exists at all,
+and a **binary search** over the marks. `HEAD` is anchored `^` and open at the
+end `( |$)`, so "matches the first k words" is monotone in k and the forward walk
+was a linear scan of a sorted array. **~17 evaluations instead of ~41,000**, and
+it deletes more emitted code than it adds.
+
+**Measured on the emitted hooks**, this tree against `origin/main`, idle, one
+case at a time: completer `x`×40,951 at 81,920 B / 0 jumps goes **106.51 s,
+killed at the 60 s ceiling → 5.12 s deny**, against a non-completer control at
+the identical byte count that reads 4.55 s → 4.50 s. **That was a live
+fail-open**: past the 60 s ceiling the emitted `settings.json` declares, a
+PreToolUse hook is cancelled and only exit 2 blocks, so the deny became an allow.
+A test now applies that ceiling for the first time — no harness in this repo ever
+had.
+
+**Behaviour unchanged, checked rather than argued:** 11,000 differential commands
+base-vs-patched on `(rc, stderr)`, 0 diffs; and a 190,494-case census against the
+emitted artifact's own `HEAD`, confirming the predicate is monotone and that the
+forward walk and the binary search return the same `(head_txt, token index)`,
+0 violations. Action counts unchanged at 57 / 69 / 59 and 79 / 93.
+
+**What it does not do.** It closes the **head-less** completer padding only.
+A segment carrying a real install head sends its argument list into the argument
+scanner, which forks one subshell per package token **and** appends to a growing
+`blocked` string — O(n²), the same shape B4, X-50 and X-52 each fixed elsewhere.
+`bun x ` + `x `×40,948 and `pip install ` + `q `×40,954 are both cap-legal at
+81,920 B and both **killed at 60 s before and after** this change; the second
+carries no completer at all, so the surviving axis is argument-token count, not
+completers. It is filed as its own row, and a test row asserts it stays `rc 124`
+so this closure is never read as the whole class. X-54 stays **open**.
+
 ## Post-2.8.0 — the prefix run stops having two readings of one token (2026-08-24)
 
 **No version bump** (fix, not surface; freeze exception **75**).

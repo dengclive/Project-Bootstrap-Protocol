@@ -311,9 +311,15 @@ check("_cs_scan's post-loop token walk does not rebuild its remainder",
 check("the D20 install-head candidate does not re-copy per token",
       _tmpl.count('_cand="$_cand $_UQW"') == 1
       and '_cparts+=("$_UQW")' in _tmpl
-      # the fold clears the pending elements, so a completer-DENSE segment
-      # marshals one element per join instead of the whole array every time
-      and _tmpl.count("_cparts=()") == 3,
+      # [X-54] `_cparts` is NEVER cleared inside the loop now. It collects the
+      # whole reduced segment and is joined ONCE after it, so the only
+      # `_cparts=()` left is the per-segment initialiser. X-52's concern -
+      # whole-array marshalling at EVERY completer - is answered by the JOIN
+      # COUNT, not by clearing: 2 + ceil(log2 m) per segment, <= 18 against
+      # 40,951 marks at the byte cap. Measured on the emitted artifact,
+      # `i` x 40,951 goes 105.75 s KILLED -> 4.48 s DENY, against the
+      # non-completer control's 4.43 s.
+      and _tmpl.count("_cparts=()") == 1,
       "appending to one growing string per token is O(total^2) - the same "
       "shape B4 fixed in the walk and X-50 in norm_cmd")
 # The array join is only equivalent to the ` `-append it replaced while the
@@ -325,6 +331,14 @@ check("the D20 install-head candidate does not re-copy per token",
 # re-marshalling the whole array at every completer, and `i` is a one-character
 # INSTALL_VERB that is itself a completer - so `i i i ...` is attacker-supplied,
 # carries zero jump targets, and sent a shape main clears at 24.38 s to 171.88 s.
+# [X-54] THAT FENCE IS RETIRED BECAUSE ITS PREMISE IS GONE, NOT OVERRIDDEN. The
+# loop no longer joins at a completer at all: it collects into `_cparts`, joins
+# ONCE after the loop, tests `HEAD` ONCE, and then BINARY-SEARCHES the completer
+# marks. `_cand="$_CJ"` was forbidden while it ran once per completer; it now
+# runs once per SEGMENT. Whole-array/prefix joins go from m to 2 + ceil(log2 m).
+# The pin below is a SHAPE pin and does NOT bound cost - text cannot say "this
+# loop is bounded", only "this loop currently looks like X". The cost fence is
+# the ratio row in tests/test_issue_fixes.py, which is behavioural.
 # [X-52] THE MEMO'S READ, WHICH NOTHING PINNED UNTIL 2026-08-13. `_CS_INVMEMO`
 # is read in exactly ONE place and deleting that single line disables the whole
 # memo. Reproduced at width 1 on a scratch tree with the line removed: THIS
@@ -412,11 +426,13 @@ check("the invoker memo is never written from a decision on the trailing word",
       and _tmpl.count('_lastw=1') == 2,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
       "not stable under a longer tail - in EITHER phase of the walk")
-check("the candidate join folds rather than re-joins",
+check("the candidate joins ONCE after the loop, never per completer",
       _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
-                  'else _cand="$_cand $_CJ"; fi') == 2,
-      "one fold inside the loop and one after it; `_cand=\"$_CJ\"` alone "
-      "re-joins the whole array per completer token")
+                  'else _cand="$_cand $_CJ"; fi') == 0,
+      "[X-54] a fold means a join per completer, which is the X-52 shape. "
+      "With `_cparts` never cleared, a fold ALSO re-joins the segment onto an "
+      "already-whole `_cand` and doubles it - measured 1.90 s DENY -> 79.07 s "
+      "KILLED at the 60 s ceiling, a fail-OPEN this suite sees NOWHERE ELSE")
 check("the candidate join fixes its own separator",
       "_cjoin(){{\n  local IFS=' '" in _tmpl
       and _tmpl.count('_CJ="${{*-}}"') == 1,
@@ -431,9 +447,22 @@ check("the candidate join fixes its own separator",
 # change, and no verdict reveals it today, so it is pinned at the source.
 # NB the doubled braces: this block is inside an f-string in lib/templates.py,
 # so the SOURCE spells `${{#_cparts[@]}}` and emits `${#_cparts[@]}`.
+# [X-54] THE MIDDLE TERM `[ -n "$_cand" ]` IS GONE, and the two-term guard is
+# EXACTLY equivalent to the three-term one. Two independent reasons: (1) the
+# loop never writes `_cand` any more, so that term is DEAD where it stood;
+# (2) even reading it as a cross-token condition, `_cand=""` is re-set PER
+# SEGMENT in lib/templates.py, so the first append in every segment requires
+# `-n "$_UQW"` and `_cparts[0]` is therefore never empty - "old `_cparts`
+# non-empty OR old `_cand` non-empty" is exactly "anything was ever appended",
+# which is what the new two-term test says. That premise is load-bearing: drop
+# it and the equivalence is false across segment boundaries.
+# THE BEHAVIOURAL DIFFERENTIAL CANNOT SUPPORT THIS PIN - a probe with the guard
+# deleted outright returns byte-identical (rc, stderr) on `'' pip install
+# evilpkg` and friends, because `head_txt` reaches no message. The equivalence
+# argument above is the whole of the evidence, which is why it stays pinned at
+# the source.
 check("the candidate accumulation drops leading empties like the append did",
-      ('[ -n "$_UQW" ] || [ -n "$_cand" ] '
-       '|| [ "${{#_cparts[@]}}" -gt 0 ]') in _tmpl,
+      ('[ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]') in _tmpl,
       "without the guard a leading `''` token shifts the candidate by one "
       "space and the gate relies on HEAD's `^ *` to absorb it")
 # Every writer of _CS_BUF must keep _CS_TAIL in step or the swap above is

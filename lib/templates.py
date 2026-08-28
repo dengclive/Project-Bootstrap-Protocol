@@ -5869,6 +5869,32 @@ while IFS= read -r nseg; do
   # the loop is linear in the shapes that have no completer - which is exactly
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
+  # [X-54] THE PARAGRAPH ABOVE IS X-52's AND IS NOW HISTORY, NOT DESCRIPTION.
+  # Its last claim - "the join runs only at a COMPLETER token, where the
+  # `[[ =~ ]]` below already pays O(n) anyway" - stopped being true of this
+  # loop: the loop no longer joins AT ALL and no longer evaluates `HEAD` at
+  # all. Both moved below it. X-52 removed the per-token copy and left a
+  # per-COMPLETER one, and that was still enough: `HEAD` is a 2,111-character
+  # anchored ERE and bash RECOMPILES IT ON EVERY `[[ =~ ]]`, ~716 us of fixed
+  # compile cost that a shorter subject cannot reduce. At 40,951 completer
+  # keys - `x` and `i` are one character each and both are completers - that
+  # is 100-265 s against a 60 s PreToolUse ceiling, and a cancelled hook exits
+  # 124 while only exit 2 blocks, so the deny became an ALLOW.
+  # THE NUMBER OF `HEAD` EVALUATIONS IS THE COST, NOT THEIR SUBJECT. So the
+  # loop below only COLLECTS - reduced words into `_cparts`, never cleared,
+  # and each completer's element count and token index into `_cen`/`_cet`.
+  # One join after it, ONE `HEAD` test to ask whether any head exists, and
+  # then a BINARY SEARCH over the marks: `HEAD` is anchored `^` and open at
+  # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the
+  # forward walk was a linear scan of a sorted array. ~17 evaluations instead
+  # of ~41,000, and the same `(head_txt, token index)` - checked against the
+  # forward walk over a 190,494-case census, and 11,000 differential commands
+  # base-vs-patched on `(rc, stderr)` with 0 diffs.
+  # WHAT IT DOES NOT CLOSE, because the completer axis was not the only one:
+  # a segment carrying a REAL install head sends `rest` into the argument
+  # scanner below, which forks one subshell per package token AND appends to
+  # a growing `blocked` string - the same O(n^2) shape as above. That crosses
+  # the ceiling before and after this change and is filed as its own row.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to
@@ -5882,50 +5908,33 @@ while IFS= read -r nseg; do
   # anchor edit away from a silent change, so the condition is reproduced here
   # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
   # `set -u`.
-  _cparts=()
+  _cparts=(); _cen=(); _cet=()
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
-    if [ -n "$_UQW" ] || [ -n "$_cand" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
+    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
       _cparts+=("$_UQW")
     fi
     _ckey "$_UQW"
     case "$_CKEY" in
-      @@COMPLETER_CASE@@)
-        # FOLD ONLY WHAT IS PENDING, then clear. Re-joining the WHOLE array at
-        # every completer marshals it into an argument list each time, which is
-        # strictly worse than the append it replaced when EVERY token is a
-        # completer - `i` is a one-character INSTALL_VERB that is itself one, so
-        # `i i i ...` is entirely attacker-supplied with zero jump targets.
-        # Measured: `i` x 20000 (40000 B, under both caps) went 24.38 s on main
-        # to 171.88 s re-joining, i.e. a shape main CLEARS turned into a 7x
-        # ceiling breach. Folding the pending elements keeps the completer-dense
-        # case at the old append's cost (one pending element, then an O(len)
-        # append) while the completer-FREE case - X-52's own padding - still
-        # never joins at all inside the loop.
-        _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-        if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
-        _cparts=()
-        if [[ "$_cand" =~ $HEAD ]]; then
-          head_txt="$_cand"
-          # [#43 review, F9] One expansion, not an append loop that
-          # reallocates per token - and no leading space for the caller.
-          rest="${{_NTOKS[*]:_hi+1}}"
-          break
-        fi ;;
+      @@COMPLETER_CASE@@) _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi") ;;
     esac
   done
-  # [X-52] The guarded loop above now sets `_cand` only AT a completer, so the
-  # whole-segment spelling the check below reads has to be materialised here.
-  # Unconditional would re-join on the break path too, where `_cand` is already
-  # the matched prefix and must not be overwritten - hence the `head_txt` test,
-  # which is the same found/not-found signal F9 established.
-  if [ -z "$head_txt" ] && [ "${{#_cparts[@]}}" -gt 0 ]; then
-    _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-    if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
-    _cparts=()
+  _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+  _cand="$_CJ"
+  if [ "${{#_cen[@]}}" -gt 0 ] && [[ "$_cand" =~ $HEAD ]]; then
+    _clo=0; _cup=$(( ${{#_cen[@]}} - 1 ))
+    while [ "$_clo" -lt "$_cup" ]; do
+      _cmid=$(( (_clo + _cup) / 2 ))
+      _cjoin ${{_cparts+"${{_cparts[@]:0:${{_cen[$_cmid]}}}}"}}
+      if [[ "$_CJ" =~ $HEAD ]]; then _cup=$_cmid; else _clo=$(( _cmid + 1 )); fi
+    done
+    _cjoin ${{_cparts+"${{_cparts[@]:0:${{_cen[$_clo]}}}}"}}
+    if [[ "$_CJ" =~ $HEAD ]]; then
+      head_txt="$_CJ"
+      _cti=${{_cet[$_clo]}}
+      rest="${{_NTOKS[*]:_cti+1}}"
+    fi
   fi
-  # `_cand` now holds the whole reduced segment when the guard found nothing,
-  # so ONE match decides whether the guard could have missed anything.
   if [ -z "$head_txt" ] && [[ "$_cand" =~ $HEAD ]]; then
     _cand=""
     for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
