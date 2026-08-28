@@ -194,7 +194,8 @@ against the emitted artifact's own `HEAD`, confirming the predicate is monotone
 and that the forward walk and the binary search return the same
 `(head_txt, token index)`, 0 violations. Action counts unchanged at
 57 / 69 / 59 and 79 / 93. `.claude/sdk_gates/gates.py` is **byte-identical** to
-`origin/main` — verified by emitting both trees under one config and `cmp`.
+`origin/main` — verified by emitting both trees and comparing them per path
+across all five fixtures, on which exactly one path moves.
 
 **What it does not do.** It closes the **head-less** completer padding only.
 A segment carrying a real install head sends its argument list into the argument

@@ -2302,8 +2302,10 @@ EXPECTED_RETROFIT_DIGESTS = {
     # measured and rejected.
     # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
     # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
-    # BYTE-IDENTICAL to origin/main -- verified by emitting both trees under one
-    # config and `cmp`, not asserted.
+    # BYTE-IDENTICAL to origin/main -- verified by emitting both trees and
+    # comparing them PER PATH across all five fixtures, not asserted: on every
+    # one, `dependency-gate.sh` is the only path that moves, none added, none
+    # removed.
     # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
     # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
     # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
