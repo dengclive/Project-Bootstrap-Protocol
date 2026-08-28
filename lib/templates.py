@@ -5887,14 +5887,19 @@ while IFS= read -r nseg; do
   # then a BINARY SEARCH over the marks: `HEAD` is anchored `^` and open at
   # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the
   # forward walk was a linear scan of a sorted array. ~17 evaluations instead
-  # of ~41,000, and the same `(head_txt, token index)` - checked against the
+  # of ~41,000 at the byte cap, and just 2 on a segment with NO head. Same
+  # `(head_txt, token index)` - checked against the
   # forward walk over a 190,494-case census, and 11,000 differential commands
   # base-vs-patched on `(rc, stderr)` with 0 diffs.
   # WHAT IT DOES NOT CLOSE, because the completer axis was not the only one:
   # a segment carrying a REAL install head sends `rest` into the argument
   # scanner below, which forks one subshell per package token AND appends to
   # a growing `blocked` string - the same O(n^2) shape as above. That crosses
-  # the ceiling before and after this change and is filed as its own row.
+  # the ceiling before and after this change, and is TO BE FILED as its own row.
+  # ONE RESIDUAL, ACCEPTED AND STATED: this loop lost its early `break`, so a
+  # segment that CARRIES a head now walks all its tokens instead of stopping at
+  # it - 1.23x-1.38x on cap-legal head-bearing shapes, bounded at ~1.3 s by
+  # `_CMD_MAXLEN`. Answers unchanged; only cost moves.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to

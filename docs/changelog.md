@@ -168,8 +168,9 @@ it on every `[[ =~ ]]`** — ~716 µs of fixed compile cost that a shorter subje
 cannot reduce (a 10-byte subject costs 716 µs; a 40 KB one 1,170 µs, so
 shortening the subject removes at most ~40% of the term). The install-head
 candidate loop evaluated it **once per completer token**. X-52 had already taken
-the fold from per-token to per-completer, and that was still enough: `x` and `i`
-are one-character `INSTALL_VERB`s that are themselves completers, so 40,951 of
+the fold from per-token to per-completer, and that was still enough: `i` is a
+one-character `INSTALL_VERB` and `x` a one-character RUNNER verb, and both are
+completer keys, so 40,951 of
 them is cap-legal at 81,920 B with **zero jump targets**. **The number of
 evaluations is the cost, not their subject** — which is why the recorded fix
 direction, a bounded subject, was measured and rejected.
@@ -179,8 +180,10 @@ cleared, and each completer's element count and token index into two parallel
 arrays. Then one join, **one** `HEAD` test to ask whether a head exists at all,
 and a **binary search** over the marks. `HEAD` is anchored `^` and open at the
 end `( |$)`, so "matches the first k words" is monotone in k and the forward walk
-was a linear scan of a sorted array. **~17 evaluations instead of ~41,000**, and
-it deletes more emitted code than it adds.
+was a linear scan of a sorted array. At most **2 + ⌈log₂ m⌉** evaluations — **18**
+at the byte cap, and just **2** on a segment with no head — against ~41,000. The
+code hunk is −17 source lines; the change also ships a comment block, so the
+emitted body grows 590 bytes net.
 
 **Measured on the emitted hooks**, this tree against `origin/main`, idle, one
 case at a time: completer `x`×40,951 at 81,920 B / 0 jumps goes **106.51 s,
@@ -188,8 +191,7 @@ killed at the 60 s ceiling → 5.12 s deny**, against a non-completer control at
 the identical byte count that reads 4.55 s → 4.50 s. **That was a live
 fail-open**: past the 60 s ceiling the emitted `settings.json` declares, a
 PreToolUse hook is cancelled and only exit 2 blocks, so the deny became an allow.
-A test now applies that ceiling for the first time — no harness in this repo ever
-had.
+A test in the suite now applies that ceiling for the first time.
 
 **Behaviour unchanged, checked rather than argued:** 11,000 differential commands
 base-vs-patched on `(rc, stderr)`, 0 diffs; and a 190,494-case census against the
@@ -204,7 +206,7 @@ scanner, which forks one subshell per package token **and** appends to a growing
 `bun x ` + `x `×40,948 and `pip install ` + `q `×40,954 are both cap-legal at
 81,920 B and both **killed at 60 s before and after** this change; the second
 carries no completer at all, so the surviving axis is argument-token count, not
-completers. It is filed as its own row, and a test row asserts it stays `rc 124`
+completers. It is **to be filed** as its own row at step 10 — not at this commit — and a test row asserts it stays `rc 124`
 so this closure is never read as the whole class. X-54 stays **open**.
 
 ## Post-2.8.0 — the prefix run stops having two readings of one token (2026-08-24)

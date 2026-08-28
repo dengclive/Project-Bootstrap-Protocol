@@ -138,7 +138,7 @@ cases, each blind to the others' findings.
 **Why fan-out.** A sequential reviewer inherits its own earlier framing; a
 second pass by the same agent re-reads the same file with the same priors. The
 failure this repo has actually paid for is *correlated blind spots*, not
-insufficient iterations: `docs/changelog.md:1238` (the 2.7.1 → 2.7.2 section)
+insufficient iterations: `docs/changelog.md:1240` (the 2.7.1 → 2.7.2 section)
 records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
@@ -147,7 +147,7 @@ previous stage had stated as measured fact.
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
-`docs/changelog.md:1238`; it also appears at
+`docs/changelog.md:1240`; it also appears at
 `.claude/checkpoints/checkpoint-20260806-083157-main.md:118`, which is
 gitignored (`.gitignore:11`) and therefore not citable. Cite the changelog.
 

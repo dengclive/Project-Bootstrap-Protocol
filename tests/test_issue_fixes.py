@@ -4242,9 +4242,9 @@ _ely54 = time.time() - _t0
 check(f"X-54 control: the SAME 81,920 B padded with a non-completer denies "
       f"({_ely54:.1f}s, rc={_rcy54})",
       _rcy54 == 2,
-      "`y` is not a completer key, so the guarded loop never folds and never "
-      "re-matches - this row is what proves row 1 is about COMPLETERS and not "
-      "about command length")
+      "`y` is not a completer key, so it produces no marks for the search to "
+      "probe - and on the parent it never folded or re-matched either. Either "
+      "way this row is what proves row 1 is about COMPLETERS, not length")
 
 # ROW 3 - CONTROL, THE UNPADDED DENY. Proves the tail is a deny to begin with.
 _rcu54, _ = shell_run("dependency-gate", bash_payload("pip install evil"))
@@ -4274,7 +4274,8 @@ check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
 # is set and `rest` flows into the ARGUMENT SCANNER - which the completer fix
 # does not touch. Two defects share that loop: `blocked="$blocked $name_only"`
 # is an O(n^2) growing-string append (the B4 / X-50 / X-52 shape), and
-# `name_only="$(pkg_name "$tok")"` forks one subshell per token. Measured
+# `name_only="$(pkg_name "$tok")"` forks one subshell per token (both line
+# numbers are the BASE artifact's; subtract 17 for the emitted one). Measured
 # cap-legal at 81,920 B / 0 jumps, KILLED at 60 s BEFORE and AFTER the fix.
 # Filed as its own A-tier row; see `docs/deferred-backlog.md`.
 #

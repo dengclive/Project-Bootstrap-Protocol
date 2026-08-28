@@ -2298,18 +2298,21 @@ EXPECTED_RETROFIT_DIGESTS = {
     # ~716 us of fixed compile cost that a shorter subject cannot reduce -- a 10-byte
     # subject costs 716 us, a 40 KB one 1,170 us, so shortening the SUBJECT removes at
     # most ~40% of the term. X-52 had already taken the fold from per-TOKEN to
-    # per-COMPLETER and that was still enough, because `x` and `i` are one-character
-    # `INSTALL_VERB`s that are themselves completers: 40,951 of them is cap-legal at
+    # per-COMPLETER and that was still enough, because `i` is a one-character
+    # `INSTALL_VERB` and `x` a one-character RUNNER verb, and both are completer
+    # keys: 40,951 of them is cap-legal at
     # 81,920 B with ZERO jump targets. THE NUMBER OF EVALUATIONS IS THE COST, NOT
     # THEIR SUBJECT. The loop now only COLLECTS -- reduced words into `_cparts`,
     # never cleared, and each completer's element count and token index into
     # `_cen`/`_cet` -- then joins ONCE after it, tests `HEAD` ONCE to ask whether any
     # head exists, and BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at
     # the end `( |$)`, so "matches the first k words" is MONOTONE in k and the forward
-    # walk was a linear scan of a sorted array. ~17 evaluations instead of ~41,000,
-    # and it deletes more emitted code than it adds.
-    # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. Exactly ONE of the twelve
-    # emitted hook bodies moves, `.claude/hooks/dependency-gate.sh`, plus the two
+    # walk was a linear scan of a sorted array. At most 2 + ceil(log2 m) evaluations
+    # -- 18 at the byte cap, and just 2 on a segment with NO head -- against ~41,000.
+    # The CODE hunk is -17 source lines; this change also ships a comment block, so
+    # the emitted body grows 590 bytes net.
+    # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS. Exactly ONE emitted hook
+    # body moves, `.claude/hooks/dependency-gate.sh`, plus the two
     # files that digest it. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL to
     # origin/main -- verified by emitting both trees under one config and `cmp`, not
     # asserted.
@@ -2322,6 +2325,10 @@ EXPECTED_RETROFIT_DIGESTS = {
     #   completer `x`x40,951 (81,920 B / 0 jumps) 106.51 s KILLED -> 5.12 s DENY
     #   CONTROL non-completer `y`x40,951, same B    4.55 s DENY  ->  4.50 s DENY
     #   the step-4 row at the production 60 s cap  rc 124 (60.0 s) -> rc 2 (4.4 s)
+    # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
+    # that CARRIES a head now walks all its tokens instead of stopping at it.
+    # Measured on three cap-legal head-bearing shapes: 1.23x-1.38x, +26-30 us/token,
+    # bounded at ~1.3 s by `_CMD_MAXLEN`. Answers unchanged; only cost moves.
     # THE FIRST WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted
     # `settings.json` declares for this hook a PreToolUse hook is CANCELLED, and only
     # exit 2 blocks, so the deny became an allow.
@@ -2333,12 +2340,13 @@ EXPECTED_RETROFIT_DIGESTS = {
     # O(n^2), the same B4 / X-50 / X-52 shape. `bun x ` + `x `x40,948 and
     # `pip install ` + `q `x40,954 are both cap-legal at 81,920 B / 0 jumps and both
     # KILLED at 60 s BEFORE AND AFTER this change; the second carries NO completer at
-    # all, so the surviving axis is argument-token count, not completers. Filed as its
-    # own row, and the step-4 boundary row asserts it stays rc 124 so this closure is
+    # all, so the surviving axis is argument-token count, not completers. TO BE FILED as its own row
+    # at step 10 -- it is NOT filed at this commit. The step-4 boundary row asserts
+    # it stays rc 124 so this closure is
     # never read as the whole class. The X-54 wrapper member (`sudo` + 2,000 quoted
     # runs) goes through `_cs_isinv` and is likewise untouched.
-    "service": "cfe265604f3227b0ba2fbf0db1301f74fa595d2f3e6a68f3fecbe0600c6b16a5",
-    "agent": "838838885148a9f0c896c895d22cc71bba99c27e8717c1e8800bacdf98670c53",
+    "service": "fb61bf5d95bd0dfa94c3a23957e9aac3209960d824cce76c43a73ac06042da67",
+    "agent": "33fdd9ad05bf2158058d237d68c389bc1ae50ffbabbfde888b3bb156d2ab7724",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
