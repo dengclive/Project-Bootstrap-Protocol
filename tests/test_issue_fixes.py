@@ -188,13 +188,23 @@ spec.loader.exec_module(gates_mod)
 os.environ["CLAUDE_PROJECT_DIR"] = PROJ
 
 
-def shell_run(hook, payload):
-    """Emitted shell hook, payload on stdin -> (rc, stderr)."""
+def shell_run(hook, payload, timeout=None):
+    """Emitted shell hook, payload on stdin -> (rc, stderr).
+
+    [X-54] `timeout` is the PRODUCTION ceiling, in seconds. `subprocess`
+    RAISES `TimeoutExpired` rather than returning a code, so it is mapped to
+    **124** here - the rc a cancelled PreToolUse hook actually exits with, and
+    the rc that means FAIL-OPEN because only exit 2 blocks. Default `None`
+    keeps every pre-existing caller unchanged.
+    """
     e = dict(os.environ)
     e["CLAUDE_PROJECT_DIR"] = PROJ
-    p = subprocess.run([BASH, os.path.join(HOOKS, f"{hook}.sh")],
-                       input=json.dumps(payload), capture_output=True,
-                       text=True, env=e, cwd=PROJ)
+    try:
+        p = subprocess.run([BASH, os.path.join(HOOKS, f"{hook}.sh")],
+                           input=json.dumps(payload), capture_output=True,
+                           text=True, env=e, cwd=PROJ, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, ""
     return p.returncode, p.stderr
 
 
@@ -4179,6 +4189,106 @@ check(f"X-45/X-52: a 16,000-character glue run and an `allow` verdict, "
       f"{_elck:.2f}s rc={_rcck} -- the per-character `${{_t#?}}` strip is back, "
       f"OR the word-walk quadratic above it got worse, OR a cost-guard "
       f"short-circuit has made this row vacuous")
+
+# --------------------------------------------------------------------------- #
+# [X-54] THE PRODUCTION 60 s CEILING, WHICH NO TEST IN THIS REPO HAS EVER APPLIED
+# --------------------------------------------------------------------------- #
+# `docs/deferred-backlog.md:406` says it in its own status cell: "the suite
+# cannot see it because no test applies the emitted timeout". That was derived
+# again here by `ast.walk` over every tests/*.py - SEVEN call sites in SIX files
+# execute the emitted `dependency-gate.sh` and NOT ONE passes `timeout=`, and no
+# ceiling arrives by any other route either (no `**kwargs` pass-through, no
+# defaulted parameter, no SIGALRM on the shell side, no per-suite budget in
+# `bin/run-tests`). These rows close that gap.
+#
+# A cancelled PreToolUse hook exits 124, and ONLY exit 2 blocks - so crossing the
+# ceiling turns a DENY into an ALLOW. Every row below carries the same
+# `; pip install evil` tail, which denies unpadded (row 3).
+_X54_PAD = "x " * 40951 + "; pip install evil"          # completer padding
+_X54_CTL = "y " * 40951 + "; pip install evil"          # same bytes, NOT a completer
+_X54_HEAD = "bun x " + "x " * 40948 + "; pip install evil"   # completer padding UNDER a head
+_X54_JUMP = set("()\\\"'`$")
+
+def _x54_caps(c):
+    return len(c.encode()), sum(1 for ch in c if ch in _X54_JUMP)
+
+for _lbl, _cmd in (("x-padded", _X54_PAD), ("y control", _X54_CTL),
+                   ("bun x + padding", _X54_HEAD)):
+    _b, _j = _x54_caps(_cmd)
+    check(f"X-54 shape `{_lbl}` is CAP-LEGAL ({_b} B, {_j} jumps)",
+          _b <= 81920 and _j <= 8191,
+          "a shape outside `_CMD_MAXLEN`/`_CMD_MAXJUMP` proves nothing - the "
+          "gate rejects it on length before the cost path is reached")
+
+# ROW 1 - THE RED ROW. Red on this tree (killed at 60 s -> rc 124 -> fail-OPEN),
+# green after the completer fix (rc 2 -> DENY). This row alone satisfies step 4.
+_t0 = time.time()
+_rc54, _ = shell_run("dependency-gate", bash_payload(_X54_PAD), timeout=60)
+_el54 = time.time() - _t0
+check(f"X-54: completer-padded DENY survives the production 60 s ceiling "
+      f"({_el54:.1f}s, rc={_rc54})",
+      _rc54 == 2,
+      "rc 124 is the hook being CANCELLED at the emitted `\"timeout\": 60`. Only "
+      "exit 2 blocks, so the deny became an allow: `pip install evil` runs. The "
+      "padding is 40,951 single-character completer keys (`x`, "
+      "`dependency-gate.sh:3941`), cap-legal at 81,920 B and ZERO jump targets")
+
+# ROW 2 - CONTROL, CAUSE NOT LENGTH. Identical byte count, non-completer padding.
+# Green on BOTH trees: if this ever goes red the cost is length, not completers,
+# and row 1 is measuring the wrong thing.
+_t0 = time.time()
+_rcy54, _ = shell_run("dependency-gate", bash_payload(_X54_CTL), timeout=60)
+_ely54 = time.time() - _t0
+check(f"X-54 control: the SAME 81,920 B padded with a non-completer denies "
+      f"({_ely54:.1f}s, rc={_rcy54})",
+      _rcy54 == 2,
+      "`y` is not a completer key, so the guarded loop never folds and never "
+      "re-matches - this row is what proves row 1 is about COMPLETERS and not "
+      "about command length")
+
+# ROW 3 - CONTROL, THE UNPADDED DENY. Proves the tail is a deny to begin with.
+_rcu54, _ = shell_run("dependency-gate", bash_payload("pip install evil"))
+check("X-54 control: the unpadded tail denies on its own",
+      _rcu54 == 2,
+      "if `pip install evil` does not deny, rows 1 and 2 are vacuous")
+
+# ROW 4 - RATIO, CONTENTION-ROBUST. The absolute rows above are this file's known
+# flake exposure: the readiness runbook records two `_el50` rows measuring 3.2 s
+# and 4.2 s idle but 14.6 s and 19.3 s PINNED TO TWO CONTENDED CORES, a ~4.6x
+# degradation. A ratio against a control at the identical byte count degrades
+# with it. Measured after the fix: 1.14x. The bound is 4x - 3.5x of headroom.
+# DO NOT tighten it toward the measured value: that is exactly what took
+# `#50 T8`'s ratio row to E7, at a 1.02x margin.
+check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
+      f"({_el54:.1f}s vs {_ely54:.1f}s = {_el54 / max(_ely54, 1e-9):.2f}x)",
+      _el54 < 4.0 * _ely54,
+      "the completer axis is back: padding with completer keys now costs "
+      "materially more than the same byte count without them")
+
+# ROW 5 - THE BOUNDARY OF THE CLOSURE. NOT an acceptance criterion for X-54's
+# completer fix - it is red-by-design on BOTH trees, and it is here so that row 1
+# going green is never read as "the cap-legal token-count fail-open class is
+# gone on this hook".
+#
+# Same completer padding, but under a REAL install head (`bun x`), so `head_txt`
+# is set and `rest` flows into the ARGUMENT SCANNER - which the completer fix
+# does not touch. Two defects share that loop: `blocked="$blocked $name_only"`
+# is an O(n^2) growing-string append (the B4 / X-50 / X-52 shape), and
+# `name_only="$(pkg_name "$tok")"` forks one subshell per token. Measured
+# cap-legal at 81,920 B / 0 jumps, KILLED at 60 s BEFORE and AFTER the fix.
+# Filed as its own A-tier row; see `docs/deferred-backlog.md`.
+#
+# COSTS A FULL 60 s EVERY RUN, deliberately: `rc == 124` is the flake-SAFE
+# direction, because contention can only make a cancellation more likely. WHEN
+# THIS ROW GOES RED THE ARGUMENT SCANNER HAS BEEN FIXED - update it, do not
+# delete it.
+_rch54, _ = shell_run("dependency-gate", bash_payload(_X54_HEAD), timeout=60)
+check("X-54 boundary: an install head plus a long argument list STILL crosses "
+      f"the 60 s ceiling, before and after the completer fix (rc={_rch54})",
+      _rch54 == 124,
+      "if this is now rc 2 the ARGUMENT SCANNER has been fixed - re-baseline "
+      "this row and close its backlog entry; if it is anything else, the shape "
+      "no longer reaches the scanner and the row has gone vacuous")
 
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
