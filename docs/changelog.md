@@ -168,8 +168,8 @@ them — landing under this release identity).
 per-completer, and that was still enough, because bash recompiles an anchored
 ERE on every `[[ =~ ]]` and the compile is fixed cost a shorter subject cannot
 reduce. **The number of evaluations is the cost, not their subject** — which is
-why this row's recorded fix direction, a bounded subject, was measured and
-rejected. Single-character completer keys make a cap-legal payload that is
+why a **bounded subject** was measured and rejected. (That was not one of the
+three fix directions the X-54 row records; none of those touches the subject.) Single-character completer keys make a cap-legal payload that is
 entirely attacker-supplied with **zero jump targets**, so the cost guard never
 fires.
 
@@ -194,8 +194,14 @@ against the emitted artifact's own `HEAD`, confirming the predicate is monotone
 and that the forward walk and the binary search return the same
 `(head_txt, token index)`, 0 violations. Action counts unchanged at
 57 / 69 / 59 and 79 / 93. `.claude/sdk_gates/gates.py` is **byte-identical** to
-`origin/main` — verified by emitting both trees and comparing them per path
-across all five fixtures, on which exactly one path moves.
+`origin/main` on the three greenfield fixtures — the two retrofit fixtures emit
+no `gates.py` at all, so "identical on all five" would be vacuous. What *is*
+true on all five, verified by emitting both trees and comparing per path:
+`dependency-gate.sh` is the only path that moves, none added, none removed.
+
+**One residual, accepted and stated.** The loop lost its early `break`, so a
+segment that *carries* a head now walks all its tokens instead of stopping at it.
+Answers are unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
 
 **What it does not do.** It closes the **head-less** completer padding only.
 A segment carrying a real install head sends its argument list into the argument

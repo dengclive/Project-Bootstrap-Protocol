@@ -4193,10 +4193,12 @@ check(f"X-45/X-52: a 16,000-character glue run and an `allow` verdict, "
 # --------------------------------------------------------------------------- #
 # [X-54] THE PRODUCTION 60 s CEILING, WHICH NO TEST IN THIS REPO HAS EVER APPLIED
 # --------------------------------------------------------------------------- #
-# The X-54 row in `docs/deferred-backlog.md` says it in its own status cell:
-# "the suite cannot see it because no test applies the emitted timeout". No
-# caller of the emitted `dependency-gate.sh` passed `timeout=`, and no ceiling
-# arrived by any other route. These rows close that gap.
+# The X-54 row in `docs/deferred-backlog.md` recorded, in its status cell, that
+# the suite could not see this class because no test applied the emitted timeout.
+# No caller of the emitted `dependency-gate.sh` passed `timeout=`, and no ceiling
+# arrived by any other route. These rows close that gap, and that cell now says
+# so - do not re-quote it from here, or this comment goes stale the next time it
+# is edited.
 #
 # A cancelled PreToolUse hook exits 124, and ONLY exit 2 blocks - so crossing the
 # ceiling turns a DENY into an ALLOW. Every row below carries the same
@@ -4227,8 +4229,9 @@ check(f"X-54: completer-padded DENY survives the production 60 s ceiling "
       _rc54 == 2,
       "rc 124 is the hook being CANCELLED at the emitted `\"timeout\": 60`. Only "
       "exit 2 blocks, so the deny became an allow: `pip install evil` runs. The "
-      "padding is single-character completer keys (`x` is one, via bash's "
-      "`install_completers()`), and the guard above pins the shape cap-legal")
+      "padding is single-character completer keys - the emitted `case` list "
+      "carries `x`, from `cmdpos.install_completers()` at emit time - and the "
+      "guard above pins the shape cap-legal")
 
 # ROW 2 - CONTROL, CAUSE NOT LENGTH. Identical byte count, non-completer padding.
 # Green on BOTH trees: if this ever goes red the cost is length, not completers,
@@ -4239,9 +4242,9 @@ _ely54 = time.time() - _t0
 check(f"X-54 control: the same byte count padded with a non-completer denies "
       f"({_ely54:.1f}s, rc={_rcy54})",
       _rcy54 == 2,
-      "`y` is not a completer key, so the guarded loop never folds and never "
-      "re-matches - this row is what proves row 1 is about COMPLETERS and not "
-      "about command length")
+      "`y` is not a completer key, so it produces no marks for the search to "
+      "probe - and on the parent it never folded or re-matched either. Either "
+      "way this row is what proves row 1 is about COMPLETERS, not length")
 
 # ROW 3 - CONTROL, THE UNPADDED DENY. Proves the tail is a deny to begin with.
 _rcu54, _ = shell_run("dependency-gate", bash_payload("pip install evil"))

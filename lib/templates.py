@@ -5869,9 +5869,10 @@ while IFS= read -r nseg; do
   # the loop is linear in the shapes that have no completer - which is exactly
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
-  # [X-54] THAT LAST CLAUSE IS NOW HISTORY, NOT DESCRIPTION. This loop no
-  # longer joins and no longer evaluates `HEAD` at all; both moved below it,
-  # where one join and a binary search over the completer marks replace them.
+  # [X-54] "The join is O(n) but runs only at a COMPLETER token, where the
+  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION:
+  # this loop no longer joins and no longer evaluates `HEAD` at all. Both moved
+  # below it, where one join and a binary search over the marks replace them.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to

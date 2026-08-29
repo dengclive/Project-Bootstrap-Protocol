@@ -1410,6 +1410,9 @@ checks / 0 failed** and a **4092-row** shell-vs-SDK differential was green. They
 were not weak tests; they answer *"what verdict would this gate reach"*, and the
 harness asks a different question — *"does a verdict arrive before the
 deadline"*. No suite here applies the emitted `timeout` when it invokes a hook.
+[CORRECTED 2026-08-29 by `x54-completer-cost`: one now does. The X-54 rows in
+`tests/test_issue_fixes.py` pass the production 60 s ceiling to the emitted
+`dependency-gate.sh`. This sentence was true of every suite before them.]
 The corpus was also structurally unable to help: every one of those 4092 rows had
 a short head, so none ever reached the walk phase where the bypass lived.
 

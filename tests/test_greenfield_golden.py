@@ -3349,14 +3349,17 @@ EXPECTED_DIGESTS = {
         # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
         # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
         # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
-        # measured and rejected.
+        # SUBJECT -- which is why a BOUNDED SUBJECT was
+        # measured and rejected. That was not one of the three fix directions the X-54
+# row records; none of those touches the subject.
         # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
-        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees and
-        # comparing them PER PATH across all five fixtures, not asserted: on every
-        # one, `dependency-gate.sh` is the only path that moves, none added, none
-        # removed.
+        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
+        # and comparing them PER PATH across all five fixtures, not asserted: on
+        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
+        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
+        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
+        # so there is nothing to compare there and "identical on five" would be a
+        # vacuous truth rather than a check.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
         # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
         # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
@@ -3377,7 +3380,7 @@ EXPECTED_DIGESTS = {
         # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
         # this closure is never read as the whole class. The X-54 wrapper member goes
         # through `_cs_isinv` and is likewise untouched.
-        "d44de09163c2b53e9a2634deb56808679180bbe1f0403bc42b2bd16cbef825a2",
+        "5e945b65d95bdae977d4f8758e70426b1e24a63c5a02ccebb025211621fda70d",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3843,14 +3846,17 @@ EXPECTED_DIGESTS = {
         # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
         # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
         # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
-        # measured and rejected.
+        # SUBJECT -- which is why a BOUNDED SUBJECT was
+        # measured and rejected. That was not one of the three fix directions the X-54
+# row records; none of those touches the subject.
         # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
-        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees and
-        # comparing them PER PATH across all five fixtures, not asserted: on every
-        # one, `dependency-gate.sh` is the only path that moves, none added, none
-        # removed.
+        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
+        # and comparing them PER PATH across all five fixtures, not asserted: on
+        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
+        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
+        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
+        # so there is nothing to compare there and "identical on five" would be a
+        # vacuous truth rather than a check.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
         # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
         # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
@@ -3871,7 +3877,7 @@ EXPECTED_DIGESTS = {
         # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
         # this closure is never read as the whole class. The X-54 wrapper member goes
         # through `_cs_isinv` and is likewise untouched.
-        "a0deac499624c0be4cc123026ebdaaa2ff35f8963f5881fcf860807500bd0b54",
+        "7e8bbd7560c38825ae06d9060c06f7af217d6c609bd17138c4900c02f6e60768",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4274,14 +4280,17 @@ EXPECTED_DIGESTS = {
         # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
         # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
         # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
-        # measured and rejected.
+        # SUBJECT -- which is why a BOUNDED SUBJECT was
+        # measured and rejected. That was not one of the three fix directions the X-54
+# row records; none of those touches the subject.
         # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
-        # BYTE-IDENTICAL to origin/main -- verified by emitting both trees and
-        # comparing them PER PATH across all five fixtures, not asserted: on every
-        # one, `dependency-gate.sh` is the only path that moves, none added, none
-        # removed.
+        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
+        # and comparing them PER PATH across all five fixtures, not asserted: on
+        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
+        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
+        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
+        # so there is nothing to compare there and "identical on five" would be a
+        # vacuous truth rather than a check.
         # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
         # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
         # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
@@ -4302,7 +4311,7 @@ EXPECTED_DIGESTS = {
         # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
         # this closure is never read as the whole class. The X-54 wrapper member goes
         # through `_cs_isinv` and is likewise untouched.
-        "f0fbdf8334fd4eea250df0adba42ccef699772312faa0877e05f393d6131c6a0",
+        "74b9bb0ec89dc5ccd618ac38e426a495bd0b2c93a0e94b870d8775935155509d",
 }
 
 EXPECTED_ACTION_COUNTS = {

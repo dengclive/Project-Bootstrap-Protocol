@@ -2298,14 +2298,17 @@ EXPECTED_RETROFIT_DIGESTS = {
     # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
     # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
     # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-    # SUBJECT -- which is why the recorded fix direction, a bounded subject, was
-    # measured and rejected.
+    # SUBJECT -- which is why a BOUNDED SUBJECT was
+    # measured and rejected. That was not one of the three fix directions the X-54
+# row records; none of those touches the subject.
     # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-    # `.claude/hooks/dependency-gate.sh` moves. `.claude/sdk_gates/gates.py` is
-    # BYTE-IDENTICAL to origin/main -- verified by emitting both trees and
-    # comparing them PER PATH across all five fixtures, not asserted: on every
-    # one, `dependency-gate.sh` is the only path that moves, none added, none
-    # removed.
+    # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees and
+    # comparing them PER PATH across all five fixtures, not asserted: on every one,
+    # `dependency-gate.sh` is the ONLY path that moves, none added, none removed.
+    # NOTE FOR THIS FILE SPECIFICALLY: the two RETROFIT fixtures emit NO
+    # `.claude/sdk_gates/gates.py` at all. The SDK byte-identity result is from the
+    # THREE GREENFIELD fixtures; asserting it "on all five" would be vacuously true
+    # here, which is how a check turns into a claim about the wrong thing.
     # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
     # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
     # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
@@ -2326,8 +2329,8 @@ EXPECTED_RETROFIT_DIGESTS = {
     # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
     # this closure is never read as the whole class. The X-54 wrapper member goes
     # through `_cs_isinv` and is likewise untouched.
-    "service": "e06b88ef7765f9e1a77d841a905464b5ee3d867cf9b1c9526c6f61c81e52eeef",
-    "agent": "e6b399f529ddc6e8a978f3155868b90f680a5b0aa9da10aba4428ee9772dc94d",
+    "service": "8809208301ca487ac976c9d75e3e293758e13a89c3d08116fdad8f2c17bb642b",
+    "agent": "d374811650ddacf5bf9b61645c6085c0642f3dc51208e7da6c5c4f237fc3d9d5",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
