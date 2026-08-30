@@ -427,29 +427,39 @@ check("the invoker memo is never written from a decision on the trailing word",
       and _tmpl.count('_lastw=1') == 2,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
       "not stable under a longer tail - in EITHER phase of the walk")
-# [X-54] THE BINARY SEARCH'S CORRECTNESS RESTS ON TWO PROPERTIES OF `HEAD`, AND
-# A BREAK IN EITHER FAILS OPEN. The loop replaced a forward walk - which was
-# correct for ANY regex - with a binary search over the completer marks. That is
-# sound only because "matches the first k words" is MONOTONE in k, and it is
-# monotone only because `HEAD` is ANCHORED at the start and OPEN at the end: an
-# unanchored `HEAD` could match a longer prefix without matching a shorter one,
-# and a `HEAD` that had to reach end-of-string could match a shorter prefix and
-# not a longer one. Either way the search lands on the wrong index or none, the
-# install head is missed, and the gate ALLOWS what it should DENY.
-# Nothing else in this suite asserts this. The behavioural rows exercise the
-# shapes we thought of; this pins the PREMISE, which is what a future edit to the
-# ERE would break silently. It is a SHAPE pin, not a cost pin.
+# [X-54] TWO PROPERTIES OF `HEAD` THE BINARY SEARCH DEPENDS ON. The loop replaced
+# a forward walk - correct for ANY regex - with a binary search over the completer
+# marks, which is sound only while "matches the first k words" is MONOTONE in k.
+# THE TWO PROPERTIES ARE NOT THE SAME KIND OF THING, AND AN EARLIER DRAFT OF THIS
+# COMMENT GOT BOTH THE MECHANISM AND THE DIRECTION WRONG. Stated correctly:
+#   * THE OPEN END `( |$)` IS WHAT CARRIES MONOTONICITY. Pin it to `$` instead and
+#     a SHORTER prefix can match where the whole segment does not, so the search
+#     can converge on the wrong index or miss the head - and THAT direction is a
+#     FAIL-OPEN, because a missed install head is a command that is not denied.
+#   * THE `^ *` ANCHOR DOES NOT CARRY MONOTONICITY AT ALL - an unanchored match is
+#     still monotone in k. Dropping it makes the predicate true EARLIER, so
+#     `head_txt` gets shorter and `rest` longer: more package tokens reach the
+#     argument scanner, never fewer. That direction is OVER-REFUSAL, i.e. fail
+#     CLOSED. Measured on the emitted hook with the anchor removed: rows expected
+#     to ALLOW deny instead, and no expected-DENY row flips to allow.
+# Both are still worth pinning - the second changes real verdicts - but only the
+# first is a safety property, and saying otherwise on a durable surface is the
+# class of defect this branch exists to stop repeating.
+# Nothing else in this suite asserts either. The behavioural rows exercise the
+# shapes we thought of; these pin the PREMISE, which a future edit to the ERE
+# would break silently. SHAPE pins, not cost pins.
 # The two halves live in different places: the `^ *` anchor is written into the
 # template here, and the `( |$)` open end comes from the substituted tail.
-check("HEAD stays ^-anchored, so a prefix match is monotone in prefix length",
+check("HEAD stays ^-anchored",
       'HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"' in _tmpl,
-      "[X-54] drop the `^` and a longer prefix can match where a shorter one "
-      "does not - the binary search then skips the true head and the gate "
-      "fails OPEN. The forward walk this replaced did not need the anchor")
+      "[X-54] drop the `^` and the predicate goes true at an EARLIER completer "
+      "mark, so the search returns a shorter head and a longer tail - real "
+      "verdicts move, in the over-refusal direction. Not a monotonicity property")
 check("the install tail stays OPEN at the end, not pinned to end-of-string",
       cmdpos.install_head_tail().endswith("( |$)"),
       "[X-54] anchor the tail to `$` and a SHORTER prefix can match where the "
-      "whole segment does not, so monotonicity breaks in the other direction "
+      "whole segment does not, so MONOTONICITY BREAKS and the search can miss "
+      "the install head - this is the half that fails OPEN. Meanwhile "
       "and the binary search converges on the wrong token index")
 check("the candidate joins ONCE after the loop, never per completer",
       _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
