@@ -3343,43 +3343,16 @@ EXPECTED_DIGESTS = {
         # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
-        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
-        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
-        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
-        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
-        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why a BOUNDED SUBJECT was
-        # measured and rejected. That was not one of the three fix directions the X-54
-# row records; none of those touches the subject.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
-        # and comparing them PER PATH across all five fixtures, not asserted: on
-        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
-        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
-        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
-        # so there is nothing to compare there and "identical on five" would be a
-        # vacuous truth rather than a check.
-        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
-        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
-        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
-        # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
-        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
-        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
-        # became an allow. A step-4 row now applies that ceiling for the first time.
-        # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
-        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
-        # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
-        # which forks one subshell per package token AND appends to a growing `blocked`
-        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
-        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
-        # this closure is never read as the whole class. The X-54 wrapper member goes
-        # through `_cs_isinv` and is likewise untouched.
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
         "5e945b65d95bdae977d4f8758e70426b1e24a63c5a02ccebb025211621fda70d",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
@@ -3840,43 +3813,16 @@ EXPECTED_DIGESTS = {
         # No `lib/` gate logic, no hook behaviour, no SDK change. See
         # docs/production-readiness.md's 2026-08-26 layer (C-2 retired by
         # disclosure).
-        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
-        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
-        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
-        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
-        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why a BOUNDED SUBJECT was
-        # measured and rejected. That was not one of the three fix directions the X-54
-# row records; none of those touches the subject.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
-        # and comparing them PER PATH across all five fixtures, not asserted: on
-        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
-        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
-        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
-        # so there is nothing to compare there and "identical on five" would be a
-        # vacuous truth rather than a check.
-        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
-        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
-        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
-        # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
-        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
-        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
-        # became an allow. A step-4 row now applies that ceiling for the first time.
-        # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
-        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
-        # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
-        # which forks one subshell per package token AND appends to a growing `blocked`
-        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
-        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
-        # this closure is never read as the whole class. The X-54 wrapper member goes
-        # through `_cs_isinv` and is likewise untouched.
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
         "7e8bbd7560c38825ae06d9060c06f7af217d6c609bd17138c4900c02f6e60768",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
@@ -4274,43 +4220,16 @@ EXPECTED_DIGESTS = {
         # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
-        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-        # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
-        # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
-        # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
-        # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
-        # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-        # SUBJECT -- which is why a BOUNDED SUBJECT was
-        # measured and rejected. That was not one of the three fix directions the X-54
-# row records; none of those touches the subject.
-        # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-        # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees
-        # and comparing them PER PATH across all five fixtures, not asserted: on
-        # every one, `dependency-gate.sh` is the ONLY path that moves, none added,
-        # none removed. `.claude/sdk_gates/gates.py` is BYTE-IDENTICAL on the THREE
-        # GREENFIELD fixtures; the two RETROFIT fixtures emit no `gates.py` at all,
-        # so there is nothing to compare there and "identical on five" would be a
-        # vacuous truth rather than a check.
-        # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-        # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
-        # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
-        # 57 / 69 / 59, verified BEFORE this re-baseline -- a move would have been E5.
-        # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-        #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
-        #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
-        # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
-        # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
-        # became an allow. A step-4 row now applies that ceiling for the first time.
-        # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-        # that CARRIES a head walks all its tokens instead of stopping at it. Answers
-        # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
-        # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-        # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
-        # which forks one subshell per package token AND appends to a growing `blocked`
-        # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
-        # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
-        # this closure is never read as the whole class. The X-54 wrapper member goes
-        # through `_cs_isinv` and is likewise untouched.
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
         "74b9bb0ec89dc5ccd618ac38e426a495bd0b2c93a0e94b870d8775935155509d",
 }
 

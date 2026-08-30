@@ -427,6 +427,30 @@ check("the invoker memo is never written from a decision on the trailing word",
       and _tmpl.count('_lastw=1') == 2,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
       "not stable under a longer tail - in EITHER phase of the walk")
+# [X-54] THE BINARY SEARCH'S CORRECTNESS RESTS ON TWO PROPERTIES OF `HEAD`, AND
+# A BREAK IN EITHER FAILS OPEN. The loop replaced a forward walk - which was
+# correct for ANY regex - with a binary search over the completer marks. That is
+# sound only because "matches the first k words" is MONOTONE in k, and it is
+# monotone only because `HEAD` is ANCHORED at the start and OPEN at the end: an
+# unanchored `HEAD` could match a longer prefix without matching a shorter one,
+# and a `HEAD` that had to reach end-of-string could match a shorter prefix and
+# not a longer one. Either way the search lands on the wrong index or none, the
+# install head is missed, and the gate ALLOWS what it should DENY.
+# Nothing else in this suite asserts this. The behavioural rows exercise the
+# shapes we thought of; this pins the PREMISE, which is what a future edit to the
+# ERE would break silently. It is a SHAPE pin, not a cost pin.
+# The two halves live in different places: the `^ *` anchor is written into the
+# template here, and the `( |$)` open end comes from the substituted tail.
+check("HEAD stays ^-anchored, so a prefix match is monotone in prefix length",
+      'HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"' in _tmpl,
+      "[X-54] drop the `^` and a longer prefix can match where a shorter one "
+      "does not - the binary search then skips the true head and the gate "
+      "fails OPEN. The forward walk this replaced did not need the anchor")
+check("the install tail stays OPEN at the end, not pinned to end-of-string",
+      cmdpos.install_head_tail().endswith("( |$)"),
+      "[X-54] anchor the tail to `$` and a SHORTER prefix can match where the "
+      "whole segment does not, so monotonicity breaks in the other direction "
+      "and the binary search converges on the wrong token index")
 check("the candidate joins ONCE after the loop, never per completer",
       _tmpl.count('if [ -z "$_cand" ]; then _cand="$_CJ"; '
                   'else _cand="$_cand $_CJ"; fi') == 0,

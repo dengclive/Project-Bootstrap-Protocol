@@ -2292,43 +2292,16 @@ EXPECTED_RETROFIT_DIGESTS = {
     # language-preserving -- it deletes
     # `python -m {x/pip install evil` -- and they are
     # `install-tail-path-scan-quadratic`, a filed row of its own.
-    # [freeze-exception no. 77, 2026-08-28] x54-completer-cost -- THE INSTALL-HEAD
-    # CANDIDATE LOOP STOPS EVALUATING `HEAD` ONCE PER COMPLETER. It COLLECTS into
-    # `_cparts` (never cleared) plus two mark arrays, joins ONCE, tests `HEAD` ONCE,
-    # then BINARY-SEARCHES the marks. `HEAD` is anchored `^` and open at the end
-    # `( |$)`, so the predicate is MONOTONE and the forward walk it replaces was a
-    # linear scan of a sorted array. THE COUNT OF EVALUATIONS IS THE COST, NOT THEIR
-    # SUBJECT -- which is why a BOUNDED SUBJECT was
-    # measured and rejected. That was not one of the three fix directions the X-54
-# row records; none of those touches the subject.
-    # SHELL ONLY, AND THAT IS THE WHOLE BLAST RADIUS: the emitted
-    # `.claude/hooks/dependency-gate.sh` moves. Verified by emitting both trees and
-    # comparing them PER PATH across all five fixtures, not asserted: on every one,
-    # `dependency-gate.sh` is the ONLY path that moves, none added, none removed.
-    # NOTE FOR THIS FILE SPECIFICALLY: the two RETROFIT fixtures emit NO
-    # `.claude/sdk_gates/gates.py` at all. The SDK byte-identity result is from the
-    # THREE GREENFIELD fixtures; asserting it "on all five" would be vacuously true
-    # here, which is how a check turns into a claim about the wrong thing.
-    # BEHAVIOUR UNCHANGED, CHECKED RATHER THAN ARGUED: 11,000 differential commands
-    # base-vs-patched on `(rc, stderr)`, 0 diffs; a 190,494-case census against the
-    # emitted artifact's OWN `HEAD`, 0 violations; and ACTION COUNTS UNCHANGED at
-    # 79 / 93, verified BEFORE this re-baseline -- a move would have been E5.
-    # MEASURED ON THE EMITTED HOOKS, this tree against origin/main, idle, serial:
-    #   completer `x`x40,951             106.51 s KILLED -> 5.12 s DENY
-    #   CONTROL non-completer, same B      4.55 s DENY   -> 4.50 s DENY
-    # THAT WAS A LIVE FAIL-OPEN: past the 60 s ceiling the emitted `settings.json`
-    # declares, a PreToolUse hook is CANCELLED and only exit 2 blocks, so the deny
-    # became an allow. A step-4 row now applies that ceiling for the first time.
-    # ONE RESIDUAL, ACCEPTED AND STATED: the loop lost its early `break`, so a segment
-    # that CARRIES a head walks all its tokens instead of stopping at it. Answers
-    # unchanged; only cost moves, and it stays bounded by `_CMD_MAXLEN`.
-    # WHAT THIS DOES NOT DO: it closes the HEAD-LESS completer padding ONLY. A segment
-    # carrying a REAL install head sends its argument list into the ARGUMENT SCANNER,
-    # which forks one subshell per package token AND appends to a growing `blocked`
-    # string -- O(n^2), the same B4 / X-50 / X-52 shape -- and is KILLED at 60 s
-    # BEFORE AND AFTER this change; the step-4 boundary row asserts it stays rc 124 so
-    # this closure is never read as the whole class. The X-54 wrapper member goes
-    # through `_cs_isinv` and is likewise untouched.
+    # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+    # re-baseline, not a drift: the install-head candidate loop stops evaluating
+    # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+    # moves. It is the ONLY emitted path that moves - none added, none removed, on
+    # every fixture. Action counts unchanged at 79 / 93, verified BEFORE this
+    # re-baseline; a move would have been E5.
+    # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+    # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+    # what this closes and what it does not. Deliberately NOT restated here: a fact
+    # repeated on ten surfaces goes stale on nine of them.
     "service": "8809208301ca487ac976c9d75e3e293758e13a89c3d08116fdad8f2c17bb642b",
     "agent": "d374811650ddacf5bf9b61645c6085c0642f3dc51208e7da6c5c4f237fc3d9d5",
 }

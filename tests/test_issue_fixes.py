@@ -4191,7 +4191,7 @@ check(f"X-45/X-52: a 16,000-character glue run and an `allow` verdict, "
       f"short-circuit has made this row vacuous")
 
 # --------------------------------------------------------------------------- #
-# [X-54] THE PRODUCTION 60 s CEILING, WHICH NO TEST IN THIS REPO HAS EVER APPLIED
+# [X-54] THE PRODUCTION 60 s CEILING, WHICH NO TEST IN THIS REPO APPLIED BEFORE
 # --------------------------------------------------------------------------- #
 # The X-54 row in `docs/deferred-backlog.md` recorded, in its status cell, that
 # the suite could not see this class because no test applied the emitted timeout.
