@@ -3343,7 +3343,17 @@ EXPECTED_DIGESTS = {
         # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
-        "ea7729f1059346cd3ca23e48ad8a50a04dbedd7527aa3b62a348aeab0ca7bea1",
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
+        "5e945b65d95bdae977d4f8758e70426b1e24a63c5a02ccebb025211621fda70d",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3803,7 +3813,17 @@ EXPECTED_DIGESTS = {
         # No `lib/` gate logic, no hook behaviour, no SDK change. See
         # docs/production-readiness.md's 2026-08-26 layer (C-2 retired by
         # disclosure).
-        "2c2daa25de8f43f4f8b2e09599bb3a4ffeeedc9810270ed510aac815c803c452",
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
+        "7e8bbd7560c38825ae06d9060c06f7af217d6c609bd17138c4900c02f6e60768",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4200,7 +4220,17 @@ EXPECTED_DIGESTS = {
         # language-preserving -- it deletes
         # `python -m {x/pip install evil` -- and they are
         # `install-tail-path-scan-quadratic`, a filed row of its own.
-        "6e36a5ee3dbd4dd96e49e6b5c049263979efaba7adde8e3589b26aceefbd3a69",
+        # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+        # re-baseline, not a drift: the install-head candidate loop stops evaluating
+        # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+        # moves. It is the ONLY emitted path that moves - none added, none removed, on
+        # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
+        # re-baseline; a move would have been E5.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+        # what this closes and what it does not. Deliberately NOT restated here: a fact
+        # repeated on ten surfaces goes stale on nine of them.
+        "74b9bb0ec89dc5ccd618ac38e426a495bd0b2c93a0e94b870d8775935155509d",
 }
 
 EXPECTED_ACTION_COUNTS = {

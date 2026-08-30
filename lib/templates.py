@@ -5869,6 +5869,10 @@ while IFS= read -r nseg; do
   # the loop is linear in the shapes that have no completer - which is exactly
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
+  # [X-54] "The join is O(n) but runs only at a COMPLETER token, where the
+  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION:
+  # this loop no longer joins and no longer evaluates `HEAD` at all. Both moved
+  # below it, where one join and a binary search over the marks replace them.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to
@@ -5882,50 +5886,33 @@ while IFS= read -r nseg; do
   # anchor edit away from a silent change, so the condition is reproduced here
   # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
   # `set -u`.
-  _cparts=()
+  _cparts=(); _cen=(); _cet=()
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
-    if [ -n "$_UQW" ] || [ -n "$_cand" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
+    if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
       _cparts+=("$_UQW")
     fi
     _ckey "$_UQW"
     case "$_CKEY" in
-      @@COMPLETER_CASE@@)
-        # FOLD ONLY WHAT IS PENDING, then clear. Re-joining the WHOLE array at
-        # every completer marshals it into an argument list each time, which is
-        # strictly worse than the append it replaced when EVERY token is a
-        # completer - `i` is a one-character INSTALL_VERB that is itself one, so
-        # `i i i ...` is entirely attacker-supplied with zero jump targets.
-        # Measured: `i` x 20000 (40000 B, under both caps) went 24.38 s on main
-        # to 171.88 s re-joining, i.e. a shape main CLEARS turned into a 7x
-        # ceiling breach. Folding the pending elements keeps the completer-dense
-        # case at the old append's cost (one pending element, then an O(len)
-        # append) while the completer-FREE case - X-52's own padding - still
-        # never joins at all inside the loop.
-        _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-        if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
-        _cparts=()
-        if [[ "$_cand" =~ $HEAD ]]; then
-          head_txt="$_cand"
-          # [#43 review, F9] One expansion, not an append loop that
-          # reallocates per token - and no leading space for the caller.
-          rest="${{_NTOKS[*]:_hi+1}}"
-          break
-        fi ;;
+      @@COMPLETER_CASE@@) _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi") ;;
     esac
   done
-  # [X-52] The guarded loop above now sets `_cand` only AT a completer, so the
-  # whole-segment spelling the check below reads has to be materialised here.
-  # Unconditional would re-join on the break path too, where `_cand` is already
-  # the matched prefix and must not be overwritten - hence the `head_txt` test,
-  # which is the same found/not-found signal F9 established.
-  if [ -z "$head_txt" ] && [ "${{#_cparts[@]}}" -gt 0 ]; then
-    _cjoin ${{_cparts+"${{_cparts[@]}}"}}
-    if [ -z "$_cand" ]; then _cand="$_CJ"; else _cand="$_cand $_CJ"; fi
-    _cparts=()
+  _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+  _cand="$_CJ"
+  if [ "${{#_cen[@]}}" -gt 0 ] && [[ "$_cand" =~ $HEAD ]]; then
+    _clo=0; _cup=$(( ${{#_cen[@]}} - 1 ))
+    while [ "$_clo" -lt "$_cup" ]; do
+      _cmid=$(( (_clo + _cup) / 2 ))
+      _cjoin ${{_cparts+"${{_cparts[@]:0:${{_cen[$_cmid]}}}}"}}
+      if [[ "$_CJ" =~ $HEAD ]]; then _cup=$_cmid; else _clo=$(( _cmid + 1 )); fi
+    done
+    _cjoin ${{_cparts+"${{_cparts[@]:0:${{_cen[$_clo]}}}}"}}
+    if [[ "$_CJ" =~ $HEAD ]]; then
+      head_txt="$_CJ"
+      _cti=${{_cet[$_clo]}}
+      rest="${{_NTOKS[*]:_cti+1}}"
+    fi
   fi
-  # `_cand` now holds the whole reduced segment when the guard found nothing,
-  # so ONE match decides whether the guard could have missed anything.
   if [ -z "$head_txt" ] && [[ "$_cand" =~ $HEAD ]]; then
     _cand=""
     for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do

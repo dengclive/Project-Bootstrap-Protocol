@@ -2292,8 +2292,18 @@ EXPECTED_RETROFIT_DIGESTS = {
     # language-preserving -- it deletes
     # `python -m {x/pip install evil` -- and they are
     # `install-tail-path-scan-quadratic`, a filed row of its own.
-    "service": "125af48c1dc2f4e846856ad85e65864b5480c99a6b46bc9efadd833857187b07",
-    "agent": "3075c76e38281143c9fa5911d412e44e21553a9fd6d8b8122ab91e14f015943d",
+    # [freeze-exception no. 77, 2026-08-28] x54-completer-cost. Deliberate
+    # re-baseline, not a drift: the install-head candidate loop stops evaluating
+    # `HEAD` once per completer, so the emitted `.claude/hooks/dependency-gate.sh`
+    # moves. It is the ONLY emitted path that moves - none added, none removed, on
+    # every fixture. Action counts unchanged at 79 / 93, verified BEFORE this
+    # re-baseline; a move would have been E5.
+    # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+    # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
+    # what this closes and what it does not. Deliberately NOT restated here: a fact
+    # repeated on ten surfaces goes stale on nine of them.
+    "service": "8809208301ca487ac976c9d75e3e293758e13a89c3d08116fdad8f2c17bb642b",
+    "agent": "d374811650ddacf5bf9b61645c6085c0642f3dc51208e7da6c5c4f237fc3d9d5",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

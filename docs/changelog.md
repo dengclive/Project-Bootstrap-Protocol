@@ -158,6 +158,43 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the install-head loop stops evaluating `HEAD` once per completer (2026-08-28)
+
+**No version bump** (fix, not surface; freeze exception **77**).
+`x54-completer-cost`, the completer member of the X-54 cost class.
+
+**The defect.** The install-head candidate loop evaluated the `HEAD` regex **once
+per completer token**, and bash recompiles an anchored ERE on every `[[ =~ ]]` —
+fixed cost a shorter subject cannot reduce. **The number of evaluations is the
+cost, not their subject.** Single-character completer keys make a cap-legal
+payload that is entirely attacker-supplied with **zero jump targets**.
+
+**The fix.** The loop only **collects** now: reduced words into `_cparts`, never
+cleared, plus each completer's element count and token index. Then one join,
+**one** `HEAD` test, and a **binary search** over the marks. `HEAD` is anchored
+`^` and open at the end `( |$)`, so "matches the first k words" is monotone in k
+and the forward walk was a linear scan of a sorted array.
+
+**Measured on the emitted hooks**, this tree against `origin/main`, idle, one
+case at a time: completer `x`×40,951 goes **106.51 s, killed at the 60 s
+ceiling → 5.12 s deny**, against a non-completer control at the identical byte
+count that reads 4.55 s → 4.50 s. **That was a live fail-open**: past the 60 s
+ceiling the emitted `settings.json` declares, a PreToolUse hook is cancelled and
+only exit 2 blocks, so the deny became an allow.
+
+**Behaviour unchanged, checked rather than argued:** 11,000 differential commands
+on `(rc, stderr)`, 0 diffs; a 190,494-case census against the emitted artifact's
+own `HEAD`, 0 violations. Action counts unchanged at 57 / 69 / 59 and 79 / 93.
+
+**One residual, accepted:** the loop lost its early `break`, so a segment that
+*carries* a head walks all its tokens. Answers unchanged; only cost moves,
+bounded by `_CMD_MAXLEN`.
+
+**X-54 stays open, and its row in `docs/deferred-backlog.md` is the single point
+of truth for what this closes and what it does not** — the wrapper member and an
+argument-scanner member both remain. This entry deliberately does not restate
+that row: a fact repeated on ten surfaces goes stale on nine of them.
+
 ## Post-2.8.0 — the prefix run stops having two readings of one token (2026-08-24)
 
 **No version bump** (fix, not surface; freeze exception **75**).
