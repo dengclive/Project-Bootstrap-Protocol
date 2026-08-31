@@ -450,6 +450,31 @@ check("the invoker memo is never written from a decision on the trailing word",
 # would break silently. SHAPE pins, not cost pins.
 # The two halves live in different places: the `^ *` anchor is written into the
 # template here, and the `( |$)` open end comes from the substituted tail.
+# [X-54b] THE LOOP MUST STILL BE ABLE TO STOP EARLY, AND THIS PIN IS A SECURITY
+# PIN. X-54 removed the per-completer `HEAD` test because ~41,000 evaluations of
+# a big anchored ERE crossed the 60 s ceiling on head-LESS padding. Testing
+# NEVER was the over-correction: a segment that CARRIES a head then walked every
+# token and recorded a mark for each - work the original loop skipped by
+# breaking AT the head. MEASURED ON THE EMITTED HOOK, `pip install evil ` +
+# `x `x34,000 (68,017 B, 0 jumps) under the production 60 s ceiling: rc 2 in
+# 57.7 s on `8c2fc35`, rc 124 on `8cc107f` - a DENY the parent reached turned
+# into a cancelled hook, and only exit 2 blocks. Restored by probing `HEAD` at
+# the 1st, 2nd, 4th, 8th ... completer, which is O(log m) evaluations rather
+# than the ~41,000 X-54 removed, so BOTH fail-opens are closed by one counter.
+# NO BEHAVIOURAL ROW GUARDS THIS YET, AND THAT IS DELIBERATE RATHER THAN
+# FORGOTTEN: the crossing sits ~9 s apart on a ~57 s baseline that is dominated
+# by the still-open ARGUMENT SCANNER member, so any wall-clock row would have
+# ~4% headroom and would flake - the `#50 T8` failure this suite already paid
+# for. When `x54-arg-scanner-quadratic-and-fork` closes, that baseline drops and
+# a real row becomes possible; it is OWED then, and named in the X-54 row.
+check("the candidate loop can still stop early on a segment that carries a head",
+      "_cnext=1" in _tmpl
+      and 'if [ "${{#_cen[@]}}" -ge "$_cnext" ]; then' in _tmpl
+      and "_cnext=$(( _cnext * 2 ))" in _tmpl,
+      "[X-54b] delete the exponential probe and a head-BEARING cap-legal segment "
+      "walks every token again, which crossed the 60 s ceiling and turned a DENY "
+      "into a fail-OPEN. The probe is O(log m), not the per-completer test X-54 "
+      "removed - this is not a re-introduction of that cost")
 check("HEAD stays ^-anchored",
       'HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"' in _tmpl,
       "[X-54] drop the `^` and the predicate goes true at an EARLIER completer "

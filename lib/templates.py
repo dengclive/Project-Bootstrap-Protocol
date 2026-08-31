@@ -5886,7 +5886,19 @@ while IFS= read -r nseg; do
   # anchor edit away from a silent change, so the condition is reproduced here
   # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
   # `set -u`.
-  _cparts=(); _cen=(); _cet=()
+  # [X-54b] THE LOOP PROBES `HEAD` AT EXPONENTIALLY SPACED COMPLETER COUNTS SO IT
+  # CAN STOP EARLY, AND THAT EARLY STOP IS A SECURITY PROPERTY, NOT A SPEED-UP.
+  # X-54 removed the per-completer `HEAD` test because ~41,000 evaluations of a
+  # big anchored ERE crossed the 60 s ceiling on head-LESS padding. Testing NEVER
+  # was the over-correction: a segment that CARRIES a head then walked every
+  # token and recorded a mark for each, work the original loop skipped by
+  # breaking AT the head - and on `pip install evil ` + `x `x34,000 that pushed a
+  # DENY the parent reached in 57.7 s past the ceiling, where a cancelled hook
+  # exits 124 and only exit 2 blocks. Probing at the 1st, 2nd, 4th, 8th ...
+  # completer costs O(log m) evaluations - the same order the binary search
+  # already pays, NOT the ~41,000 X-54 removed - while letting a front head stop
+  # the walk almost immediately. Both fail-opens are closed by the same counter.
+  _cparts=(); _cen=(); _cet=(); _cnext=1
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
     if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
@@ -5894,7 +5906,13 @@ while IFS= read -r nseg; do
     fi
     _ckey "$_UQW"
     case "$_CKEY" in
-      @@COMPLETER_CASE@@) _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi") ;;
+      @@COMPLETER_CASE@@)
+        _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi")
+        if [ "${{#_cen[@]}}" -ge "$_cnext" ]; then
+          _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+          if [[ "$_CJ" =~ $HEAD ]]; then break; fi
+          _cnext=$(( _cnext * 2 ))
+        fi ;;
     esac
   done
   _cjoin ${{_cparts+"${{_cparts[@]}}"}}

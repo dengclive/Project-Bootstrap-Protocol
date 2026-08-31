@@ -186,9 +186,44 @@ only exit 2 blocks, so the deny became an allow.
 on `(rc, stderr)`, 0 diffs; a 190,494-case census against the emitted artifact's
 own `HEAD`, 0 violations. Action counts unchanged at 57 / 69 / 59 and 79 / 93.
 
-**One residual, accepted:** the loop lost its early `break`, so a segment that
-*carries* a head walks all its tokens. Answers unchanged; only cost moves,
-bounded by `_CMD_MAXLEN`.
+**RETRACTED, 2026-08-31 — the residual above was NOT harmless and the disclosure
+was false.** It read: *"the loop lost its early `break`, so a segment that
+carries a head walks all its tokens. Answers unchanged; only cost moves, bounded
+by `_CMD_MAXLEN`."* Under the production ceiling **cost crossing IS an answer
+change**, which is the one thing this entry is about. Measured on the emitted
+hook, `pip install evil ` + `x `×34,000 (68,017 B, 0 jump targets, deny at stake
+— it denies unpadded in 0.03 s): **rc 2 in 57.7 s on `8c2fc35`, rc 124 on
+`8cc107f`** — a DENY the parent reached, cancelled, and only exit 2 blocks. The
+fix closed one fail-open and opened another. **Closed by the follow-up below;
+the entry above is left standing per this file's append-only rule.**
+
+## Post-2.8.0 — the install-head loop can stop early again (2026-08-31)
+
+**No version bump** (fix, not surface; freeze exception **77**, the same
+exception). `x54-head-bearing-fail-open`, a regression from the entry above.
+
+**The defect.** Removing the per-completer `HEAD` test fixed head-LESS padding
+and broke head-BEARING padding: the loop no longer stopped at the head, so it
+walked every token and recorded a mark for each — work the original loop skipped.
+On a cap-legal shape that pushed a deny the parent reached past the 60 s ceiling.
+
+**The fix, and it is one counter.** The loop probes `HEAD` at the **1st, 2nd,
+4th, 8th …** completer. That is O(log m) evaluations — the same order the binary
+search after it already pays, **not** the ~41,000 the previous entry removed — so
+a head near the front stops the walk almost at once and head-less padding keeps
+its bound. **Both fail-opens are closed by the same counter.**
+
+**Measured under the production 60 s ceiling**, emitted hooks, one case at a
+time: head-bearing `pip install evil ` + `x `×34,000 **rc 124 → rc 2 in 57.5 s**;
+and the previous entry's win is kept — head-less `x `×40,951 + `; pip install
+evil` stays **rc 2 in 4.5 s**. Unpadded control denies in 0.03 s.
+
+**No behavioural row guards this yet, deliberately.** The crossing sits about 9 s
+apart on a ~57 s baseline dominated by the still-open **argument-scanner** member,
+so a wall-clock row would have ~4% headroom and would flake — the `#50 T8`
+failure this suite has already paid for once. A source-shape pin in
+`tests/test_composition.py` guards the probe against deletion, and the
+behavioural row is **owed** when `x54-arg-scanner-quadratic-and-fork` closes.
 
 **X-54 stays open, and its row in `docs/deferred-backlog.md` is the single point
 of truth for what this closes and what it does not** — the wrapper member and an

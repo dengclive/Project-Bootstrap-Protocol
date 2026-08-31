@@ -2298,12 +2298,15 @@ EXPECTED_RETROFIT_DIGESTS = {
     # moves. It is the ONLY emitted path that moves - none added, none removed, on
     # every fixture. Action counts unchanged at 79 / 93, verified BEFORE this
     # re-baseline; a move would have been E5.
-    # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+    # RE-BASELINED A SECOND TIME 2026-08-31, same exception 77: the first fix broke
+    # head-BEARING padding (a DENY the parent reached became a cancelled hook), and
+    # the loop can now stop early again. Both fail-opens are closed by one counter.
+    # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
     # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
     # what this closes and what it does not. Deliberately NOT restated here: a fact
     # repeated on ten surfaces goes stale on nine of them.
-    "service": "8809208301ca487ac976c9d75e3e293758e13a89c3d08116fdad8f2c17bb642b",
-    "agent": "d374811650ddacf5bf9b61645c6085c0642f3dc51208e7da6c5c4f237fc3d9d5",
+    "service": "7bbfde2d228f4fe48dbe30a9ca83aa1b89304c8fe2c1329e8b7b164e76ccb508",
+    "agent": "f516920d903043da95fc7fb4dc18410582e381b9009278717cc114e68853beed",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
