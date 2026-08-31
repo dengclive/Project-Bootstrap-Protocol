@@ -403,8 +403,13 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # `corrected` (a one-clause "every surface" overclaim self-caught by the step-7
 # review and fixed before push). The runbook's step-10b "pin moved in the same
 # commit".
+# +1 on 2026-08-31 for x54-completer-cost: the completer member of the X-54 cost
+# class closed (PR #98, merge 8cc107f, freeze exception 77), graded `harmful` --
+# four correction commits each pushed false claims to ORIGIN and all four are
+# merged into main. The code was never at fault; every defect in every round was
+# in prose. The runbook's step-10b "pin moved in the same commit".
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 43, f"{len(es)} entries")
+      len(es) == 44, f"{len(es)} entries")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
