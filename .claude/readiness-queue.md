@@ -307,6 +307,41 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   Step 4 = a differential row that is red on the current tree. Freeze
   exception applies. **Never batched.**
 
+- **[ready] x54-arg-scanner-quadratic-and-fork** · `CODE` · eligible: **yes**
+  **FILED 2026-08-31 AT STEP 10 BY `x54-completer-cost` (PR #98, merge
+  `8cc107f`), WHICH IS WHERE IT WAS PROMISED AND NOT BEFORE.** Every commit on
+  that branch said this member was "to be filed at step 10 — not at this
+  commit"; those sentences were true when written and are now discharged.
+  **The third member of the X-54 cost class, and the one the X-54 row never
+  named.** A segment carrying a REAL install head sends its argument list into
+  the argument scanner, which **forks one subshell per package token** AND
+  appends to a **growing `blocked` string** — O(n²), the same shape B4, X-50 and
+  X-52 each fixed elsewhere. Cap-legal and **KILLED at 60 s before and after**
+  the completer fix, so it is a live fail-open on the same mechanism: a
+  cancelled hook exits 124 and only exit 2 blocks.
+  **A step-4 row already exists and is GREEN-by-design:** the boundary row in
+  `tests/test_issue_fixes.py` asserts this shape stays `rc 124`. **When that row
+  goes RED the scanner has been fixed — update it, do not delete it.** That row
+  is therefore this item's step-4 red, inverted; re-read it before planning.
+  Name the code, not the line: the sites are `pkg_name "$tok"` and
+  `blocked="$blocked $name_only"`. Line numbers into the emitted artifact drift
+  with every comment edit and two rounds got them wrong in OPPOSITE directions.
+
+- **[ready] x54-wrapper-cost** · `CODE` · eligible: **yes**
+  **FILED 2026-08-31 at step 10 by `x54-completer-cost`.** The X-54 row records
+  this member and measures it; **no queue row has ever carried it**, so nothing
+  was scheduled to do it. `sudo` + 2,000 quoted runs is cap-legal at 80,022 B /
+  4,000 jump targets and was measured at **167.15 s** carrying a would-otherwise
+  -DENY tail — killed at the 60 s ceiling, fail-OPEN, execution-proven under
+  `x54-deny-shape`. Untouched by the completer fix: it crosses through
+  `_cs_isinv`, not the install-head candidate loop.
+  **Read the X-54 row before planning — it carries why X-52's memo cannot serve
+  this class:** a WRAPPER head sets `_seen=1`, which is the arm that stops the
+  walk deciding ON A TOKEN, so it decides by EXHAUSTION and an exhausted answer
+  must not be cached. Overlaps `shell-walk-residual-superlinear` (B) on
+  mechanism; that row is scoped to the brace-glue shape and `_ckey`, this one to
+  the wrapper class. **Check before planning whether they should be merged.**
+
 ## B — makes shipping-with-known-risk honest
 
 - **[ready] shell-walk-residual-superlinear** · `CODE` · eligible: **yes**
@@ -522,6 +557,32 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
 
+**`x54-completer-cost` PR #98 `8cc107f` — the install-head loop stops evaluating
+`HEAD` once per completer.** Closed 2026-08-31. Freeze exception **77**. Never a
+queue row: it was taken directly off the **X-54** backlog row, which is why its
+two surviving members had to be filed as rows above rather than found there.
+**Six commits**, and the shape of them is the record: `b9df507` step-4 red,
+`dc268d0` the fix, `ef99fbc` a step-8 correction that DIVERGED (23 findings →
+32), `521724a` the operator-ruled STRIP, `56421e9` a solo re-review, `e6a1a03`
+and `fd4c90e` and `5b2b6ca` the three fan-out rounds. **The verdict did NOT
+move** — `docs/production-readiness.md` untouched, `main` stays NOT PRODUCTION
+READY on leg (a); X-37 unaffected. What moved is the X-54 row's status cell:
+the **completer** member is closed, the **wrapper** and **argument-scanner**
+members remain and now have rows.
+**Measured on the emitted hooks**, this tree vs `origin/main`, idle, serial:
+completer `x`×40,951 **106.51 s KILLED → 5.12 s DENY**, non-completer control at
+the identical byte count 4.55 → 4.50 s. 11,000 differential commands 0 diffs;
+190,494-case census 0 violations; action counts unchanged at 57/69/59 and 79/93.
+**AND THE SUITE CAN SEE THIS CLASS NOW:** `tests/test_issue_fixes.py` applies
+the production 60 s ceiling for the first time in this repo.
+**Graded `harmful`** — see the ledger entry. Four rounds of false prose reached
+origin, and so did a FAIL-OPEN: closing the head-LESS completer padding opened a
+head-BEARING one on the same loop (`pip install evil ` + `x `×34,000 — rc 2 in
+57.65 s on `8c2fc35`, rc 124 on `8cc107f`). Round 3 reported it as a BLOCKER; a
+1–1 refuter tie was scored as refuted and it was dropped. **Fixed in PR #99,
+which is under adversarial review and NOT merged** — until it lands, `main`
+carries a fail-open this item introduced.
+
 **`prefix-run-assignment-wrapper-overlap` PR #92 `abe3f48` — the prefix run
 stops having two readings of one token.** Closed 2026-08-25. Seven commits:
 `8796db1` step-4 reds, `f8745bf` the fix, `e9120eb` the second red, `3c3c11b`
@@ -711,6 +772,31 @@ operator — the first merge in this run the loop did not perform itself**, whic
 is exactly what 9b now requires.
 
 ## Owed
+
+**[2026-08-31]** `x54-completer-cost` closed, **PR #98, merge `8cc107f`** —
+**and it introduced a fail-open that is not yet fixed on `main`.** Closing the
+head-LESS completer padding opened a head-BEARING one on the same loop; PR #99
+(`fix/x54-head-bearing-fail-open`) closes it and is under review, NOT merged.
+`x54-head-bearing-fail-open` is therefore live work, not a filed residual.
+**THE VERDICT DID NOT MOVE.** `docs/production-readiness.md` is untouched by this
+work and `main` stays **NOT PRODUCTION READY**. It is not X-37, and the leg it
+does touch — leg (a), the emitted gates as a security boundary — it only
+narrows: the X-54 row's **completer** member is closed, its **wrapper** and
+**argument-scanner** members are not.
+**COUNTED OFF THE SECTION HEADERS JUST NOW, NOT FROM MEMORY: A = 9, B = 9,
+C = 5, measurement residuals = 2.** A gained the two rows this work exposed
+(`x54-arg-scanner-quadratic-and-fork`, `x54-wrapper-cost`) and lost none —
+`x54-completer-cost` was never a queue row, so nothing moved to Done from A.
+**TWO EARLIER LAYERS IN THIS SECTION ARE NOW SUPERSEDED, NOT WRONG WHEN
+WRITTEN:** every layer that says the verdict has **two** remaining legs predates
+2026-08-26, when C-2 was retired by disclosure (PR #96, merge `75eef0a`); there
+is **one** security leg now. And the **"A holds 8"** paragraph below predates
+both that retirement and `prefix-run-assignment-wrapper-overlap`'s closure, so
+its list names two rows that are no longer open. Read the count in this layer.
+**`docs/production-readiness.md` is 13 commits behind its last edit (`6aefb6b`,
+2026-08-26) and no row covers that** — `priority-reading` (C) owns only its
+stale Snapshot header. That is a smaller gap than the 70 the 2026-08-25 layer
+records, because the C-2 retirement re-based the document; it is not closed.
 
 **[2026-08-25]** `prefix-run-assignment-wrapper-overlap` closed, PR #92
 merge `abe3f48`. **THE VERDICT DID NOT MOVE** -- it is neither of the two
