@@ -5870,9 +5870,12 @@ while IFS= read -r nseg; do
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
   # [X-54] "The join is O(n) but runs only at a COMPLETER token, where the
-  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION:
-  # this loop no longer joins and no longer evaluates `HEAD` at all. Both moved
-  # below it, where one join and a binary search over the marks replace them.
+  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION.
+  # [X-54b] AND SO IS X-54's OWN REPLACEMENT FOR IT. That sentence read "this
+  # loop no longer joins and no longer evaluates `HEAD` at all"; it was true of
+  # X-54 and is FALSE of this loop, which probes `HEAD` at exponentially spaced
+  # completer counts so it can stop early. It is quoted here rather than deleted
+  # because it shipped in the emitted artifact and a reader may have it.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to
@@ -5886,7 +5889,22 @@ while IFS= read -r nseg; do
   # anchor edit away from a silent change, so the condition is reproduced here
   # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
   # `set -u`.
-  _cparts=(); _cen=(); _cet=()
+  # [X-54b] THE LOOP PROBES `HEAD` AT EXPONENTIALLY SPACED COMPLETER COUNTS, AND
+  # THE FIRST PROBE IS DELIBERATELY NOT AT THE FIRST COMPLETER. X-54 removed the
+  # per-completer test because ~41,000 evaluations of a big anchored ERE crossed
+  # the 60 s ceiling. Testing NEVER was the over-correction: a segment that
+  # CARRIES a head then walked every token, which pushed a DENY the parent
+  # reached past the ceiling - and a cancelled hook exits 124 while only exit 2
+  # blocks.
+  # THE COUNTER IS PER SEGMENT AND THE CEILING IS PER COMMAND, so an unthresholded
+  # probe is itself a fail-open: `("x ; " x 20476)` is 20,476 ONE-completer
+  # segments, and probing each one restored the same order of `HEAD` evaluations
+  # X-54 removed. Starting at the 16th completer means a segment must be big
+  # enough to be worth probing, which bounds the per-COMMAND count at roughly
+  # total-completers / 16 plus a logarithmic term per large segment.
+  # Adversarially sized against the threshold - segments of EXACTLY 16 completers
+  # at the byte cap - the emitted hook denies well inside the ceiling.
+  _cparts=(); _cen=(); _cet=(); _cnext=16
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
     if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then
@@ -5894,7 +5912,13 @@ while IFS= read -r nseg; do
     fi
     _ckey "$_UQW"
     case "$_CKEY" in
-      @@COMPLETER_CASE@@) _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi") ;;
+      @@COMPLETER_CASE@@)
+        _cen+=("${{#_cparts[@]}}"); _cet+=("$_hi")
+        if [ "${{#_cen[@]}}" -ge "$_cnext" ]; then
+          _cjoin ${{_cparts+"${{_cparts[@]}}"}}
+          if [[ "$_CJ" =~ $HEAD ]]; then break; fi
+          _cnext=$(( _cnext * 2 ))
+        fi ;;
     esac
   done
   _cjoin ${{_cparts+"${{_cparts[@]}}"}}

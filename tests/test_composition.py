@@ -450,6 +450,40 @@ check("the invoker memo is never written from a decision on the trailing word",
 # would break silently. SHAPE pins, not cost pins.
 # The two halves live in different places: the `^ *` anchor is written into the
 # template here, and the `( |$)` open end comes from the substituted tail.
+# [X-54b] THE EARLY STOP IS A SECURITY PROPERTY AND THIS PIN GUARDS THE LINE THAT
+# PERFORMS IT, NOT THE BOOKKEEPING AROUND IT. An earlier version of this pin
+# asserted only the counter (`_cnext`, its guard and its doubling); replacing
+# `break` with `:` left all three strings intact and the whole suite green while
+# the fail-open came back. Pin the probe and the break themselves.
+# WHY THE PROBE EXISTS: X-54 removed the per-completer `HEAD` test because
+# ~41,000 evaluations crossed the 60 s ceiling on head-LESS padding. Testing
+# NEVER was the over-correction - a segment that CARRIES a head then walked every
+# token, turning a DENY the parent reached into a cancelled hook, and only exit 2
+# blocks.
+# WHY IT STARTS AT 16 AND NOT AT 1: the counter is per SEGMENT, the ceiling is per
+# COMMAND. Probing from the first completer meant `("x ; " x 20476)` - 20,476
+# ONE-completer segments - paid one evaluation each, restoring the same order
+# X-54 removed. Measured on the emitted hook: that shape denies on the parent and
+# on X-54 and was CANCELLED with an unthresholded probe. The threshold bounds the
+# per-COMMAND count at roughly total-completers / 16.
+# NO BEHAVIOURAL ROW GUARDS THIS, DELIBERATELY: the head-bearing crossing sits a
+# few seconds apart on a ~58 s baseline dominated by the still-open ARGUMENT
+# SCANNER member, so a wall-clock row would have single-digit-percent headroom and
+# would flake - the `#50 T8` failure this suite already paid for. The row is OWED
+# when `x54-arg-scanner-quadratic-and-fork` closes.
+check("the candidate loop still probes HEAD and BREAKS, so it can stop early",
+      'if [[ "$_CJ" =~ $HEAD ]]; then break; fi' in _tmpl
+      and 'if [ "${{#_cen[@]}}" -ge "$_cnext" ]; then' in _tmpl,
+      "[X-54b] this is the early stop itself. Delete the break, or the probe, and "
+      "a head-BEARING cap-legal segment walks every token again - which crossed "
+      "the 60 s ceiling and turned a DENY into a fail-OPEN")
+check("the HEAD probe starts above the first completer, bounding it per COMMAND",
+      "_cnext=16" in _tmpl and "_cnext=1\n" not in _tmpl
+      and "_cnext=$(( _cnext * 2 ))" in _tmpl,
+      "[X-54b] the counter is per SEGMENT and the ceiling is per COMMAND. Probing "
+      "from the FIRST completer costs one HEAD evaluation per segment, and a "
+      "cap-legal command of one-completer segments then pays the same order X-54 "
+      "removed - a fail-OPEN. The threshold is what makes the probe affordable")
 check("HEAD stays ^-anchored",
       'HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"' in _tmpl,
       "[X-54] drop the `^` and the predicate goes true at an EARLIER completer "
