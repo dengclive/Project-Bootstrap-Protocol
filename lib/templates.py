@@ -5870,9 +5870,12 @@ while IFS= read -r nseg; do
   # the padding an attacker supplies. `${{_NTOKS[*]:_hi+1}}` below is the same
   # idiom; this is it applied to the other half of the pair.
   # [X-54] "The join is O(n) but runs only at a COMPLETER token, where the
-  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION:
-  # this loop no longer joins and no longer evaluates `HEAD` at all. Both moved
-  # below it, where one join and a binary search over the marks replace them.
+  # `[[ =~ ]]` below already pays O(n) anyway" IS NOW HISTORY, NOT DESCRIPTION.
+  # [X-54b] AND SO IS X-54's OWN REPLACEMENT FOR IT. That sentence read "this
+  # loop no longer joins and no longer evaluates `HEAD` at all"; it was true of
+  # X-54 and is FALSE of this loop, which probes `HEAD` at exponentially spaced
+  # completer counts so it can stop early. It is quoted here rather than deleted
+  # because it shipped in the emitted artifact and a reader may have it.
   #
   # LEADING EMPTIES ARE DROPPED, INTERIOR ONES ARE KEPT - and that asymmetry is
   # the append's behaviour, not a choice made here. `_uqw` reduces a token to
@@ -5886,19 +5889,22 @@ while IFS= read -r nseg; do
   # anchor edit away from a silent change, so the condition is reproduced here
   # instead. `${{#_cparts[@]}}` on an empty array is 0 and is legal under
   # `set -u`.
-  # [X-54b] THE LOOP PROBES `HEAD` AT EXPONENTIALLY SPACED COMPLETER COUNTS SO IT
-  # CAN STOP EARLY, AND THAT EARLY STOP IS A SECURITY PROPERTY, NOT A SPEED-UP.
-  # X-54 removed the per-completer `HEAD` test because ~41,000 evaluations of a
-  # big anchored ERE crossed the 60 s ceiling on head-LESS padding. Testing NEVER
-  # was the over-correction: a segment that CARRIES a head then walked every
-  # token and recorded a mark for each, work the original loop skipped by
-  # breaking AT the head - and on `pip install evil ` + `x `x34,000 that pushed a
-  # DENY the parent reached in 57.7 s past the ceiling, where a cancelled hook
-  # exits 124 and only exit 2 blocks. Probing at the 1st, 2nd, 4th, 8th ...
-  # completer costs O(log m) evaluations - the same order the binary search
-  # already pays, NOT the ~41,000 X-54 removed - while letting a front head stop
-  # the walk almost immediately. Both fail-opens are closed by the same counter.
-  _cparts=(); _cen=(); _cet=(); _cnext=1
+  # [X-54b] THE LOOP PROBES `HEAD` AT EXPONENTIALLY SPACED COMPLETER COUNTS, AND
+  # THE FIRST PROBE IS DELIBERATELY NOT AT THE FIRST COMPLETER. X-54 removed the
+  # per-completer test because ~41,000 evaluations of a big anchored ERE crossed
+  # the 60 s ceiling. Testing NEVER was the over-correction: a segment that
+  # CARRIES a head then walked every token, which pushed a DENY the parent
+  # reached past the ceiling - and a cancelled hook exits 124 while only exit 2
+  # blocks.
+  # THE COUNTER IS PER SEGMENT AND THE CEILING IS PER COMMAND, so an unthresholded
+  # probe is itself a fail-open: `("x ; " x 20476)` is 20,476 ONE-completer
+  # segments, and probing each one restored the same order of `HEAD` evaluations
+  # X-54 removed. Starting at the 16th completer means a segment must be big
+  # enough to be worth probing, which bounds the per-COMMAND count at roughly
+  # total-completers / 16 plus a logarithmic term per large segment.
+  # Adversarially sized against the threshold - segments of EXACTLY 16 completers
+  # at the byte cap - the emitted hook denies well inside the ceiling.
+  _cparts=(); _cen=(); _cet=(); _cnext=16
   for ((_hi=0; _hi<${{#_NTOKS[@]}}; _hi++)); do
     _uqw "${{_NTOKS[$_hi]}}"
     if [ -n "$_UQW" ] || [ "${{#_cparts[@]}}" -gt 0 ]; then

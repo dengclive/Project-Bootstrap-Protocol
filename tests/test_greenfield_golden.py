@@ -3349,14 +3349,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # RE-BASELINED A SECOND TIME 2026-08-31, same exception 77: the first fix broke
-        # head-BEARING padding (a DENY the parent reached became a cancelled hook), and
-        # the loop can now stop early again. Both fail-opens are closed by one counter.
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
         # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "ee3d8f065b86340aef519db1041a232273a8a1054a99e23c375a0375c5080cd6",
+        "13bd61135b01da88efdde84646b751f05b54e323742de6a01a13d8f236bf820b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3822,14 +3825,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # RE-BASELINED A SECOND TIME 2026-08-31, same exception 77: the first fix broke
-        # head-BEARING padding (a DENY the parent reached became a cancelled hook), and
-        # the loop can now stop early again. Both fail-opens are closed by one counter.
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
         # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "3484448e9ce4fc38ae63a39f1ab16276187e15974529ca71e38ca9a9c2373ab6",
+        "e52dd9d92e5a89e685a913c58e98736f37408724ba3df1f55a487d81385e3118",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4232,14 +4238,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # RE-BASELINED A SECOND TIME 2026-08-31, same exception 77: the first fix broke
-        # head-BEARING padding (a DENY the parent reached became a cancelled hook), and
-        # the loop can now stop early again. Both fail-opens are closed by one counter.
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
         # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "03b6b64f9b16c13940c5a5b1fcf444930e1b87549d2d026c9ced2fcc3ac0bfe0",
+        "242af74be96c37647c934bcd3ed7a8f1231a51b13e42763e0cc628796649a84d",
 }
 
 EXPECTED_ACTION_COUNTS = {

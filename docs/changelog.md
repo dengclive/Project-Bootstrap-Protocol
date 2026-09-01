@@ -187,48 +187,62 @@ on `(rc, stderr)`, 0 diffs; a 190,494-case census against the emitted artifact's
 own `HEAD`, 0 violations. Action counts unchanged at 57 / 69 / 59 and 79 / 93.
 
 **RETRACTED, 2026-08-31 — the residual above was NOT harmless and the disclosure
-was false.** It read: *"the loop lost its early `break`, so a segment that
-carries a head walks all its tokens. Answers unchanged; only cost moves, bounded
-by `_CMD_MAXLEN`."* Under the production ceiling **cost crossing IS an answer
-change**, which is the one thing this entry is about. Measured on the emitted
-hook, `pip install evil ` + `x `×34,000 (68,017 B, 0 jump targets, deny at stake
-— it denies unpadded in 0.03 s): **rc 2 in 57.7 s on `8c2fc35`, rc 124 on
-`8cc107f`** — a DENY the parent reached, cancelled, and only exit 2 blocks. The
-fix closed one fail-open and opened another. **Closed by the follow-up below;
-the entry above is left standing per this file's append-only rule.**
+was false.** It read: *"the loop lost its early `break`, so a segment that carries
+a head walks all its tokens. Answers unchanged; only cost moves, bounded by
+`_CMD_MAXLEN`."* Under the production ceiling **cost crossing IS an answer
+change**. **PR #98's merged body carried a stronger, quantified form of the same
+disclosure — *"+26–30 µs/token, bounded at ~1.3 s by `_CMD_MAXLEN`"* — and that
+is retracted here too:** it accounted only for the extra per-token walk, never for
+the marks the loop records once it no longer stops at the head. Three lines of the
+entry above were replaced by this block rather than appended to; that is a
+deviation from how the rest of this file is maintained, and it is noted rather
+than hidden — **no append-only rule for this file is written down anywhere**, and
+an earlier draft of this paragraph claimed one.
 
 ## Post-2.8.0 — the install-head loop can stop early again (2026-08-31)
 
 **No version bump** (fix, not surface; freeze exception **77**, the same
 exception). `x54-head-bearing-fail-open`, a regression from the entry above.
 
-**The defect.** Removing the per-completer `HEAD` test fixed head-LESS padding
-and broke head-BEARING padding: the loop no longer stopped at the head, so it
-walked every token and recorded a mark for each — work the original loop skipped.
-On a cap-legal shape that pushed a deny the parent reached past the 60 s ceiling.
+**The defect.** Removing the per-completer `HEAD` test closed head-LESS padding
+and opened head-BEARING padding: the loop no longer stopped at the head, so it
+walked every token and recorded a mark for each. On the emitted hook under the
+production 60 s ceiling, `pip install evil ` + `x `×34,000 (68,017 B, 0 jumps;
+denies unpadded in 0.03 s) the parent DENIES and the merged tree is CANCELLED —
+and a cancelled hook exits 124 while only exit 2 blocks.
 
-**The fix, and it is one counter.** The loop probes `HEAD` at the **1st, 2nd,
-4th, 8th …** completer. That is O(log m) evaluations — the same order the binary
-search after it already pays, **not** the ~41,000 the previous entry removed — so
-a head near the front stops the walk almost at once and head-less padding keeps
-its bound. **Both fail-opens are closed by the same counter.**
+**The fix.** The loop probes `HEAD` at exponentially spaced completer counts and
+breaks when one matches — **starting at the 16th completer, not the first.** The
+threshold is the load-bearing part: **the counter is per SEGMENT and the ceiling
+is per COMMAND**, so probing from the first completer costs one evaluation per
+segment, and a cap-legal command of ~20,000 one-completer segments then pays the
+same order of `HEAD` evaluations X-54 removed. That was measured, not reasoned:
+an unthresholded probe turned `("x ; "` ×20,476`) + "pip install evil"` — a shape
+the parent and X-54 both DENY — into a cancelled hook.
 
-**Measured under the production 60 s ceiling**, emitted hooks, one case at a
-time: head-bearing `pip install evil ` + `x `×34,000 **rc 124 → rc 2 in 57.5 s**;
-and the previous entry's win is kept — head-less `x `×40,951 + `; pip install
-evil` stays **rc 2 in 4.5 s**. Unpadded control denies in 0.03 s.
+**What this closes, stated narrowly because the wider claim is false.** It
+restores the **band** of head-bearing shapes that X-54 regressed: shapes the
+parent denied and X-54 cancelled now deny again, and X-54's own win is kept —
+head-less `x `×40,951 still denies in seconds. **It does NOT close the
+head-bearing class.** Taken to the byte cap (`pip install evil ` + `x `×40,951)
+the shape is CANCELLED on the parent, on X-54 and on this tree alike: that is the
+open **argument-scanner** member, not this loop, and no claim here should be read
+as touching it.
 
-**No behavioural row guards this yet, deliberately.** The crossing sits about 9 s
-apart on a ~57 s baseline dominated by the still-open **argument-scanner** member,
-so a wall-clock row would have ~4% headroom and would flake — the `#50 T8`
-failure this suite has already paid for once. A source-shape pin in
-`tests/test_composition.py` guards the probe against deletion, and the
-behavioural row is **owed** when `x54-arg-scanner-quadratic-and-fork` closes.
+**Measured, and the absolutes do not travel.** Every figure above was taken on
+one machine at low load; a reviewer on a box ~1.2–1.35× slower saw the
+head-bearing case cancelled on all three trees. **The ORDERING is the durable
+result** — parent denies, X-54 cancels, this tree denies — and the crossing point
+in padding length is machine-dependent. Figures quoted at the ceiling are
+censored at 60 s and bound the cost from below only.
 
-**X-54 stays open, and its row in `docs/deferred-backlog.md` is the single point
-of truth for what this closes and what it does not** — the wrapper member and an
-argument-scanner member both remain. This entry deliberately does not restate
-that row: a fact repeated on ten surfaces goes stale on nine of them.
+**No behavioural row guards this, deliberately.** The crossing sits a few seconds
+apart on a ~58 s baseline dominated by the still-open argument-scanner member, so
+a wall-clock row would have single-digit-percent headroom and would flake — the
+`#50 T8` failure this suite has already paid for. Source-shape pins in
+`tests/test_composition.py` guard the probe **and the break**, and were
+mutation-tested against the one-line change that defeats them. The behavioural
+row is **owed** when `x54-arg-scanner-quadratic-and-fork` closes.
 
 ## Post-2.8.0 — the prefix run stops having two readings of one token (2026-08-24)
 
