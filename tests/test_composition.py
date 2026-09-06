@@ -477,8 +477,27 @@ check("the candidate loop still probes HEAD and BREAKS, so it can stop early",
       "[X-54b] this is the early stop itself. Delete the break, or the probe, and "
       "a head-BEARING cap-legal segment walks every token again - which crossed "
       "the 60 s ceiling and turned a DENY into a fail-OPEN")
+# [X-54b] PIN THE WHOLE INITIALISATION LINE, NOT THE BARE SUBSTRING. The
+# conjunct here was `"_cnext=16" in _tmpl`, and `_cnext=1600000` CONTAINS
+# `_cnext=16` - so raising the threshold to every 1.6-millionth completer, which
+# is the same as never probing, left this check green. Measured on this head
+# 2026-09-07: `_cnext=1600000`, `_cnext=160` and `_cnext=17` each passed the old
+# conjunct 156/0 and each fails the line form 155/1. The `"_cnext=1\n" not in`
+# half was the previous attempt at the same hole and is subsumed: it caught only
+# the single value `1`, and every other value walked through it.
+# THE OTHER TWO KNOWN EDITS ARE ALREADY CAUGHT, re-measured per conjunct on this
+# head: `break` -> `:` gives 155/1, and wrapping the probe in a never-true guard
+# gives 155/1, both via the check above. The readiness record's "three one-line
+# edits each restore the fail-open with 156/156 green" is STALE - only the
+# threshold edit survived, and this closes it.
+# STILL A SHAPE PIN. It proves the constant is intact, not that the guard answers
+# inside the ceiling; the behavioural row remains OWED per the note above, and
+# two wall-clock designs were tried and REJECTED as vacuous on 2026-09-07 (a
+# head-bearing vs head-less ratio held at 5.38 / 5.08 / 5.03 across the
+# unmutated tree and both mutations - it measures the pipe rule and the argument
+# scanner, not the early stop).
 check("the HEAD probe starts above the first completer, bounding it per COMMAND",
-      "_cnext=16" in _tmpl and "_cnext=1\n" not in _tmpl
+      "_cparts=(); _cen=(); _cet=(); _cnext=16\n" in _tmpl
       and "_cnext=$(( _cnext * 2 ))" in _tmpl,
       "[X-54b] the counter is per SEGMENT and the ceiling is per COMMAND. Probing "
       "from the FIRST completer costs one HEAD evaluation per segment, and a "
