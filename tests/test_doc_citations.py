@@ -96,6 +96,8 @@ CITATIONS = [
     ("tests/test_wrapper_behavior.py", PRD,
      "exit 2 blocks, but exit 1 is",
      "**Fails closed when the parser does not WORK"),
+    ("docs/deferred-backlog.md", COMPANION,
+     "**Runner termination conditions**"),
     ("docs/deferred-backlog.md", PRD,
      "**Iteration-summary enforcement** (only if"),
     # EMITTED. This one ships inside .claude/hooks/iteration-summary-enforcement.sh

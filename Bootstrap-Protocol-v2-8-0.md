@@ -2351,11 +2351,13 @@ The wizard surfaces these to the operator before generating queue-mode artifacts
 Derived from the first review round to examine the **specification** of Phases
 9.5–9.7 rather than the emitted wrappers, and the first to settle its substrate
 premises by live measurement rather than by reading. Method: 10 adversarial
-lenses, each finding faced by 3 refuters; 48 raised, 13 refuted, 29 distinct
-confirmed. The seven below are the subset that **blocks an operator completing
-the dispatch loop** — each one either makes a documented mechanism unbuildable,
-or makes a built one silently wrong. The remaining 22 are recorded in
-`docs/deferred-backlog.md`.
+lenses, each finding faced by 3 refuters. The seven below are the subset that
+**blocks an operator completing the dispatch loop** — each one either makes a
+documented mechanism unbuildable, or makes a built one silently wrong. The
+review's tally and the non-blocking balance are recorded in
+`docs/deferred-backlog.md` cluster Z, which carries the arithmetic with its
+derivation; this appendix deliberately does not restate a count that would then
+have to be kept in agreement.
 
 Claims marked MEASURED were executed against Claude Code **2.1.263** on Linux;
 a measurement is named with its probe so it can be re-run rather than trusted.
