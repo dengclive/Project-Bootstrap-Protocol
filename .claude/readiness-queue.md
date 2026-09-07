@@ -561,7 +561,7 @@ defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 `HEAD` once per completer.** Closed 2026-08-31. Freeze exception **77**. Never a
 queue row: it was taken directly off the **X-54** backlog row, which is why its
 two surviving members had to be filed as rows above rather than found there.
-**Six commits**, and the shape of them is the record: `b9df507` step-4 red,
+**Eight commits** (`git rev-list --count 8c2fc35..5b2b6ca`; the sentence below names eight shas), and the shape of them is the record: `b9df507` step-4 red,
 `dc268d0` the fix, `ef99fbc` a step-8 correction that DIVERGED (23 findings →
 32), `521724a` the operator-ruled STRIP, `56421e9` a solo re-review, `e6a1a03`
 and `fd4c90e` and `5b2b6ca` the three fan-out rounds. **The verdict did NOT
@@ -574,12 +574,18 @@ completer `x`×40,951 **106.51 s KILLED → 5.12 s DENY**, non-completer control
 the identical byte count 4.55 → 4.50 s. 11,000 differential commands 0 diffs;
 190,494-case census 0 violations; action counts unchanged at 57/69/59 and 79/93.
 **AND THE SUITE CAN SEE THIS CLASS NOW:** `tests/test_issue_fixes.py` applies
-the production 60 s ceiling for the first time in this repo.
+the production 60 s ceiling by CANCELLATION for the first time in this repo
+(`subprocess timeout=60` -> rc 124). The ceiling was already BOUNDED before this
+item: the parent `8c2fc35` asserts elapsed time on the emitted hook at
+`tests/test_issue_fixes.py:4108-4119` and `:4175-4177`, and a SIGALRM cap at
+`tests/test_substrate_differential.py:4198-4240`. What is new is enforcing it.
 **Graded `harmful`** — see the ledger entry. Four rounds of false prose reached
 origin, and so did a FAIL-OPEN: closing the head-LESS completer padding opened a
 head-BEARING one on the same loop (`pip install evil ` + `x `×34,000 — rc 2 in
 57.65 s on `8c2fc35`, rc 124 on `8cc107f`). Round 3 reported it as a BLOCKER; a
-1–1 refuter tie was scored as refuted and it was dropped. **Fixed in PR #99,
+1–1 refuter tie was scored as refuted and it was dropped. **A head-bearing fail-open remains open on `main`; PR #99 (unmerged) narrows but
+does not close it, and the residue is tracked as `x54-arg-scanner-quadratic-and-fork`.
+See PR #99,
 which is under adversarial review and NOT merged** — until it lands, `main`
 carries a fail-open this item introduced.
 

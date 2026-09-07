@@ -406,10 +406,29 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # +1 on 2026-08-31 for x54-completer-cost: the completer member of the X-54 cost
 # class closed (PR #98, merge 8cc107f, freeze exception 77), graded `harmful` --
 # four correction commits each pushed false claims to ORIGIN and all four are
-# merged into main. The code was never at fault; every defect in every round was
-# in prose. The runbook's step-10b "pin moved in the same commit".
+# merged into main. THE CODE WAS AT FAULT TOO: this comment used to say "the
+# code was never at fault; every defect in every round was in prose", which is
+# the exact sentence `.claude/trust-ramp.md` in this same commit retracts --
+# removing the per-completer HEAD test shipped a head-BEARING fail-open on
+# `main`. The runbook's step-10b "pin moved in the same commit".
 check("shipped ledger parses to the expected number of entries",
       len(es) == 44, f"{len(es)} entries")
+
+# [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
+# above catches a DELETED entry and nothing else: mutating this entry's
+# `**Outcome:** harmful` to `clean` passes this suite 39/0, measured 2026-09-08.
+# For an item whose entire product IS the grade -- the whole point of the
+# close-out is that x54-completer-cost shipped a fail-open and is graded harmful
+# -- an unpinned outcome is the same defect this repo keeps finding: a record
+# that agrees with itself while the load-bearing claim is free to move.
+# Consistent with the standing finding "pin SHAPE, never COST": this pins the
+# shape of the verdict, not any number attached to it.
+_x54 = [e for e in es if e.get("task") == "x54-completer-cost"]
+check("the x54-completer-cost ledger entry still carries its `harmful` grade",
+      len(_x54) == 1 and _x54[0].get("outcome") == "harmful",
+      f"    matched {len(_x54)} entries, outcome "
+      f"{_x54[0].get('outcome') if _x54 else None!r}; an entry that loses its "
+      "grade makes the whole close-out assert nothing")
 check("every shipped entry carries an outcome the vocabulary knows",
       all(e["outcome"] in ("clean", "corrected", "harmful") for e in es),
       str([e["outcome"] for e in es]))
