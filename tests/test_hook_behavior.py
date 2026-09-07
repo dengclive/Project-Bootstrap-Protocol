@@ -1328,6 +1328,57 @@ rc, _, err = run("spec-gate-entry", {"prompt": "please write the parser"})
 check("spec-gate-entry goes quiet once a spec exists",
       "No active spec" not in err, err[:200])
 
+print("\n== X-54b: the candidate loop STOPS EARLY on a head-bearing command ==")
+
+# [X-54b] THE BEHAVIOURAL ROW THE SOURCE-SHAPE PINS COULD NOT BE.
+# `tests/test_composition.py` pins the SHAPE of the early stop -- the probe,
+# the break, the `_cnext` line. Every such pin is defeatable: appending
+# `; continue` to the completer-mark line skips the probe block entirely and
+# leaves all four pinned strings BYTE-IDENTICAL, passing 156/0. Measured
+# 2026-09-07 on this head; it is the fourth known bypass and the first that no
+# source pin can see.
+#
+# WHY A TRACE COUNT AND NOT A CLOCK. The prior deferral said a behavioural row
+# was "owed when x54-arg-scanner-quadratic-and-fork closes", because a
+# wall-clock row sits on a ~58 s baseline dominated by that still-open scanner
+# and would have single-digit-percent headroom -- the `#50 T8` flake this suite
+# already paid for. THAT PREMISE ONLY BINDS A CLOCK. Counting `_uqw` calls
+# measures the work the candidate loop itself does, isolating it from the
+# scanner, so the row lands now and the deferral is discharged.
+#
+# WHY `-mx` IS LOAD-BEARING IN THE PAYLOAD. `_ckey` strips the leading `-m`,
+# leaving completer `x`, so every padding token marks a completer and drives
+# the loop; meanwhile the argument scanner's `-*) continue` arm makes each one
+# free. The count therefore isolates the candidate loop from the scanner.
+#
+# MEASURED, same box, same payload (2000 `-mx` tokens after a real install head):
+#     this head                    18 `_uqw` calls
+#     `_cnext` raised to 1600000 2003
+#     `break` -> `:`             2003
+#     `; continue` appended      2003        <- passes every source pin
+# 111x separation, sub-second, no wall clock, no digest movement.
+_pad = " ".join(["-mx"] * 2000)
+_payload = json.dumps(pre("Bash", command="pip install evilpkg " + _pad))
+_e = dict(os.environ)
+_e["CLAUDE_PROJECT_DIR"] = PROJ
+_xp = subprocess.run([BASH, "-x", os.path.join(HOOKS, "dependency-gate.sh")],
+                     input=_payload, capture_output=True, text=True, env=_e)
+_uqw_calls = sum(1 for ln in _xp.stderr.splitlines()
+                 if ln.lstrip("+ ").startswith("_uqw "))
+# The bound is generous: the early stop yields ~18, every known bypass ~2003.
+# Anything under 200 means the loop stopped; over means it walked the padding.
+check("the candidate loop stops early instead of walking every token",
+      0 < _uqw_calls < 200,
+      f"    {_uqw_calls} `_uqw` calls on a head-bearing 2000-token command.\n"
+      "    ~18 = the early stop fired. ~2003 = it walked every token, which is\n"
+      "    the X-54b fail-open: a head-BEARING cap-legal command then crosses\n"
+      "    the 60 s hook ceiling, and a hook killed at its timeout is SKIPPED,\n"
+      "    so a DENY the parent reached becomes an ALLOW.")
+check("the gate still DENIES that command (the stop is a cost fix, not a "
+      "correctness one)",
+      run("dependency-gate", _payload)[0] == 2,
+      "    an early stop that changed the verdict would be a different bug")
+
 shutil.rmtree(TMP, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")

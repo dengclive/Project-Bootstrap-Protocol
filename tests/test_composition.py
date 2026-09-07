@@ -490,12 +490,24 @@ check("the candidate loop still probes HEAD and BREAKS, so it can stop early",
 # gives 155/1, both via the check above. The readiness record's "three one-line
 # edits each restore the fail-open with 156/156 green" is STALE - only the
 # threshold edit survived, and this closes it.
-# STILL A SHAPE PIN. It proves the constant is intact, not that the guard answers
-# inside the ceiling; the behavioural row remains OWED per the note above, and
-# two wall-clock designs were tried and REJECTED as vacuous on 2026-09-07 (a
-# head-bearing vs head-less ratio held at 5.38 / 5.08 / 5.03 across the
-# unmutated tree and both mutations - it measures the pipe rule and the argument
-# scanner, not the early stop).
+# THIS IS A SHAPE PIN AND SHAPE PINS ARE NOT SUFFICIENT HERE. Corrected
+# 2026-09-07, same day, after an adversarial round found a FOURTH one-line edit:
+# appending `; continue` to the completer-mark line skips the probe block and
+# leaves all four pinned strings BYTE-IDENTICAL - 156/0 green. An earlier
+# version of this comment claimed the "three one-line edits" blocker was closed;
+# that was true of the three then known and wrong about the class.
+# THE BEHAVIOURAL ROW NOW EXISTS and is the authority:
+# `tests/test_hook_behavior.py` counts `_uqw` calls under `bash -x` on a
+# head-bearing 2000-token command - 18 here, ~2003 under every one of the four
+# bypasses, including the one this file cannot see. Keep these pins as cheap
+# fast-fail documentation of intent; do not treat them as the guard.
+# The row was previously deferred to `x54-arg-scanner-quadratic-and-fork` on the
+# grounds that a wall-clock assertion would flake on a baseline that item
+# dominates. THAT PREMISE ONLY EVER BOUND A CLOCK: a trace count isolates the
+# candidate loop, so the deferral is discharged. Two wall-clock designs were in
+# fact built and REJECTED as vacuous the same day (a head-bearing vs head-less
+# ratio held at 5.38 / 5.08 / 5.03 across the unmutated tree and both mutations,
+# because it measures the pipe rule and the argument scanner, not the stop).
 check("the HEAD probe starts above the first completer, bounding it per COMMAND",
       "_cparts=(); _cen=(); _cet=(); _cnext=16\n" in _tmpl
       and "_cnext=$(( _cnext * 2 ))" in _tmpl,
