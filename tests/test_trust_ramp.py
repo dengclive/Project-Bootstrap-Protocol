@@ -456,8 +456,24 @@ _MUTDIR = os.path.join(ROOT, ".claude", "mutations")
 check("the mutation gate is present and executable",
       os.path.isfile(_GATE) and os.access(_GATE, os.X_OK),
       f"    {_GATE}")
-_sets = sorted(f for f in os.listdir(_MUTDIR)) if os.path.isdir(_MUTDIR) else []
-check("at least one mutation set is tracked", len(_sets) >= 1, f"    {_sets}")
+# [2026-09-08 review blocker 3] These names are PINNED, not discovered. The
+# first version did `os.listdir(_MUTDIR)` and generated a check per file found
+# -- so deleting a set deleted its own checks and the suite went 44/0 GREEN
+# with the guard's entire bypass list gone. A check derived from the thing it
+# checks enforces nothing. Adding a set means adding its name here, on purpose.
+_REQUIRED_SETS = [
+    "int-word-clamp-sufficiency.json",
+    "x54-head-bearing-early-stop.json",
+]
+_present = sorted(f for f in os.listdir(_MUTDIR)
+                  if f.endswith(".json")) if os.path.isdir(_MUTDIR) else []
+_missing = [n for n in _REQUIRED_SETS if n not in _present]
+check("every REQUIRED mutation set is present",
+      not _missing,
+      f"    missing {_missing}; present {_present}. A set is removed only by "
+      "removing its name from _REQUIRED_SETS in the same commit, which is the "
+      "review surface this pin exists to create.")
+_sets = [n for n in _REQUIRED_SETS if n in _present]
 
 # ANTI-ROT, and this is the check with no equivalent anywhere else in the
 # suite: re-bind every `find` string against its target IN-PROCESS. When a
@@ -465,8 +481,15 @@ check("at least one mutation set is tracked", len(_sets) >= 1, f"    {_sets}")
 # stay green, the behavioural rows stay green, and only this goes red.
 import json as _json
 for _name in _sets:
-    _spec = _json.load(open(os.path.join(_MUTDIR, _name), encoding="utf-8"))
-    _tgt = open(os.path.join(ROOT, _spec["target"]), encoding="utf-8").read()
+    try:
+        _spec = _json.load(open(os.path.join(_MUTDIR, _name), encoding="utf-8"))
+        _tgt = open(os.path.join(ROOT, _spec["target"]), encoding="utf-8").read()
+    except Exception as _e:
+        # A traceback here would kill the whole suite inside bin/run-tests and
+        # report NO count at all, which reads as infrastructure noise rather
+        # than as a failure. Fail as a CHECK instead.
+        check(f"{_name}: parses and names a readable target", False, f"    {_e!r}")
+        continue
     _bad = [(m["id"], _tgt.count(m["find"])) for m in _spec["mutations"]
             if _tgt.count(m["find"]) != 1]
     check(f"{_name}: every anchor binds exactly once",

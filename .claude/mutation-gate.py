@@ -208,6 +208,31 @@ def main(argv):
             print("REFUSING to recover: cannot read the committed version of "
                   f"{spec['target']}.", file=sys.stderr)
             return 2
+        # [2026-09-08 review blocker 2] REFUSE IF THE CURRENT FILE IS NOT A
+        # RECOGNISED GATE MUTATION. The first version compared only backup vs
+        # HEAD and then overwrote, so pointing --recover at a target carrying
+        # real uncommitted work DESTROYED it -- and the runbook's own E6
+        # carve-out routes a dirty target here. Recovery is only safe when the
+        # current bytes are HEAD plus exactly one mutation this set declares.
+        with open(_TARGET, "rb") as fh:
+            cur = fh.read()
+        if cur != r.stdout:
+            head_txt = r.stdout.decode("utf-8", "replace")
+            cur_txt = cur.decode("utf-8", "replace")
+            known = False
+            for m in spec["mutations"]:
+                if head_txt.count(m["find"]) == 1 and \
+                        head_txt.replace(m["find"], m["replace"], 1) == cur_txt:
+                    known = True
+                    print(f"recognised in-place mutation {m['id']!r}")
+                    break
+            if not known:
+                print("REFUSING to recover: the target differs from HEAD and the "
+                      "difference is NOT one of this set's declared mutations. "
+                      "That is uncommitted work, not a crashed gate run. Inspect "
+                      "`git diff` and resolve it by hand; --recover will not "
+                      "overwrite it.", file=sys.stderr)
+                return 1
         if sha(bak) != sha(r.stdout):
             print("REFUSING to recover: the backup does not match "
                   f"HEAD:{spec['target']}. The dead run started from an "
@@ -326,7 +351,7 @@ def main(argv):
             print(f"  {m['id']:<26} applied; sha256 {sha(on_disk)[:16]} "
                   f"(was {orig_sha[:16]})")
 
-            caught_by, surprises = [], []
+            caught_by, surprises, went_red = [], [], []
             dsuites_pre = set(spec.get("digest_suites", []))
             for s, want in sorted(m["expect"].items()):
                 p, f, crashed, names, dt = run_suite(s)
@@ -347,6 +372,13 @@ def main(argv):
                     state = "RED-WRONG-REASON"
                 print(f"      {s:<28} {p:>4}/{f:<3} {dt:>5.1f}s  {state}"
                       + (f"  <- {hit[0].strip()[:58]}" if hit else ""))
+                # [2026-09-08 review blocker 1] Record RAW redness, independent of
+                # `expect`. A control declares every suite null, so `caught_by`
+                # is empty for it BY CONSTRUCTION and judging a control on
+                # `caught_by` made CONTROL-OK unconditional -- the control could
+                # never fail, which is the exact defect this gate exists to find.
+                if f and not crashed:
+                    went_red.append(s)
                 if state == "RED@check":
                     caught_by.append(s)
                 elif want is None and f and s not in dsuites_pre:
@@ -368,7 +400,10 @@ def main(argv):
             # could ever be written for `lib/templates.py`.
             dsuites = set(spec.get("digest_suites", []))
             real_catch = [s for s in caught_by if s not in dsuites]
+            # Judge the control on RAW redness in the behavioural suites.
+            ctl_red = [s for s in went_red if s not in dsuites]
             if m.get("control"):
+                real_catch = ctl_red
                 row["verdict"] = "CONTROL-FAILED" if real_catch else "CONTROL-OK"
                 row["detail"] = (
                     f"caught by {', '.join(real_catch)} - these suites are now "
