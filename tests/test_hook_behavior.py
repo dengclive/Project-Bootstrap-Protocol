@@ -1328,6 +1328,84 @@ rc, _, err = run("spec-gate-entry", {"prompt": "please write the parser"})
 check("spec-gate-entry goes quiet once a spec exists",
       "No active spec" not in err, err[:200])
 
+print("\n== X-54b: the candidate loop STOPS EARLY on a head-bearing command ==")
+
+# [X-54b] THE BEHAVIOURAL ROW THE SOURCE-SHAPE PINS COULD NOT BE.
+# `tests/test_composition.py` pins the SHAPE of the early stop -- the probe,
+# the break, the `_cnext` line. Every such pin is defeatable: appending
+# `; continue` to the completer-mark line skips the probe block entirely and
+# leaves all four pinned strings BYTE-IDENTICAL, passing 156/0. Measured
+# 2026-09-07 on this head; it is the fourth known bypass and the first that no
+# source pin can see.
+#
+# WHY A TRACE COUNT AND NOT A CLOCK. The prior deferral said a behavioural row
+# was "owed when x54-arg-scanner-quadratic-and-fork closes", because a
+# wall-clock row sits on a ~58 s baseline dominated by that still-open scanner
+# and would have single-digit-percent headroom -- the `#50 T8` flake this suite
+# already paid for. THAT PREMISE ONLY BINDS A CLOCK. Counting `_uqw` calls
+# measures the work the candidate loop itself does, isolating it from the
+# scanner, so the row lands now and the deferral is discharged.
+#
+# WHY `-mx` IS LOAD-BEARING IN THE PAYLOAD. `_ckey` strips the leading `-m`,
+# leaving completer `x`, so every padding token marks a completer and drives
+# the loop; meanwhile the argument scanner's `-*) continue` arm makes each one
+# free. The count therefore isolates the candidate loop from the scanner.
+#
+# MEASURED, same box, same payload (2000 `-mx` tokens after a real install head):
+#     this head                    18 `_uqw` calls
+#     `_cnext` raised to 1600000 2003
+#     `break` -> `:`             2003
+#     `; continue` appended      2003        <- passes every source pin
+# 111x separation, sub-second, no wall clock, no digest movement.
+#
+# THE COUNT ONLY SEES ONE OF THE TWO FAILURE DIRECTIONS, and an earlier version
+# of this comment wrongly said "~2003 under every known bypass". Corrected
+# 2026-09-08 by measurement: a stop that fires TOO SOON leaves the count at 18,
+# indistinguishable from health. Those are caught by the verdict check below,
+# not here. Keep both; neither is sufficient alone.
+_pad = " ".join(["-mx"] * 2000)
+_payload = json.dumps(pre("Bash", command="pip install evilpkg " + _pad))
+_e = dict(os.environ)
+_e["CLAUDE_PROJECT_DIR"] = PROJ
+# Pin the trace prefix and drop BASH_ENV: the count greps for a PS4-prefixed
+# line, so an inherited PS4 would make it 0. That fails safe here (`0 < n` is
+# False, so the check goes RED rather than green), but a spurious fail-open
+# message at a correctly-denying gate is its own kind of wrong.
+_e["PS4"] = "+ "
+_e.pop("BASH_ENV", None)
+_xp = subprocess.run([BASH, "-x", os.path.join(HOOKS, "dependency-gate.sh")],
+                     input=_payload, capture_output=True, text=True, env=_e)
+_uqw_calls = sum(1 for ln in _xp.stderr.splitlines()
+                 if ln.lstrip("+ ").startswith("_uqw "))
+# The bound is generous: the early stop yields ~18, every known bypass ~2003.
+# Anything under 200 means the loop stopped; over means it walked the padding.
+check("the candidate loop stops early instead of walking every token",
+      0 < _uqw_calls < 200,
+      f"    {_uqw_calls} `_uqw` calls on a head-bearing 2000-token command.\n"
+      "    ~18 = the early stop fired. ~2003 = it walked every token, which is\n"
+      "    the X-54b fail-open: a head-BEARING cap-legal command then crosses\n"
+      "    the 60 s hook ceiling, and a hook killed at its timeout is SKIPPED,\n"
+      "    so a DENY the parent reached becomes an ALLOW.")
+# [X-54b] AND THE MIRROR IMAGE: A STOP THAT FIRES TOO SOON IS A FAIL-OPEN TOO.
+# The trace count above bounds "walks too much". It cannot see "stops too soon":
+# appending `; break` after the probe truncates `_cparts` before the head's verb
+# is appended, so `HEAD` never matches and the command is ALLOWED -- measured
+# 2026-09-08 as rc 0 on `sudo x*20 pip install evilpkg`, with `_uqw` still 18,
+# identical to the healthy head, passing the row above 386/0. A count is not a
+# verdict. This asserts the verdict on a head whose verb lands PAST the 16th
+# completer, which is the only shape that distinguishes the two failures.
+_late = "sudo " + "x " * 20 + "pip install evilpkg"
+check("a head whose verb lands after the 16th completer is still DENIED",
+      run("dependency-gate", json.dumps(pre("Bash", command=_late)))[0] == 2,
+      "    an early stop firing BEFORE the head truncates `_cparts`, so `HEAD` "
+      "never matches and the segment is ALLOWED -- a fail-OPEN the trace count "
+      "cannot see, because stopping early looks identical to stopping right")
+
+check("the gate still DENIES that command (the stop is a cost fix, not a "
+      "correctness one)",
+      run("dependency-gate", _payload)[0] == 2,
+      "    an early stop that changed the verdict would be a different bug")
+
 shutil.rmtree(TMP, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")

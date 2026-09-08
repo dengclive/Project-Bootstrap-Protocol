@@ -450,6 +450,79 @@ check("the invoker memo is never written from a decision on the trailing word",
 # would break silently. SHAPE pins, not cost pins.
 # The two halves live in different places: the `^ *` anchor is written into the
 # template here, and the `( |$)` open end comes from the substituted tail.
+# [X-54b] THE EARLY STOP IS A SECURITY PROPERTY AND THIS PIN GUARDS THE LINE THAT
+# PERFORMS IT, NOT THE BOOKKEEPING AROUND IT. An earlier version of this pin
+# asserted only the counter (`_cnext`, its guard and its doubling); replacing
+# `break` with `:` left all three strings intact and the whole suite green while
+# the fail-open came back. Pin the probe and the break themselves.
+# WHY THE PROBE EXISTS: X-54 removed the per-completer `HEAD` test because
+# ~41,000 evaluations crossed the 60 s ceiling on head-LESS padding. Testing
+# NEVER was the over-correction - a segment that CARRIES a head then walked every
+# token, turning a DENY the parent reached into a cancelled hook, and only exit 2
+# blocks.
+# WHY IT STARTS AT 16 AND NOT AT 1: the counter is per SEGMENT, the ceiling is per
+# COMMAND. Probing from the first completer meant `("x ; " x 20476)` - 20,476
+# ONE-completer segments - paid one evaluation each, restoring the same order
+# X-54 removed. Measured on the emitted hook: that shape denies on the parent and
+# on X-54 and was CANCELLED with an unthresholded probe. The threshold bounds the
+# per-COMMAND count at roughly total-completers / 16.
+# NO BEHAVIOURAL ROW GUARDS THIS, DELIBERATELY: the head-bearing crossing sits a
+# few seconds apart on a ~58 s baseline dominated by the still-open ARGUMENT
+# SCANNER member, so a wall-clock row would have single-digit-percent headroom and
+# would flake - the `#50 T8` failure this suite already paid for. The row is OWED
+# when `x54-arg-scanner-quadratic-and-fork` closes.
+check("the candidate loop still probes HEAD and BREAKS, so it can stop early",
+      'if [[ "$_CJ" =~ $HEAD ]]; then break; fi' in _tmpl
+      and 'if [ "${{#_cen[@]}}" -ge "$_cnext" ]; then' in _tmpl,
+      "[X-54b] this is the early stop itself. Delete the break, or the probe, and "
+      "a head-BEARING cap-legal segment walks every token again - which crossed "
+      "the 60 s ceiling and turned a DENY into a fail-OPEN")
+# [X-54b] PIN THE WHOLE INITIALISATION LINE, NOT THE BARE SUBSTRING. The
+# conjunct here was `"_cnext=16" in _tmpl`, and `_cnext=1600000` CONTAINS
+# `_cnext=16` - so raising the threshold to every 1.6-millionth completer, which
+# is the same as never probing, left this check green. Measured on this head
+# 2026-09-07: `_cnext=1600000`, `_cnext=160` and `_cnext=17` each passed the old
+# conjunct 156/0 and each fails the line form 155/1. The `"_cnext=1\n" not in`
+# half was the previous attempt at the same hole and is subsumed: it caught only
+# the single value `1`, and every other value walked through it.
+# THE OTHER TWO KNOWN EDITS ARE ALREADY CAUGHT, re-measured per conjunct on this
+# head: `break` -> `:` gives 155/1, and wrapping the probe in a never-true guard
+# gives 155/1, both via the check above. The readiness record's "three one-line
+# edits each restore the fail-open with 156/156 green" is STALE - only the
+# threshold edit survived, and this closes it.
+# THIS IS A SHAPE PIN AND SHAPE PINS ARE NOT SUFFICIENT HERE. Corrected
+# 2026-09-07, same day, after an adversarial round found a FOURTH one-line edit:
+# appending `; continue` to the completer-mark line skips the probe block and
+# leaves all four pinned strings BYTE-IDENTICAL - 156/0 green. An earlier
+# version of this comment claimed the "three one-line edits" blocker was closed;
+# that was true of the three then known and wrong about the class.
+# THE BEHAVIOURAL ROW NOW EXISTS and is the authority:
+# `tests/test_hook_behavior.py` counts `_uqw` calls under `bash -x` on a
+# head-bearing 2000-token command - 18 here, ~2003 under the three bypasses that
+# make the loop WALK TOO MUCH (`_cnext` raised, `break` -> `:`, `; continue`),
+# including `; continue`, which this file cannot see.
+# IT DOES NOT COVER THE OTHER DIRECTION, and this comment previously implied it
+# did. A stop that fires TOO SOON (an unconditional `break` at or after the
+# probe) leaves the count at 18 and ALLOWS a head whose verb lands past the
+# threshold - measured rc 0 on 2026-09-08. That is caught by the verdict check
+# in the same file, not by the count and not by these pins.
+# So: these pins catch the threshold and the probe/break edits; the count row
+# catches `; continue`; the verdict row catches the stops-too-soon family. Three
+# guards, none of them redundant, and none of them sufficient alone.
+# The row was previously deferred to `x54-arg-scanner-quadratic-and-fork` on the
+# grounds that a wall-clock assertion would flake on a baseline that item
+# dominates. THAT PREMISE ONLY EVER BOUND A CLOCK: a trace count isolates the
+# candidate loop, so the deferral is discharged. Two wall-clock designs were in
+# fact built and REJECTED as vacuous the same day (a head-bearing vs head-less
+# ratio held at 5.38 / 5.08 / 5.03 across the unmutated tree and both mutations,
+# because it measures the pipe rule and the argument scanner, not the stop).
+check("the HEAD probe starts above the first completer, bounding it per COMMAND",
+      "_cparts=(); _cen=(); _cet=(); _cnext=16\n" in _tmpl
+      and "_cnext=$(( _cnext * 2 ))" in _tmpl,
+      "[X-54b] the counter is per SEGMENT and the ceiling is per COMMAND. Probing "
+      "from the FIRST completer costs one HEAD evaluation per segment, and a "
+      "cap-legal command of one-completer segments then pays the same order X-54 "
+      "removed - a fail-OPEN. The threshold is what makes the probe affordable")
 check("HEAD stays ^-anchored",
       'HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"' in _tmpl,
       "[X-54] drop the `^` and the predicate goes true at an EARLIER completer "

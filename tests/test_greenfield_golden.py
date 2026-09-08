@@ -3349,11 +3349,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "5e945b65d95bdae977d4f8758e70426b1e24a63c5a02ccebb025211621fda70d",
+        "13bd61135b01da88efdde84646b751f05b54e323742de6a01a13d8f236bf820b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3819,11 +3825,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "7e8bbd7560c38825ae06d9060c06f7af217d6c609bd17138c4900c02f6e60768",
+        "e52dd9d92e5a89e685a913c58e98736f37408724ba3df1f55a487d81385e3118",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4226,11 +4238,17 @@ EXPECTED_DIGESTS = {
         # moves. It is the ONLY emitted path that moves - none added, none removed, on
         # every fixture. Action counts unchanged at 57 / 69 / 59, verified BEFORE this
         # re-baseline; a move would have been E5.
-        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54-completer-cost entry,
+        # RE-BASELINED A THIRD TIME 2026-09-01, same exception 77. The completer fix broke
+        # head-BEARING padding (a DENY the parent reached became a cancelled hook); the
+        # first re-fix probed from the FIRST completer, which was itself a fail-open on a
+        # many-segment command; probing now starts at the 16th. It restores the BAND that
+        # regressed - it does NOT close the head-bearing class, which is the argument
+        # scanner and is still open.
+        # THE FULL RECORD IS IN docs/changelog.md's Post-2.8.0 x54 entries - BOTH of them,
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "74b9bb0ec89dc5ccd618ac38e426a495bd0b2c93a0e94b870d8775935155509d",
+        "242af74be96c37647c934bcd3ed7a8f1231a51b13e42763e0cc628796649a84d",
 }
 
 EXPECTED_ACTION_COUNTS = {
