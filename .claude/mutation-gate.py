@@ -1,0 +1,476 @@
+#!/usr/bin/env python3
+"""mutation-gate - prove a guard is RED under mutation, mechanically.
+
+Internal automation. NOT protocol surface. NOT a Bootstrap Protocol feature.
+It emits nothing, is imported by nothing under `lib/`, moves no golden digest,
+and is cited from no protocol document (`.claude/readiness-runbook.md` §0).
+
+WHY THIS EXISTS. A source-text pin asserts that a string is present. It cannot
+assert that removing the BEHAVIOUR turns the suite red, and this repo has now
+paid for that difference five times against one loop: `_cnext=16` ->
+`_cnext=1600000` passed a pin that CONTAINED it; `break` -> `:` left every
+pinned string intact; `; continue` on the completer-mark line left all four
+pinned strings BYTE-IDENTICAL; and a `; break` after the probe stops the loop
+TOO SOON, which the trace-count row cannot see because stopping early looks
+exactly like stopping right. The merge gate is therefore not "the pins are
+green" but "each known one-line bypass has been shown to turn a NAMED check
+red". This script is that gate, run rather than remembered.
+
+WHAT IT REFUSES TO DO. The failure mode of a mutation harness is to apply
+nothing, run a suite, watch it go red for some unrelated reason, and report
+"all caught". Every guard below exists because "all caught" is the answer this
+script would give if it were broken:
+
+  1. DIRTY TREE -> refuse. A pre-existing edit to the target is
+     indistinguishable from a mutation, and restoring would destroy it.
+  2. LEFTOVER BACKUP -> refuse. A previous run died hard; the tree may still
+     carry a mutation. Recovery is the operator's call, not this script's.
+  3. BASELINE MUST BE GREEN. If the suite is already red, every mutation is
+     "caught" and the report is vacuous. Measured, printed, and required.
+  4. THE ANCHOR MUST MATCH EXACTLY ONCE. Zero matches means the mutation has
+     ROTTED against the guard it protects -- the single highest-value signal
+     this script produces, and the one a prose mutation list cannot give. More
+     than one means the edit is ambiguous. Either is an ERROR, never "caught".
+  5. THE BYTES MUST ACTUALLY CHANGE. The post-write SHA-256 is compared to the
+     pre-write one. A no-op rewrite reports MUTATION-NOOP, not "caught".
+  6. RED IS NOT ENOUGH -- IT MUST BE RED AT THE NAMED CHECK. A mutation that
+     makes the suite crash, or that trips an unrelated check (a golden digest
+     moves for EVERY edit to `lib/templates.py`), is scored RED-WRONG-REASON,
+     which is a failure of the gate, not a pass.
+  7. RESTORE IS VERIFIED BY HASH, on every path: normal, exception, SIGINT,
+     SIGTERM. A restore that did not restore is reported and exits non-zero.
+
+Usage:
+  .claude/mutation-gate.py .claude/mutations/<set>.json [-k NAME] [--dry-run]
+"""
+import argparse
+import atexit
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, ".."))
+SUMMARY_RE = re.compile(r"(\d+)\s+passed,\s+(\d+)\s+failed")
+FAIL_RE = re.compile(r"^\s*FAIL\s+(.*)$", re.M)
+
+# Module state so the atexit/signal restorer can reach it without a global
+# object graph. `_ORIGINAL` is the authority; nothing else may write the target.
+_TARGET = None
+_ORIGINAL = None      # bytes
+_BAK = None
+
+
+HARNESS_BAK_DIR = os.path.join(ROOT, ".claude", "mutation-gate-backups")
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def restore(reason="normal"):
+    """Put the target back and prove it by hash. Safe to call repeatedly."""
+    if _TARGET is None or _ORIGINAL is None:
+        return True
+    try:
+        with open(_TARGET, "rb") as fh:
+            now = fh.read()
+        if now != _ORIGINAL:
+            with open(_TARGET, "wb") as fh:
+                fh.write(_ORIGINAL)
+        with open(_TARGET, "rb") as fh:
+            back = fh.read()
+    except OSError as exc:
+        print(f"\nRESTORE FAILED ({reason}): {exc}\n"
+              f"  The original bytes are in {_BAK}. Restore by hand.",
+              file=sys.stderr)
+        return False
+    if sha(back) != sha(_ORIGINAL):
+        print(f"\nRESTORE FAILED ({reason}): {_TARGET} does not hash to the "
+              f"original.\n  The original bytes are in {_BAK}.", file=sys.stderr)
+        return False
+    if _BAK and os.path.exists(_BAK):
+        try:
+            os.unlink(_BAK)
+        except OSError:
+            pass
+    return True
+
+
+def _on_signal(signum, _frame):
+    print(f"\n[mutation-gate] signal {signum} - restoring {_TARGET}",
+          file=sys.stderr)
+    restore(f"signal {signum}")
+    # 128+n is the shell's convention for death by signal; keep it visible.
+    os._exit(128 + signum)
+
+
+def tree_dirty(paths):
+    """Porcelain status for the given paths, or None if git is unavailable."""
+    try:
+        r = subprocess.run(["git", "status", "--porcelain", "--"] + list(paths),
+                           cwd=ROOT, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode != 0:
+        return None
+    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def run_suite(suite):
+    """Run one standalone suite directly.
+
+    Returns (passed, failed, crashed, fail_names, seconds). `crashed` means the
+    suite printed no summary line, or exited non-zero with no failing check --
+    red, but NOT evidence that a check caught anything.
+    """
+    path = os.path.join(ROOT, "tests", suite)
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    t0 = time.monotonic()
+    r = subprocess.run([sys.executable, path], cwd=ROOT, capture_output=True,
+                       text=True, env=env)
+    dt = time.monotonic() - t0
+    out = r.stdout + r.stderr
+    hits = SUMMARY_RE.findall(out)
+    if not hits:
+        return (0, 0, True, [], dt)
+    p, f = int(hits[-1][0]), int(hits[-1][1])
+    return (p, f, r.returncode != 0 and f == 0, FAIL_RE.findall(out), dt)
+
+
+def main(argv):
+    global _TARGET, _ORIGINAL, _BAK
+    ap = argparse.ArgumentParser(prog="mutation-gate")
+    ap.add_argument("mutation_set", help="path to a mutation-set JSON file")
+    ap.add_argument("-k", dest="only", help="run only mutations whose id "
+                                            "contains this substring")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="check anchors and baseline; apply nothing")
+    ap.add_argument("--anchors-only", action="store_true",
+                    help="check only that every anchor still matches exactly "
+                         "once; runs no suite. Sub-second, so it can run in S0 "
+                         "preflight -- this is the anti-rot check")
+    ap.add_argument("--recover", action="store_true",
+                    help="restore the target from a backup left by a run that "
+                         "died on SIGKILL, then delete the backup")
+    args = ap.parse_args(argv)
+    if args.anchors_only:
+        args.dry_run = True   # --anchors-only is --dry-run minus the baseline
+
+    with open(args.mutation_set, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    _TARGET = os.path.join(ROOT, spec["target"])
+    # [critique fix 5] The backup must NOT sit beside the target: the target is
+    # PRODUCT source under lib/, and no harness artifact may persist there --
+    # a crashed run would leave lib/*.mutation-gate.bak in the product tree and
+    # a `git add -A` would ship it. Keep it in the harness dir instead, named
+    # after the target so a recovery cannot cross-apply between sets.
+    _BAK = os.path.join(HARNESS_BAK_DIR,
+                        spec["target"].replace(os.sep, "__") + ".mutation-gate.bak")
+    os.makedirs(HARNESS_BAK_DIR, exist_ok=True)
+    guard = spec.get("guard", os.path.basename(args.mutation_set))
+    n_total = len(spec["mutations"])
+    muts = [m for m in spec["mutations"]
+            if not args.only or args.only in m["id"]]
+    # `expect` maps a suite to the check-name substring that must go red there,
+    # or to null for "this suite is expected NOT to see it". Naming the null
+    # cells is what turns the report into a COVERAGE table rather than a
+    # pass/fail light: it records which guard is load-bearing for which bypass.
+    suites = sorted({s for m in muts for s in m["expect"]})
+
+    print(f"mutation-gate: {guard}")
+    print(f"  target  {spec['target']}")
+    print(f"  set     {args.mutation_set}  ({len(muts)} mutations)")
+    print(f"  suites  {', '.join(suites)}\n")
+
+    # SIGKILL cannot be trapped, so guard 7 cannot cover it. What survives is
+    # the backup file, and `--recover` is the only sanctioned way to consume it.
+    # It restores ONLY when the backup matches the target's committed content,
+    # so it can never be used to launder an unrelated edit into the tree.
+    if args.recover:
+        if not os.path.exists(_BAK):
+            print(f"nothing to recover: {_BAK} does not exist")
+            return 0
+        with open(_BAK, "rb") as fh:
+            bak = fh.read()
+        try:
+            r = subprocess.run(["git", "show", f"HEAD:{spec['target']}"],
+                               cwd=ROOT, capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            r = None
+        if r is None or r.returncode != 0:
+            print("REFUSING to recover: cannot read the committed version of "
+                  f"{spec['target']}.", file=sys.stderr)
+            return 2
+        if sha(bak) != sha(r.stdout):
+            print("REFUSING to recover: the backup does not match "
+                  f"HEAD:{spec['target']}. The dead run started from an "
+                  "uncommitted tree, so restoring it is not this script's call.",
+                  file=sys.stderr)
+            return 2
+        with open(_TARGET, "wb") as fh:
+            fh.write(bak)
+        os.unlink(_BAK)
+        print(f"recovered {spec['target']} to sha256 {sha(bak)[:16]}; "
+              f"backup deleted")
+        return 0
+
+    # ---- GUARD 2: a leftover backup means a previous run died mutated. ----
+    if os.path.exists(_BAK):
+        print(f"REFUSING: {_BAK} exists. A previous run died while the target "
+              f"was mutated.\n  Compare it with {spec['target']} and restore by "
+              f"hand, then delete the backup.", file=sys.stderr)
+        return 2
+
+    # ---- GUARD 1: refuse on a dirty target or a dirty suite. ----
+    dirty = tree_dirty([spec["target"]] + ["tests/" + s for s in suites])
+    if dirty is None:
+        print("REFUSING: could not read git status. This script rewrites a "
+              "tracked file; without a clean-tree proof it will not run.",
+              file=sys.stderr)
+        return 2
+    if dirty:
+        print("REFUSING: the target or a suite is dirty:", file=sys.stderr)
+        for ln in dirty:
+            print("   ", ln, file=sys.stderr)
+        print("  A pre-existing edit is indistinguishable from a mutation, and "
+              "restoring would destroy it. Commit or stash first.",
+              file=sys.stderr)
+        return 2
+
+    with open(_TARGET, "rb") as fh:
+        _ORIGINAL = fh.read()
+    orig_sha = sha(_ORIGINAL)
+    print(f"  clean tree; target sha256 {orig_sha[:16]}\n")
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+    atexit.register(lambda: restore("atexit"))
+
+    rows = []
+    rc = 0
+    try:
+        # ---- GUARD 3: the baseline MUST be green, per suite. ----
+        # `--anchors-only` skips it deliberately: that mode makes no claim about
+        # redness, so it needs no green baseline, and skipping it is what keeps
+        # the anti-rot check sub-second and therefore runnable in S0 preflight.
+        for s in [] if args.anchors_only else suites:
+            if s == suites[0]:
+                print("BASELINE (unmutated) - every mutation is vacuously "
+                      "'caught' if this is red")
+            p, f, crashed, _names, dt = run_suite(s)
+            state = "CRASHED" if crashed else ("GREEN" if f == 0 else "RED")
+            print(f"  {s:<28} {p:>4} passed, {f:>3} failed  {dt:>5.1f}s  {state}")
+            if crashed or f:
+                print("\nREFUSING: baseline is not green. Every mutation would "
+                      "'turn it red' and the report would mean nothing.",
+                      file=sys.stderr)
+                return 2
+        print()
+
+        if args.dry_run:
+            print("ANCHORS ONLY - no suite run, nothing applied\n"
+                  if args.anchors_only else
+                  "DRY RUN - anchors only, nothing applied\n")
+
+        for m in muts:
+            text = _ORIGINAL.decode("utf-8")
+            find, repl = m["find"], m["replace"]
+            n = text.count(find)
+            row = {"id": m["id"], "verdict": None, "detail": ""}
+
+            # ---- GUARD 4: the anchor must match exactly once. ----
+            if n != 1:
+                row["verdict"] = "ROTTED" if n == 0 else "AMBIGUOUS"
+                row["detail"] = (f"anchor matched {n} times; the mutation no "
+                                 f"longer describes the guard")
+                rows.append(row)
+                rc = 1
+                print(f"  {m['id']:<26} ANCHOR {n}x -> {row['verdict']}")
+                continue
+            if args.dry_run:
+                row["verdict"] = "ANCHOR-OK"
+                rows.append(row)
+                print(f"  {m['id']:<26} anchor 1x")
+                continue
+
+            mutated = text.replace(find, repl, 1).encode("utf-8")
+
+            # ---- GUARD 5: the bytes must actually change. ----
+            if sha(mutated) == orig_sha:
+                row["verdict"] = "MUTATION-NOOP"
+                row["detail"] = "find == replace; nothing was changed"
+                rows.append(row)
+                rc = 1
+                print(f"  {m['id']:<26} NOOP")
+                continue
+
+            with open(_BAK, "wb") as fh:
+                fh.write(_ORIGINAL)
+            with open(_TARGET, "wb") as fh:
+                fh.write(mutated)
+            with open(_TARGET, "rb") as fh:
+                on_disk = fh.read()
+            if sha(on_disk) != sha(mutated):
+                restore("write-verify")
+                row["verdict"] = "WRITE-FAILED"
+                rows.append(row)
+                rc = 1
+                continue
+            print(f"  {m['id']:<26} applied; sha256 {sha(on_disk)[:16]} "
+                  f"(was {orig_sha[:16]})")
+
+            caught_by, surprises = [], []
+            dsuites_pre = set(spec.get("digest_suites", []))
+            for s, want in sorted(m["expect"].items()):
+                p, f, crashed, names, dt = run_suite(s)
+                hit = [x for x in names if want and want in x]
+                if crashed:
+                    state = "CRASHED"
+                elif f == 0:
+                    state = "green (blind, as declared)" if want is None \
+                        else "GREEN"
+                elif hit:
+                    state = "RED@check"
+                elif want is None and s in dsuites_pre:
+                    # A digest moves for any byte of an emitted file. Saying
+                    # "wrong reason" here would train the reader to ignore the
+                    # label on the rows where it matters.
+                    state = "digest moved (expected; emitted file)"
+                else:
+                    state = "RED-WRONG-REASON"
+                print(f"      {s:<28} {p:>4}/{f:<3} {dt:>5.1f}s  {state}"
+                      + (f"  <- {hit[0].strip()[:58]}" if hit else ""))
+                if state == "RED@check":
+                    caught_by.append(s)
+                elif want is None and f and s not in dsuites_pre:
+                    # Declared blind, went red anyway: the coverage table is
+                    # stale, or the mutation is broader than it claims.
+                    surprises.append(f"{s} went red though declared blind")
+                elif want is not None:
+                    surprises.append(f"{s}: {state}, wanted {want!r}")
+
+            # ---- GUARD 6: red at the NAMED check, or it does not count. ----
+            # ---- GUARD 8: a CONTROL must ESCAPE. -------------------------
+            # A harness that reports "all caught" is only meaningful if
+            # something can still get through it. A control is a one-line edit
+            # to the same file that these suites are known NOT to see; if it
+            # ever reports CAUGHT, the suites have become red-for-everything
+            # and every other row above is vacuous.
+            # A digest moves for ANY edit to an emitted file, so a control is
+            # judged on the BEHAVIOURAL suites only -- otherwise no control
+            # could ever be written for `lib/templates.py`.
+            dsuites = set(spec.get("digest_suites", []))
+            real_catch = [s for s in caught_by if s not in dsuites]
+            if m.get("control"):
+                row["verdict"] = "CONTROL-FAILED" if real_catch else "CONTROL-OK"
+                row["detail"] = (
+                    f"caught by {', '.join(real_catch)} - these suites are now "
+                    f"red for ANY edit, so the rows above prove nothing"
+                    if real_catch else
+                    "escaped, as required: the suites are not red-for-everything")
+                if real_catch:
+                    rc = 1
+                rows.append(row)
+                if not restore("between mutations"):
+                    return 3
+                continue
+            # ---- GUARD 9: a digest is not a guard. -----------------------
+            # `.claude/readiness-queue.md:257` records the reason: when the only
+            # thing that goes red is an opaque golden digest, a deliberate
+            # freeze re-baseline carries the mutation through. That is a catch
+            # on paper and no catch in practice, so it gets its own verdict and
+            # does not count as a pass.
+            if caught_by and not real_catch:
+                row["verdict"] = "DIGEST-ONLY"
+                row["detail"] = (f"only {', '.join(caught_by)} went red, and a "
+                                 f"freeze re-baseline carries this through")
+                rc = 1
+                rows.append(row)
+                if not restore("between mutations"):
+                    return 3
+                continue
+            row["verdict"] = "CAUGHT" if caught_by else "ESCAPED"
+            row["detail"] = (", ".join(caught_by) if caught_by
+                             else "no suite went red at the named check")
+            if surprises:
+                row["detail"] += "  [!] " + "; ".join(surprises)
+                rc = 1
+            if not caught_by:
+                rc = 1
+            rows.append(row)
+
+            # ---- GUARD 7: restore, verified by hash, before the next one. ----
+            if not restore("between mutations"):
+                return 3
+    finally:
+        if not restore("finally"):
+            rc = 3
+
+    print("\n" + "=" * 96)
+    # [critique fix 3] Provenance, so a pasted table cannot be attributed to a
+    # set it did not come from, and a silent filter cannot hide behind "all caught".
+    with open(args.mutation_set, "rb") as _fh:
+        print(f"SET-SHA256 {sha(_fh.read())[:32]}  {os.path.basename(args.mutation_set)}")
+    print(f"MUTATIONS: {len(rows)}/{n_total} ran"
+          + (f" ({n_total - len(rows)} filtered by -k {args.only!r})" if args.only else ""))
+    print(f"{'mutation':<26} {'verdict':<18} caught by / why not")
+    print("-" * 96)
+    for r in rows:
+        print(f"{r['id']:<26} {r['verdict']:<18} {r['detail']}")
+    print("-" * 96)
+    bad = [r for r in rows
+           if r["verdict"] not in ("CAUGHT", "ANCHOR-OK", "CONTROL-OK")]
+    if args.dry_run:
+        # A dry run applied nothing, so it can say the anchors still bind and
+        # NOTHING ELSE. Printing a PASS here would be the exact defect this
+        # script exists to catch: a report that reads green without a run.
+        print(f"DRY RUN: {len(rows) - len(bad)}/{len(rows)} anchors still bind. "
+              f"NOT a merge-gate result - no mutation was applied.")
+    elif bad:
+        print(f"MERGE GATE: FAIL - {len(bad)} of {len(rows)} mutations are not "
+              f"provably caught")
+    else:
+        caught = [r for r in rows if r["verdict"] == "CAUGHT"]
+        ctl = [r for r in rows if r["verdict"] == "CONTROL-OK"]
+        if args.only:
+            # [critique fix 3] A -k run exercised a SUBSET. Reporting PASS from
+            # a subset is precisely the "agrees with itself" failure this gate
+            # exists to stop, and it is the shape a person reaches for under
+            # time pressure at the context gate.
+            print(f"PARTIAL: {len(caught)} of the set's {n_total} mutations ran "
+                  f"(-k {args.only!r}). NOT a merge-gate result - re-run the "
+                  f"whole set before merging.")
+            rc = 1
+        elif not ctl:
+            # No control means nothing demonstrated that these suites CAN stay
+            # green. "All caught" from a set with no control is the report a
+            # broken harness gives, so it is not allowed to read as a pass.
+            print("MERGE GATE: INCONCLUSIVE - this set has no negative "
+                  "control, so nothing proved the suites are not simply red "
+                  'for any edit. Add one `"control": true` mutation.')
+            rc = 1
+        elif not caught:
+            # [critique fix 3] A set of controls only, or a set whose real
+            # mutations were all filtered out, must not read green.
+            print("MERGE GATE: INCONCLUSIVE - no real (non-control) mutation "
+                  "was exercised, so nothing was proved removable-and-caught.")
+            rc = 1
+        else:
+            print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
+                  f"turn a NAMED check red; {len(ctl)} control(s) escaped as "
+                  f"required")
+    with open(_TARGET, "rb") as fh:
+        print(f"target restored: sha256 {sha(fh.read())[:16]} "
+              f"(original {orig_sha[:16]})")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

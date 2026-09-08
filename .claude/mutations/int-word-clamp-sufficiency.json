@@ -1,0 +1,39 @@
+{
+  "guard": "int-word-clamp-sufficiency: the _int_word clamp bounds the reduction",
+  "target": "lib/sdk_gates_template.py",
+  "guard_site": "lib/sdk_gates_template.py:2885-2887 (n = len(base); if n > _INT_MAXLEN)",
+  "digest_suites": ["test_greenfield_golden.py"],
+  "why": [
+    "Both clamp pins -- the SDK one in tests/test_issue_fixes.py and the shell one",
+    "PR #85 added -- read that the clamp is PRESENT, not that it is SUFFICIENT.",
+    "`.claude/readiness-queue.md:246` records the bypass and, crucially, records",
+    "that the only surviving backstop is a golden DIGEST, which a deliberate",
+    "re-baseline carries the mutation straight through. This set exists so that",
+    "claim is re-measured on every merge instead of remembered."
+  ],
+  "mutations": [
+    {
+      "id": "clamp-undone",
+      "why": "Re-assigning n = len(base) after the clamp restores the quadratic reduction with every pinned string byte-identical.",
+      "find": "    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n    while n > 0:\n",
+      "replace": "    n = len(base)\n    if n > _INT_MAXLEN:\n        n = _INT_MAXLEN\n    n = len(base)\n    while n > 0:\n",
+      "expect": {
+        "test_greenfield_golden.py": "digest",
+        "test_issue_fixes.py": null,
+        "test_retrofit.py": null
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-docstring",
+      "why": "NEGATIVE CONTROL. A one-word spelling change in a docstring of the same emitted file. It moves the golden digest -- which is exactly why digest_suites exists -- and no behavioural suite. It MUST escape the behavioural suites.",
+      "find": "the cost there is the tokenizer's",
+      "replace": "the cost there is the tokeniser's",
+      "expect": {
+        "test_greenfield_golden.py": null,
+        "test_issue_fixes.py": null,
+        "test_retrofit.py": null
+      }
+    }
+  ]
+}

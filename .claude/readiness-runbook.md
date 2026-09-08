@@ -34,8 +34,24 @@ PYTHONDONTWRITEBYTECODE=1 python3 tests/test_greenfield_golden.py   # must stay 
 grep -rln "readiness-runbook\|readiness-queue\|context-check" lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
 # ^ must print nothing
 ```
-The three harness files are `readiness-runbook.md`, `readiness-queue.md` and
-`context-check.py`. `context-check.py` reads only the session transcript, imports
+The harness files are `readiness-runbook.md`, `readiness-queue.md`,
+`context-check.py`, and — **as of 2026-09-08** — `mutation-gate.py` plus the
+sets under `.claude/mutations/`. Re-verify with the extended grep:
+
+```bash
+grep -rln "readiness-runbook\|readiness-queue\|context-check\|mutation-gate\|mutations/" \
+     lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
+# ^ must print nothing   (verified empty 2026-09-08)
+```
+
+**The gate WRITES TO PRODUCT SOURCE, transiently, and that needs saying out
+loud.** It applies a mutation to `lib/…`, runs a suite, and restores. Two rules
+follow: no harness artifact may PERSIST under `lib/` (the backup lives at
+`.claude/mutation-gate-backups/`, gitignored, never beside the target), and the
+gate refuses to start on a dirty target so it can never bank someone else's
+edit. A run killed with SIGKILL leaves the backup; `--recover` is the only
+sanctioned way to consume it, and it restores only when the backup matches the
+target's committed bytes. `context-check.py` reads only the session transcript, imports
 nothing from `lib/`, and is emitted nowhere.
 
 **Three things this runbook may never do:** add a file under `lib/` or `bin/`;
@@ -149,6 +165,46 @@ fails now and passes after*:
 
 **Paste the failing output into the commit.** A check that never failed proves
 nothing.
+
+**4b — THE MUTATION GATE (new 2026-09-08). Mandatory for any item whose
+product is a GUARD.** Step 4's failing check is necessary and not sufficient.
+Line 150 says *"a check that never failed proves nothing"*; this is that
+sentence generalised, because a check that failed ONCE proves only that one
+edit is caught. Measured on one loop in 48 hours: **five distinct one-line
+edits removed the guard, and two of them left every source-text pin
+byte-identical** (`tests/test_composition.py:485-519`).
+
+Write the bypasses down as data, and make something run them:
+
+```bash
+python3 .claude/mutation-gate.py .claude/mutations/<item-id>.json   # full run, ~2 min
+python3 .claude/mutation-gate.py --anchors-only .claude/mutations/<item-id>.json   # 0.05 s
+```
+
+Each set names the target, the guard site (the same `file:line` step 3 quoted),
+the suites, and per mutation a `find`/`replace`/`why`/`expect`. `expect` maps a
+suite to the check-name substring that must go red there, or `null` for **"this
+suite is declared blind"** — the null cells are what make the output a COVERAGE
+table rather than a pass light. **Every set MUST carry one `"control": true`
+mutation that has to ESCAPE**; without one, a set that reports "all caught" is
+indistinguishable from suites that are red for any edit, and the gate reports
+`INCONCLUSIVE` rather than PASS. A `-k` filtered run reports `PARTIAL` and is
+never a merge-gate result. Paste the whole table into the commit.
+
+**`--anchors-only` is the anti-rot check and is the novel signal here.** It
+re-binds every `find` string without applying anything. A `ROTTED` verdict says
+the guard has moved out from under its own bypass list — which no pin and no
+behavioural row reports, because both keep passing.
+
+**WHAT A PASS MEANS, STATED SO IT CANNOT BE OVER-READ: the bypasses someone
+enumerated are caught. It is not a closure proof.** Twice in 48 hours a guard
+declared sound acquired a new bypass the next day — a fourth at 156/0 green on
+2026-09-07, and a fifth in the opposite direction at rc 0 on 2026-09-08. **The
+gate bounds REMOVABILITY. Only review bounds the ENUMERATION.**
+
+**This step changes no merge authority.** Step 9b is unchanged: the operator
+reviews the diff and merges. The gate makes the evidence for that review
+mechanical; it does not replace the reviewer.
 
 **5 — implement**: smallest diff that turns it green. Read the diff before
 committing (R0). Suite 25/0. Outside scope globs → **E4**.
@@ -345,6 +401,12 @@ NOW=$(grep -c '"model_refusal_fallback"' \
 is uncommitted, **the single question that unblocks it**); send a
 `PushNotification` leading with the code and item; leave the branch and PR
 exactly as they are — **a halted item is evidence, not mess.**
+
+**E6 carve-out for the mutation gate (2026-09-08).** A dirty target whose ONLY
+diff is a gate mutation, with a byte-matching backup under
+`.claude/mutation-gate-backups/`, is a crashed gate run, not a foreign edit.
+That is a `python3 .claude/mutation-gate.py --recover <set>`, not a
+preserve-and-halt. Any other dirty target is E6 as written.
 
 **E6 has a worked example.** On 2026-08-14 this session found two protocol docs
 renamed-and-uncommitted in a tree it had just found dirty after a merge, never

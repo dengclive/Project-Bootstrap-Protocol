@@ -445,5 +445,38 @@ check("bin/trust-ramp is executable", os.access(SCRIPT, os.X_OK))
 
 shutil.rmtree(TMP, ignore_errors=True)
 
+print("\n== the mutation gate exists and its sets still bind (runbook step 4b) ==")
+
+# [2026-09-08] Only checks that can actually GO RED live here. A check that
+# asserts a sentence appears in a prose file cannot survive a line wrap, and
+# this repo has already shipped pins that passed while the thing they guarded
+# was gone. These four run the artifact instead.
+_GATE = os.path.join(ROOT, ".claude", "mutation-gate.py")
+_MUTDIR = os.path.join(ROOT, ".claude", "mutations")
+check("the mutation gate is present and executable",
+      os.path.isfile(_GATE) and os.access(_GATE, os.X_OK),
+      f"    {_GATE}")
+_sets = sorted(f for f in os.listdir(_MUTDIR)) if os.path.isdir(_MUTDIR) else []
+check("at least one mutation set is tracked", len(_sets) >= 1, f"    {_sets}")
+
+# ANTI-ROT, and this is the check with no equivalent anywhere else in the
+# suite: re-bind every `find` string against its target IN-PROCESS. When a
+# guard is refactored, its bypass list silently stops describing it -- the pins
+# stay green, the behavioural rows stay green, and only this goes red.
+import json as _json
+for _name in _sets:
+    _spec = _json.load(open(os.path.join(_MUTDIR, _name), encoding="utf-8"))
+    _tgt = open(os.path.join(ROOT, _spec["target"]), encoding="utf-8").read()
+    _bad = [(m["id"], _tgt.count(m["find"])) for m in _spec["mutations"]
+            if _tgt.count(m["find"]) != 1]
+    check(f"{_name}: every anchor binds exactly once",
+          not _bad,
+          f"    {_bad} -- the guard moved out from under its own bypass list; "
+          "re-derive the set against the current source, do not delete it")
+    check(f"{_name}: declares a negative control",
+          any(m.get("control") for m in _spec["mutations"]),
+          "    a set with no control cannot distinguish 'all caught' from "
+          "'these suites are red for any edit'")
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

@@ -1,0 +1,73 @@
+{
+  "guard": "x54b: the install-head candidate loop stops early on a head-bearing command",
+  "target": "lib/templates.py",
+  "guard_site": "lib/templates.py:5907-5921 (_cnext probe, the HEAD test, and the break)",
+  "digest_suites": ["test_greenfield_golden.py"],
+  "why": [
+    "This guard has been removed FIVE distinct ways in 48 hours, and two of the",
+    "five leave every source-text pin byte-identical. It is the worked example",
+    "behind runbook step 4b. The three guards protecting it are not redundant:",
+    "  * test_composition.py  - source-shape pins: catch the threshold and the",
+    "    probe/break edits, and are BLIND to `; continue` and `; break`.",
+    "  * test_hook_behavior.py trace count - catches `; continue` (the loop walks",
+    "    every token), and is BLIND to stops-too-soon, which leaves the count at",
+    "    the healthy value of 18.",
+    "  * test_hook_behavior.py verdict row - catches the stops-too-soon family,",
+    "    which ALLOWS a real install (rc 0) while every count reads healthy.",
+    "A PASS here means these five are caught. It is NOT a closure proof: two of",
+    "the five were found only after the guard had been declared sound."
+  ],
+  "mutations": [
+    {
+      "id": "threshold-raised",
+      "why": "Raise the probe threshold to every 1.6-millionth completer, i.e. never. `_cnext=1600000` CONTAINS the substring `_cnext=16`, which is why the ORIGINAL pin passed it 156/0.",
+      "find": "_cparts=(); _cen=(); _cet=(); _cnext=16\n",
+      "replace": "_cparts=(); _cen=(); _cet=(); _cnext=1600000\n",
+      "expect": {
+        "test_composition.py": "HEAD probe starts above the first completer",
+        "test_hook_behavior.py": "stops early instead of walking every token"
+      }
+    },
+    {
+      "id": "probe-defanged",
+      "why": "Replace the break with a no-op. The probe still runs and still matches; it just stops stopping.",
+      "find": "if [[ \"$_CJ\" =~ $HEAD ]]; then break; fi",
+      "replace": "if [[ \"$_CJ\" =~ $HEAD ]]; then :; fi",
+      "expect": {
+        "test_composition.py": "probes HEAD and BREAKS",
+        "test_hook_behavior.py": "stops early instead of walking every token"
+      }
+    },
+    {
+      "id": "probe-skipped-continue",
+      "why": "Append `; continue` to the completer-mark line: the probe block is never reached. ALL FOUR pinned strings stay byte-identical, so every source-shape pin passes 156/0. Found by an adversarial round on 2026-09-07, one day after the pin was hardened against the threshold edit.",
+      "find": "_cen+=(\"${{#_cparts[@]}}\"); _cet+=(\"$_hi\")\n",
+      "replace": "_cen+=(\"${{#_cparts[@]}}\"); _cet+=(\"$_hi\"); continue\n",
+      "expect": {
+        "test_composition.py": null,
+        "test_hook_behavior.py": "stops early instead of walking every token"
+      }
+    },
+    {
+      "id": "stops-too-soon-break",
+      "why": "Append an unconditional `; break` after the probe. This TRUNCATES _cparts before the head's verb is appended, so HEAD never matches and the gate ALLOWS the command (measured rc 0 on `sudo x*20 pip install evilpkg`). The trace count stays at 18 -- identical to a healthy tree -- so only a VERDICT assertion sees it. Found by the pre-merge gate on 2026-09-08.",
+      "find": "if [[ \"$_CJ\" =~ $HEAD ]]; then break; fi\n",
+      "replace": "if [[ \"$_CJ\" =~ $HEAD ]]; then break; fi; break\n",
+      "expect": {
+        "test_composition.py": null,
+        "test_hook_behavior.py": "verb lands after the 16th completer is still DENIED"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. A one-word spelling change in a COMMENT inside the same emitted body. It moves the golden digest (which is what digest_suites is for) and must escape every behavioural suite. If this is reported CAUGHT, the suites are red for any edit and the whole table is meaningless.",
+      "find": "# THE COUNTER IS PER SEGMENT AND THE CEILING IS PER COMMAND",
+      "replace": "# THE COUNTER IS PER-SEGMENT AND THE CEILING IS PER COMMAND",
+      "expect": {
+        "test_composition.py": null,
+        "test_hook_behavior.py": null
+      }
+    }
+  ]
+}
