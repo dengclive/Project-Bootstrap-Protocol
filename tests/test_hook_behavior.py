@@ -1357,10 +1357,22 @@ print("\n== X-54b: the candidate loop STOPS EARLY on a head-bearing command ==")
 #     `break` -> `:`             2003
 #     `; continue` appended      2003        <- passes every source pin
 # 111x separation, sub-second, no wall clock, no digest movement.
+#
+# THE COUNT ONLY SEES ONE OF THE TWO FAILURE DIRECTIONS, and an earlier version
+# of this comment wrongly said "~2003 under every known bypass". Corrected
+# 2026-09-08 by measurement: a stop that fires TOO SOON leaves the count at 18,
+# indistinguishable from health. Those are caught by the verdict check below,
+# not here. Keep both; neither is sufficient alone.
 _pad = " ".join(["-mx"] * 2000)
 _payload = json.dumps(pre("Bash", command="pip install evilpkg " + _pad))
 _e = dict(os.environ)
 _e["CLAUDE_PROJECT_DIR"] = PROJ
+# Pin the trace prefix and drop BASH_ENV: the count greps for a PS4-prefixed
+# line, so an inherited PS4 would make it 0. That fails safe here (`0 < n` is
+# False, so the check goes RED rather than green), but a spurious fail-open
+# message at a correctly-denying gate is its own kind of wrong.
+_e["PS4"] = "+ "
+_e.pop("BASH_ENV", None)
 _xp = subprocess.run([BASH, "-x", os.path.join(HOOKS, "dependency-gate.sh")],
                      input=_payload, capture_output=True, text=True, env=_e)
 _uqw_calls = sum(1 for ln in _xp.stderr.splitlines()
@@ -1374,6 +1386,21 @@ check("the candidate loop stops early instead of walking every token",
       "    the X-54b fail-open: a head-BEARING cap-legal command then crosses\n"
       "    the 60 s hook ceiling, and a hook killed at its timeout is SKIPPED,\n"
       "    so a DENY the parent reached becomes an ALLOW.")
+# [X-54b] AND THE MIRROR IMAGE: A STOP THAT FIRES TOO SOON IS A FAIL-OPEN TOO.
+# The trace count above bounds "walks too much". It cannot see "stops too soon":
+# appending `; break` after the probe truncates `_cparts` before the head's verb
+# is appended, so `HEAD` never matches and the command is ALLOWED -- measured
+# 2026-09-08 as rc 0 on `sudo x*20 pip install evilpkg`, with `_uqw` still 18,
+# identical to the healthy head, passing the row above 386/0. A count is not a
+# verdict. This asserts the verdict on a head whose verb lands PAST the 16th
+# completer, which is the only shape that distinguishes the two failures.
+_late = "sudo " + "x " * 20 + "pip install evilpkg"
+check("a head whose verb lands after the 16th completer is still DENIED",
+      run("dependency-gate", json.dumps(pre("Bash", command=_late)))[0] == 2,
+      "    an early stop firing BEFORE the head truncates `_cparts`, so `HEAD` "
+      "never matches and the segment is ALLOWED -- a fail-OPEN the trace count "
+      "cannot see, because stopping early looks identical to stopping right")
+
 check("the gate still DENIES that command (the stop is a cost fix, not a "
       "correctness one)",
       run("dependency-gate", _payload)[0] == 2,

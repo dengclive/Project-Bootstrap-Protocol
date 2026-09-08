@@ -498,9 +498,17 @@ check("the candidate loop still probes HEAD and BREAKS, so it can stop early",
 # that was true of the three then known and wrong about the class.
 # THE BEHAVIOURAL ROW NOW EXISTS and is the authority:
 # `tests/test_hook_behavior.py` counts `_uqw` calls under `bash -x` on a
-# head-bearing 2000-token command - 18 here, ~2003 under every one of the four
-# bypasses, including the one this file cannot see. Keep these pins as cheap
-# fast-fail documentation of intent; do not treat them as the guard.
+# head-bearing 2000-token command - 18 here, ~2003 under the three bypasses that
+# make the loop WALK TOO MUCH (`_cnext` raised, `break` -> `:`, `; continue`),
+# including `; continue`, which this file cannot see.
+# IT DOES NOT COVER THE OTHER DIRECTION, and this comment previously implied it
+# did. A stop that fires TOO SOON (an unconditional `break` at or after the
+# probe) leaves the count at 18 and ALLOWS a head whose verb lands past the
+# threshold - measured rc 0 on 2026-09-08. That is caught by the verdict check
+# in the same file, not by the count and not by these pins.
+# So: these pins catch the threshold and the probe/break edits; the count row
+# catches `; continue`; the verdict row catches the stops-too-soon family. Three
+# guards, none of them redundant, and none of them sufficient alone.
 # The row was previously deferred to `x54-arg-scanner-quadratic-and-fork` on the
 # grounds that a wall-clock assertion would flake on a baseline that item
 # dominates. THAT PREMISE ONLY EVER BOUND A CLOCK: a trace count isolates the
