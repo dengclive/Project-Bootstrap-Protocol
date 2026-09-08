@@ -35,11 +35,11 @@ grep -rln "readiness-runbook\|readiness-queue\|context-check" lib/ bin/ Bootstra
 # ^ must print nothing
 ```
 The harness files are `readiness-runbook.md`, `readiness-queue.md`,
-`context-check.py`, and — **as of 2026-09-08** — `mutation-gate.py` plus the
-sets under `.claude/mutations/`. Re-verify with the extended grep:
+`context-check.py`, and — **as of 2026-09-08** — `mutation-gate.py`, the sets
+under `.claude/mutations/`, and `alert-operator.sh`. Re-verify with the extended grep:
 
 ```bash
-grep -rln "readiness-runbook\|readiness-queue\|context-check\|mutation-gate\|mutations/" \
+grep -rln "readiness-runbook\|readiness-queue\|context-check\|mutation-gate\|mutations/\|alert-operator" \
      lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
 # ^ must print nothing   (verified empty 2026-09-08)
 ```
