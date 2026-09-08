@@ -309,9 +309,12 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
 
 - **[ready] x54-arg-scanner-quadratic-and-fork** · `CODE` · eligible: **yes**
   **FILED 2026-08-31 AT STEP 10 BY `x54-completer-cost` (PR #98, merge
-  `8cc107f`), WHICH IS WHERE IT WAS PROMISED AND NOT BEFORE.** Every commit on
-  that branch said this member was "to be filed at step 10 — not at this
-  commit"; those sentences were true when written and are now discharged.
+  `8cc107f`), WHICH IS WHERE IT WAS PROMISED AND NOT BEFORE.** **The claim that every commit on that branch
+  promised this filing is FALSE, and is retracted here.** Re-derived over all
+  eight commits of `8c2fc35..5b2b6ca`: no tree contains the promise text, and the
+  two earliest asserted the CONTRARY in present tense against a row that did not
+  exist — which `ef99fbc` withdrew, and which is part of why this item is graded
+  harmful. The residual is filed because it is real, not because it was promised.
   **The third member of the X-54 cost class, and the one the X-54 row never
   named.** A segment carrying a REAL install head sends its argument list into
   the argument scanner, which **forks one subshell per package token** AND
@@ -577,7 +580,7 @@ the identical byte count 4.55 → 4.50 s. 11,000 differential commands 0 diffs;
 the production 60 s ceiling by CANCELLATION for the first time in this repo
 (`subprocess timeout=60` -> rc 124). The ceiling was already BOUNDED before this
 item: the parent `8c2fc35` asserts elapsed time on the emitted hook at
-`tests/test_issue_fixes.py:4108-4119` and `:4175-4177`, and a SIGALRM cap at
+`tests/test_issue_fixes.py:4108-4119` and `:4172-4181`, and a SIGALRM cap at
 `tests/test_substrate_differential.py:4198-4240`. What is new is enforcing it.
 **Graded `harmful`** — see the ledger entry. Four rounds of false prose reached
 origin, and so did a FAIL-OPEN: closing the head-LESS completer padding opened a
@@ -586,7 +589,7 @@ head-BEARING one on the same loop (`pip install evil ` + `x `×34,000 — rc 2 i
 1–1 refuter tie was scored as refuted and it was dropped. **A head-bearing fail-open remains open on `main`; PR #99 (unmerged) narrows but
 does not close it, and the residue is tracked as `x54-arg-scanner-quadratic-and-fork`.
 See PR #99,
-which is under adversarial review and NOT merged** — until it lands, `main`
+which was under adversarial review when this was written** — until it lands, `main`
 carries a fail-open this item introduced.
 
 **`prefix-run-assignment-wrapper-overlap` PR #92 `abe3f48` — the prefix run
@@ -782,7 +785,9 @@ is exactly what 9b now requires.
 **[2026-08-31]** `x54-completer-cost` closed, **PR #98, merge `8cc107f`** —
 **and it introduced a fail-open that is not yet fixed on `main`.** Closing the
 head-LESS completer padding opened a head-BEARING one on the same loop; PR #99
-(`fix/x54-head-bearing-fail-open`) closes it and is under review, NOT merged.
+(`fix/x54-head-bearing-fail-open`) NARROWS but does not close it; the residue is
+tracked as `x54-arg-scanner-quadratic-and-fork`. State of that PR at the time of
+writing: under adversarial review.
 `x54-head-bearing-fail-open` is therefore live work, not a filed residual.
 **THE VERDICT DID NOT MOVE.** `docs/production-readiness.md` is untouched by this
 work and `main` stays **NOT PRODUCTION READY**. It is not X-37, and the leg it
