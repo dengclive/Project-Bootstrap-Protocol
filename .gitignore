@@ -28,3 +28,10 @@ __pycache__/
 # alarm starting mid-run scores every row INTERFERED -- two features on this
 # same branch disabling each other. Measured: 5/5 rows INTERFERED, rc 1.
 .claude/.alert-operator.pid
+
+# Editor/OS debris beside a mutation set. Without these the gate refuses to run
+# (GUARD 1 wants a clean tree) exactly while a set is open in an editor.
+*.swp
+*.swo
+*~
+.DS_Store

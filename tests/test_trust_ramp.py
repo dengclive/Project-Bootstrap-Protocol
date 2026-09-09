@@ -524,11 +524,25 @@ _REQUIRED_SETS = {
 # was named *.JSON, had no extension, or sat in a subdirectory -- measured: three
 # such copies produced ZERO checks between them. Anything under .claude/mutations
 # is a mutation set and must be registered.
+# Editor and OS debris is NOT a mutation set. [2026-09-09 round-8] The
+# unfiltered walk turned this PRODUCT suite -- and therefore ./bin/run-tests --
+# red on the files a stock editor leaves beside an open set. MEASURED: a vim
+# swapfile gave "57 passed, 2 failed" (unregistered, plus a JSONDecodeError on
+# the swapfile), and the same file simultaneously made the gate refuse under
+# GUARD 1. The runbook step-4b authoring loop is exactly when a set is open in
+# an editor, so this fired precisely when the harness is meant to be usable.
+_DEBRIS = (".swp", ".swo", ".swn", "~", ".orig", ".rej", ".bak", ".tmp")
+def _is_debris(name):
+    base = os.path.basename(name)
+    return (base.endswith(_DEBRIS) or base.startswith((".#", "#"))
+            or base == ".DS_Store")
 _present = []
 if os.path.isdir(_MUTDIR):
     for _root, _dirs, _files in os.walk(_MUTDIR):
         for _f in _files:
-            _present.append(os.path.relpath(os.path.join(_root, _f), _MUTDIR))
+            _rel = os.path.relpath(os.path.join(_root, _f), _MUTDIR)
+            if not _is_debris(_rel):
+                _present.append(_rel)
 _present = sorted(_present)
 _missing = [n for n in _REQUIRED_SETS if n not in _present]
 check("every REQUIRED mutation set is present",
