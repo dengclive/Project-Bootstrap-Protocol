@@ -39,7 +39,10 @@ script would give if it were broken:
      which is a failure of the gate, not a pass.
   7. RESTORE IS VERIFIED BY HASH, on every path: normal, exception, SIGINT,
      SIGTERM. A restore that did not restore is reported and exits non-zero.
-  8. ONE RUN AT A TIME, PER TARGET. The backup is created O_EXCL before the
+  8. EVERY ROW IS VERIFIED AGAINST THE BYTES THIS RUN WROTE. The target is
+     re-read after each suite; if it changed, the row is INTERFERED and the run
+     fails. This does not depend on the lock below being correct.
+  9. ONE RUN AT A TIME, PER TARGET. The backup is created O_EXCL before the
      baseline and held for the run, so a second gate against the same target
      refuses instead of interleaving writes. Without it two runs score rows on
      each other's bytes and an inert set can report "all caught".
@@ -523,8 +526,31 @@ def main(argv):
             ctl_suites = [s for s in suites if s not in dsuites_pre]
             plan = ([(s, None) for s in ctl_suites] if is_ctl
                     else sorted(m["expect"].items()))
+            interfered = []
             for s, want in plan:
                 p, f, crashed, names, dt = run_suite(s)
+                # ---- GUARD 10: THE ROW MUST BE ABOUT THE BYTES WE WROTE. ----
+                # [2026-09-09] The lock (GUARD 1b) tries to PREVENT a second
+                # writer; this VERIFIES the result regardless of whether the
+                # lock worked. Three separate blockers in this file have come
+                # from rows scored on somebody else's bytes -- two gates racing,
+                # a dry run deleting a live lock, --recover rewriting a target
+                # mid-measurement -- and each time the lock was patched and a
+                # new hole appeared. This check does not depend on the lock
+                # being correct: the gate knows exactly what it wrote, so it
+                # reads the file back and refuses to score a suite that ran
+                # against anything else. It also catches what no lock can -- a
+                # human editing the target by hand while the gate runs.
+                try:
+                    with open(_TARGET, "rb") as _fh:
+                        _now = _fh.read()
+                except OSError as _exc:
+                    _now, _exc_txt = None, str(_exc)
+                if _now != mutated:
+                    interfered.append(s)
+                    print(f"      {s:<28} {'':>4}{'':>4}  {dt:>5.1f}s  "
+                          f"INTERFERED - the target changed under this run")
+                    continue
                 hit = [x for x in names if want and want in x]
                 if crashed:
                     state = "CRASHED"
@@ -586,6 +612,17 @@ def main(argv):
             # A digest moves for ANY edit to an emitted file, so a control is
             # judged on the BEHAVIOURAL suites only -- otherwise no control
             # could ever be written for `lib/templates.py`.
+            if interfered:
+                row["verdict"] = "INTERFERED"
+                row["detail"] = (
+                    f"the target changed under {', '.join(interfered)} - another "
+                    f"writer touched it mid-run, so nothing here is evidence")
+                rc = 1
+                rows.append(row)
+                if not restore("between mutations"):
+                    rc = 3
+                    break
+                continue
             dsuites = set(spec.get("digest_suites", []))
             real_catch = [s for s in caught_by if s not in dsuites]
             # Judge the control on RAW redness in the behavioural suites.
