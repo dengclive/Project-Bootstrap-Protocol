@@ -351,9 +351,24 @@ def main(argv):
             print(f"  {m['id']:<26} applied; sha256 {sha(on_disk)[:16]} "
                   f"(was {orig_sha[:16]})")
 
-            caught_by, surprises, went_red = [], [], []
+            caught_by, surprises, went_red, went_crashed = [], [], [], []
             dsuites_pre = set(spec.get("digest_suites", []))
-            for s, want in sorted(m["expect"].items()):
+            # [2026-09-09 re-review fix A] A CONTROL IS JUDGED OVER THE SET'S
+            # BEHAVIOURAL SUITES, NOT OVER THE ONES IT NAMES. The blocker-1 fix
+            # judged it over `m["expect"]`, which left the same defect standing
+            # one JSON line away: `"expect": {}` runs no suite, records no
+            # redness, and reads as "escaped, as required". MEASURED on 756c95e:
+            # `probe-defanged` -- a real guard removal this very set proves both
+            # suites catch -- marked `"control": true` with an empty expect
+            # scored CONTROL-OK and the run printed MERGE GATE: PASS, rc 0.
+            # A control's claim is about THIS SET's suites. It does not get to
+            # pick its own jury. `suites` is the union the baseline proved green,
+            # so judging over it keeps GUARD 3's invariant intact.
+            is_ctl = bool(m.get("control"))
+            ctl_suites = [s for s in suites if s not in dsuites_pre]
+            plan = ([(s, None) for s in ctl_suites] if is_ctl
+                    else sorted(m["expect"].items()))
+            for s, want in plan:
                 p, f, crashed, names, dt = run_suite(s)
                 hit = [x for x in names if want and want in x]
                 if crashed:
@@ -379,13 +394,29 @@ def main(argv):
                 # never fail, which is the exact defect this gate exists to find.
                 if f and not crashed:
                     went_red.append(s)
+                # [2026-09-09 re-review fix B] A CRASH IS NOT AN ESCAPE. The
+                # blocker-1 fix recorded redness only when `f and not crashed`,
+                # so a control that CRASHED every suite recorded nothing and
+                # scored CONTROL-OK. MEASURED on 756c95e: a control replacing
+                # `def _bash_case_words(words):` with a SyntaxError ran both
+                # suites to `0/0 CRASHED` and the gate reported "escaped, as
+                # required: the suites are not red-for-everything", MERGE GATE:
+                # PASS, rc 0 -- of suites that executed no checks at all.
+                # A crash is also invisible below: the blind-cell branch needs
+                # `f`, and a crash reports f == 0, so nothing flagged it.
+                if crashed:
+                    went_crashed.append(s)
+                    surprises.append(f"{s} CRASHED - 0 checks ran, so this "
+                                     f"row is evidence of nothing")
                 if state == "RED@check":
                     caught_by.append(s)
                 elif want is None and f and s not in dsuites_pre:
                     # Declared blind, went red anyway: the coverage table is
                     # stale, or the mutation is broader than it claims.
                     surprises.append(f"{s} went red though declared blind")
-                elif want is not None:
+                elif want is not None and not crashed:
+                    # A crashed cell already recorded a better-worded surprise
+                    # just above; do not report it twice.
                     surprises.append(f"{s}: {state}, wanted {want!r}")
 
             # ---- GUARD 6: red at the NAMED check, or it does not count. ----
@@ -402,16 +433,37 @@ def main(argv):
             real_catch = [s for s in caught_by if s not in dsuites]
             # Judge the control on RAW redness in the behavioural suites.
             ctl_red = [s for s in went_red if s not in dsuites]
-            if m.get("control"):
+            ctl_crashed = [s for s in went_crashed if s not in dsuites]
+            if is_ctl:
                 real_catch = ctl_red
-                row["verdict"] = "CONTROL-FAILED" if real_catch else "CONTROL-OK"
-                row["detail"] = (
-                    f"caught by {', '.join(real_catch)} - these suites are now "
-                    f"red for ANY edit, so the rows above prove nothing"
-                    if real_catch else
-                    "escaped, as required: the suites are not red-for-everything")
-                if real_catch:
+                if not ctl_suites:
+                    # No behavioural suite to escape from: the set names only
+                    # digest suites, so nothing could ever demonstrate that
+                    # these suites are not red-for-everything.
+                    row["verdict"] = "CONTROL-VACUOUS"
+                    row["detail"] = ("this set names no behavioural (non-digest) "
+                                     "suite, so the control proves nothing")
                     rc = 1
+                elif ctl_crashed:
+                    # A crash is not an escape: the suite executed no checks.
+                    row["verdict"] = "CONTROL-CRASHED"
+                    row["detail"] = (
+                        f"{', '.join(ctl_crashed)} crashed - 0 checks ran, so "
+                        f"nothing was demonstrated about them")
+                    rc = 1
+                elif real_catch:
+                    row["verdict"] = "CONTROL-FAILED"
+                    row["detail"] = (
+                        f"went red in {', '.join(real_catch)} - either this "
+                        f"control is not inert, or these suites are red for ANY "
+                        f"edit; the printed per-suite states say which")
+                    rc = 1
+                else:
+                    row["verdict"] = "CONTROL-OK"
+                    row["detail"] = (
+                        f"escaped {len(ctl_suites)} behavioural suite(s) "
+                        f"({', '.join(ctl_suites)}): they are not "
+                        f"red-for-everything")
                 rows.append(row)
                 if not restore("between mutations"):
                     return 3
@@ -497,6 +549,18 @@ def main(argv):
             print("MERGE GATE: INCONCLUSIVE - no real (non-control) mutation "
                   "was exercised, so nothing was proved removable-and-caught.")
             rc = 1
+        elif rc:
+            # [2026-09-09 re-review fix C] THE BOTTOM LINE MUST NOT CONTRADICT
+            # THE EXIT CODE. `bad` is computed from verdicts alone, so a row
+            # that is CAUGHT but carries a `[!]` surprise set rc=1 while this
+            # block still printed PASS. MEASURED on 756c95e: a declared
+            # expectation that never fired printed
+            # "MERGE GATE: PASS ... 1 control(s) escaped as required" and
+            # returned 1. A human reads the last line; only a script reads $?.
+            print(f"MERGE GATE: FAIL - every row has an accepted verdict, but "
+                  f"the run raised rc={rc}: see the [!] notes above. A declared "
+                  f"expectation did not fire, so the coverage table is wrong "
+                  f"even though each bypass was caught.")
         else:
             print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
                   f"turn a NAMED check red; {len(ctl)} control(s) escaped as "

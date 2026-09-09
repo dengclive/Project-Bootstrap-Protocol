@@ -461,10 +461,29 @@ check("the mutation gate is present and executable",
 # -- so deleting a set deleted its own checks and the suite went 44/0 GREEN
 # with the guard's entire bypass list gone. A check derived from the thing it
 # checks enforces nothing. Adding a set means adding its name here, on purpose.
-_REQUIRED_SETS = [
-    "int-word-clamp-sufficiency.json",
-    "x54-head-bearing-early-stop.json",
-]
+# [2026-09-09 re-review fixes D and E] The pin now names the BYPASSES, not just
+# the file. Two measured defects in the 2026-09-08 version:
+#   D  it narrowed the anti-rot loop to pinned names, so a set ADDED without
+#      editing this list got ZERO anchor checking. Measured: a new set whose
+#      anchor matched nothing at all left the suite at 46 passed, 0 failed.
+#   E  it pinned the FILENAME only, so the file could stay and be gutted.
+#      Measured: deleting 3 of x54's 4 enumerated bypasses -> 46 passed, 0 failed.
+# Removing a bypass now means editing this list in the same commit, which is
+# the review surface the pin exists to create. Anti-rot runs over every set
+# PRESENT, so an unregistered set is still anchor-checked.
+_REQUIRED_SETS = {
+    "int-word-clamp-sufficiency.json": [
+        "clamp-undone",
+        "control-inert-docstring",
+    ],
+    "x54-head-bearing-early-stop.json": [
+        "threshold-raised",
+        "probe-defanged",
+        "probe-skipped-continue",
+        "stops-too-soon-break",
+        "control-inert-comment",
+    ],
+}
 _present = sorted(f for f in os.listdir(_MUTDIR)
                   if f.endswith(".json")) if os.path.isdir(_MUTDIR) else []
 _missing = [n for n in _REQUIRED_SETS if n not in _present]
@@ -473,7 +492,14 @@ check("every REQUIRED mutation set is present",
       f"    missing {_missing}; present {_present}. A set is removed only by "
       "removing its name from _REQUIRED_SETS in the same commit, which is the "
       "review surface this pin exists to create.")
-_sets = [n for n in _REQUIRED_SETS if n in _present]
+# Anti-rot covers everything actually on disk, not just what is registered.
+_sets = _present
+_unregistered = [n for n in _present if n not in _REQUIRED_SETS]
+check("every mutation set on disk is registered in _REQUIRED_SETS",
+      not _unregistered,
+      f"    {_unregistered} present but unregistered. An unregistered set has "
+      "no pinned bypass list, so its rows can be deleted without a reviewable "
+      "diff. Add it to _REQUIRED_SETS with its mutation ids.")
 
 # ANTI-ROT, and this is the check with no equivalent anywhere else in the
 # suite: re-bind every `find` string against its target IN-PROCESS. When a
@@ -484,13 +510,34 @@ for _name in _sets:
     try:
         _spec = _json.load(open(os.path.join(_MUTDIR, _name), encoding="utf-8"))
         _tgt = open(os.path.join(ROOT, _spec["target"]), encoding="utf-8").read()
+        # [2026-09-09 re-review fix G] The 2026-09-08 try covered only parse and
+        # IO. A JSON-valid but STRUCTURALLY malformed set -- no "mutations" key,
+        # a mutation missing "find" or "id", "mutations" not a list -- still
+        # raised out of the comprehension below and killed the whole suite with
+        # no count. Force the structural access inside the try.
+        _muts = _spec["mutations"]
+        if not isinstance(_muts, list) or not _muts:
+            raise ValueError("'mutations' must be a non-empty list")
+        _ids = [m["id"] for m in _muts]
+        _finds = [m["find"] for m in _muts]
     except Exception as _e:
         # A traceback here would kill the whole suite inside bin/run-tests and
         # report NO count at all, which reads as infrastructure noise rather
         # than as a failure. Fail as a CHECK instead.
-        check(f"{_name}: parses and names a readable target", False, f"    {_e!r}")
+        check(f"{_name}: parses and is structurally well formed", False,
+              f"    {_e!r}")
         continue
-    _bad = [(m["id"], _tgt.count(m["find"])) for m in _spec["mutations"]
+    # [2026-09-09 re-review fix E] Pin the BYPASS LIST, not just the filename.
+    if _name in _REQUIRED_SETS:
+        _want_ids = _REQUIRED_SETS[_name]
+        _gone = [i for i in _want_ids if i not in _ids]
+        _extra = [i for i in _ids if i not in _want_ids]
+        check(f"{_name}: every pinned bypass is still declared",
+              not _gone and not _extra,
+              f"    missing {_gone}; unregistered {_extra}. The set file can be "
+              "gutted without deleting it; this is the check that notices. "
+              "Changing the bypass list means editing _REQUIRED_SETS too.")
+    _bad = [(m["id"], _tgt.count(m["find"])) for m in _muts
             if _tgt.count(m["find"]) != 1]
     check(f"{_name}: every anchor binds exactly once",
           not _bad,

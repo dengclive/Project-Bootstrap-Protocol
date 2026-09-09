@@ -2,7 +2,7 @@
   "guard": "x54b: the install-head candidate loop stops early on a head-bearing command",
   "target": "lib/templates.py",
   "guard_site": "lib/templates.py:5907-5921 (_cnext probe, the HEAD test, and the break)",
-  "digest_suites": ["test_greenfield_golden.py"],
+  "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
   "why": [
     "This guard has been removed FIVE distinct ways in 48 hours, and two of the",
     "five leave every source-text pin byte-identical. It is the worked example",
