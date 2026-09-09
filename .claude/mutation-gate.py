@@ -69,22 +69,38 @@ _TARGET = None
 _ORIGINAL = None      # bytes
 _BAK = None
 _LOCK = None          # holds the owning PID; see GUARD 1b
+_OWN_LOCK = False     # True only after THIS process wins the O_EXCL claim
 
 
 def _lock_owner(path):
-    """-> (pid, alive) for a lock file, or (None, False) if unreadable."""
+    """-> (pid, state) where state is "running", "dead" or "corrupt".
+
+    A pid <= 0 is CORRUPT, not dead: os.kill would read it as a process GROUP
+    and report every such lock as running. An unreadable or empty lock is also
+    corrupt rather than dead -- the claim writes the pid immediately after the
+    O_EXCL create, so an empty lock is a torn write, not a finished run.
+    """
     try:
         with open(path, encoding="utf-8") as fh:
-            pid = int(fh.read().strip())
+            raw = fh.read().strip()
+        pid = int(raw)
     except (OSError, ValueError):
-        return (None, False)
+        return (None, "corrupt")
+    if pid <= 0:
+        return (pid, "corrupt")
     try:
         os.kill(pid, 0)          # signal 0 tests existence, sends nothing
     except ProcessLookupError:
-        return (pid, False)
+        return (pid, "dead")
     except PermissionError:
-        return (pid, True)       # someone else's process: alive, not ours
-    return (pid, True)
+        return (pid, "running")  # someone else's process: alive, not ours
+    return (pid, "running")
+
+
+def _stale_note(pid, state):
+    return (f"owner pid {pid} is {state}"
+            if state != "corrupt" else
+            f"the lock is CORRUPT (contents {pid!r})")
 
 
 HARNESS_BAK_DIR = os.path.join(ROOT, ".claude", "mutation-gate-backups")
@@ -120,7 +136,14 @@ def restore(reason="normal", release=False):
         print(f"\nRESTORE FAILED ({reason}): {_TARGET} does not hash to the "
               f"original.\n  The original bytes are in {_BAK}.", file=sys.stderr)
         return False
-    if release:
+    # [2026-09-09 round-4 blocker] ONLY RELEASE A LOCK WE CLAIMED. --dry-run and
+    # --anchors-only never claim one, but they still registered this restorer at
+    # exit, so they DELETED A LIVE RUN'S lock and backup and handed the target
+    # to a second gate. MEASURED: a plain --anchors-only (0.05 s) stripped a
+    # running gate of both files in 2 of 3 trials, and another real run then
+    # claimed the freed lock and mutated lib/templates.py concurrently -- the
+    # exact false-PASS class GUARD 1b exists to close, reopened by the guard.
+    if release and _OWN_LOCK:
         for _p in (_BAK, _LOCK):
             if _p and os.path.exists(_p):
                 try:
@@ -173,7 +196,7 @@ def run_suite(suite):
 
 
 def main(argv):
-    global _TARGET, _ORIGINAL, _BAK, _LOCK
+    global _TARGET, _ORIGINAL, _BAK, _LOCK, _OWN_LOCK
     ap = argparse.ArgumentParser(prog="mutation-gate")
     ap.add_argument("mutation_set", help="path to a mutation-set JSON file")
     ap.add_argument("-k", dest="only", help="run only mutations whose id "
@@ -228,16 +251,31 @@ def main(argv):
         # this set's declared mutations", rewrote the target MID-MEASUREMENT,
         # deleted the lock -- destroying the mutual exclusion GUARD 1b exists
         # to provide -- and exited 0. The live run's verdict went PASS -> FAIL.
+        _stale_lock = False
         if os.path.exists(_LOCK):
-            _pid, _alive = _lock_owner(_LOCK)
-            if _alive:
+            _pid, _state = _lock_owner(_LOCK)
+            if _state == "running":
                 print(f"REFUSING to recover: mutation-gate pid {_pid} is "
                       f"RUNNING and holds {spec['target']}. Recovering now "
                       f"would rewrite the file it is measuring. Wait for it.",
                       file=sys.stderr)
                 return 2
-            print(f"note: stale lock from dead pid {_pid}; continuing")
+            _stale_lock = True
+            print(f"note: stale lock ({_stale_note(_pid, _state)}); continuing")
         if not os.path.exists(_BAK):
+            # [2026-09-09 round-4] CLEAR THE STALE LOCK HERE. A crash between
+            # the claim and the backup write, or an operator following GUARD 2's
+            # old advice to "delete the backup", leaves a lock with NO backup --
+            # and this early return used to exit 0 without touching it, so every
+            # later run refused forever. MEASURED: SIGKILL -> GUARD 2 -> delete
+            # the backup as instructed -> GUARD 1b -> --recover rc 0 "nothing to
+            # recover" -> next run rc 2, repeating indefinitely. --recover is the
+            # sanctioned way out, so it must actually be one.
+            if _stale_lock:
+                os.unlink(_LOCK)
+                print(f"cleared the stale lock; {_BAK} does not exist, so the "
+                      f"target was never left mutated. Nothing else to do.")
+                return 0
             print(f"nothing to recover: {_BAK} does not exist")
             return 0
         with open(_BAK, "rb") as fh:
@@ -291,10 +329,34 @@ def main(argv):
               f"backup and stale lock deleted")
         return 0
 
+    # ---- GUARD 1a: IS ANOTHER RUN LIVE? ---------------------------------
+    # [2026-09-09 round-4] This must precede GUARD 2. GUARD 2 only sees "a
+    # backup exists" and says "a previous run died ... restore by hand, then
+    # delete the backup" -- advice that, aimed at a HEALTHY RUNNING gate,
+    # destroys its safety net. MEASURED at 674798a: a live run (pid alive, lock
+    # held, later MERGE GATE: PASS rc 0) made both a second run and
+    # --anchors-only refuse with "a previous run died".
+    if os.path.exists(_LOCK):
+        _pid, _state = _lock_owner(_LOCK)
+        if _state == "running":
+            print(f"REFUSING: mutation-gate pid {_pid} is RUNNING and holds "
+                  f"{spec['target']}. This is not a crash; wait for it to "
+                  f"finish. (Even --dry-run and --anchors-only refuse here: the "
+                  f"target is mutated right now, so any anchor result would be "
+                  f"about the mutation, not the guard.)", file=sys.stderr)
+            return 2
+        print(f"REFUSING: a stale lock is present ({_stale_note(_pid, _state)}), "
+              f"so a previous run died holding {spec['target']}.\n  Run "
+              f"`{os.path.relpath(__file__, ROOT)} {args.mutation_set} --recover`"
+              f" -- it restores the target if a backup survived, and clears the "
+              f"lock either way.", file=sys.stderr)
+        return 2
+
     # ---- GUARD 2: a leftover backup means a previous run died mutated. ----
     if os.path.exists(_BAK):
-        print(f"REFUSING: {_BAK} exists. A previous run died while the target "
-              f"was mutated.\n  Compare it with {spec['target']} and restore by "
+        print(f"REFUSING: {_BAK} exists with no lock beside it. A previous run "
+              f"died while the target was mutated.\n  Compare it with "
+              f"{spec['target']} and restore by "
               f"hand, then delete the backup.", file=sys.stderr)
         return 2
 
@@ -346,8 +408,11 @@ def main(argv):
         except OSError as exc:
             print(f"REFUSING: cannot claim {_LOCK}: {exc}", file=sys.stderr)
             return 2
-        with os.fdopen(_fd, "w") as fh:
-            fh.write(str(os.getpid()))
+        # Write the pid before anything can observe the file, then mark
+        # ownership: only a process that got HERE may ever release the lock.
+        os.write(_fd, str(os.getpid()).encode())
+        os.close(_fd)
+        _OWN_LOCK = True
         with open(_BAK, "wb") as fh:
             fh.write(_ORIGINAL)
 
@@ -558,7 +623,8 @@ def main(argv):
                         f"red-for-everything")
                 rows.append(row)
                 if not restore("between mutations"):
-                    return 3
+                    rc = 3
+                    break
                 continue
             # ---- GUARD 9: a digest is not a guard. -----------------------
             # `.claude/readiness-queue.md:257` records the reason: when the only
@@ -573,7 +639,8 @@ def main(argv):
                 rc = 1
                 rows.append(row)
                 if not restore("between mutations"):
-                    return 3
+                    rc = 3
+                    break
                 continue
             row["verdict"] = "CAUGHT" if caught_by else "ESCAPED"
             row["detail"] = (", ".join(caught_by) if caught_by
@@ -587,7 +654,14 @@ def main(argv):
 
             # ---- GUARD 7: restore, verified by hash, before the next one. ----
             if not restore("between mutations"):
-                return 3
+                # [2026-09-09 round-4] Was `return 3`, which left main before
+                # the summary: MEASURED with chmod 0444 mid-run, the run gave
+                # rc 3 and printed NO table, NO SET-SHA256 and NOT the rc-3
+                # headline -- only three stderr lines. Break to the summary so
+                # the loudest outcome this script has is stated where the
+                # operator is already reading.
+                rc = 3
+                break
     finally:
         if not restore("finally", release=True):
             rc = 3
