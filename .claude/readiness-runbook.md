@@ -50,17 +50,27 @@ the suites *there*, and deletes it. Your tree is neither written to nor read for
 the result, so the gate cannot disturb your work and your work cannot disturb
 its measurement. Two consequences worth stating: you may run it with any amount
 of uncommitted work in progress, and a run killed by SIGKILL costs you a stray
-directory under the system temp dir — collected by `git worktree prune` — and
-nothing else. There is no backup, no lock and no recovery mode, because there
+checkout under the system temp dir (~6.6 MB) and nothing else. Note that
+`git worktree prune` does NOT collect it — prune only forgets entries whose
+directory has already gone — so remove it with
+`git worktree remove --force <path>`. The gate lists any it finds at startup. There is no backup, no lock and no recovery mode, because there
 is nothing to recover.
 
-The one question it asks about your tree is that **the target itself must be
-committed**: the checkout is taken at HEAD, so uncommitted edits to the guard
-are not what gets measured, and reporting on bytes other than the ones you are
-looking at is exactly the false-green class this gate exists to prevent. Every
-other file may be dirty. `--anchors-only` asks nothing at all — it re-binds
-anchors against the target in your working tree, runs no suite, and is
-sub-second, which is what makes it usable in preflight mid-work.
+The one question it asks about your tree is that **it must be committed**: the
+checkout is taken at HEAD, so any uncommitted file is silently swapped for its
+committed version, and reporting on bytes other than the ones you are looking
+at is exactly the false-green class this gate exists to prevent. That covers
+the whole tree, not just the target, because the **suites** decide the verdict
+and they come from HEAD too — an uncommitted edit to a test would otherwise let
+a PASS credit a check that cannot go red in front of you. The mutation set is
+exempt: it is input, and the report carries the sha256 of the bytes that were
+parsed. The target is additionally compared to HEAD **by bytes**, because `git
+status` calls a file clean whenever `assume-unchanged` or `skip-worktree` is
+set on it.
+
+`--anchors-only` asks nothing at all — it re-binds anchors against the target in
+your working tree, runs no suite, and is sub-second, which is what makes it
+usable in preflight mid-work however dirty things are.
 
 `context-check.py` reads only the session transcript, imports
 nothing from `lib/`, and is emitted nowhere.

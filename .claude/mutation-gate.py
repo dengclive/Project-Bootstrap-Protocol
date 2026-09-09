@@ -31,11 +31,15 @@ nothing, run a suite, watch it go red for some unrelated reason, and report
 "all caught". Every guard below exists because "all caught" is the answer this
 script would give if it were broken:
 
-  1. THE TARGET MUST BE COMMITTED. The checkout is taken at HEAD, so
-     uncommitted edits to the guard are not what gets measured, and silently
-     reporting on different bytes than the ones you are looking at is the
-     false-green class this harness exists to prevent. This is the ONLY
-     question asked about your working tree; every other file may be dirty.
+  1. THE TREE MUST BE COMMITTED. The checkout is taken at HEAD, so ANY
+     uncommitted file is silently swapped for its committed version -- and the
+     SUITES decide the verdict, not just the target. Reporting on different
+     bytes than the ones you are looking at is the false-green class this
+     harness exists to prevent. The mutation SET is exempt (it is input, and
+     its parsed bytes are hashed into the report); `--anchors-only` asks
+     nothing at all, because it reads your working tree directly. The target
+     is additionally compared to HEAD by BYTES, since `git status` calls a
+     file clean when assume-unchanged or skip-worktree is set on it.
   2. BASELINE MUST BE GREEN, AND MUST RUN CHECKS. If a suite is already red,
      every mutation is "caught" and the report is vacuous; if it reports
      0 checks (a skip), it witnesses nothing. Measured, printed, required.
@@ -165,22 +169,56 @@ def _on_signal(signum, _frame):
     os._exit(128 + signum)
 
 
-def target_is_dirty(rel):
-    """Is the ONE file the mutations describe uncommitted? None if git fails.
+def worktree_dirt():
+    """Every uncommitted path in YOUR tree, or None if git is unavailable.
 
-    This is the only thing the gate asks about your working tree, and it asks
-    for a provenance reason rather than a safety one: the checkout is taken at
-    HEAD, so uncommitted edits to the guard are NOT what gets measured. Every
-    other file may be as dirty as you like.
+    [2026-09-09 round-9] THE QUESTION COVERS EVERYTHING THE RUN READS, not just
+    the target. The checkout is taken at HEAD, so ANY file that differs in your
+    tree is silently swapped for its committed version -- and the SUITES decide
+    the verdict. MEASURED: with one uncommitted line neutering the only check
+    that catches `stops-too-soon-break`, the gate reported that check CAUGHT it
+    and printed MERGE GATE: PASS at rc 0, crediting a check that cannot go red
+    in the tree the operator is looking at. Four independent reviewers found
+    this the same way. Asking only about the target was my error; the suites
+    import lib/, read .claude/, and shell out to bin/, so the honest scope is
+    "everything", not a list I would get wrong again.
+
+    This is ONE call at startup. It does NOT bring back the per-suite scanning,
+    the lock, the backup or the restore that the private checkout deleted.
     """
     try:
-        r = subprocess.run(["git", "status", "--porcelain", "--", rel],
+        r = subprocess.run(["git", "status", "--porcelain"],
                            cwd=ROOT, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
     return [ln for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def target_differs_from_head(rel):
+    """Compare BYTES, not git's opinion. -> (differs: bool|None, why: str)
+
+    [2026-09-09 round-9] `git status` calls a file clean whenever
+    assume-unchanged or skip-worktree is set on it, so the cleanliness question
+    could be answered wrong silently: MEASURED, with assume-unchanged set and
+    the guard actually removed in the working tree, porcelain was empty and the
+    gate reported the bypass CAUGHT at MERGE GATE: PASS. The index is not the
+    authority on what is in the file; the file is.
+    """
+    try:
+        r = subprocess.run(["git", "show", f"HEAD:{rel}"], cwd=ROOT,
+                           capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return (None, "could not read the committed version")
+    if r.returncode != 0:
+        return (None, f"{rel} is not tracked at HEAD")
+    try:
+        with open(os.path.join(ROOT, rel), "rb") as fh:
+            live = fh.read()
+    except OSError as exc:
+        return (None, f"cannot read {rel}: {exc}")
+    return (live != r.stdout, "the working-tree bytes differ from HEAD")
 
 
 
@@ -291,26 +329,48 @@ def main(argv):
             print(f"  {r['id']:<26} {r['verdict']:<18} {r['detail']}")
         return rc
 
-    # ---- GUARD 1: THE TARGET MUST BE COMMITTED. --------------------------
-    # The only question the gate asks about your working tree, and it asks for
-    # a PROVENANCE reason, not a safety one: the checkout below is taken at
-    # HEAD, so uncommitted edits to the guard are not what gets measured. A
-    # silent "you tested something other than what you are looking at" is the
-    # false-green class this whole harness exists to prevent. Every OTHER file
-    # in your tree may be dirty -- that is the point of the private checkout.
-    _td = target_is_dirty(spec["target"])
-    if _td is None:
-        print("REFUSING: could not read git status for "
-              f"{spec['target']}.", file=sys.stderr)
+    # ---- GUARD 1: WHAT GETS MEASURED MUST BE WHAT YOU ARE LOOKING AT. ---
+    # The checkout is at HEAD, so ANY uncommitted file is silently swapped for
+    # its committed version -- and the SUITES, not just the target, decide the
+    # verdict. Reporting on bytes other than the ones in front of you is the
+    # false-green class this harness exists to prevent, so the question covers
+    # the whole tree. The mutation SET is exempt: it is input, the gate hashes
+    # the bytes it parsed, and runbook step 4b has you author it uncommitted.
+    #
+    # This is one call at startup. The machinery the private checkout deleted
+    # -- the lock, the backup, the hash-verified restore, the per-suite
+    # whole-tree scan -- stays deleted; four review rounds found defects in
+    # THAT, never in asking once whether the tree is clean.
+    _setrel = os.path.relpath(os.path.abspath(args.mutation_set), ROOT)
+    _dirt = worktree_dirt()
+    if _dirt is None:
+        print("REFUSING: could not read git status.", file=sys.stderr)
         return 2
-    if _td:
-        print(f"REFUSING: {spec['target']} has uncommitted changes:",
+    _dirt = [ln for ln in _dirt if ln[3:].strip().strip('"') != _setrel]
+    if _dirt:
+        print("REFUSING: your working tree has uncommitted changes:",
               file=sys.stderr)
-        for ln in _td:
+        for ln in _dirt[:20]:
             print("   ", ln, file=sys.stderr)
-        print("  This gate measures HEAD in a private checkout, so those edits "
-              "would NOT be what it reports on. Commit them first.\n  (Every "
-              "other file in your tree may be dirty; only this one matters.)",
+        if len(_dirt) > 20:
+            print(f"    ... and {len(_dirt) - 20} more", file=sys.stderr)
+        print("  This gate measures HEAD in a private checkout, so none of "
+              "those edits\n  would be what it reports on -- and the suites "
+              "decide the verdict, not\n  just the target. Commit or stash "
+              "first.\n  (`--anchors-only` needs none of this: it reads your "
+              "working tree directly.)", file=sys.stderr)
+        return 2
+
+    # ...and the index is not the authority on the target's contents.
+    _differs, _why = target_differs_from_head(spec["target"])
+    if _differs is None:
+        print(f"REFUSING: {_why}.", file=sys.stderr)
+        return 2
+    if _differs:
+        print(f"REFUSING: {spec['target']} differs from HEAD though git "
+              f"status did not say so\n  ({_why}). assume-unchanged or "
+              f"skip-worktree is probably set on it. The gate\n  would have "
+              f"measured HEAD and reported on bytes you do not have.",
               file=sys.stderr)
         return 2
 
@@ -320,7 +380,41 @@ def main(argv):
     if make_private_checkout() is None:
         return 2
     atexit.register(drop_private_checkout)
+    # [2026-09-09 round-9] REPORT STRAYS; do not delete them. SIGKILL cannot be
+    # trapped, so it leaves a checkout behind -- and `git worktree prune` does
+    # NOT collect it, because prune only forgets entries whose directory is
+    # already gone. MEASURED: a killed run left /tmp/mutation-gate-*/w
+    # registered and on disk (6.6 MB measured) and prune left it alone.
+    # Deleting strays automatically would mean deciding which are live, and
+    # every previous attempt in this file to decide that (an owner pid, a lock)
+    # became the defect. So: say what is there and hand over the command.
+    _strays = [ln.split()[0] for ln in subprocess.run(
+        ["git", "worktree", "list"], cwd=ROOT, capture_output=True, text=True
+    ).stdout.splitlines()
+        if ln.startswith(tempfile.gettempdir() + "/mutation-gate-")
+        and not ln.startswith(WORK)]
+    if _strays:
+        print(f"  note: {len(_strays)} checkout(s) from earlier runs were left "
+              f"behind (a killed run does that;\n        `git worktree prune` "
+              f"will NOT collect them because the directories still exist):")
+        for _s in _strays[:5]:
+            print(f"        git worktree remove --force {_s}")
     _TARGET = os.path.join(WORK, spec["target"])
+    # [2026-09-09 round-9] THE TARGET MUST STAY INSIDE THE CHECKOUT. os.path.join
+    # returns an ABSOLUTE second argument unchanged, so a set naming an absolute
+    # path (or climbing out with ..) made the gate write the mutation into the
+    # operator's REAL working tree while running the suites against the pristine
+    # copy. MEASURED: lib/templates.py in the live tree carried a removed guard
+    # for ~15 s, the run still printed "your working tree was never modified",
+    # and a SIGKILL in that window would have left the guard removed with no
+    # backup and no --recover -- both of which this design deleted precisely
+    # because they could not be needed.
+    if os.path.commonpath([os.path.realpath(_TARGET),
+                           os.path.realpath(WORK)]) != os.path.realpath(WORK):
+        print(f"REFUSING: the target {spec['target']!r} resolves outside the "
+              f"private checkout. A set may only name a path inside the repo.",
+              file=sys.stderr)
+        return 2
     with open(_TARGET, "rb") as fh:
         _ORIGINAL = fh.read()
     orig_sha = sha(_ORIGINAL)
@@ -671,7 +765,8 @@ def main(argv):
             print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
                   f"turn a NAMED check red; {len(ctl)} control(s) escaped as "
                   f"required")
-    print("your working tree was never modified; the private checkout is gone")
+    print("measured in a private checkout, now removed; your working tree was "
+          "not written to")
     return rc
 
 

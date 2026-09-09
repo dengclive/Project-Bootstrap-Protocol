@@ -464,7 +464,7 @@ check("the mutation gate is present and executable",
 # refers to the gate. Editing it now means updating this hash in the same
 # commit, which is the review surface the pin exists to create.
 import hashlib as _hl
-_GATE_SHA = "77d865e1663fc94a48010a064ceed10db9d091c347231d228d0c86d53e953e31"
+_GATE_SHA = "2e5bac46f5e6610cb7936b667234f32d66bf0218a48c9131268fc90f3a1cfeed"
 try:
     with open(_GATE, "rb") as _fh:
         _gsha = _hl.sha256(_fh.read()).hexdigest()
