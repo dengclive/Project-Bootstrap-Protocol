@@ -68,6 +68,23 @@ FAIL_RE = re.compile(r"^\s*FAIL\s+(.*)$", re.M)
 _TARGET = None
 _ORIGINAL = None      # bytes
 _BAK = None
+_LOCK = None          # holds the owning PID; see GUARD 1b
+
+
+def _lock_owner(path):
+    """-> (pid, alive) for a lock file, or (None, False) if unreadable."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            pid = int(fh.read().strip())
+    except (OSError, ValueError):
+        return (None, False)
+    try:
+        os.kill(pid, 0)          # signal 0 tests existence, sends nothing
+    except ProcessLookupError:
+        return (pid, False)
+    except PermissionError:
+        return (pid, True)       # someone else's process: alive, not ours
+    return (pid, True)
 
 
 HARNESS_BAK_DIR = os.path.join(ROOT, ".claude", "mutation-gate-backups")
@@ -103,11 +120,13 @@ def restore(reason="normal", release=False):
         print(f"\nRESTORE FAILED ({reason}): {_TARGET} does not hash to the "
               f"original.\n  The original bytes are in {_BAK}.", file=sys.stderr)
         return False
-    if release and _BAK and os.path.exists(_BAK):
-        try:
-            os.unlink(_BAK)
-        except OSError:
-            pass
+    if release:
+        for _p in (_BAK, _LOCK):
+            if _p and os.path.exists(_p):
+                try:
+                    os.unlink(_p)
+                except OSError:
+                    pass
     return True
 
 
@@ -154,7 +173,7 @@ def run_suite(suite):
 
 
 def main(argv):
-    global _TARGET, _ORIGINAL, _BAK
+    global _TARGET, _ORIGINAL, _BAK, _LOCK
     ap = argparse.ArgumentParser(prog="mutation-gate")
     ap.add_argument("mutation_set", help="path to a mutation-set JSON file")
     ap.add_argument("-k", dest="only", help="run only mutations whose id "
@@ -182,6 +201,7 @@ def main(argv):
     # after the target so a recovery cannot cross-apply between sets.
     _BAK = os.path.join(HARNESS_BAK_DIR,
                         spec["target"].replace(os.sep, "__") + ".mutation-gate.bak")
+    _LOCK = _BAK + ".lock"
     os.makedirs(HARNESS_BAK_DIR, exist_ok=True)
     guard = spec.get("guard", os.path.basename(args.mutation_set))
     n_total = len(spec["mutations"])
@@ -203,6 +223,20 @@ def main(argv):
     # It restores ONLY when the backup matches the target's committed content,
     # so it can never be used to launder an unrelated edit into the tree.
     if args.recover:
+        # [2026-09-09 round-4] REFUSE AGAINST A LIVE RUN. MEASURED: with a gate
+        # run in flight, --recover recognised its in-flight mutation as "one of
+        # this set's declared mutations", rewrote the target MID-MEASUREMENT,
+        # deleted the lock -- destroying the mutual exclusion GUARD 1b exists
+        # to provide -- and exited 0. The live run's verdict went PASS -> FAIL.
+        if os.path.exists(_LOCK):
+            _pid, _alive = _lock_owner(_LOCK)
+            if _alive:
+                print(f"REFUSING to recover: mutation-gate pid {_pid} is "
+                      f"RUNNING and holds {spec['target']}. Recovering now "
+                      f"would rewrite the file it is measuring. Wait for it.",
+                      file=sys.stderr)
+                return 2
+            print(f"note: stale lock from dead pid {_pid}; continuing")
         if not os.path.exists(_BAK):
             print(f"nothing to recover: {_BAK} does not exist")
             return 0
@@ -251,8 +285,10 @@ def main(argv):
         with open(_TARGET, "wb") as fh:
             fh.write(bak)
         os.unlink(_BAK)
+        if os.path.exists(_LOCK):
+            os.unlink(_LOCK)
         print(f"recovered {spec['target']} to sha256 {sha(bak)[:16]}; "
-              f"backup deleted")
+              f"backup and stale lock deleted")
         return 0
 
     # ---- GUARD 2: a leftover backup means a previous run died mutated. ----
@@ -297,17 +333,22 @@ def main(argv):
     # second run loses the race and hits this same guard instead of interleaving.
     if not args.dry_run:
         try:
-            _fd = os.open(_BAK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            _fd = os.open(_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
-            print(f"REFUSING: {_BAK} exists. Either another mutation-gate run "
-                  f"holds {spec['target']} right now, or a previous run died "
-                  f"while the target was mutated. Wait for it, or compare the "
-                  f"backup with the target and restore by hand.", file=sys.stderr)
+            _pid, _alive = _lock_owner(_LOCK)
+            print(f"REFUSING: {_LOCK} exists (owner pid {_pid}, "
+                  f"{'RUNNING' if _alive else 'dead'}). "
+                  + (f"Another mutation-gate run holds {spec['target']} right "
+                     "now; wait for it." if _alive else
+                     "That run died. Compare the backup with the target and "
+                     "resolve by hand, or use --recover."), file=sys.stderr)
             return 2
         except OSError as exc:
-            print(f"REFUSING: cannot claim {_BAK}: {exc}", file=sys.stderr)
+            print(f"REFUSING: cannot claim {_LOCK}: {exc}", file=sys.stderr)
             return 2
-        with os.fdopen(_fd, "wb") as fh:
+        with os.fdopen(_fd, "w") as fh:
+            fh.write(str(os.getpid()))
+        with open(_BAK, "wb") as fh:
             fh.write(_ORIGINAL)
 
     signal.signal(signal.SIGINT, _on_signal)
