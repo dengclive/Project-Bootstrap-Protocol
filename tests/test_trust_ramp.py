@@ -471,18 +471,31 @@ check("the mutation gate is present and executable",
 # Removing a bypass now means editing this list in the same commit, which is
 # the review surface the pin exists to create. Anti-rot runs over every set
 # PRESENT, so an unregistered set is still anchor-checked.
+# [2026-09-09 round-4] The pin also records WHICH ids are controls, the set's
+# digest_suites, and its expect-key union -- because the gate derives a
+# control's jury from exactly those, and all three are author-supplied. MEASURED
+# at 756c95e and again after round 3: flipping a live bypass to "control": true
+# and either dropping the only catching suite from every expect map, or naming
+# that suite in digest_suites, makes a REAL bypass score CONTROL-OK and the gate
+# print MERGE GATE: PASS at rc 0 -- while this suite stayed at 49 passed, 0
+# failed. Pinning ids alone could not see it: a variant that preserved all five
+# ids laundered two bypasses silently. These four facts are what a reviewer
+# would have to be shown to be fooled, so they are the four that get pinned.
 _REQUIRED_SETS = {
-    "int-word-clamp-sufficiency.json": [
-        "clamp-undone",
-        "control-inert-docstring",
-    ],
-    "x54-head-bearing-early-stop.json": [
-        "threshold-raised",
-        "probe-defanged",
-        "probe-skipped-continue",
-        "stops-too-soon-break",
-        "control-inert-comment",
-    ],
+    "int-word-clamp-sufficiency.json": {
+        "bypasses": ["clamp-undone"],
+        "controls": ["control-inert-docstring"],
+        "digest_suites": ["test_greenfield_golden.py"],
+        "suites": ["test_greenfield_golden.py", "test_issue_fixes.py",
+                   "test_retrofit.py"],
+    },
+    "x54-head-bearing-early-stop.json": {
+        "bypasses": ["threshold-raised", "probe-defanged",
+                     "probe-skipped-continue", "stops-too-soon-break"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
+        "suites": ["test_composition.py", "test_hook_behavior.py"],
+    },
 }
 _present = sorted(f for f in os.listdir(_MUTDIR)
                   if f.endswith(".json")) if os.path.isdir(_MUTDIR) else []
@@ -529,7 +542,8 @@ for _name in _sets:
         continue
     # [2026-09-09 re-review fix E] Pin the BYPASS LIST, not just the filename.
     if _name in _REQUIRED_SETS:
-        _want_ids = _REQUIRED_SETS[_name]
+        _pin = _REQUIRED_SETS[_name]
+        _want_ids = sorted(_pin["bypasses"] + _pin["controls"])
         _gone = [i for i in _want_ids if i not in _ids]
         _extra = [i for i in _ids if i not in _want_ids]
         check(f"{_name}: every pinned bypass is still declared",
@@ -537,6 +551,26 @@ for _name in _sets:
               f"    missing {_gone}; unregistered {_extra}. The set file can be "
               "gutted without deleting it; this is the check that notices. "
               "Changing the bypass list means editing _REQUIRED_SETS too.")
+        # [round-4] WHICH ids are controls, and the two author-supplied inputs
+        # the gate derives a control's jury from.
+        _is_ctl = sorted(m["id"] for m in _muts if m.get("control"))
+        check(f"{_name}: exactly the pinned mutations are controls",
+              _is_ctl == sorted(_pin["controls"]),
+              f"    controls are {_is_ctl}, pinned {sorted(_pin['controls'])}. "
+              "Flipping a live bypass to a control makes the gate score it "
+              "CONTROL-OK and report PASS; that must be a reviewable diff.")
+        _dg = sorted(_spec.get("digest_suites", []))
+        check(f"{_name}: digest_suites is unchanged",
+              _dg == sorted(_pin["digest_suites"]),
+              f"    {_dg}, pinned {sorted(_pin['digest_suites'])}. A behavioural "
+              "suite listed here is subtracted from the control's jury, which "
+              "is one array entry away from a false PASS.")
+        _union = sorted({s for m in _muts for s in (m.get("expect") or {})})
+        check(f"{_name}: the expect-suite union is unchanged",
+              _union == sorted(_pin["suites"]),
+              f"    {_union}, pinned {sorted(_pin['suites'])}. The gate derives "
+              "both the baseline and the control's jury from this union; "
+              "narrowing it silently shrinks what the control had to escape.")
     _bad = [(m["id"], _tgt.count(m["find"])) for m in _muts
             if _tgt.count(m["find"]) != 1]
     check(f"{_name}: every anchor binds exactly once",

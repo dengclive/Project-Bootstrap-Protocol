@@ -39,6 +39,10 @@ script would give if it were broken:
      which is a failure of the gate, not a pass.
   7. RESTORE IS VERIFIED BY HASH, on every path: normal, exception, SIGINT,
      SIGTERM. A restore that did not restore is reported and exits non-zero.
+  8. ONE RUN AT A TIME, PER TARGET. The backup is created O_EXCL before the
+     baseline and held for the run, so a second gate against the same target
+     refuses instead of interleaving writes. Without it two runs score rows on
+     each other's bytes and an inert set can report "all caught".
 
 Usage:
   .claude/mutation-gate.py .claude/mutations/<set>.json [-k NAME] [--dry-run]
@@ -73,8 +77,13 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def restore(reason="normal"):
-    """Put the target back and prove it by hash. Safe to call repeatedly."""
+def restore(reason="normal", release=False):
+    """Put the target back and prove it by hash. Safe to call repeatedly.
+
+    `release` drops the backup, which is ALSO this run's lock (see GUARD 1b).
+    Between mutations we restore but keep the lock; only the terminal paths
+    (finally, atexit, signal) release it.
+    """
     if _TARGET is None or _ORIGINAL is None:
         return True
     try:
@@ -94,7 +103,7 @@ def restore(reason="normal"):
         print(f"\nRESTORE FAILED ({reason}): {_TARGET} does not hash to the "
               f"original.\n  The original bytes are in {_BAK}.", file=sys.stderr)
         return False
-    if _BAK and os.path.exists(_BAK):
+    if release and _BAK and os.path.exists(_BAK):
         try:
             os.unlink(_BAK)
         except OSError:
@@ -105,7 +114,7 @@ def restore(reason="normal"):
 def _on_signal(signum, _frame):
     print(f"\n[mutation-gate] signal {signum} - restoring {_TARGET}",
           file=sys.stderr)
-    restore(f"signal {signum}")
+    restore(f"signal {signum}", release=True)
     # 128+n is the shell's convention for death by signal; keep it visible.
     os._exit(128 + signum)
 
@@ -274,9 +283,36 @@ def main(argv):
     orig_sha = sha(_ORIGINAL)
     print(f"  clean tree; target sha256 {orig_sha[:16]}\n")
 
+    # ---- GUARD 1b: CLAIM THE TARGET FOR THE WHOLE RUN. ------------------
+    # [2026-09-09 round-4 blocker] Nothing used to claim the target, and GUARD 2
+    # only sampled once at startup. Two gates run at once therefore scored rows
+    # on EACH OTHER'S bytes. MEASURED across two independent reviewers: 7 of 8
+    # aligned trials produced a WRONG table, and a sham set whose only mutation
+    # is an inert comment printed "MERGE GATE: PASS" at rc 0 because the OTHER
+    # run's real mutation was on disk when the suite ran. That is a false PASS
+    # needing no dishonesty -- just two runs, or one run and a stale background
+    # job. An earlier review called this "unproven" after seeing identical
+    # tables from two runs of the SAME set; that was the one shape that hides it.
+    # The backup doubles as the lock: created O_EXCL here, held to the end, so a
+    # second run loses the race and hits this same guard instead of interleaving.
+    if not args.dry_run:
+        try:
+            _fd = os.open(_BAK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        except FileExistsError:
+            print(f"REFUSING: {_BAK} exists. Either another mutation-gate run "
+                  f"holds {spec['target']} right now, or a previous run died "
+                  f"while the target was mutated. Wait for it, or compare the "
+                  f"backup with the target and restore by hand.", file=sys.stderr)
+            return 2
+        except OSError as exc:
+            print(f"REFUSING: cannot claim {_BAK}: {exc}", file=sys.stderr)
+            return 2
+        with os.fdopen(_fd, "wb") as fh:
+            fh.write(_ORIGINAL)
+
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
-    atexit.register(lambda: restore("atexit"))
+    atexit.register(lambda: restore("atexit", release=True))
 
     rows = []
     rc = 0
@@ -290,8 +326,21 @@ def main(argv):
                 print("BASELINE (unmutated) - every mutation is vacuously "
                       "'caught' if this is red")
             p, f, crashed, _names, dt = run_suite(s)
-            state = "CRASHED" if crashed else ("GREEN" if f == 0 else "RED")
+            vacuous = not crashed and p + f == 0
+            state = ("CRASHED" if crashed else
+                     "VACUOUS (0 checks)" if vacuous else
+                     ("GREEN" if f == 0 else "RED"))
             print(f"  {s:<28} {p:>4} passed, {f:>3} failed  {dt:>5.1f}s  {state}")
+            if vacuous:
+                # [2026-09-09 round-4] A suite that SKIPS reports "0 passed, 0
+                # failed" and exits 0. That read GREEN here and then counted as
+                # a suite the control "escaped" -- an escape from a jury that
+                # never sat. MEASURED with test_wrapper_behavior.py under a
+                # flock-less PATH: CONTROL-OK, MERGE GATE: PASS, rc 0.
+                print("\nREFUSING: baseline suite ran 0 checks (skipped?). It "
+                      "cannot witness anything, so no row scored against it "
+                      "would mean anything.", file=sys.stderr)
+                return 2
             if crashed or f:
                 print("\nREFUSING: baseline is not green. Every mutation would "
                       "'turn it red' and the report would mean nothing.",
@@ -336,8 +385,8 @@ def main(argv):
                 print(f"  {m['id']:<26} NOOP")
                 continue
 
-            with open(_BAK, "wb") as fh:
-                fh.write(_ORIGINAL)
+            # The backup was written once under GUARD 1b and is this run's
+            # lock; do not truncate and rewrite it per mutation.
             with open(_TARGET, "wb") as fh:
                 fh.write(mutated)
             with open(_TARGET, "rb") as fh:
@@ -373,6 +422,8 @@ def main(argv):
                 hit = [x for x in names if want and want in x]
                 if crashed:
                     state = "CRASHED"
+                elif p + f == 0:
+                    state = "VACUOUS (0 checks)"
                 elif f == 0:
                     state = "green (blind, as declared)" if want is None \
                         else "GREEN"
@@ -404,17 +455,17 @@ def main(argv):
                 # PASS, rc 0 -- of suites that executed no checks at all.
                 # A crash is also invisible below: the blind-cell branch needs
                 # `f`, and a crash reports f == 0, so nothing flagged it.
-                if crashed:
+                if crashed or (p + f == 0):
                     went_crashed.append(s)
-                    surprises.append(f"{s} CRASHED - 0 checks ran, so this "
-                                     f"row is evidence of nothing")
+                    surprises.append(f"{s} ran 0 checks (crashed or skipped), "
+                                     f"so this row is evidence of nothing")
                 if state == "RED@check":
                     caught_by.append(s)
                 elif want is None and f and s not in dsuites_pre:
                     # Declared blind, went red anyway: the coverage table is
                     # stale, or the mutation is broader than it claims.
                     surprises.append(f"{s} went red though declared blind")
-                elif want is not None and not crashed:
+                elif want is not None and not crashed and p + f:
                     # A crashed cell already recorded a better-worded surprise
                     # just above; do not report it twice.
                     surprises.append(f"{s}: {state}, wanted {want!r}")
@@ -497,7 +548,7 @@ def main(argv):
             if not restore("between mutations"):
                 return 3
     finally:
-        if not restore("finally"):
+        if not restore("finally", release=True):
             rc = 3
 
     print("\n" + "=" * 96)
@@ -514,7 +565,21 @@ def main(argv):
     print("-" * 96)
     bad = [r for r in rows
            if r["verdict"] not in ("CAUGHT", "ANCHOR-OK", "CONTROL-OK")]
-    if args.dry_run:
+    if rc == 3:
+        # [2026-09-09 round-4 fix] A FAILED RESTORE OUTRANKS EVERY OTHER
+        # HEADLINE, and it must be tested FIRST. 1895c4a put this test at the
+        # bottom of the chain, where it was reachable only when every row had
+        # an accepted verdict. Measured: with one bad row the headline was the
+        # coverage sentence and the unrestored tree was never named; under -k
+        # or a no-control set the PARTIAL/INCONCLUSIVE branches additionally
+        # reassigned rc = 1, so even `$?` lost the failed restore. The shipped
+        # int-word set always has a bad row, so on it a failed restore could
+        # never be announced at all.
+        print("MERGE GATE: FAIL - THE TARGET WAS NOT RESTORED (rc=3). The "
+              "working tree may still carry a mutation, which outranks every "
+              "other result here. Fix that FIRST; nothing above is a merge-gate "
+              "result until the target matches HEAD.")
+    elif args.dry_run:
         # A dry run applied nothing, so it can say the anchors still bind and
         # NOTHING ELSE. Printing a PASS here would be the exact defect this
         # script exists to catch: a report that reads green without a run.
@@ -557,20 +622,11 @@ def main(argv):
             # expectation that never fired printed
             # "MERGE GATE: PASS ... 1 control(s) escaped as required" and
             # returned 1. A human reads the last line; only a script reads $?.
-            # rc 3 is a FAILED RESTORE, set in the `finally` above. Saying
-            # "a declared expectation did not fire" there would misdiagnose a
-            # tree that is still mutated -- the single most urgent outcome this
-            # script has -- so it gets its own sentence.
-            if rc == 3:
-                print("MERGE GATE: FAIL - THE TARGET WAS NOT RESTORED (rc=3). "
-                      "Every row has an accepted verdict, but the working tree "
-                      "may still carry a mutation. Fix that before reading "
-                      "anything above as a result.")
-            else:
-                print(f"MERGE GATE: FAIL - every row has an accepted verdict, "
-                      f"but the run raised rc={rc}: see the [!] notes above. A "
-                      f"declared expectation did not fire, so the coverage "
-                      f"table is wrong even though each bypass was caught.")
+            # rc 3 cannot reach here: it is tested at the TOP of this chain.
+            print(f"MERGE GATE: FAIL - every row has an accepted verdict, but "
+                  f"the run raised rc={rc}: see the [!] notes above. A declared "
+                  f"expectation did not fire, or a suite ran no checks, so the "
+                  f"coverage table is wrong even though each bypass was caught.")
         else:
             print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
                   f"turn a NAMED check red; {len(ctl)} control(s) escaped as "
