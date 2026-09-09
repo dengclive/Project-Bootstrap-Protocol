@@ -456,6 +456,24 @@ _MUTDIR = os.path.join(ROOT, ".claude", "mutations")
 check("the mutation gate is present and executable",
       os.path.isfile(_GATE) and os.access(_GATE, os.X_OK),
       f"    {_GATE}")
+# [2026-09-09 round-6] PIN THE GATE'S CONTENT, not just its existence. isfile +
+# X_OK was the ONLY automatic assertion about this harness, so MEASURED at
+# 8f93fd4: a 2-line stub printing the exact "MERGE GATE: PASS" banner, a
+# ZERO-BYTE gate, and a gate with GUARD 10 deleted each left the suite at 55/0
+# and ./bin/run-tests at 25 suites / 9862 checks / 0 failed. Nothing else in CI
+# refers to the gate. Editing it now means updating this hash in the same
+# commit, which is the review surface the pin exists to create.
+import hashlib as _hl
+_GATE_SHA = "f473017b69faa67c34a9a0c60a03414be7515cc1e7dafa3af0981d1273c9b9a1"
+try:
+    with open(_GATE, "rb") as _fh:
+        _gsha = _hl.sha256(_fh.read()).hexdigest()
+except OSError as _e:
+    _gsha = f"unreadable: {_e!r}"
+check("the mutation gate's content matches its pin",
+      _gsha == _GATE_SHA,
+      f"    got {_gsha}, pinned {_GATE_SHA}. If you edited the gate on "
+      "purpose, update _GATE_SHA in the same commit.")
 # [2026-09-08 review blocker 3] These names are PINNED, not discovered. The
 # first version did `os.listdir(_MUTDIR)` and generated a check per file found
 # -- so deleting a set deleted its own checks and the suite went 44/0 GREEN
@@ -483,6 +501,8 @@ check("the mutation gate is present and executable",
 # would have to be shown to be fooled, so they are the four that get pinned.
 _REQUIRED_SETS = {
     "int-word-clamp-sufficiency.json": {
+        "sha256": "1cef5393e99c0893a206f01c3fba511b"
+                  "6cb14fb54ed50b51ae2def4713f4446b",
         "bypasses": ["clamp-undone"],
         "controls": ["control-inert-docstring"],
         "digest_suites": ["test_greenfield_golden.py"],
@@ -490,6 +510,8 @@ _REQUIRED_SETS = {
                    "test_retrofit.py"],
     },
     "x54-head-bearing-early-stop.json": {
+        "sha256": "debd1c68f08c29c01f4815d35ae612a4"
+                  "d9f773e9b4b8d885a942d2f60e1f788d",
         "bypasses": ["threshold-raised", "probe-defanged",
                      "probe-skipped-continue", "stops-too-soon-break"],
         "controls": ["control-inert-comment"],
@@ -543,6 +565,22 @@ for _name in _sets:
     # [2026-09-09 re-review fix E] Pin the BYPASS LIST, not just the filename.
     if _name in _REQUIRED_SETS:
         _pin = _REQUIRED_SETS[_name]
+        # [2026-09-09 round-6] PIN THE SET'S CONTENT. The pins below cover the
+        # set's METADATA -- ids, which are controls, digest_suites, the
+        # expect-key union -- but not `find`, `replace`, or the check-name
+        # VALUES in expect. MEASURED at 8f93fd4: with every one of those pinned
+        # facts intact, all four x54 bypasses were swapped for whitespace-only
+        # no-ops and the suite stayed 55/0 WHILE THE GATE ITSELF printed
+        # "MERGE GATE: PASS - 4/4 bypasses turn a NAMED check red" at rc 0,
+        # with the real guard byte-untouched. A content hash is the only pin
+        # that cannot be satisfied by a differently-shaped lie.
+        with open(os.path.join(_MUTDIR, _name), "rb") as _fh:
+            _ssha = _hl.sha256(_fh.read()).hexdigest()
+        check(f"{_name}: content matches its pin",
+              _ssha == _pin["sha256"],
+              f"    got {_ssha}, pinned {_pin['sha256']}. Every field a set "
+              "declares steers what the gate measures; changing any of them "
+              "means updating this hash in the same commit.")
         _want_ids = sorted(_pin["bypasses"] + _pin["controls"])
         _gone = [i for i in _want_ids if i not in _ids]
         _extra = [i for i in _ids if i not in _want_ids]

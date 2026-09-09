@@ -65,6 +65,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SUMMARY_RE = re.compile(r"(\d+)\s+passed,\s+(\d+)\s+failed")
 FAIL_RE = re.compile(r"^\s*FAIL\s+(.*)$", re.M)
+CHECK_RE = re.compile(r"^\s*(?:PASS|FAIL)\s+(.*)$", re.M)
 
 # Module state so the atexit/signal restorer can reach it without a global
 # object graph. `_ORIGINAL` is the authority; nothing else may write the target.
@@ -164,22 +165,32 @@ def _on_signal(signum, _frame):
     os._exit(128 + signum)
 
 
-def tree_dirty(paths):
-    """Porcelain status for the given paths, or None if git is unavailable."""
+def tree_lines(paths=None):
+    """Sorted porcelain status for the WHOLE tree (or the given paths).
+
+    [2026-09-09 round-6] The gate used to check only the target and the suite
+    FILES. But the suites import the rest of lib/, so a foreign write to any
+    other file changes what they measure. MEASURED at 8f93fd4: a concurrent
+    one-line edit to lib/cmdpos.py turned an INERT comment mutation into
+    CAUGHT and the run printed MERGE GATE: PASS at rc 0, with the target
+    byte-identical throughout and no INTERFERED row. The unit of isolation is
+    the REPO, not the file.
+    """
+    cmd = ["git", "status", "--porcelain"] + (["--"] + list(paths) if paths else [])
     try:
-        r = subprocess.run(["git", "status", "--porcelain", "--"] + list(paths),
-                           cwd=ROOT, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
+                           timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
-    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+    return sorted(ln for ln in r.stdout.splitlines() if ln.strip())
 
 
 def run_suite(suite):
     """Run one standalone suite directly.
 
-    Returns (passed, failed, crashed, fail_names, seconds). `crashed` means the
+    Returns (passed, failed, crashed, fail_names, seconds, all_check_names). `crashed` means the
     suite printed no summary line, or exited non-zero with no failing check --
     red, but NOT evidence that a check caught anything.
     """
@@ -193,9 +204,10 @@ def run_suite(suite):
     out = r.stdout + r.stderr
     hits = SUMMARY_RE.findall(out)
     if not hits:
-        return (0, 0, True, [], dt)
+        return (0, 0, True, [], dt, [])
     p, f = int(hits[-1][0]), int(hits[-1][1])
-    return (p, f, r.returncode != 0 and f == 0, FAIL_RE.findall(out), dt)
+    return (p, f, r.returncode != 0 and f == 0, FAIL_RE.findall(out), dt,
+            CHECK_RE.findall(out))
 
 
 def main(argv):
@@ -227,7 +239,11 @@ def main(argv):
     # after the target so a recovery cannot cross-apply between sets.
     _BAK = os.path.join(HARNESS_BAK_DIR,
                         spec["target"].replace(os.sep, "__") + ".mutation-gate.bak")
-    _LOCK = _BAK + ".lock"
+    # [2026-09-09 round-6] ONE LOCK FOR THE REPO, not one per target. Two gates
+    # on DIFFERENT targets were not mutually excluded even though their suites
+    # read the same product files, so each measured rows against the other's
+    # mutation.
+    _LOCK = os.path.join(HARNESS_BAK_DIR, "mutation-gate.lock")
     os.makedirs(HARNESS_BAK_DIR, exist_ok=True)
     guard = spec.get("guard", os.path.basename(args.mutation_set))
     n_total = len(spec["mutations"])
@@ -364,14 +380,26 @@ def main(argv):
         return 2
 
     # ---- GUARD 1: refuse on a dirty target or a dirty suite. ----
-    dirty = tree_dirty([spec["target"]] + ["tests/" + s for s in suites])
+    # The mutation SET may legitimately be uncommitted: runbook step 4b has you
+    # author it before it is committed. Everything else must be clean, because
+    # the suites read the whole tree.
+    _setrel = os.path.relpath(os.path.abspath(args.mutation_set), ROOT)
+    dirty = tree_lines()
+    if dirty is not None:
+        _set_dirty = [ln for ln in dirty if ln[3:].strip().strip('"') == _setrel]
+        dirty = [ln for ln in dirty if ln not in _set_dirty]
+        if _set_dirty:
+            print(f"  note: the mutation set is uncommitted ({_setrel}); the "
+                  f"SET-SHA256 below is what actually ran")
     if dirty is None:
         print("REFUSING: could not read git status. This script rewrites a "
               "tracked file; without a clean-tree proof it will not run.",
               file=sys.stderr)
         return 2
     if dirty:
-        print("REFUSING: the target or a suite is dirty:", file=sys.stderr)
+        print("REFUSING: the working tree is dirty. The suites read the whole "
+              "tree, so ANY uncommitted file can change what they measure:",
+              file=sys.stderr)
         for ln in dirty:
             print("   ", ln, file=sys.stderr)
         print("  A pre-existing edit is indistinguishable from a mutation, and "
@@ -379,6 +407,10 @@ def main(argv):
               file=sys.stderr)
         return 2
 
+    # The tree as GUARD 1 accepted it. GUARD 10 requires every later scan to
+    # equal this, plus the target we mutated ourselves and nothing else.
+    _clean_tree = list(dirty) + list(_set_dirty)
+    _tgtrel = spec["target"]
     with open(_TARGET, "rb") as fh:
         _ORIGINAL = fh.read()
     orig_sha = sha(_ORIGINAL)
@@ -430,11 +462,13 @@ def main(argv):
         # `--anchors-only` skips it deliberately: that mode makes no claim about
         # redness, so it needs no green baseline, and skipping it is what keeps
         # the anti-rot check sub-second and therefore runnable in S0 preflight.
+        baseline_checks = {}
         for s in [] if args.anchors_only else suites:
             if s == suites[0]:
                 print("BASELINE (unmutated) - every mutation is vacuously "
                       "'caught' if this is red")
-            p, f, crashed, _names, dt = run_suite(s)
+            p, f, crashed, _names, dt, _all = run_suite(s)
+            baseline_checks[s] = _all
             vacuous = not crashed and p + f == 0
             state = ("CRASHED" if crashed else
                      "VACUOUS (0 checks)" if vacuous else
@@ -456,6 +490,37 @@ def main(argv):
                       file=sys.stderr)
                 return 2
         print()
+
+        # ---- GUARD 4b: a declared check name must IDENTIFY ONE CHECK. ----
+        # [2026-09-09 round-6] `want` is matched as a SUBSTRING of failing check
+        # names, so a short or generic string scores RED@check against whatever
+        # happens to fail. MEASURED at 8f93fd4: want "s" made a row labelled
+        # `stops-too-soon-break` score CAUGHT against an unrelated check. A
+        # declared expectation that does not pick out exactly one check in the
+        # suite's own baseline is not an expectation.
+        if not args.dry_run:
+            _bad_want = []
+            _dsq = set(spec.get("digest_suites", []))
+            for _m in muts:
+                for _s, _w in sorted(_m["expect"].items()):
+                    if _w is None:
+                        continue
+                    _n = sum(1 for _c in baseline_checks.get(_s, []) if _w in _c)
+                    # A DIGEST suite moves for any byte of an emitted file, so
+                    # naming one check there is meaningless by construction --
+                    # and GUARD 9 already refuses to count a digest-only catch.
+                    # Require only that the name matches something real.
+                    _need = ">=1" if _s in _dsq else "exactly 1"
+                    if (_n < 1) if _s in _dsq else (_n != 1):
+                        _bad_want.append(f"{_m['id']}/{_s}: {_w!r} matches "
+                                         f"{_n} checks, need {_need}")
+            if _bad_want:
+                print("REFUSING: a declared check name does not identify "
+                      "exactly one check in that suite's baseline:",
+                      file=sys.stderr)
+                for _b in _bad_want:
+                    print("   ", _b, file=sys.stderr)
+                return 2
 
         if args.dry_run:
             print("ANCHORS ONLY - no suite run, nothing applied\n"
@@ -528,7 +593,7 @@ def main(argv):
                     else sorted(m["expect"].items()))
             interfered = []
             for s, want in plan:
-                p, f, crashed, names, dt = run_suite(s)
+                p, f, crashed, names, dt, _all = run_suite(s)
                 # ---- GUARD 10: THE ROW MUST BE ABOUT THE BYTES WE WROTE. ----
                 # [2026-09-09] The lock (GUARD 1b) tries to PREVENT a second
                 # writer; this VERIFIES the result regardless of whether the
@@ -544,12 +609,27 @@ def main(argv):
                 try:
                     with open(_TARGET, "rb") as _fh:
                         _now = _fh.read()
-                except OSError as _exc:
-                    _now, _exc_txt = None, str(_exc)
+                except OSError:
+                    _now = None
+                _why = None
                 if _now != mutated:
+                    _why = "the target changed under this run"
+                else:
+                    # ...and NOTHING ELSE in the tree may have moved either.
+                    _tl = tree_lines()
+                    if _tl is None:
+                        _why = "git status unreadable, so the tree is unverified"
+                    else:
+                        _foreign = [ln for ln in _tl
+                                    if ln not in _clean_tree
+                                    and ln[3:].strip().strip('"') != _tgtrel]
+                        if _foreign:
+                            _why = (f"another file changed under this run: "
+                                    f"{'; '.join(x.strip() for x in _foreign[:3])}")
+                if _why:
                     interfered.append(s)
-                    print(f"      {s:<28} {'':>4}{'':>4}  {dt:>5.1f}s  "
-                          f"INTERFERED - the target changed under this run")
+                    print(f"      {s:<28} {'':>8}  {dt:>5.1f}s  "
+                          f"INTERFERED - {_why}")
                     continue
                 hit = [x for x in names if want and want in x]
                 if crashed:
