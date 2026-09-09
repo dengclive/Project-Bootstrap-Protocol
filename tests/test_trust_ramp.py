@@ -445,5 +445,203 @@ check("bin/trust-ramp is executable", os.access(SCRIPT, os.X_OK))
 
 shutil.rmtree(TMP, ignore_errors=True)
 
+print("\n== the mutation gate exists and its sets still bind (runbook step 4b) ==")
+
+# [2026-09-08] Only checks that can actually GO RED live here. A check that
+# asserts a sentence appears in a prose file cannot survive a line wrap, and
+# this repo has already shipped pins that passed while the thing they guarded
+# was gone. These four run the artifact instead.
+_GATE = os.path.join(ROOT, ".claude", "mutation-gate.py")
+_MUTDIR = os.path.join(ROOT, ".claude", "mutations")
+check("the mutation gate is present and executable",
+      os.path.isfile(_GATE) and os.access(_GATE, os.X_OK),
+      f"    {_GATE}")
+# [2026-09-09 round-6] PIN THE GATE'S CONTENT, not just its existence. isfile +
+# X_OK was the ONLY automatic assertion about this harness, so MEASURED at
+# 8f93fd4: a 2-line stub printing the exact "MERGE GATE: PASS" banner, a
+# ZERO-BYTE gate, and a gate with GUARD 10 deleted each left the suite at 55/0
+# and ./bin/run-tests at 25 suites / 9862 checks / 0 failed. Nothing else in CI
+# refers to the gate. Editing it now means updating this hash in the same
+# commit, which is the review surface the pin exists to create.
+import hashlib as _hl
+_GATE_SHA = "2e5bac46f5e6610cb7936b667234f32d66bf0218a48c9131268fc90f3a1cfeed"
+try:
+    with open(_GATE, "rb") as _fh:
+        _gsha = _hl.sha256(_fh.read()).hexdigest()
+except OSError as _e:
+    _gsha = f"unreadable: {_e!r}"
+check("the mutation gate's content matches its pin",
+      _gsha == _GATE_SHA,
+      f"    got {_gsha}, pinned {_GATE_SHA}. If you edited the gate on "
+      "purpose, update _GATE_SHA in the same commit.")
+# [2026-09-08 review blocker 3] These names are PINNED, not discovered. The
+# first version did `os.listdir(_MUTDIR)` and generated a check per file found
+# -- so deleting a set deleted its own checks and the suite went 44/0 GREEN
+# with the guard's entire bypass list gone. A check derived from the thing it
+# checks enforces nothing. Adding a set means adding its name here, on purpose.
+# [2026-09-09 re-review fixes D and E] The pin now names the BYPASSES, not just
+# the file. Two measured defects in the 2026-09-08 version:
+#   D  it narrowed the anti-rot loop to pinned names, so a set ADDED without
+#      editing this list got ZERO anchor checking. Measured: a new set whose
+#      anchor matched nothing at all left the suite at 46 passed, 0 failed.
+#   E  it pinned the FILENAME only, so the file could stay and be gutted.
+#      Measured: deleting 3 of x54's 4 enumerated bypasses -> 46 passed, 0 failed.
+# Removing a bypass now means editing this list in the same commit, which is
+# the review surface the pin exists to create. Anti-rot runs over every set
+# PRESENT, so an unregistered set is still anchor-checked.
+# [2026-09-09 round-4] The pin also records WHICH ids are controls, the set's
+# digest_suites, and its expect-key union -- because the gate derives a
+# control's jury from exactly those, and all three are author-supplied. MEASURED
+# at 756c95e and again after round 3: flipping a live bypass to "control": true
+# and either dropping the only catching suite from every expect map, or naming
+# that suite in digest_suites, makes a REAL bypass score CONTROL-OK and the gate
+# print MERGE GATE: PASS at rc 0 -- while this suite stayed at 49 passed, 0
+# failed. Pinning ids alone could not see it: a variant that preserved all five
+# ids laundered two bypasses silently. These four facts are what a reviewer
+# would have to be shown to be fooled, so they are the four that get pinned.
+_REQUIRED_SETS = {
+    "int-word-clamp-sufficiency.json": {
+        "sha256": "1cef5393e99c0893a206f01c3fba511b"
+                  "6cb14fb54ed50b51ae2def4713f4446b",
+        "bypasses": ["clamp-undone"],
+        "controls": ["control-inert-docstring"],
+        "digest_suites": ["test_greenfield_golden.py"],
+        "suites": ["test_greenfield_golden.py", "test_issue_fixes.py",
+                   "test_retrofit.py"],
+    },
+    "x54-head-bearing-early-stop.json": {
+        "sha256": "debd1c68f08c29c01f4815d35ae612a4"
+                  "d9f773e9b4b8d885a942d2f60e1f788d",
+        "bypasses": ["threshold-raised", "probe-defanged",
+                     "probe-skipped-continue", "stops-too-soon-break"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
+        "suites": ["test_composition.py", "test_hook_behavior.py"],
+    },
+}
+# [2026-09-09 round-7] Walk, and do not filter by extension. `os.listdir` plus
+# `endswith(".json")` made a set INVISIBLE to both this check and anti-rot if it
+# was named *.JSON, had no extension, or sat in a subdirectory -- measured: three
+# such copies produced ZERO checks between them. Anything under .claude/mutations
+# is a mutation set and must be registered.
+# Editor and OS debris is NOT a mutation set. [2026-09-09 round-8] The
+# unfiltered walk turned this PRODUCT suite -- and therefore ./bin/run-tests --
+# red on the files a stock editor leaves beside an open set. MEASURED: a vim
+# swapfile gave "57 passed, 2 failed" (unregistered, plus a JSONDecodeError on
+# the swapfile), and the same file simultaneously made the gate refuse under
+# GUARD 1. The runbook step-4b authoring loop is exactly when a set is open in
+# an editor, so this fired precisely when the harness is meant to be usable.
+_DEBRIS = (".swp", ".swo", ".swn", "~", ".orig", ".rej", ".bak", ".tmp")
+def _is_debris(name):
+    base = os.path.basename(name)
+    return (base.endswith(_DEBRIS) or base.startswith((".#", "#"))
+            or base == ".DS_Store")
+_present = []
+if os.path.isdir(_MUTDIR):
+    for _root, _dirs, _files in os.walk(_MUTDIR):
+        for _f in _files:
+            _rel = os.path.relpath(os.path.join(_root, _f), _MUTDIR)
+            if not _is_debris(_rel):
+                _present.append(_rel)
+_present = sorted(_present)
+_missing = [n for n in _REQUIRED_SETS if n not in _present]
+check("every REQUIRED mutation set is present",
+      not _missing,
+      f"    missing {_missing}; present {_present}. A set is removed only by "
+      "removing its name from _REQUIRED_SETS in the same commit, which is the "
+      "review surface this pin exists to create.")
+# Anti-rot covers everything actually on disk, not just what is registered.
+_sets = _present
+_unregistered = [n for n in _present if n not in _REQUIRED_SETS]
+check("every mutation set on disk is registered in _REQUIRED_SETS",
+      not _unregistered,
+      f"    {_unregistered} present but unregistered. An unregistered set has "
+      "no pinned bypass list, so its rows can be deleted without a reviewable "
+      "diff. Add it to _REQUIRED_SETS with its mutation ids.")
+
+# ANTI-ROT, and this is the check with no equivalent anywhere else in the
+# suite: re-bind every `find` string against its target IN-PROCESS. When a
+# guard is refactored, its bypass list silently stops describing it -- the pins
+# stay green, the behavioural rows stay green, and only this goes red.
+import json as _json
+for _name in _sets:
+    try:
+        _spec = _json.load(open(os.path.join(_MUTDIR, _name), encoding="utf-8"))
+        _tgt = open(os.path.join(ROOT, _spec["target"]), encoding="utf-8").read()
+        # [2026-09-09 re-review fix G] The 2026-09-08 try covered only parse and
+        # IO. A JSON-valid but STRUCTURALLY malformed set -- no "mutations" key,
+        # a mutation missing "find" or "id", "mutations" not a list -- still
+        # raised out of the comprehension below and killed the whole suite with
+        # no count. Force the structural access inside the try.
+        _muts = _spec["mutations"]
+        if not isinstance(_muts, list) or not _muts:
+            raise ValueError("'mutations' must be a non-empty list")
+        _ids = [m["id"] for m in _muts]
+        _finds = [m["find"] for m in _muts]
+    except Exception as _e:
+        # A traceback here would kill the whole suite inside bin/run-tests and
+        # report NO count at all, which reads as infrastructure noise rather
+        # than as a failure. Fail as a CHECK instead.
+        check(f"{_name}: parses and is structurally well formed", False,
+              f"    {_e!r}")
+        continue
+    # [2026-09-09 re-review fix E] Pin the BYPASS LIST, not just the filename.
+    if _name in _REQUIRED_SETS:
+        _pin = _REQUIRED_SETS[_name]
+        # [2026-09-09 round-6] PIN THE SET'S CONTENT. The pins below cover the
+        # set's METADATA -- ids, which are controls, digest_suites, the
+        # expect-key union -- but not `find`, `replace`, or the check-name
+        # VALUES in expect. MEASURED at 8f93fd4: with every one of those pinned
+        # facts intact, all four x54 bypasses were swapped for whitespace-only
+        # no-ops and the suite stayed 55/0 WHILE THE GATE ITSELF printed
+        # "MERGE GATE: PASS - 4/4 bypasses turn a NAMED check red" at rc 0,
+        # with the real guard byte-untouched. A content hash is the only pin
+        # that cannot be satisfied by a differently-shaped lie.
+        with open(os.path.join(_MUTDIR, _name), "rb") as _fh:
+            _ssha = _hl.sha256(_fh.read()).hexdigest()
+        check(f"{_name}: content matches its pin",
+              _ssha == _pin["sha256"],
+              f"    got {_ssha}, pinned {_pin['sha256']}. Every field a set "
+              "declares steers what the gate measures; changing any of them "
+              "means updating this hash in the same commit.")
+        _want_ids = sorted(_pin["bypasses"] + _pin["controls"])
+        _gone = [i for i in _want_ids if i not in _ids]
+        _extra = [i for i in _ids if i not in _want_ids]
+        check(f"{_name}: every pinned bypass is still declared",
+              not _gone and not _extra,
+              f"    missing {_gone}; unregistered {_extra}. The set file can be "
+              "gutted without deleting it; this is the check that notices. "
+              "Changing the bypass list means editing _REQUIRED_SETS too.")
+        # [round-4] WHICH ids are controls, and the two author-supplied inputs
+        # the gate derives a control's jury from.
+        _is_ctl = sorted(m["id"] for m in _muts if m.get("control"))
+        check(f"{_name}: exactly the pinned mutations are controls",
+              _is_ctl == sorted(_pin["controls"]),
+              f"    controls are {_is_ctl}, pinned {sorted(_pin['controls'])}. "
+              "Flipping a live bypass to a control makes the gate score it "
+              "CONTROL-OK and report PASS; that must be a reviewable diff.")
+        _dg = sorted(_spec.get("digest_suites", []))
+        check(f"{_name}: digest_suites is unchanged",
+              _dg == sorted(_pin["digest_suites"]),
+              f"    {_dg}, pinned {sorted(_pin['digest_suites'])}. A behavioural "
+              "suite listed here is subtracted from the control's jury, which "
+              "is one array entry away from a false PASS.")
+        _union = sorted({s for m in _muts for s in (m.get("expect") or {})})
+        check(f"{_name}: the expect-suite union is unchanged",
+              _union == sorted(_pin["suites"]),
+              f"    {_union}, pinned {sorted(_pin['suites'])}. The gate derives "
+              "both the baseline and the control's jury from this union; "
+              "narrowing it silently shrinks what the control had to escape.")
+    _bad = [(m["id"], _tgt.count(m["find"])) for m in _muts
+            if _tgt.count(m["find"]) != 1]
+    check(f"{_name}: every anchor binds exactly once",
+          not _bad,
+          f"    {_bad} -- the guard moved out from under its own bypass list; "
+          "re-derive the set against the current source, do not delete it")
+    check(f"{_name}: declares a negative control",
+          any(m.get("control") for m in _spec["mutations"]),
+          "    a set with no control cannot distinguish 'all caught' from "
+          "'these suites are red for any edit'")
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

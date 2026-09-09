@@ -34,8 +34,45 @@ PYTHONDONTWRITEBYTECODE=1 python3 tests/test_greenfield_golden.py   # must stay 
 grep -rln "readiness-runbook\|readiness-queue\|context-check" lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
 # ^ must print nothing
 ```
-The three harness files are `readiness-runbook.md`, `readiness-queue.md` and
-`context-check.py`. `context-check.py` reads only the session transcript, imports
+The harness files are `readiness-runbook.md`, `readiness-queue.md`,
+`context-check.py`, and — **as of 2026-09-08** — `mutation-gate.py`, the sets
+under `.claude/mutations/`, and `alert-operator.sh`. Re-verify with the extended grep:
+
+```bash
+grep -rln "readiness-runbook\|readiness-queue\|context-check\|mutation-gate\|mutations/\|alert-operator" \
+     lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
+# ^ must print nothing   (verified empty 2026-09-08)
+```
+
+**The gate NEVER WRITES TO YOUR WORKING TREE, and that is the whole design.**
+It creates a private `git worktree` at HEAD, applies the mutation *there*, runs
+the suites *there*, and deletes it. Your tree is neither written to nor read for
+the result, so the gate cannot disturb your work and your work cannot disturb
+its measurement. Two consequences worth stating: you may run it with any amount
+of uncommitted work in progress, and a run killed by SIGKILL costs you a stray
+checkout under the system temp dir (~6.6 MB) and nothing else. Note that
+`git worktree prune` does NOT collect it — prune only forgets entries whose
+directory has already gone — so remove it with
+`git worktree remove --force <path>`. The gate lists any it finds at startup. There is no backup, no lock and no recovery mode, because there
+is nothing to recover.
+
+The one question it asks about your tree is that **it must be committed**: the
+checkout is taken at HEAD, so any uncommitted file is silently swapped for its
+committed version, and reporting on bytes other than the ones you are looking
+at is exactly the false-green class this gate exists to prevent. That covers
+the whole tree, not just the target, because the **suites** decide the verdict
+and they come from HEAD too — an uncommitted edit to a test would otherwise let
+a PASS credit a check that cannot go red in front of you. The mutation set is
+exempt: it is input, and the report carries the sha256 of the bytes that were
+parsed. The target is additionally compared to HEAD **by bytes**, because `git
+status` calls a file clean whenever `assume-unchanged` or `skip-worktree` is
+set on it.
+
+`--anchors-only` asks nothing at all — it re-binds anchors against the target in
+your working tree, runs no suite, and is sub-second, which is what makes it
+usable in preflight mid-work however dirty things are.
+
+`context-check.py` reads only the session transcript, imports
 nothing from `lib/`, and is emitted nowhere.
 
 **Three things this runbook may never do:** add a file under `lib/` or `bin/`;
@@ -149,6 +186,67 @@ fails now and passes after*:
 
 **Paste the failing output into the commit.** A check that never failed proves
 nothing.
+
+**4b — THE MUTATION GATE (new 2026-09-08). Mandatory for any item whose
+product is a GUARD.** Step 4's failing check is necessary and not sufficient.
+Line 150 says *"a check that never failed proves nothing"*; this is that
+sentence generalised, because a check that failed ONCE proves only that one
+edit is caught. Measured on one loop in 48 hours: **five distinct one-line
+edits removed the guard, and two of them left every source-text pin
+byte-identical** (`tests/test_composition.py:485-519`).
+
+Write the bypasses down as data, and make something run them:
+
+```bash
+python3 .claude/mutation-gate.py .claude/mutations/<item-id>.json   # full run, ~2 min
+python3 .claude/mutation-gate.py --anchors-only .claude/mutations/<item-id>.json   # ~0.07 s
+```
+
+**Author the set at 4b; run it once the guard is COMMITTED at step 5.** The
+anchors describe the implemented guard, so they cannot bind before it exists,
+and the gate measures HEAD in a private checkout, so the guard must be
+committed for the run to be about it. `--anchors-only` works at any time,
+against your working tree, dirty or not.
+
+Each set names `target`, the guard site (the same `file:line` step 3 quoted),
+optionally `digest_suites`, and per mutation a `find`/`replace`/`why`/`expect`.
+There is no `suites` key — the gate derives the suite list from the union of
+every mutation's `expect` keys. `expect` maps a suite to the check-name
+substring that must go red there, or `null` for **"this suite is declared
+blind"** — the null cells are what make the output a COVERAGE table rather than
+a pass light. That substring must identify **exactly one** check in that
+suite's baseline (a `digest_suites` entry needs only one or more), or the gate
+refuses: a short or generic string would otherwise score against whatever
+happens to fail.
+
+**Every set MUST carry one `"control": true` mutation that has to ESCAPE**;
+without one, a set that reports "all caught" is indistinguishable from suites
+that are red for any edit, and the gate reports `INCONCLUSIVE` rather than
+PASS. A control is judged over the set's **behavioural** suites — every suite in
+the union that is not a `digest_suites` entry — and NOT over the suites the
+control itself names: a control that picks its own jury is the oldest defect
+this harness has had. A crash, or a suite that runs zero checks, is not an
+escape. A `-k` filtered run reports `PARTIAL` and is never a merge-gate result.
+
+**Register every set in `_REQUIRED_SETS` in `tests/test_trust_ramp.py`**, with
+its `sha256`. Anything unregistered under `.claude/mutations/` fails that suite,
+and the hash is what makes a doctored set a reviewable diff rather than a silent
+one. Paste the whole table, including its `SET-SHA256` line, into the commit.
+
+**`--anchors-only` is the anti-rot check and is the novel signal here.** It
+re-binds every `find` string without applying anything. A `ROTTED` verdict says
+the guard has moved out from under its own bypass list — which no pin and no
+behavioural row reports, because both keep passing.
+
+**WHAT A PASS MEANS, STATED SO IT CANNOT BE OVER-READ: the bypasses someone
+enumerated are caught. It is not a closure proof.** Twice in 48 hours a guard
+declared sound acquired a new bypass the next day — a fourth at 156/0 green on
+2026-09-07, and a fifth in the opposite direction at rc 0 on 2026-09-08. **The
+gate bounds REMOVABILITY. Only review bounds the ENUMERATION.**
+
+**This step changes no merge authority.** Step 9b is unchanged: the operator
+reviews the diff and merges. The gate makes the evidence for that review
+mechanical; it does not replace the reviewer.
 
 **5 — implement**: smallest diff that turns it green. Read the diff before
 committing (R0). Suite 25/0. Outside scope globs → **E4**.
@@ -345,6 +443,11 @@ NOW=$(grep -c '"model_refusal_fallback"' \
 is uncommitted, **the single question that unblocks it**); send a
 `PushNotification` leading with the code and item; leave the branch and PR
 exactly as they are — **a halted item is evidence, not mess.**
+
+**E6 carve-out for the mutation gate — WITHDRAWN 2026-09-09.** It no longer has
+anything to carve out: the gate mutates a private checkout, never your tree, so
+a dirty target is never a crashed gate run. Any dirty target is E6 as written.
+A crashed run leaves only a stray temp worktree; `git worktree prune` clears it.
 
 **E6 has a worked example.** On 2026-08-14 this session found two protocol docs
 renamed-and-uncommitted in a tree it had just found dirty after a merge, never
