@@ -557,10 +557,20 @@ def main(argv):
             # expectation that never fired printed
             # "MERGE GATE: PASS ... 1 control(s) escaped as required" and
             # returned 1. A human reads the last line; only a script reads $?.
-            print(f"MERGE GATE: FAIL - every row has an accepted verdict, but "
-                  f"the run raised rc={rc}: see the [!] notes above. A declared "
-                  f"expectation did not fire, so the coverage table is wrong "
-                  f"even though each bypass was caught.")
+            # rc 3 is a FAILED RESTORE, set in the `finally` above. Saying
+            # "a declared expectation did not fire" there would misdiagnose a
+            # tree that is still mutated -- the single most urgent outcome this
+            # script has -- so it gets its own sentence.
+            if rc == 3:
+                print("MERGE GATE: FAIL - THE TARGET WAS NOT RESTORED (rc=3). "
+                      "Every row has an accepted verdict, but the working tree "
+                      "may still carry a mutation. Fix that before reading "
+                      "anything above as a result.")
+            else:
+                print(f"MERGE GATE: FAIL - every row has an accepted verdict, "
+                      f"but the run raised rc={rc}: see the [!] notes above. A "
+                      f"declared expectation did not fire, so the coverage "
+                      f"table is wrong even though each bypass was caught.")
         else:
             print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
                   f"turn a NAMED check red; {len(ctl)} control(s) escaped as "
