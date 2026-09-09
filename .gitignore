@@ -21,3 +21,10 @@ __pycache__/
 # (`.claude/mutation-gate.py --recover`). It must never sit beside the target,
 # which is PRODUCT source under lib/, and it must never be committed.
 .claude/mutation-gate-backups/
+
+# The operator-attention alarm's PID file. It is runtime state, not source, and
+# it lives beside the harness. Without this line the alarm being UP makes the
+# mutation gate refuse every invocation (GUARD 1 wants a clean tree), and the
+# alarm starting mid-run scores every row INTERFERED -- two features on this
+# same branch disabling each other. Measured: 5/5 rows INTERFERED, rc 1.
+.claude/.alert-operator.pid

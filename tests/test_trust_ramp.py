@@ -464,7 +464,7 @@ check("the mutation gate is present and executable",
 # refers to the gate. Editing it now means updating this hash in the same
 # commit, which is the review surface the pin exists to create.
 import hashlib as _hl
-_GATE_SHA = "f473017b69faa67c34a9a0c60a03414be7515cc1e7dafa3af0981d1273c9b9a1"
+_GATE_SHA = "e25263ddac9781953b43f41d0332d66098d9cb3d9f4edc1496ab34e40a0a64a8"
 try:
     with open(_GATE, "rb") as _fh:
         _gsha = _hl.sha256(_fh.read()).hexdigest()
@@ -519,8 +519,17 @@ _REQUIRED_SETS = {
         "suites": ["test_composition.py", "test_hook_behavior.py"],
     },
 }
-_present = sorted(f for f in os.listdir(_MUTDIR)
-                  if f.endswith(".json")) if os.path.isdir(_MUTDIR) else []
+# [2026-09-09 round-7] Walk, and do not filter by extension. `os.listdir` plus
+# `endswith(".json")` made a set INVISIBLE to both this check and anti-rot if it
+# was named *.JSON, had no extension, or sat in a subdirectory -- measured: three
+# such copies produced ZERO checks between them. Anything under .claude/mutations
+# is a mutation set and must be registered.
+_present = []
+if os.path.isdir(_MUTDIR):
+    for _root, _dirs, _files in os.walk(_MUTDIR):
+        for _f in _files:
+            _present.append(os.path.relpath(os.path.join(_root, _f), _MUTDIR))
+_present = sorted(_present)
 _missing = [n for n in _REQUIRED_SETS if n not in _present]
 check("every REQUIRED mutation set is present",
       not _missing,

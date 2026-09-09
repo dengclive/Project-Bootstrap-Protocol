@@ -197,6 +197,15 @@ def run_suite(suite):
     path = os.path.join(ROOT, "tests", suite)
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # [2026-09-09 round-7] Send any cache Python still reads OUT of the repo.
+    # A stale/forged lib/__pycache__/*.pyc is arbitrary code that changes what a
+    # suite measures, and it is gitignored, so neither GUARD 1 nor GUARD 10 can
+    # see it. MEASURED: a forged cmdpos pyc took test_composition 156/0 -> 111/45
+    # with lib/cmdpos.py byte-identical; with this prefix set it is 156/0 again.
+    env["PYTHONPYCACHEPREFIX"] = os.path.join(HARNESS_BAK_DIR, "pycache")
+    # Refuse to let a stray module beside the gate shadow the stdlib in the
+    # child either (see the -P re-exec at the bottom of this file).
+    env["PYTHONSAFEPATH"] = "1"
     t0 = time.monotonic()
     r = subprocess.run([sys.executable, path], cwd=ROOT, capture_output=True,
                        text=True, env=env)
@@ -229,8 +238,20 @@ def main(argv):
     if args.anchors_only:
         args.dry_run = True   # --anchors-only is --dry-run minus the baseline
 
-    with open(args.mutation_set, encoding="utf-8") as fh:
-        spec = json.load(fh)
+    # [2026-09-09 round-7] Hash the bytes we PARSE, once, here. The provenance
+    # stamp used to be computed by RE-READING the file after the run -- and
+    # GUARD 1 deliberately permits an UNCOMMITTED set (runbook step 4b has you
+    # author it before committing), for which GUARD 10 is structurally blind:
+    # the porcelain line stays `?? <path>` whatever the bytes become. MEASURED:
+    # one editor save 34 s into a 126 s run left the table stamped with a sha
+    # that did NOT produce it, under the printed words "the SET-SHA256 below is
+    # what actually ran", at MERGE GATE: PASS rc 0. The stamp exists so a pasted
+    # table cannot be attributed to a set it did not come from, and that was the
+    # one thing it could not do.
+    with open(args.mutation_set, "rb") as fh:
+        _set_bytes = fh.read()
+    set_sha = sha(_set_bytes)
+    spec = json.loads(_set_bytes.decode("utf-8"))
     _TARGET = os.path.join(ROOT, spec["target"])
     # [critique fix 5] The backup must NOT sit beside the target: the target is
     # PRODUCT source under lib/, and no harness artifact may persist there --
@@ -384,9 +405,22 @@ def main(argv):
     # author it before it is committed. Everything else must be clean, because
     # the suites read the whole tree.
     _setrel = os.path.relpath(os.path.abspath(args.mutation_set), ROOT)
-    dirty = tree_lines()
+    # [2026-09-09 round-7] SCOPE THE TREE DEMAND TO WHAT THE MODE ACTUALLY READS.
+    # --anchors-only applies nothing, writes nothing and runs NO suite: it only
+    # re-binds anchors against the target. Requiring a clean whole tree there was
+    # a regression that killed its advertised mid-work S0 preflight use -- its
+    # own --help calls it "sub-second, so it can run in S0 preflight". Full and
+    # --dry-run runs keep the whole-tree rule, because their suites read the
+    # whole tree. `tests/test_trust_ramp.py` is exempt unless a suite of THIS run
+    # reads it: registering a new set means editing that file, and the authoring
+    # loop in runbook step 4b would otherwise need a commit per iteration.
+    _exempt = {_setrel}
+    if "test_trust_ramp.py" not in suites:
+        _exempt.add(os.path.join("tests", "test_trust_ramp.py"))
+    dirty = tree_lines([spec["target"]] if args.anchors_only else None)
     if dirty is not None:
-        _set_dirty = [ln for ln in dirty if ln[3:].strip().strip('"') == _setrel]
+        _set_dirty = [ln for ln in dirty
+                      if ln[3:].strip().strip('"') in _exempt]
         dirty = [ln for ln in dirty if ln not in _set_dirty]
         if _set_dirty:
             print(f"  note: the mutation set is uncommitted ({_setrel}); the "
@@ -627,7 +661,7 @@ def main(argv):
                             _why = (f"another file changed under this run: "
                                     f"{'; '.join(x.strip() for x in _foreign[:3])}")
                 if _why:
-                    interfered.append(s)
+                    interfered.append(f"{s} ({_why})")
                     print(f"      {s:<28} {'':>8}  {dt:>5.1f}s  "
                           f"INTERFERED - {_why}")
                     continue
@@ -694,9 +728,8 @@ def main(argv):
             # could ever be written for `lib/templates.py`.
             if interfered:
                 row["verdict"] = "INTERFERED"
-                row["detail"] = (
-                    f"the target changed under {', '.join(interfered)} - another "
-                    f"writer touched it mid-run, so nothing here is evidence")
+                row["detail"] = ("; ".join(interfered) +
+                                 " - nothing in this row is evidence")
                 rc = 1
                 rows.append(row)
                 if not restore("between mutations"):
@@ -786,8 +819,7 @@ def main(argv):
     print("\n" + "=" * 96)
     # [critique fix 3] Provenance, so a pasted table cannot be attributed to a
     # set it did not come from, and a silent filter cannot hide behind "all caught".
-    with open(args.mutation_set, "rb") as _fh:
-        print(f"SET-SHA256 {sha(_fh.read())[:32]}  {os.path.basename(args.mutation_set)}")
+    print(f"SET-SHA256 {set_sha[:32]}  {os.path.basename(args.mutation_set)}")
     print(f"MUTATIONS: {len(rows)}/{n_total} ran"
           + (f" ({n_total - len(rows)} filtered by -k {args.only!r})" if args.only else ""))
     print(f"{'mutation':<26} {'verdict':<18} caught by / why not")
@@ -870,4 +902,17 @@ def main(argv):
 
 
 if __name__ == "__main__":
+    # [2026-09-09 round-7] RUN WITH sys.path[0] REMOVED. A script's own
+    # directory leads sys.path, so a module beside this one shadows the stdlib.
+    # MEASURED: a sourceless, gitignored `.claude/subprocess.pyc` fabricated
+    # every suite result -- "MERGE GATE: PASS - 4/4 bypasses turn a NAMED check
+    # red" at rc 0 in 0.14 s instead of ~2 min, with git status empty, the
+    # gate's own sha256 still matching its pin, and CI fully green. Re-exec
+    # under -P so the real stdlib wins; the child suites get PYTHONSAFEPATH=1
+    # from run_suite for the same reason (-P alone left tests/subprocess.pyc
+    # able to do it). This is sabotage-class, not drift, but the fix is six
+    # lines and the failure is total.
+    if not sys.flags.safe_path:
+        os.execv(sys.executable,
+                 [sys.executable, "-P", os.path.abspath(__file__)] + sys.argv[1:])
     sys.exit(main(sys.argv[1:]))
