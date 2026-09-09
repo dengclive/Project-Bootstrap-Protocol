@@ -44,14 +44,25 @@ grep -rln "readiness-runbook\|readiness-queue\|context-check\|mutation-gate\|mut
 # ^ must print nothing   (verified empty 2026-09-08)
 ```
 
-**The gate WRITES TO PRODUCT SOURCE, transiently, and that needs saying out
-loud.** It applies a mutation to `lib/…`, runs a suite, and restores. Two rules
-follow: no harness artifact may PERSIST under `lib/` (the backup lives at
-`.claude/mutation-gate-backups/`, gitignored, never beside the target), and the
-gate refuses to start on a dirty target so it can never bank someone else's
-edit. A run killed with SIGKILL leaves the backup; `--recover` is the only
-sanctioned way to consume it, and it restores only when the backup matches the
-target's committed bytes. `context-check.py` reads only the session transcript, imports
+**The gate NEVER WRITES TO YOUR WORKING TREE, and that is the whole design.**
+It creates a private `git worktree` at HEAD, applies the mutation *there*, runs
+the suites *there*, and deletes it. Your tree is neither written to nor read for
+the result, so the gate cannot disturb your work and your work cannot disturb
+its measurement. Two consequences worth stating: you may run it with any amount
+of uncommitted work in progress, and a run killed by SIGKILL costs you a stray
+directory under the system temp dir — collected by `git worktree prune` — and
+nothing else. There is no backup, no lock and no recovery mode, because there
+is nothing to recover.
+
+The one question it asks about your tree is that **the target itself must be
+committed**: the checkout is taken at HEAD, so uncommitted edits to the guard
+are not what gets measured, and reporting on bytes other than the ones you are
+looking at is exactly the false-green class this gate exists to prevent. Every
+other file may be dirty. `--anchors-only` asks nothing at all — it re-binds
+anchors against the target in your working tree, runs no suite, and is
+sub-second, which is what makes it usable in preflight mid-work.
+
+`context-check.py` reads only the session transcript, imports
 nothing from `lib/`, and is emitted nowhere.
 
 **Three things this runbook may never do:** add a file under `lib/` or `bin/`;
@@ -181,15 +192,36 @@ python3 .claude/mutation-gate.py .claude/mutations/<item-id>.json   # full run, 
 python3 .claude/mutation-gate.py --anchors-only .claude/mutations/<item-id>.json   # 0.05 s
 ```
 
-Each set names the target, the guard site (the same `file:line` step 3 quoted),
-the suites, and per mutation a `find`/`replace`/`why`/`expect`. `expect` maps a
-suite to the check-name substring that must go red there, or `null` for **"this
-suite is declared blind"** — the null cells are what make the output a COVERAGE
-table rather than a pass light. **Every set MUST carry one `"control": true`
-mutation that has to ESCAPE**; without one, a set that reports "all caught" is
-indistinguishable from suites that are red for any edit, and the gate reports
-`INCONCLUSIVE` rather than PASS. A `-k` filtered run reports `PARTIAL` and is
-never a merge-gate result. Paste the whole table into the commit.
+**Author the set at 4b; run it once the guard is COMMITTED at step 5.** The
+anchors describe the implemented guard, so they cannot bind before it exists,
+and the gate measures HEAD in a private checkout, so the guard must be
+committed for the run to be about it. `--anchors-only` works at any time,
+against your working tree, dirty or not.
+
+Each set names `target`, the guard site (the same `file:line` step 3 quoted),
+optionally `digest_suites`, and per mutation a `find`/`replace`/`why`/`expect`.
+There is no `suites` key — the gate derives the suite list from the union of
+every mutation's `expect` keys. `expect` maps a suite to the check-name
+substring that must go red there, or `null` for **"this suite is declared
+blind"** — the null cells are what make the output a COVERAGE table rather than
+a pass light. That substring must identify **exactly one** check in that
+suite's baseline (a `digest_suites` entry needs only one or more), or the gate
+refuses: a short or generic string would otherwise score against whatever
+happens to fail.
+
+**Every set MUST carry one `"control": true` mutation that has to ESCAPE**;
+without one, a set that reports "all caught" is indistinguishable from suites
+that are red for any edit, and the gate reports `INCONCLUSIVE` rather than
+PASS. A control is judged over the set's **behavioural** suites — every suite in
+the union that is not a `digest_suites` entry — and NOT over the suites the
+control itself names: a control that picks its own jury is the oldest defect
+this harness has had. A crash, or a suite that runs zero checks, is not an
+escape. A `-k` filtered run reports `PARTIAL` and is never a merge-gate result.
+
+**Register every set in `_REQUIRED_SETS` in `tests/test_trust_ramp.py`**, with
+its `sha256`. Anything unregistered under `.claude/mutations/` fails that suite,
+and the hash is what makes a doctored set a reviewable diff rather than a silent
+one. Paste the whole table, including its `SET-SHA256` line, into the commit.
 
 **`--anchors-only` is the anti-rot check and is the novel signal here.** It
 re-binds every `find` string without applying anything. A `ROTTED` verdict says
@@ -402,11 +434,10 @@ is uncommitted, **the single question that unblocks it**); send a
 `PushNotification` leading with the code and item; leave the branch and PR
 exactly as they are — **a halted item is evidence, not mess.**
 
-**E6 carve-out for the mutation gate (2026-09-08).** A dirty target whose ONLY
-diff is a gate mutation, with a byte-matching backup under
-`.claude/mutation-gate-backups/`, is a crashed gate run, not a foreign edit.
-That is a `python3 .claude/mutation-gate.py --recover <set>`, not a
-preserve-and-halt. Any other dirty target is E6 as written.
+**E6 carve-out for the mutation gate — WITHDRAWN 2026-09-09.** It no longer has
+anything to carve out: the gate mutates a private checkout, never your tree, so
+a dirty target is never a crashed gate run. Any dirty target is E6 as written.
+A crashed run leaves only a stray temp worktree; `git worktree prune` clears it.
 
 **E6 has a worked example.** On 2026-08-14 this session found two protocol docs
 renamed-and-uncommitted in a tree it had just found dirty after a merge, never

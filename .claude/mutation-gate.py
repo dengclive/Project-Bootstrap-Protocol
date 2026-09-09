@@ -16,39 +16,57 @@ exactly like stopping right. The merge gate is therefore not "the pins are
 green" but "each known one-line bypass has been shown to turn a NAMED check
 red". This script is that gate, run rather than remembered.
 
+WHERE IT MEASURES. In a PRIVATE `git worktree` at HEAD, created per run and
+deleted after. Your working tree is never written to and never read for the
+result, so the gate cannot be disturbed by, and cannot disturb, anything else
+you are doing. It also does not need to police what you are doing: an earlier
+design mutated product source in the shared tree and grew ~250 lines of
+dirty-tree refusals, an O_EXCL lock with an owner pid, a backup, a
+hash-verified restore on four exit paths, `--recover`, and a per-suite
+whole-tree scan. Four consecutive review rounds found new accident-class
+defects in that machinery and nowhere else. The isolation replaces all of it.
+
 WHAT IT REFUSES TO DO. The failure mode of a mutation harness is to apply
 nothing, run a suite, watch it go red for some unrelated reason, and report
 "all caught". Every guard below exists because "all caught" is the answer this
 script would give if it were broken:
 
-  1. DIRTY TREE -> refuse. A pre-existing edit to the target is
-     indistinguishable from a mutation, and restoring would destroy it.
-  2. LEFTOVER BACKUP -> refuse. A previous run died hard; the tree may still
-     carry a mutation. Recovery is the operator's call, not this script's.
-  3. BASELINE MUST BE GREEN. If the suite is already red, every mutation is
-     "caught" and the report is vacuous. Measured, printed, and required.
-  4. THE ANCHOR MUST MATCH EXACTLY ONCE. Zero matches means the mutation has
+  1. THE TARGET MUST BE COMMITTED. The checkout is taken at HEAD, so
+     uncommitted edits to the guard are not what gets measured, and silently
+     reporting on different bytes than the ones you are looking at is the
+     false-green class this harness exists to prevent. This is the ONLY
+     question asked about your working tree; every other file may be dirty.
+  2. BASELINE MUST BE GREEN, AND MUST RUN CHECKS. If a suite is already red,
+     every mutation is "caught" and the report is vacuous; if it reports
+     0 checks (a skip), it witnesses nothing. Measured, printed, required.
+  3. THE ANCHOR MUST MATCH EXACTLY ONCE. Zero matches means the mutation has
      ROTTED against the guard it protects -- the single highest-value signal
      this script produces, and the one a prose mutation list cannot give. More
      than one means the edit is ambiguous. Either is an ERROR, never "caught".
+  4. A DECLARED CHECK NAME MUST IDENTIFY ONE CHECK. `want` is matched as a
+     substring, so a short or generic string would score RED@check against
+     whatever happens to fail. A behavioural suite needs exactly one match; a
+     digest suite needs at least one, since a digest moves for any byte.
   5. THE BYTES MUST ACTUALLY CHANGE. The post-write SHA-256 is compared to the
      pre-write one. A no-op rewrite reports MUTATION-NOOP, not "caught".
   6. RED IS NOT ENOUGH -- IT MUST BE RED AT THE NAMED CHECK. A mutation that
      makes the suite crash, or that trips an unrelated check (a golden digest
      moves for EVERY edit to `lib/templates.py`), is scored RED-WRONG-REASON,
      which is a failure of the gate, not a pass.
-  7. RESTORE IS VERIFIED BY HASH, on every path: normal, exception, SIGINT,
-     SIGTERM. A restore that did not restore is reported and exits non-zero.
-  8. EVERY ROW IS VERIFIED AGAINST THE BYTES THIS RUN WROTE. The target is
-     re-read after each suite; if it changed, the row is INTERFERED and the run
-     fails. This does not depend on the lock below being correct.
-  9. ONE RUN AT A TIME, PER TARGET. The backup is created O_EXCL before the
-     baseline and held for the run, so a second gate against the same target
-     refuses instead of interleaving writes. Without it two runs score rows on
-     each other's bytes and an inert set can report "all caught".
+  7. A CONTROL IS JUDGED OVER THE SET'S BEHAVIOURAL SUITES, not the ones it
+     names, and a crash or a zero-check suite is not an escape. A control that
+     picks its own jury is the oldest defect this file has had.
+  8. A DIGEST IS NOT A GUARD. When only an opaque golden digest moves, a freeze
+     re-baseline carries the mutation through: DIGEST-ONLY, never a pass.
+  9. THE BOTTOM LINE MAY NOT CONTRADICT THE EXIT CODE, and a -k subset or a
+     set with no control may not read as a merge-gate result.
 
 Usage:
   .claude/mutation-gate.py .claude/mutations/<set>.json [-k NAME] [--dry-run]
+  .claude/mutation-gate.py .claude/mutations/<set>.json --anchors-only
+      Anti-rot only: re-binds every anchor against the target in YOUR working
+      tree. No checkout, no suite, sub-second, and it does not care how dirty
+      the tree is -- that is what makes it usable in S0 preflight mid-work.
 """
 import argparse
 import atexit
@@ -59,6 +77,8 @@ import re
 import signal
 import subprocess
 import sys
+import shutil
+import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,122 +89,99 @@ CHECK_RE = re.compile(r"^\s*(?:PASS|FAIL)\s+(.*)$", re.M)
 
 # Module state so the atexit/signal restorer can reach it without a global
 # object graph. `_ORIGINAL` is the authority; nothing else may write the target.
-_TARGET = None
+# Module state. `_ORIGINAL` is the authority for the private checkout's copy of
+# the target; nothing else may write it.
+_TARGET = None        # path INSIDE the private checkout
 _ORIGINAL = None      # bytes
-_BAK = None
-_LOCK = None          # holds the owning PID; see GUARD 1b
-_OWN_LOCK = False     # True only after THIS process wins the O_EXCL claim
-
-
-def _lock_owner(path):
-    """-> (pid, state) where state is "running", "dead" or "corrupt".
-
-    A pid <= 0 is CORRUPT, not dead: os.kill would read it as a process GROUP
-    and report every such lock as running. An unreadable or empty lock is also
-    corrupt rather than dead -- the claim writes the pid immediately after the
-    O_EXCL create, so an empty lock is a torn write, not a finished run.
-    """
-    try:
-        with open(path, encoding="utf-8") as fh:
-            raw = fh.read().strip()
-        pid = int(raw)
-    except (OSError, ValueError):
-        return (None, "corrupt")
-    if pid <= 0:
-        return (pid, "corrupt")
-    try:
-        os.kill(pid, 0)          # signal 0 tests existence, sends nothing
-    except ProcessLookupError:
-        return (pid, "dead")
-    except PermissionError:
-        return (pid, "running")  # someone else's process: alive, not ours
-    return (pid, "running")
-
-
-def _stale_note(pid, state):
-    return (f"owner pid {pid} is {state}"
-            if state != "corrupt" else
-            f"the lock is CORRUPT (contents {pid!r})")
-
-
-HARNESS_BAK_DIR = os.path.join(ROOT, ".claude", "mutation-gate-backups")
+WORK = None           # the private checkout; None until main() makes one
+_WORK_PARENT = None
 
 
 def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def restore(reason="normal", release=False):
-    """Put the target back and prove it by hash. Safe to call repeatedly.
+def make_private_checkout():
+    """A throwaway `git worktree` at HEAD. Returns its path, or None.
 
-    `release` drops the backup, which is ALSO this run's lock (see GUARD 1b).
-    Between mutations we restore but keep the lock; only the terminal paths
-    (finally, atexit, signal) release it.
+    [2026-09-09 round-9] THIS IS THE WHOLE DESIGN. The gate used to mutate
+    PRODUCT SOURCE in the working tree you are sitting in, and then spent ~250
+    lines trying to police that shared tree: a dirty-tree refusal, a live-run
+    check, an O_EXCL lock with an owner pid, a backup, a hash-verified restore
+    on four exit paths, `--recover`, and a per-suite whole-tree scan. Four
+    consecutive review rounds found new accident-class defects in that
+    machinery and nowhere else -- two gates racing, a dry run deleting a live
+    run's lock, `--recover` rewriting a file a live run was measuring, the
+    operator alarm and the gate disabling each other, an editor swapfile
+    reddening CI. Measuring in a directory other writers share is the defect.
+    A private checkout deletes the question instead of answering it: nothing
+    else can touch this tree, so there is nothing to lock, restore or detect.
     """
-    if _TARGET is None or _ORIGINAL is None:
-        return True
-    try:
-        with open(_TARGET, "rb") as fh:
-            now = fh.read()
-        if now != _ORIGINAL:
-            with open(_TARGET, "wb") as fh:
-                fh.write(_ORIGINAL)
-        with open(_TARGET, "rb") as fh:
-            back = fh.read()
-    except OSError as exc:
-        print(f"\nRESTORE FAILED ({reason}): {exc}\n"
-              f"  The original bytes are in {_BAK}. Restore by hand.",
-              file=sys.stderr)
-        return False
-    if sha(back) != sha(_ORIGINAL):
-        print(f"\nRESTORE FAILED ({reason}): {_TARGET} does not hash to the "
-              f"original.\n  The original bytes are in {_BAK}.", file=sys.stderr)
-        return False
-    # [2026-09-09 round-4 blocker] ONLY RELEASE A LOCK WE CLAIMED. --dry-run and
-    # --anchors-only never claim one, but they still registered this restorer at
-    # exit, so they DELETED A LIVE RUN'S lock and backup and handed the target
-    # to a second gate. MEASURED: a plain --anchors-only (0.05 s) stripped a
-    # running gate of both files in 2 of 3 trials, and another real run then
-    # claimed the freed lock and mutated lib/templates.py concurrently -- the
-    # exact false-PASS class GUARD 1b exists to close, reopened by the guard.
-    if release and _OWN_LOCK:
-        for _p in (_BAK, _LOCK):
-            if _p and os.path.exists(_p):
-                try:
-                    os.unlink(_p)
-                except OSError:
-                    pass
-    return True
+    global WORK, _WORK_PARENT
+    _WORK_PARENT = tempfile.mkdtemp(prefix="mutation-gate-")
+    WORK = os.path.join(_WORK_PARENT, "w")     # must not exist yet
+    r = subprocess.run(["git", "worktree", "add", "--detach", "--quiet",
+                        WORK, "HEAD"], cwd=ROOT, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"REFUSING: could not create a private checkout: "
+              f"{r.stderr.strip()}", file=sys.stderr)
+        WORK = None
+        return None
+    return WORK
+
+
+def drop_private_checkout():
+    """Remove the checkout. Safe to call repeatedly, and safe to fail.
+
+    Nothing here can damage the operator's tree: the worst case is a stray
+    directory under the system temp dir and a stale `git worktree` entry, which
+    `git worktree prune` collects. That is the point of the design -- cleanup
+    is best-effort rather than load-bearing.
+    """
+    global WORK
+    if WORK:
+        subprocess.run(["git", "worktree", "remove", "--force", WORK],
+                       cwd=ROOT, capture_output=True)
+        WORK = None
+    if _WORK_PARENT:
+        shutil.rmtree(_WORK_PARENT, ignore_errors=True)
+
+
+def reset_target():
+    """Put the private copy of the target back for the next mutation.
+
+    Unlike the old `restore()`, nothing here is load-bearing: this file lives
+    in a throwaway checkout, so a failure costs the run and nothing else.
+    """
+    with open(_TARGET, "wb") as fh:
+        fh.write(_ORIGINAL)
 
 
 def _on_signal(signum, _frame):
-    print(f"\n[mutation-gate] signal {signum} - restoring {_TARGET}",
+    print(f"\n[mutation-gate] signal {signum} - dropping the private checkout",
           file=sys.stderr)
-    restore(f"signal {signum}", release=True)
+    drop_private_checkout()
     # 128+n is the shell's convention for death by signal; keep it visible.
     os._exit(128 + signum)
 
 
-def tree_lines(paths=None):
-    """Sorted porcelain status for the WHOLE tree (or the given paths).
+def target_is_dirty(rel):
+    """Is the ONE file the mutations describe uncommitted? None if git fails.
 
-    [2026-09-09 round-6] The gate used to check only the target and the suite
-    FILES. But the suites import the rest of lib/, so a foreign write to any
-    other file changes what they measure. MEASURED at 8f93fd4: a concurrent
-    one-line edit to lib/cmdpos.py turned an INERT comment mutation into
-    CAUGHT and the run printed MERGE GATE: PASS at rc 0, with the target
-    byte-identical throughout and no INTERFERED row. The unit of isolation is
-    the REPO, not the file.
+    This is the only thing the gate asks about your working tree, and it asks
+    for a provenance reason rather than a safety one: the checkout is taken at
+    HEAD, so uncommitted edits to the guard are NOT what gets measured. Every
+    other file may be as dirty as you like.
     """
-    cmd = ["git", "status", "--porcelain"] + (["--"] + list(paths) if paths else [])
     try:
-        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                           timeout=30)
+        r = subprocess.run(["git", "status", "--porcelain", "--", rel],
+                           cwd=ROOT, capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
         return None
-    return sorted(ln for ln in r.stdout.splitlines() if ln.strip())
+    return [ln for ln in r.stdout.splitlines() if ln.strip()]
+
 
 
 def run_suite(suite):
@@ -194,20 +191,13 @@ def run_suite(suite):
     suite printed no summary line, or exited non-zero with no failing check --
     red, but NOT evidence that a check caught anything.
     """
-    path = os.path.join(ROOT, "tests", suite)
+    path = os.path.join(WORK, "tests", suite)
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    # [2026-09-09 round-7] Send any cache Python still reads OUT of the repo.
-    # A stale/forged lib/__pycache__/*.pyc is arbitrary code that changes what a
-    # suite measures, and it is gitignored, so neither GUARD 1 nor GUARD 10 can
-    # see it. MEASURED: a forged cmdpos pyc took test_composition 156/0 -> 111/45
-    # with lib/cmdpos.py byte-identical; with this prefix set it is 156/0 again.
-    env["PYTHONPYCACHEPREFIX"] = os.path.join(HARNESS_BAK_DIR, "pycache")
-    # Refuse to let a stray module beside the gate shadow the stdlib in the
-    # child either (see the -P re-exec at the bottom of this file).
+    # A stray module beside a script shadows the stdlib; keep the child honest.
     env["PYTHONSAFEPATH"] = "1"
     t0 = time.monotonic()
-    r = subprocess.run([sys.executable, path], cwd=ROOT, capture_output=True,
+    r = subprocess.run([sys.executable, path], cwd=WORK, capture_output=True,
                        text=True, env=env)
     dt = time.monotonic() - t0
     out = r.stdout + r.stderr
@@ -220,7 +210,7 @@ def run_suite(suite):
 
 
 def main(argv):
-    global _TARGET, _ORIGINAL, _BAK, _LOCK, _OWN_LOCK
+    global _TARGET, _ORIGINAL
     ap = argparse.ArgumentParser(prog="mutation-gate")
     ap.add_argument("mutation_set", help="path to a mutation-set JSON file")
     ap.add_argument("-k", dest="only", help="run only mutations whose id "
@@ -231,9 +221,6 @@ def main(argv):
                     help="check only that every anchor still matches exactly "
                          "once; runs no suite. Sub-second, so it can run in S0 "
                          "preflight -- this is the anti-rot check")
-    ap.add_argument("--recover", action="store_true",
-                    help="restore the target from a backup left by a run that "
-                         "died on SIGKILL, then delete the backup")
     args = ap.parse_args(argv)
     if args.anchors_only:
         args.dry_run = True   # --anchors-only is --dry-run minus the baseline
@@ -253,19 +240,6 @@ def main(argv):
     set_sha = sha(_set_bytes)
     spec = json.loads(_set_bytes.decode("utf-8"))
     _TARGET = os.path.join(ROOT, spec["target"])
-    # [critique fix 5] The backup must NOT sit beside the target: the target is
-    # PRODUCT source under lib/, and no harness artifact may persist there --
-    # a crashed run would leave lib/*.mutation-gate.bak in the product tree and
-    # a `git add -A` would ship it. Keep it in the harness dir instead, named
-    # after the target so a recovery cannot cross-apply between sets.
-    _BAK = os.path.join(HARNESS_BAK_DIR,
-                        spec["target"].replace(os.sep, "__") + ".mutation-gate.bak")
-    # [2026-09-09 round-6] ONE LOCK FOR THE REPO, not one per target. Two gates
-    # on DIFFERENT targets were not mutually excluded even though their suites
-    # read the same product files, so each measured rows against the other's
-    # mutation.
-    _LOCK = os.path.join(HARNESS_BAK_DIR, "mutation-gate.lock")
-    os.makedirs(HARNESS_BAK_DIR, exist_ok=True)
     guard = spec.get("guard", os.path.basename(args.mutation_set))
     n_total = len(spec["mutations"])
     muts = [m for m in spec["mutations"]
@@ -281,213 +255,80 @@ def main(argv):
     print(f"  set     {args.mutation_set}  ({len(muts)} mutations)")
     print(f"  suites  {', '.join(suites)}\n")
 
-    # SIGKILL cannot be trapped, so guard 7 cannot cover it. What survives is
-    # the backup file, and `--recover` is the only sanctioned way to consume it.
-    # It restores ONLY when the backup matches the target's committed content,
-    # so it can never be used to launder an unrelated edit into the tree.
-    if args.recover:
-        # [2026-09-09 round-4] REFUSE AGAINST A LIVE RUN. MEASURED: with a gate
-        # run in flight, --recover recognised its in-flight mutation as "one of
-        # this set's declared mutations", rewrote the target MID-MEASUREMENT,
-        # deleted the lock -- destroying the mutual exclusion GUARD 1b exists
-        # to provide -- and exited 0. The live run's verdict went PASS -> FAIL.
-        _stale_lock = False
-        if os.path.exists(_LOCK):
-            _pid, _state = _lock_owner(_LOCK)
-            if _state == "running":
-                print(f"REFUSING to recover: mutation-gate pid {_pid} is "
-                      f"RUNNING and holds {spec['target']}. Recovering now "
-                      f"would rewrite the file it is measuring. Wait for it.",
-                      file=sys.stderr)
-                return 2
-            _stale_lock = True
-            print(f"note: stale lock ({_stale_note(_pid, _state)}); continuing")
-        if not os.path.exists(_BAK):
-            # [2026-09-09 round-4] CLEAR THE STALE LOCK HERE. A crash between
-            # the claim and the backup write, or an operator following GUARD 2's
-            # old advice to "delete the backup", leaves a lock with NO backup --
-            # and this early return used to exit 0 without touching it, so every
-            # later run refused forever. MEASURED: SIGKILL -> GUARD 2 -> delete
-            # the backup as instructed -> GUARD 1b -> --recover rc 0 "nothing to
-            # recover" -> next run rc 2, repeating indefinitely. --recover is the
-            # sanctioned way out, so it must actually be one.
-            if _stale_lock:
-                os.unlink(_LOCK)
-                print(f"cleared the stale lock; {_BAK} does not exist, so the "
-                      f"target was never left mutated. Nothing else to do.")
-                return 0
-            print(f"nothing to recover: {_BAK} does not exist")
-            return 0
-        with open(_BAK, "rb") as fh:
-            bak = fh.read()
+    # ---- ANCHORS-ONLY: no checkout, no suite, no isolation needed. -------
+    # It applies nothing and runs nothing; it re-binds every `find` against the
+    # target you are LOOKING AT, which is what makes it useful mid-work in S0
+    # preflight. A dirty tree is fine here, by design.
+    if args.anchors_only:
+        _live = os.path.join(ROOT, spec["target"])
         try:
-            r = subprocess.run(["git", "show", f"HEAD:{spec['target']}"],
-                               cwd=ROOT, capture_output=True, timeout=60)
-        except (OSError, subprocess.SubprocessError):
-            r = None
-        if r is None or r.returncode != 0:
-            print("REFUSING to recover: cannot read the committed version of "
-                  f"{spec['target']}.", file=sys.stderr)
-            return 2
-        # [2026-09-08 review blocker 2] REFUSE IF THE CURRENT FILE IS NOT A
-        # RECOGNISED GATE MUTATION. The first version compared only backup vs
-        # HEAD and then overwrote, so pointing --recover at a target carrying
-        # real uncommitted work DESTROYED it -- and the runbook's own E6
-        # carve-out routes a dirty target here. Recovery is only safe when the
-        # current bytes are HEAD plus exactly one mutation this set declares.
-        with open(_TARGET, "rb") as fh:
-            cur = fh.read()
-        if cur != r.stdout:
-            head_txt = r.stdout.decode("utf-8", "replace")
-            cur_txt = cur.decode("utf-8", "replace")
-            known = False
-            for m in spec["mutations"]:
-                if head_txt.count(m["find"]) == 1 and \
-                        head_txt.replace(m["find"], m["replace"], 1) == cur_txt:
-                    known = True
-                    print(f"recognised in-place mutation {m['id']!r}")
-                    break
-            if not known:
-                print("REFUSING to recover: the target differs from HEAD and the "
-                      "difference is NOT one of this set's declared mutations. "
-                      "That is uncommitted work, not a crashed gate run. Inspect "
-                      "`git diff` and resolve it by hand; --recover will not "
-                      "overwrite it.", file=sys.stderr)
-                return 1
-        if sha(bak) != sha(r.stdout):
-            print("REFUSING to recover: the backup does not match "
-                  f"HEAD:{spec['target']}. The dead run started from an "
-                  "uncommitted tree, so restoring it is not this script's call.",
+            with open(_live, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError as exc:
+            print(f"REFUSING: cannot read {spec['target']}: {exc}",
                   file=sys.stderr)
             return 2
-        with open(_TARGET, "wb") as fh:
-            fh.write(bak)
-        os.unlink(_BAK)
-        if os.path.exists(_LOCK):
-            os.unlink(_LOCK)
-        print(f"recovered {spec['target']} to sha256 {sha(bak)[:16]}; "
-              f"backup and stale lock deleted")
-        return 0
+        rows, rc = [], 0
+        print("ANCHORS ONLY - no checkout, no suite run, nothing applied\n")
+        for m in muts:
+            n = text.count(m["find"])
+            if n != 1:
+                rows.append({"id": m["id"],
+                             "verdict": "ROTTED" if n == 0 else "AMBIGUOUS",
+                             "detail": f"anchor matched {n} times; the mutation "
+                                       f"no longer describes the guard"})
+                rc = 1
+                print(f"  {m['id']:<26} ANCHOR {n}x -> {rows[-1]['verdict']}")
+            else:
+                rows.append({"id": m["id"], "verdict": "ANCHOR-OK", "detail": ""})
+                print(f"  {m['id']:<26} anchor 1x")
+        print("\n" + "=" * 96)
+        print(f"SET-SHA256 {set_sha[:32]}  {os.path.basename(args.mutation_set)}")
+        _bad = [r for r in rows if r["verdict"] != "ANCHOR-OK"]
+        print(f"ANCHORS: {len(rows) - len(_bad)}/{len(rows)} still bind against "
+              f"the WORKING tree. NOT a merge-gate result - nothing was applied.")
+        for r in _bad:
+            print(f"  {r['id']:<26} {r['verdict']:<18} {r['detail']}")
+        return rc
 
-    # ---- GUARD 1a: IS ANOTHER RUN LIVE? ---------------------------------
-    # [2026-09-09 round-4] This must precede GUARD 2. GUARD 2 only sees "a
-    # backup exists" and says "a previous run died ... restore by hand, then
-    # delete the backup" -- advice that, aimed at a HEALTHY RUNNING gate,
-    # destroys its safety net. MEASURED at 674798a: a live run (pid alive, lock
-    # held, later MERGE GATE: PASS rc 0) made both a second run and
-    # --anchors-only refuse with "a previous run died".
-    if os.path.exists(_LOCK):
-        _pid, _state = _lock_owner(_LOCK)
-        if _state == "running":
-            print(f"REFUSING: mutation-gate pid {_pid} is RUNNING and holds "
-                  f"{spec['target']}. This is not a crash; wait for it to "
-                  f"finish. (Even --dry-run and --anchors-only refuse here: the "
-                  f"target is mutated right now, so any anchor result would be "
-                  f"about the mutation, not the guard.)", file=sys.stderr)
-            return 2
-        print(f"REFUSING: a stale lock is present ({_stale_note(_pid, _state)}), "
-              f"so a previous run died holding {spec['target']}.\n  Run "
-              f"`{os.path.relpath(__file__, ROOT)} {args.mutation_set} --recover`"
-              f" -- it restores the target if a backup survived, and clears the "
-              f"lock either way.", file=sys.stderr)
+    # ---- GUARD 1: THE TARGET MUST BE COMMITTED. --------------------------
+    # The only question the gate asks about your working tree, and it asks for
+    # a PROVENANCE reason, not a safety one: the checkout below is taken at
+    # HEAD, so uncommitted edits to the guard are not what gets measured. A
+    # silent "you tested something other than what you are looking at" is the
+    # false-green class this whole harness exists to prevent. Every OTHER file
+    # in your tree may be dirty -- that is the point of the private checkout.
+    _td = target_is_dirty(spec["target"])
+    if _td is None:
+        print("REFUSING: could not read git status for "
+              f"{spec['target']}.", file=sys.stderr)
         return 2
-
-    # ---- GUARD 2: a leftover backup means a previous run died mutated. ----
-    if os.path.exists(_BAK):
-        print(f"REFUSING: {_BAK} exists with no lock beside it. A previous run "
-              f"died while the target was mutated.\n  Compare it with "
-              f"{spec['target']} and restore by "
-              f"hand, then delete the backup.", file=sys.stderr)
-        return 2
-
-    # ---- GUARD 1: refuse on a dirty target or a dirty suite. ----
-    # The mutation SET may legitimately be uncommitted: runbook step 4b has you
-    # author it before it is committed. Everything else must be clean, because
-    # the suites read the whole tree.
-    _setrel = os.path.relpath(os.path.abspath(args.mutation_set), ROOT)
-    # [2026-09-09 round-7] SCOPE THE TREE DEMAND TO WHAT THE MODE ACTUALLY READS.
-    # --anchors-only applies nothing, writes nothing and runs NO suite: it only
-    # re-binds anchors against the target. Requiring a clean whole tree there was
-    # a regression that killed its advertised mid-work S0 preflight use -- its
-    # own --help calls it "sub-second, so it can run in S0 preflight". Full and
-    # --dry-run runs keep the whole-tree rule, because their suites read the
-    # whole tree. `tests/test_trust_ramp.py` is exempt unless a suite of THIS run
-    # reads it: registering a new set means editing that file, and the authoring
-    # loop in runbook step 4b would otherwise need a commit per iteration.
-    _exempt = {_setrel}
-    if "test_trust_ramp.py" not in suites:
-        _exempt.add(os.path.join("tests", "test_trust_ramp.py"))
-    dirty = tree_lines([spec["target"]] if args.anchors_only else None)
-    if dirty is not None:
-        _set_dirty = [ln for ln in dirty
-                      if ln[3:].strip().strip('"') in _exempt]
-        dirty = [ln for ln in dirty if ln not in _set_dirty]
-        if _set_dirty:
-            print(f"  note: the mutation set is uncommitted ({_setrel}); the "
-                  f"SET-SHA256 below is what actually ran")
-    if dirty is None:
-        print("REFUSING: could not read git status. This script rewrites a "
-              "tracked file; without a clean-tree proof it will not run.",
+    if _td:
+        print(f"REFUSING: {spec['target']} has uncommitted changes:",
               file=sys.stderr)
-        return 2
-    if dirty:
-        print("REFUSING: the working tree is dirty. The suites read the whole "
-              "tree, so ANY uncommitted file can change what they measure:",
-              file=sys.stderr)
-        for ln in dirty:
+        for ln in _td:
             print("   ", ln, file=sys.stderr)
-        print("  A pre-existing edit is indistinguishable from a mutation, and "
-              "restoring would destroy it. Commit or stash first.",
+        print("  This gate measures HEAD in a private checkout, so those edits "
+              "would NOT be what it reports on. Commit them first.\n  (Every "
+              "other file in your tree may be dirty; only this one matters.)",
               file=sys.stderr)
         return 2
 
-    # The tree as GUARD 1 accepted it. GUARD 10 requires every later scan to
-    # equal this, plus the target we mutated ourselves and nothing else.
-    _clean_tree = list(dirty) + list(_set_dirty)
-    _tgtrel = spec["target"]
+    # ---- THE PRIVATE CHECKOUT. -------------------------------------------
+    _head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                           capture_output=True, text=True)
+    if make_private_checkout() is None:
+        return 2
+    atexit.register(drop_private_checkout)
+    _TARGET = os.path.join(WORK, spec["target"])
     with open(_TARGET, "rb") as fh:
         _ORIGINAL = fh.read()
     orig_sha = sha(_ORIGINAL)
-    print(f"  clean tree; target sha256 {orig_sha[:16]}\n")
-
-    # ---- GUARD 1b: CLAIM THE TARGET FOR THE WHOLE RUN. ------------------
-    # [2026-09-09 round-4 blocker] Nothing used to claim the target, and GUARD 2
-    # only sampled once at startup. Two gates run at once therefore scored rows
-    # on EACH OTHER'S bytes. MEASURED across two independent reviewers: 7 of 8
-    # aligned trials produced a WRONG table, and a sham set whose only mutation
-    # is an inert comment printed "MERGE GATE: PASS" at rc 0 because the OTHER
-    # run's real mutation was on disk when the suite ran. That is a false PASS
-    # needing no dishonesty -- just two runs, or one run and a stale background
-    # job. An earlier review called this "unproven" after seeing identical
-    # tables from two runs of the SAME set; that was the one shape that hides it.
-    # The backup doubles as the lock: created O_EXCL here, held to the end, so a
-    # second run loses the race and hits this same guard instead of interleaving.
-    if not args.dry_run:
-        try:
-            _fd = os.open(_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            _pid, _alive = _lock_owner(_LOCK)
-            print(f"REFUSING: {_LOCK} exists (owner pid {_pid}, "
-                  f"{'RUNNING' if _alive else 'dead'}). "
-                  + (f"Another mutation-gate run holds {spec['target']} right "
-                     "now; wait for it." if _alive else
-                     "That run died. Compare the backup with the target and "
-                     "resolve by hand, or use --recover."), file=sys.stderr)
-            return 2
-        except OSError as exc:
-            print(f"REFUSING: cannot claim {_LOCK}: {exc}", file=sys.stderr)
-            return 2
-        # Write the pid before anything can observe the file, then mark
-        # ownership: only a process that got HERE may ever release the lock.
-        os.write(_fd, str(os.getpid()).encode())
-        os.close(_fd)
-        _OWN_LOCK = True
-        with open(_BAK, "wb") as fh:
-            fh.write(_ORIGINAL)
+    print(f"  measuring {_head.stdout.strip()} in a private checkout "
+          f"(target sha256 {orig_sha[:16]}); your working tree is untouched\n")
 
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
-    atexit.register(lambda: restore("atexit", release=True))
 
     rows = []
     rc = 0
@@ -593,14 +434,12 @@ def main(argv):
                 print(f"  {m['id']:<26} NOOP")
                 continue
 
-            # The backup was written once under GUARD 1b and is this run's
-            # lock; do not truncate and rewrite it per mutation.
             with open(_TARGET, "wb") as fh:
                 fh.write(mutated)
             with open(_TARGET, "rb") as fh:
                 on_disk = fh.read()
             if sha(on_disk) != sha(mutated):
-                restore("write-verify")
+                reset_target()
                 row["verdict"] = "WRITE-FAILED"
                 rows.append(row)
                 rc = 1
@@ -625,46 +464,8 @@ def main(argv):
             ctl_suites = [s for s in suites if s not in dsuites_pre]
             plan = ([(s, None) for s in ctl_suites] if is_ctl
                     else sorted(m["expect"].items()))
-            interfered = []
             for s, want in plan:
                 p, f, crashed, names, dt, _all = run_suite(s)
-                # ---- GUARD 10: THE ROW MUST BE ABOUT THE BYTES WE WROTE. ----
-                # [2026-09-09] The lock (GUARD 1b) tries to PREVENT a second
-                # writer; this VERIFIES the result regardless of whether the
-                # lock worked. Three separate blockers in this file have come
-                # from rows scored on somebody else's bytes -- two gates racing,
-                # a dry run deleting a live lock, --recover rewriting a target
-                # mid-measurement -- and each time the lock was patched and a
-                # new hole appeared. This check does not depend on the lock
-                # being correct: the gate knows exactly what it wrote, so it
-                # reads the file back and refuses to score a suite that ran
-                # against anything else. It also catches what no lock can -- a
-                # human editing the target by hand while the gate runs.
-                try:
-                    with open(_TARGET, "rb") as _fh:
-                        _now = _fh.read()
-                except OSError:
-                    _now = None
-                _why = None
-                if _now != mutated:
-                    _why = "the target changed under this run"
-                else:
-                    # ...and NOTHING ELSE in the tree may have moved either.
-                    _tl = tree_lines()
-                    if _tl is None:
-                        _why = "git status unreadable, so the tree is unverified"
-                    else:
-                        _foreign = [ln for ln in _tl
-                                    if ln not in _clean_tree
-                                    and ln[3:].strip().strip('"') != _tgtrel]
-                        if _foreign:
-                            _why = (f"another file changed under this run: "
-                                    f"{'; '.join(x.strip() for x in _foreign[:3])}")
-                if _why:
-                    interfered.append(f"{s} ({_why})")
-                    print(f"      {s:<28} {'':>8}  {dt:>5.1f}s  "
-                          f"INTERFERED - {_why}")
-                    continue
                 hit = [x for x in names if want and want in x]
                 if crashed:
                     state = "CRASHED"
@@ -726,16 +527,6 @@ def main(argv):
             # A digest moves for ANY edit to an emitted file, so a control is
             # judged on the BEHAVIOURAL suites only -- otherwise no control
             # could ever be written for `lib/templates.py`.
-            if interfered:
-                row["verdict"] = "INTERFERED"
-                row["detail"] = ("; ".join(interfered) +
-                                 " - nothing in this row is evidence")
-                rc = 1
-                rows.append(row)
-                if not restore("between mutations"):
-                    rc = 3
-                    break
-                continue
             dsuites = set(spec.get("digest_suites", []))
             real_catch = [s for s in caught_by if s not in dsuites]
             # Judge the control on RAW redness in the behavioural suites.
@@ -772,9 +563,7 @@ def main(argv):
                         f"({', '.join(ctl_suites)}): they are not "
                         f"red-for-everything")
                 rows.append(row)
-                if not restore("between mutations"):
-                    rc = 3
-                    break
+                reset_target()
                 continue
             # ---- GUARD 9: a digest is not a guard. -----------------------
             # `.claude/readiness-queue.md:257` records the reason: when the only
@@ -788,9 +577,7 @@ def main(argv):
                                  f"freeze re-baseline carries this through")
                 rc = 1
                 rows.append(row)
-                if not restore("between mutations"):
-                    rc = 3
-                    break
+                reset_target()
                 continue
             row["verdict"] = "CAUGHT" if caught_by else "ESCAPED"
             row["detail"] = (", ".join(caught_by) if caught_by
@@ -801,20 +588,9 @@ def main(argv):
             if not caught_by:
                 rc = 1
             rows.append(row)
-
-            # ---- GUARD 7: restore, verified by hash, before the next one. ----
-            if not restore("between mutations"):
-                # [2026-09-09 round-4] Was `return 3`, which left main before
-                # the summary: MEASURED with chmod 0444 mid-run, the run gave
-                # rc 3 and printed NO table, NO SET-SHA256 and NOT the rc-3
-                # headline -- only three stderr lines. Break to the summary so
-                # the loudest outcome this script has is stated where the
-                # operator is already reading.
-                rc = 3
-                break
+            reset_target()
     finally:
-        if not restore("finally", release=True):
-            rc = 3
+        drop_private_checkout()
 
     print("\n" + "=" * 96)
     # [critique fix 3] Provenance, so a pasted table cannot be attributed to a
@@ -895,9 +671,7 @@ def main(argv):
             print(f"MERGE GATE: PASS - {len(caught)}/{len(caught)} bypasses "
                   f"turn a NAMED check red; {len(ctl)} control(s) escaped as "
                   f"required")
-    with open(_TARGET, "rb") as fh:
-        print(f"target restored: sha256 {sha(fh.read())[:16]} "
-              f"(original {orig_sha[:16]})")
+    print("your working tree was never modified; the private checkout is gone")
     return rc
 
 

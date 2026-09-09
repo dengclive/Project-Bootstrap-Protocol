@@ -16,10 +16,10 @@ __pycache__/
 # broken; this is the enforcement.
 .claude/sessions/
 
-# Mutation-gate backups. The gate writes the target's original bytes here while
-# a mutation is applied, so a run killed with SIGKILL leaves a recoverable copy
-# (`.claude/mutation-gate.py --recover`). It must never sit beside the target,
-# which is PRODUCT source under lib/, and it must never be committed.
+# The mutation gate keeps no state here any more: it measures in a private
+# `git worktree` under the system temp dir, which it deletes when it finishes.
+# The directory is left ignored so an old backup from before 2026-09-09 cannot
+# be committed by accident.
 .claude/mutation-gate-backups/
 
 # The operator-attention alarm's PID file. It is runtime state, not source, and
