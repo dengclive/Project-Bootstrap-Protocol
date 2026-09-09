@@ -199,7 +199,7 @@ Write the bypasses down as data, and make something run them:
 
 ```bash
 python3 .claude/mutation-gate.py .claude/mutations/<item-id>.json   # full run, ~2 min
-python3 .claude/mutation-gate.py --anchors-only .claude/mutations/<item-id>.json   # 0.05 s
+python3 .claude/mutation-gate.py --anchors-only .claude/mutations/<item-id>.json   # ~0.07 s
 ```
 
 **Author the set at 4b; run it once the guard is COMMITTED at step 5.** The
