@@ -2312,8 +2312,10 @@ EXPECTED_RETROFIT_DIGESTS = {
     # Same change as the greenfield columns: the argument scanner's three
     # per-token costs are removed, so `.claude/hooks/dependency-gate.sh` moves
     # and nothing else does. Retrofit action counts unchanged at 79 / 93.
-    "service": "5ad8fa422aabec32159b1a80b82a938ff6de31b6fddc593984bc5f9527a3e8b3",
-    "agent": "74f335f4647cdf81746ee2872cde929f81c9c00094ddb0c39581f6d05185ebad",
+    # RE-BASELINED 2026-09-10, same exception 78: a corrected comment above
+    # `is_approved` (see the greenfield note). Counts still 79 / 93.
+    "service": "35f723dc4417513b962bbf99567855216d74c39eef6c22370a48e4598444d2c5",
+    "agent": "a7a4cf7ae8909d2c029bba4c6d765b19976ade3196deb6f447d809d80ec87365",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

@@ -162,7 +162,9 @@ them — landing under this release identity).
 
 **No version bump** (fix, not surface; freeze exception **78**).
 `x54-arg-scanner-quadratic-and-fork`, the argument-scanner member of the X-54
-cost class, and the last of its members that the class row named.
+cost class. It is the last member the class row *named*, in the order they were
+named - NOT the last one open. The **wrapper** member is still open; see the
+closing section.
 
 **The defect, and it had THREE sites where the backlog row named two.** A segment
 carrying a REAL install head sends its argument list into the scanner, which paid

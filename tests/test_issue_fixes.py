@@ -4287,8 +4287,10 @@ check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
 #
 # WHAT THIS ROW CANNOT SEE, stated so a green is never over-read. It asserts an
 # rc and captures no clock. MEASURED on the emitted hook at this fixture's
-# one-entry approved list: reverting ONLY the fork fix leaves 42.1 s and
-# reverting ONLY the append fix leaves 25.9 s - both finish inside the ceiling,
+# one-entry approved list: reverting ONLY the fork fix leaves 43.3 s and
+# reverting ONLY the append fix leaves 26.2 s - both finish inside the ceiling,
+# (an earlier run of the SAME two cells read 42.1 s and 25.9 s; ~3% run-to-run
+# spread, and the pair quoted everywhere else in this change is this one)
 # so both return rc 2 and THIS ROW STAYS GREEN. Row 6 below closes that gap for
 # the `is_approved` site; the other two are carried by the step-4b mutation set
 # at .claude/mutations/x54-arg-scanner-quadratic-and-fork.json, because no
@@ -4318,11 +4320,23 @@ check("X-54: an install head plus a cap-legal argument list DENIES inside the "
 #
 # WHY K=800, sized by measurement rather than chosen. With `is_approved` reverted
 # the hook takes 115.5 s here - 1.93x the ceiling - so the row stays RED on a box
-# up to 1.93x faster than this one, against the 1.2-1.35x box variation this repo
-# has actually observed (.claude/readiness-runbook.md section 9a). At K=500 the
+# up to 1.93x faster than this one.
+# THE COMPARISON FIGURE, STATED HONESTLY AND WITH ITS REAL SOURCE: the only
+# box-to-box variation this repo has recorded is ~1.2-1.35x, and it was observed
+# in the SLOWER direction - a reviewer's box being 1.2-1.35x slower. NAMED, NOT
+# NUMBERED, deliberately: grep `1.2-1.35x` in docs/changelog.md and the X-54 row
+# in docs/deferred-backlog.md. A line citation here would drift on the next
+# changelog entry, which is the defect this very item already had to fix once.
+# That bounds the size of box-to-box spread seen here; it is NOT a measured bound
+# on how much FASTER a box can be, and this row does not pretend otherwise. An
+# earlier draft cited `.claude/readiness-runbook.md` section 9a for the figure;
+# that file contains neither string, and 9a's own number is the 4.6x CORE
+# CONTENTION result, a different quantity. At K=500 the
 # same cell is 70.3 s, only 1.17x, which a faster reviewer's box would turn into
 # a FALSE GREEN. The fixed cell is 4.9 s and FLAT in K (4.96 / 4.90 / 4.92 at
-# K=200 / 500 / 800), which is what an O(1) membership test looks like and is the
+# K=1 / 200 / 800 - an earlier draft of this line mislabelled them 200/500/800,
+# shifted one slot; there is no fixed reading at K=500), which is what an O(1)
+# membership test looks like and is the
 # evidence that the scan is really gone rather than merely cheaper.
 #
 # FLAKE DIRECTION, checked both ways: the fixed cell survives a 1.35x slower box

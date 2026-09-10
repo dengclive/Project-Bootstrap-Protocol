@@ -3373,7 +3373,14 @@ EXPECTED_DIGESTS = {
         # change, and the fix was separately shown output-identical on 15 token
         # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
         # and `a$b`.
-        "737eb846a95ce6b34ceb216f4cafeefe8f2c8de351764b5f9a0d1fa0f1262da4",
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        "0de6e2cfb94f71e4e27f9465aea3cc3011ab4d3e12664c2bb72e00cc758663d3",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3863,7 +3870,14 @@ EXPECTED_DIGESTS = {
         # change, and the fix was separately shown output-identical on 15 token
         # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
         # and `a$b`.
-        "d8d158b8a6dd4711ae53e8f641556fe7fece34a8eb46c19d1ea8eca7bf65a5eb",
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        "eb2f0767a71f7d5a6d7ced509479b2414180ae0355f7e75b858b4688c463720e",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4290,7 +4304,14 @@ EXPECTED_DIGESTS = {
         # change, and the fix was separately shown output-identical on 15 token
         # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
         # and `a$b`.
-        "20d6a62ac2622555717e1085df078c6fda10b5e9a440f954b526e81cfbcd0f55",
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        "5b567e27ff91822af3bf6d39d63376f813ab166c13ca9e8f1939062d9e6c18ec",
 }
 
 EXPECTED_ACTION_COUNTS = {
