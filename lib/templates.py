@@ -4465,17 +4465,15 @@ APPROVED_EOF
 # 5.4 s at 1 approved package, 13.0 s at 60 and 31.9 s at 200, against a 60 s
 # emitted ceiling that fails OPEN.
 #
-# `@` AND `*` ARE REFUSED BY NAME BEFORE THE LOOKUP - AND NOT FOR THE REASON AN
-# EARLIER DRAFT OF THIS COMMENT GAVE. It claimed both "mean all elements" as an
-# associative subscript. That is FALSE for the spelling this code uses: MEASURED
-# on bash 5.3.15, a QUOTED subscript round-trips both as literal keys
-# (`_APPSET["*"]=1` then `${{_APPSET["*"]+x}}` HITS). Only the UNQUOTED `${{arr[*]}}`
-# means "all elements". The guards stay as belt-and-braces against a future edit
-# dropping those quotes, and they cost nothing because neither spelling can reach
-# here: `*` in `deps.approved` is a FATAL config error (`_SHELL_META` in
-# lib/defaults.py, which subtracts nothing back for this field), and `_pkg_name`
-# reduces a bare `@` to the empty string, which the caller skips before this
-# runs.
+# `@` AND `*` ARE REFUSED BY NAME BEFORE THE LOOKUP, so that this predicate
+# never depends on how bash resolves them as an array subscript.
+#
+# NO REASON IS GIVEN HERE ON PURPOSE. Two drafts of this comment tried, and both
+# shipped something false - first a claim about what `*` means as a subscript,
+# then a claim that neither spelling can reach these guards. The second is wrong
+# for `*`: `pip install *` reaches `is_approved` with `$1` unchanged. The guards
+# are cheap and unconditional; anything further belongs in a test, not in prose
+# that keeps going stale.
 declare -A _APPSET=()
 _appset_build(){{
   local a

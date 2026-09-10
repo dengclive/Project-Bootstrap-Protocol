@@ -4318,26 +4318,21 @@ check("X-54: an install head plus a cap-legal argument list DENIES inside the "
 # K=200 -> 31.9 s. The fail-open the item closes is reachable on an ordinary
 # dependency list and NOT reachable at K=1.
 #
-# WHY K=800, sized by measurement rather than chosen. With `is_approved` reverted
-# the hook takes 115.5 s here - 1.93x the ceiling - so the row stays RED on a box
-# up to 1.93x faster than this one.
-# THE COMPARISON FIGURE, STATED HONESTLY AND WITH ITS REAL SOURCE: the only
-# box-to-box variation this repo has recorded is ~1.2-1.35x, and it was observed
-# in the SLOWER direction - a reviewer's box being 1.2-1.35x slower. NAMED, NOT
-# NUMBERED, deliberately: grep `1.2-1.35x` in docs/changelog.md and the X-54 row
-# in docs/deferred-backlog.md. A line citation here would drift on the next
-# changelog entry, which is the defect this very item already had to fix once.
-# That bounds the size of box-to-box spread seen here; it is NOT a measured bound
-# on how much FASTER a box can be, and this row does not pretend otherwise. An
-# earlier draft cited `.claude/readiness-runbook.md` section 9a for the figure;
-# that file contains neither string, and 9a's own number is the 4.6x CORE
-# CONTENTION result, a different quantity. At K=500 the
-# same cell is 70.3 s, only 1.17x, which a faster reviewer's box would turn into
-# a FALSE GREEN. The fixed cell is 4.9 s and FLAT in K (4.96 / 4.90 / 4.92 at
-# K=1 / 200 / 800 - an earlier draft of this line mislabelled them 200/500/800,
-# shifted one slot; there is no fixed reading at K=500), which is what an O(1)
-# membership test looks like and is the
-# evidence that the scan is really gone rather than merely cheaper.
+# WHY K=800, SIZED BY MEASUREMENT. With `is_approved` reverted the hook takes
+# 115.5 s here - 1.93x the 60 s ceiling - so this row stays RED unless a box is
+# more than 1.93x faster than the one it was sized on. At K=500 the same cell is
+# 70.3 s, only 1.17x, which is why 500 was rejected. NO OTHER FIGURE IS QUOTED
+# FOR COMPARISON: two drafts tried to justify this margin against a "box
+# variation" number from elsewhere in the repo and both cited it wrongly. The
+# margin is what was measured; sizing it against anything else needs its own
+# measurement, not a pointer.
+#
+# The FIXED cell is 4.96 / 4.90 / 4.92 s at K = 200 / 500 / 800 - flat, which is
+# what an O(1) membership test looks like rather than a scan that got cheaper.
+# THESE LABELS ARE THE MEASURED ONES. A correction round briefly relabelled them
+# 1 / 200 / 800 to match a table elsewhere in this change; that table was the
+# thing in error, and there is NO measurement of the all-three-fixed tree at
+# K=1.
 #
 # FLAKE DIRECTION, checked both ways: the fixed cell survives a 1.35x slower box
 # AND 4.6x core contention at ~30 s, so this row is not the wall-clock shape that

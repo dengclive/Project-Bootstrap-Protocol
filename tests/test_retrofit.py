@@ -2314,8 +2314,9 @@ EXPECTED_RETROFIT_DIGESTS = {
     # and nothing else does. Retrofit action counts unchanged at 79 / 93.
     # RE-BASELINED 2026-09-10, same exception 78: a corrected comment above
     # `is_approved` (see the greenfield note). Counts still 79 / 93.
-    "service": "35f723dc4417513b962bbf99567855216d74c39eef6c22370a48e4598444d2c5",
-    "agent": "a7a4cf7ae8909d2c029bba4c6d765b19976ade3196deb6f447d809d80ec87365",
+    # RE-BASELINED 2026-09-10 (3rd time, same exception 78) - see the greenfield note.
+    "service": "9c42907121d101b7d5c15e4535dc4aa3c2b9406bd8aba2106d75b318f4bf37f8",
+    "agent": "e8ae7f1d811104cfb75f663a6246ddfd02c74d1cbdc76401d5b544131df2f0f6",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

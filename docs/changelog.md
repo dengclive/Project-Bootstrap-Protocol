@@ -187,11 +187,20 @@ contention factor this repo has measured.
 **Measured on the emitted hooks**, cap-legal payload (81,920 B — exactly
 `_CMD_MAXLEN`, zero headroom — 40,948 argument tokens), idle, one case at a time:
 
-| approved list | before | after |
-|---|---|---|
-| 1 | 80.9 s | **4.96 s** |
-| 200 | 125.0 s | **4.90 s** |
-| 800 | — | **4.92 s** |
+| approved list `K` | unfixed | fork+append fixed | all three fixed |
+|---|---|---|---|
+| 1 | 80.90 s | 5.36 s | *not measured* |
+| 60 | 94.57 s | 13.03 s | *not measured* |
+| 200 | 125.01 s | 31.87 s | **4.96 s** |
+| 500 | *not measured* | 70.26 s | **4.90 s** |
+| 800 | *not measured* | 115.51 s | **4.92 s** |
+
+Every cell above is a single run and is labelled with the K it was measured at.
+The blanks are blank because nothing was run there — **an earlier version of this
+entry carried a three-row before/after table that paired an unfixed K=1 reading
+with a fixed K=200 reading, and quoted an "all three fixed at K=1" figure that
+was never measured.** It was caught by this item's own step-8 re-review and is
+corrected here rather than quietly restated.
 
 The fixed figure is **flat in the approved-list length**, which is what an O(1)
 membership test looks like rather than a scan that merely got cheaper.

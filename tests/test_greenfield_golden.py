@@ -3380,7 +3380,12 @@ EXPECTED_DIGESTS = {
         # shipped prose moves the digest exactly as correcting shipped code does.
         # Blast radius re-verified: still the dependency gate alone, counts still
         # 57 / 69 / 59 and 79 / 93.
-        "0de6e2cfb94f71e4e27f9465aea3cc3011ab4d3e12664c2bb72e00cc758663d3",
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "ec6e6d8b2be82b00066dbc0756713636563a7f44744674d8b6a6d1446ff23c5b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3877,7 +3882,12 @@ EXPECTED_DIGESTS = {
         # shipped prose moves the digest exactly as correcting shipped code does.
         # Blast radius re-verified: still the dependency gate alone, counts still
         # 57 / 69 / 59 and 79 / 93.
-        "eb2f0767a71f7d5a6d7ced509479b2414180ae0355f7e75b858b4688c463720e",
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "653081d5f7498bb23ec49d48f67f561864a53f19afe176b37b3ce4c8a9766050",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4311,7 +4321,12 @@ EXPECTED_DIGESTS = {
         # shipped prose moves the digest exactly as correcting shipped code does.
         # Blast radius re-verified: still the dependency gate alone, counts still
         # 57 / 69 / 59 and 79 / 93.
-        "5b567e27ff91822af3bf6d39d63376f813ab166c13ca9e8f1939062d9e6c18ec",
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "4b8d87011492230e7124632910d6d87d229ca7f5e97cd60a06ada4a51773c149",
 }
 
 EXPECTED_ACTION_COUNTS = {
