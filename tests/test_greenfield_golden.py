@@ -3359,7 +3359,21 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "13bd61135b01da88efdde84646b751f05b54e323742de6a01a13d8f236bf820b",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        "737eb846a95ce6b34ceb216f4cafeefe8f2c8de351764b5f9a0d1fa0f1262da4",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3835,7 +3849,21 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "e52dd9d92e5a89e685a913c58e98736f37408724ba3df1f55a487d81385e3118",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        "d8d158b8a6dd4711ae53e8f641556fe7fece34a8eb46c19d1ea8eca7bf65a5eb",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4248,7 +4276,21 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "242af74be96c37647c934bcd3ed7a8f1231a51b13e42763e0cc628796649a84d",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        "20d6a62ac2622555717e1085df078c6fda10b5e9a440f954b526e81cfbcd0f55",
 }
 
 EXPECTED_ACTION_COUNTS = {
