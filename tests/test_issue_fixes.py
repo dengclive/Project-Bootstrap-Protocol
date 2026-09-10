@@ -4294,7 +4294,9 @@ check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
 # at .claude/mutations/x54-arg-scanner-quadratic-and-fork.json, because no
 # cap-legal payload makes either of them cross alone - token count is bounded by
 # the byte cap.
+_th54 = time.time()
 _rch54, _ = shell_run("dependency-gate", bash_payload(_X54_HEAD), timeout=60)
+_elh54 = time.time() - _th54
 check("X-54: an install head plus a cap-legal argument list DENIES inside the "
       f"60 s ceiling (rc={_rch54})",
       _rch54 == 2,
@@ -4381,6 +4383,42 @@ check("X-54 row 6: the same cap-legal shape DENIES inside the 60 s ceiling "
       "no early exit on a miss, so this shape costs O(tokens x approved) - "
       "invisible at the K=1 fixture above and 115 s here when that site is "
       "reverted. Name the code, not the line")
+
+# ROW 7 - RATIO, AND THE ONLY ROW THAT SEES THE FORK AND THE APPEND AT ALL.
+#
+# WHY IT HAD TO EXIST. Rows 5 and 6 read an rc, and an rc cannot tell a complete
+# fix from a two-thirds one: MEASURED on the emitted hook, reverting ONLY the
+# fork leaves 43.3 s and reverting ONLY the append leaves 26.2 s, both inside
+# the 60 s ceiling, so both return rc 2 and both rows stay GREEN. Neither cost
+# scales with the approved list, and token count is bounded by `_CMD_MAXLEN`, so
+# no cap-legal payload makes either cross alone. Without this row the two sites
+# would be guarded by nothing mechanical.
+#
+# WHY A RATIO AND NOT A CLOCK. `#50 T8` was DELETED for bounding a reduction at
+# an ABSOLUTE figure on one un-repeated sample. This is row 4's shape instead:
+# both arms run in the same suite at the identical byte count, and the control
+# (`_X54_CTL`, y-padded) carries NO install head, so it never enters the
+# argument scanner and is unaffected by all three sites. Contention inflates
+# both arms together, which is what an absolute bound cannot do.
+#
+# WHY 3.0x, SIZED FROM THE GAP AND NOT FROM THIS RUN. Measured ratios: fixed
+# tree 1.15x; fork reverted 9.83x; append reverted 6.07x; the flush-threshold
+# bypass 6.04x; the unbounded-window bypass 6.30x. The bound sits 2.6x above the
+# fixed tree and 2.0x below the cheapest bypass. DO NOT tighten it toward
+# whatever this run measures - that is what took T8 to E7.
+#
+# WHAT IT DOES NOT SEE, and row 6 does: reverting `is_approved` alone costs
+# 1.18x here, because at this fixture's ONE approved package an O(K) scan and an
+# O(1) lookup are indistinguishable. The two rows are complementary, not
+# redundant - each is blind exactly where the other is not.
+check(f"X-54 arg-scanner ratio: the head-bearing shape costs < 3x its no-head "
+      f"control ({_elh54:.1f}s vs {_ely54:.1f}s = "
+      f"{_elh54 / max(_ely54, 1e-9):.2f}x)",
+      _elh54 < 3.0 * _ely54,
+      "a head-bearing command enters the ARGUMENT SCANNER and the control does "
+      "not, so this ratio is that loop's per-token cost. Above the bound, one "
+      "of the three per-token costs is back: the subshell fork per token, the "
+      "O(approved) scan per token, or the growing-string append")
 
 shutil.rmtree(_K800_TMP, ignore_errors=True)
 
