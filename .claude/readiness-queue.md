@@ -307,28 +307,28 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   Step 4 = a differential row that is red on the current tree. Freeze
   exception applies. **Never batched.**
 
-- **[ready] x54-arg-scanner-quadratic-and-fork** · `CODE` · eligible: **yes**
-  **FILED 2026-08-31 AT STEP 10 BY `x54-completer-cost` (PR #98, merge
-  `8cc107f`), WHICH IS WHERE IT WAS PROMISED AND NOT BEFORE.** **The claim that every commit on that branch
-  promised this filing is FALSE, and is retracted here.** Re-derived over all
-  eight commits of `8c2fc35..5b2b6ca`: no tree contains the promise text, and the
-  two earliest asserted the CONTRARY in present tense against a row that did not
-  exist — which `ef99fbc` withdrew, and which is part of why this item is graded
-  harmful. The residual is filed because it is real, not because it was promised.
-  **The third member of the X-54 cost class, and the one the X-54 row never
-  named.** A segment carrying a REAL install head sends its argument list into
-  the argument scanner, which **forks one subshell per package token** AND
-  appends to a **growing `blocked` string** — O(n²), the same shape B4, X-50 and
-  X-52 each fixed elsewhere. Cap-legal and **KILLED at 60 s before and after**
-  the completer fix, so it is a live fail-open on the same mechanism: a
-  cancelled hook exits 124 and only exit 2 blocks.
-  **A step-4 row already exists and is GREEN-by-design:** the boundary row in
-  `tests/test_issue_fixes.py` asserts this shape stays `rc 124`. **When that row
-  goes RED the scanner has been fixed — update it, do not delete it.** That row
-  is therefore this item's step-4 red, inverted; re-read it before planning.
-  Name the code, not the line: the sites are `pkg_name "$tok"` and
-  `blocked="$blocked $name_only"`. Line numbers into the emitted artifact drift
-  with every comment edit and two rounds got them wrong in OPPOSITE directions.
+- **[ready] x54-wrapper-cost-residual-fallback-head-loop** · `CODE` · eligible: **yes**
+  **FILED 2026-09-11 at step 10 by `x54-arg-scanner-quadratic-and-fork`, found by
+  its step-3 review.** A PRESERVED COPY of the hot site the completer fix removed
+  survives in the SAME emitted hook: the unguarded fallback head loop still does a
+  per-token `_cand` append followed by a per-token `HEAD` rescan — the coupled
+  O(n²) pair `docs/deferred-backlog.md`'s X-54 row measured at 96.0 s → 47.8 →
+  31.3 → 4.5 in its own ablation. Byte-unchanged across `8c2fc35 → 8cc107f →
+  HEAD`. **Unreached on the shapes measured so far** because the primary loop
+  finds the head first; it runs if a completer member is ever MISSED, which
+  `lib/cmdpos.py` records as having already happened once. Name the code, not the
+  line.
+
+- **[ready] xp-write-growing-string-append** · `CODE` · eligible: **yes**
+  **FILED 2026-09-11 at step 10 by `x54-arg-scanner-quadratic-and-fork`.** A
+  second growing-string append of the B4 / X-50 / X-52 shape, OUTSIDE the argument
+  scanner and in the same emitted hook: `_XP_WRITES="$_XP_WRITES $_XP_K "` in both
+  `_xp_write` and `_xp_cap`, single-level with no `_CS_WIN` flush, driven five
+  times per token inside the D20 stage walk and later substring-scanned inside
+  another loop. **Reachable by a cap-legal `curl http://x | tee f1 f2 … fN`**, i.e.
+  a shape the X-54 payloads never touched — cell D of that item's ablation says
+  nothing about it. NOT MEASURED YET: measure before assuming it crosses.
+
 
 - **[ready] x54-wrapper-cost** · `CODE` · eligible: **yes**
   **FILED 2026-08-31 at step 10 by `x54-completer-cost`.** The X-54 row records
@@ -508,6 +508,28 @@ separate items only because they were discovered separately.
 
 ## Measurement residuals
 
+- **[ready] e8-detector-counts-its-own-string** · `MEASUREMENT` · eligible: **yes**
+  **FILED 2026-09-11 by `x54-arg-scanner-quadratic-and-fork`.** The runbook §6
+  E8 detector is `grep -c '"model_refusal_fallback"'` over the session
+  transcript, and it counts **its own command** plus the runbook's §4 text —
+  which every session is REQUIRED to read. The S0 baseline command lands in the
+  transcript AFTER the baseline is taken, so the delta is guaranteed ≥1 at the
+  first check of every session, before any fan-out. Measured this session: **14
+  literal occurrences, 0 real events.** The delta fix already applied once did
+  not close this. **The sound test is the record's own shape** — `type ==
+  "system"` and `subtype == "model_refusal_fallback"` — calibrated here against a
+  known-positive session (`339bedbb`) so the negative is not vacuous.
+
+- **[ready] doc-citations-need-anchor-text** · `TEST-CONTRACT` · eligible: **yes**
+  **FILED 2026-09-11 by `x54-arg-scanner-quadratic-and-fork`.**
+  `tests/test_doc_citations.py` pins citations by LINE NUMBER, and
+  `docs/changelog.md` is append-at-top, so every changelog entry breaks every
+  citation into it. Inside that ONE item the policy doc's citation drifted three
+  times: **1275 → 1333 → 1335 → 1344**. The suite caught it each time, which is
+  the harness working — but the format guarantees the churn. Anchor-text
+  citations would end it. This is the repo's own "name the code, not the line"
+  rule, applied to a surface that has not learned it.
+
 - **[done 2026-08-26] x54-deny-shape** · `MEASUREMENT` · PR #94, merge `69395f1` · on `f4cc8c8`, emitted
   `dependency-gate.sh` md5 `18aba3cf`. The gap the 2026-08-14 pass left in its own
   claim — same padding but a **would-otherwise-DENY** payload through the emitted
@@ -559,6 +581,41 @@ the nine historical fail-closed sites (historical record); the PR-attribution
 defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
+
+**`x54-arg-scanner-quadratic-and-fork` PR #102 `01976cc` — three per-token costs
+out of the argument scanner.** Closed 2026-09-11. Freeze exception **78**. Graded
+**`harmful`** — see the ledger. Closes the **argument-scanner** member of the
+X-54 cost class; the **wrapper** member is now the only one of the three left.
+
+**THE QUEUE ROW NAMED TWO SITES AND THERE WERE THREE.** The third — `is_approved`
+scanning the project's whole approved list per token, with no early exit on a
+miss — was found by the step-3 review, and it is the one that scales with a
+variable the OPERATOR sets in `deps.md` rather than one the attacker supplies.
+Against the suite's one-package fixture an O(K) scan and an O(1) lookup are
+indistinguishable, so the item's first measurement concluded the two named sites
+were the whole defect and was **wrong**: with only those two fixed, a
+200-package `deps.md` still crossed the ceiling at every contention factor this
+repo has recorded. **A row that varies only the attacker's input cannot see a
+cost whose second factor is the adopter's own configuration** — that is the
+reusable half of this item.
+
+**THREE TEST ROWS, BECAUSE TWO WERE NOT ENOUGH.** Row 5 re-based from `rc == 124`
+to `rc == 2`; row 6 added at an 800-package fixture, the only row that sees the
+`is_approved` site; row 7 a RATIO against a no-head control, the only row that
+sees the fork and the append — reverting either alone leaves 43.3 s / 26.2 s,
+INSIDE the ceiling and invisible to any rc. Mutation set
+`.claude/mutations/x54-arg-scanner-quadratic-and-fork.json`, **MERGE GATE: PASS
+5/5 + 1 control escaped**, re-run on the merged bytes.
+
+**THE VERDICT DID NOT MOVE.** `main` stays NOT PRODUCTION READY on leg (a). This
+closes one of the two X-54 members that were open; the leg needs
+`x54-wrapper-cost` and `install-tail-path-scan-quadratic` as well, and X-37 Class
+B is untouched. `docs/production-readiness.md` gains a dated layer saying exactly
+that.
+
+**RESIDUALS FILED:** `x54-wrapper-cost-residual-fallback-head-loop` and
+`xp-write-growing-string-append` (both above), plus two harness defects in
+**Measurement residuals**.
 
 **`x54-completer-cost` PR #98 `8cc107f` — the install-head loop stops evaluating
 `HEAD` once per completer.** Closed 2026-08-31. Freeze exception **77**. Never a

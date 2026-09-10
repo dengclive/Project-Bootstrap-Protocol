@@ -411,8 +411,13 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # the exact sentence `.claude/trust-ramp.md` in this same commit retracts --
 # removing the per-completer HEAD test shipped a head-BEARING fail-open on
 # `main`. The runbook's step-10b "pin moved in the same commit".
+# +1 on 2026-09-11 for x54-arg-scanner-quadratic-and-fork: the argument-scanner
+# member of the X-54 cost class closed (PR #102, merge 01976cc, freeze exception
+# 78), graded `harmful` -- two correction commits pushed false claims to ORIGIN,
+# including a table quoting a figure that was never measured. The runbook's
+# step-10b "pin moved in the same commit".
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 44, f"{len(es)} entries")
+      len(es) == 45, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's

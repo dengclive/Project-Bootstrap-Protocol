@@ -1,5 +1,37 @@
 # Production-readiness analysis — `main`
 
+**X-54's ARGUMENT-SCANNER MEMBER CLOSED, 2026-09-11 — THE VERDICT DOES NOT
+MOVE.** `main` @ `01976cc` is still **NOT PRODUCTION READY**, on leg (a) alone,
+and this layer exists to say what changed WITHOUT letting it read as more than it
+is. `x54-arg-scanner-quadratic-and-fork` (PR #102, freeze exception 78) removed
+three per-token costs from the emitted `dependency-gate.sh` argument scanner: a
+subshell fork per package token, an O(approved-list) scan per token, and an
+O(n²) growing-string append. Cap-legal input at exactly `_CMD_MAXLEN` went from
+**125.01 s to 4.96 s** at a 200-package approved list, and the fixed figure is
+flat in that list's length. Past the emitted 60 s ceiling a PreToolUse hook is
+cancelled and exits 124 while only exit 2 blocks, so that shape was a live
+fail-open and is not one now.
+
+**WHAT THIS DOES NOT CLOSE, ENUMERATED SO THE LEG IS NOT READ AS NARROWER THAN IT
+IS.** Leg (a) — *the emitted gates are not yet a proven boundary* — stands on all
+of: **X-37 Class B** (`bash -c "$(curl …)"`, still ALLOW/ALLOW on both
+substrates, attempt 1 withdrawn as a net regression); the **wrapper** member of
+X-54 (`x54-wrapper-cost`, measured 167 s against the same ceiling and
+execution-proven); and **`install-tail-path-scan-quadratic`**. The X-54 cost
+class had three members; two are now closed and one is open. **A class is not
+closed by closing members of it**, and the boundary is not proven by closing a
+class.
+
+**THE ADOPTER-CONFIGURATION AXIS IS NEW, AND IT IS THE PART A FUTURE READINESS
+PASS SHOULD CARRY.** One of the three costs scaled with the length of the
+project's OWN `deps.md`, not with anything the attacker supplies. Every cost
+measurement in this document's history varies attacker input against a fixture
+that approves one package — a configuration under which that entire cost is
+invisible. It was found by review, not by measurement, and only after the item's
+first ablation had already concluded the defect was elsewhere. **Any future
+statement that a cost class is closed should say which adopter-controlled
+quantities were varied to establish it.**
+
 **C-2 RETIRED BY DISCLOSURE, 2026-08-26 — the autonomous-mode leg is no longer a
 readiness blocker.** §1's leg **(b)** (*"the autonomous-mode wrappers dispatch
 nothing"*, C-2) is resolved not by building the Phase 9.7 dispatch loop but by
