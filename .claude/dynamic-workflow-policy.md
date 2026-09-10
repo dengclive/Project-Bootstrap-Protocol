@@ -30,7 +30,7 @@ owns it; if all ten pass, author the script.
 
 | # | Check | Rule |
 |---|---|---|
-| 1 | No `hooks` entry in `.claude/settings.json`, `.claude/settings.local.json`, or `~/.claude/settings.json`; `.claude/hooks/` still empty | §1 |
+| 1 | No **`PreToolUse`** entry in any settings source of §1's table — resolve `CLAUDE_CONFIG_DIR` before reading the user-scope one; `.claude/hooks/` still absent | §1 |
 | 2 | The task qualifies under **one** limb: independent *samples*, or independent *sites*. Wanting it sooner is neither | §2 |
 | 3 | It is one of the four uses. If it isn't, stop — the list is closed | DW-U1–U4 |
 | 4 | Nothing will be emitted, and no `lib/` or `bin/` file changes | DW-P1, DW-P3 |
@@ -76,25 +76,64 @@ registered against this working tree, from any settings source.** That is the
 property §3.4 of the assessment turns on, and it is strictly stronger than "this
 repo has no install of its own" — a hook needs no install to be registered.
 
-CONFIRMED at write time, and this is the whole check:
+CONFIRMED at write time, and this is the whole check. **The cell that matters
+is `PreToolUse`, not the presence of a `hooks` key** — the amendment below
+derives why, in both directions:
 
 | source | state |
 |---|---|
-| `.claude/hooks/*.sh` | matches zero files |
+| `.claude/hooks/*.sh` | directory does not exist; matches zero files |
 | `.claude/settings.json` | does not exist |
-| `.claude/settings.local.json` | exists; contains `permissions` only, no `hooks` key |
-| `~/.claude/settings.json` (user scope) | exists; zero `hooks` occurrences |
+| `.claude/settings.local.json` | exists; `hooks` holds `UserPromptSubmit` ONLY — **no `PreToolUse`** |
+| `$CLAUDE_CONFIG_DIR/settings.json` (LIVE user scope) | exists; zero `PreToolUse` occurrences |
+| `~/.claude/settings.json` (user scope **only when `CLAUDE_CONFIG_DIR` is unset**) | exists; zero `PreToolUse` occurrences |
+| `/etc/claude-code/managed-settings.json` (system scope) | does not exist |
 
-`bin/trust-ramp:14` states the no-install half in as many words. **Re-run all
-four rows before relying on the grant** — the first two alone cannot see a hook
-registered from either settings file, and settings files change without an
-install ever happening.
+`bin/trust-ramp:14` states the no-install half in as many words. **Re-run every
+row before relying on the grant** — the first two alone cannot see a hook
+registered from any settings file, and settings files change without an install
+ever happening.
 
-**The grant is suspended** the moment any row above changes, until §3–§5 are
-re-derived against a gated tree. Self-installation is one way that happens and
-not the likeliest: the ledger format in `.claude/trust-ramp.md:96` contemplates
-self-install, but a single hand-added `hooks` entry in a settings file is
-cheaper and invisible to the no-install check.
+**The grant is suspended** the moment a **`PreToolUse`** entry appears in any row
+above, or a file appears in `.claude/hooks/`, until §3–§5 are re-derived against
+a gated tree. Self-installation is one way that happens and not the likeliest:
+the ledger format in `.claude/trust-ramp.md:96` contemplates self-install, but a
+single hand-added `PreToolUse` entry in a settings file is cheaper and invisible
+to the no-install check.
+
+### AMENDED 2026-09-09 — the trigger was BOTH too wide and too narrow
+
+Both halves were found by running the pre-flight for real on the
+`x54-arg-scanner-quadratic-and-fork` item, which the too-wide half halted at E3.
+
+**Too wide: any `hooks` key used to suspend the grant, and a non-`PreToolUse`
+hook cannot re-arm §3.4.** `.claude/settings.local.json` acquired a
+`UserPromptSubmit` hook running `.claude/alert-operator.sh --stop` when the alarm
+harness landed on **2026-09-08** (`f3391ec`) — a week after this document was
+last touched (**2026-09-01**, `a3b0d55`). `.claude/readiness-runbook.md:39` was
+updated to name `alert-operator.sh` as a harness file; this table was not. The
+grant's premise is one sentence above: *no `PreToolUse` hook*. §8's stated
+consequence is that **assessment §3.4** starts applying — and §3.4 measures the
+**per-Bash-tool-call gate tax** (`git add` 5,000 paths: 25.44 s solo, 72.38 s at
+N=16). A `UserPromptSubmit` hook fires **once per operator prompt and never on a
+tool call**, so a fan-out of N agents invokes it **zero** times; this one is
+additionally `>/dev/null 2>&1 || true`, so it can neither deny nor fail. It
+cannot re-arm the tax, therefore it must not suspend the grant.
+
+**Too narrow, and this half is the dangerous one: the table named a file this
+machine does not read.** `CLAUDE_CONFIG_DIR` is set to
+`/home/dengc/.ctx/personal/claude`, so the LIVE user-scope settings file is
+`$CLAUDE_CONFIG_DIR/settings.json` and `~/.claude/settings.json` — the path the
+old table named — is **inert**. They are two distinct files, confirmed by
+`readlink -f`. A `PreToolUse` hook added to the live file would have been
+**invisible to this check**, which is a fail-open in the check itself and the
+opposite direction from the false positive above. The system-scope path was
+missing outright. Both rows are added.
+
+**Enumerate the sources, do not trust a remembered path.** The seven checked
+were: `/etc/claude-code/managed-settings.json`, the macOS managed path,
+`$CLAUDE_CONFIG_DIR/settings.json`, `$CLAUDE_CONFIG_DIR/settings.local.json`,
+`~/.claude/settings.json`, `.claude/settings.json`, `.claude/settings.local.json`.
 
 ---
 
@@ -138,7 +177,7 @@ cases, each blind to the others' findings.
 **Why fan-out.** A sequential reviewer inherits its own earlier framing; a
 second pass by the same agent re-reads the same file with the same priors. The
 failure this repo has actually paid for is *correlated blind spots*, not
-insufficient iterations: `docs/changelog.md:1275` (the 2.7.1 → 2.7.2 section)
+insufficient iterations: `docs/changelog.md:1344` (the 2.7.1 → 2.7.2 section)
 records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
@@ -147,7 +186,7 @@ previous stage had stated as measured fact.
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
-`docs/changelog.md:1275`; it also appears at
+`docs/changelog.md:1344`; it also appears at
 `.claude/checkpoints/checkpoint-20260806-083157-main.md:118`, which is
 gitignored (`.gitignore:11`) and therefore not citable. Cite the changelog.
 
@@ -667,12 +706,20 @@ mechanism; it works only if it is read before the script is written.
 
 ## 8. What reopens this
 
-- **Any row of §1's table changing.** A `hooks` entry appearing in
-  `.claude/settings.json`, `.claude/settings.local.json`, or
-  `~/.claude/settings.json`; a file appearing in `.claude/hooks/`; or this
-  repository gaining an install of its own. Any one of those suspends the grant
-  and makes §3.4 of the assessment apply to this tree. **Re-run the table, do
-  not assume the no-install shorthand.**
+- **A `PreToolUse` entry appearing in any row of §1's table** — in
+  `.claude/settings.json`, `.claude/settings.local.json`,
+  `$CLAUDE_CONFIG_DIR/settings.json`, `~/.claude/settings.json` (user scope only
+  while `CLAUDE_CONFIG_DIR` is unset), or `/etc/claude-code/managed-settings.json`;
+  a file appearing in `.claude/hooks/`; or this repository gaining an install of
+  its own. Any one of those suspends the grant and makes §3.4 of the assessment
+  apply to this tree. **Re-run the table, do not assume the no-install
+  shorthand — and do not assume a path either: resolve `CLAUDE_CONFIG_DIR`
+  first.**
+  **[AMENDED 2026-09-09] The trigger used to read "a `hooks` entry", any event.
+  That fired on the runbook's own `UserPromptSubmit` alarm, which cannot re-arm
+  §3.4 because §3.4 is a per-tool-call cost — while simultaneously missing the
+  live user-scope file on any machine with `CLAUDE_CONFIG_DIR` set. See §1's
+  amendment note for both derivations.**
 - **Any proposal to emit orchestration.** Blocked on B-1 and gaps G-1 / G-3, and
   it is a seam event plus an owner-side pin event (§7 of the assessment). Not an
   authoring decision.

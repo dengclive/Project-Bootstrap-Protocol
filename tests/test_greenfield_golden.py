@@ -3359,7 +3359,33 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "13bd61135b01da88efdde84646b751f05b54e323742de6a01a13d8f236bf820b",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "ec6e6d8b2be82b00066dbc0756713636563a7f44744674d8b6a6d1446ff23c5b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3835,7 +3861,33 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "e52dd9d92e5a89e685a913c58e98736f37408724ba3df1f55a487d81385e3118",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "653081d5f7498bb23ec49d48f67f561864a53f19afe176b37b3ce4c8a9766050",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4248,7 +4300,33 @@ EXPECTED_DIGESTS = {
         # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
         # what this closes and what it does not. Deliberately NOT restated here: a fact
         # repeated on ten surfaces goes stale on nine of them.
-        "242af74be96c37647c934bcd3ed7a8f1231a51b13e42763e0cc628796649a84d",
+        # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+        # Deliberate re-baseline, not a drift. The argument scanner's THREE
+        # per-token costs are removed - a subshell fork per token, an O(K) scan
+        # of the project's approved list per token, and an O(n^2) growing-string
+        # append - so the emitted `.claude/hooks/dependency-gate.sh` moves. It is
+        # the ONLY emitted path that moves: none added, none removed, no
+        # mode/kind change, on every fixture. Action counts unchanged at
+        # 57 / 69 / 59, VERIFIED BEFORE this re-baseline by rendering the plan
+        # from `origin/main`'s lib and from this tree's and diffing them; a moved
+        # count would have been E5.
+        # NO VERDICT MOVES: test_substrate_differential.py is 4240/0 across the
+        # change, and the fix was separately shown output-identical on 15 token
+        # spellings including the associative-subscript hazards `*`, `@`, `a[b]`
+        # and `a$b`.
+        # RE-BASELINED 2026-09-10, SAME EXCEPTION 78: the step-7 review found the
+        # comment above `is_approved` asserted a bash behaviour the code does not
+        # exhibit (a QUOTED associative subscript round-trips `*` and `@` as
+        # literal keys; only the UNQUOTED form means "all elements"). Correcting
+        # shipped prose moves the digest exactly as correcting shipped code does.
+        # Blast radius re-verified: still the dependency gate alone, counts still
+        # 57 / 69 / 59 and 79 / 93.
+        # RE-BASELINED 2026-09-10 (3rd time, SAME exception 78): the step-8
+        # re-review found the previous re-baseline's comment was itself wrong
+        # about reachability, so the justification prose was SUBTRACTED rather
+        # than corrected a third time. Emitted comment text only; blast radius
+        # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
+        "4b8d87011492230e7124632910d6d87d229ca7f5e97cd60a06ada4a51773c149",
 }
 
 EXPECTED_ACTION_COUNTS = {

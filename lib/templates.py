@@ -4456,23 +4456,56 @@ NCMD="$(norm_cmd "$CMD")"
 mapfile -t APPROVED <<'APPROVED_EOF'
 {approved_body}
 APPROVED_EOF
-is_approved(){{
-  local n="$1" a
+# [x54-arg-scanner] A SET, BUILT ONCE, INSTEAD OF A SCAN PER TOKEN. The old
+# form walked the WHOLE approved list for every package token and had no early
+# exit on a miss - and on the shape this closes, the miss case is every token,
+# so the cost was O(tokens x approved). The second factor is the PROJECT's
+# deps.md, not ours, which is why it was invisible to a fixture approving one
+# package: with the other two costs fixed, the same cap-legal command measured
+# 5.4 s at 1 approved package, 13.0 s at 60 and 31.9 s at 200, against a 60 s
+# emitted ceiling that fails OPEN.
+#
+# `@` AND `*` ARE REFUSED BY NAME BEFORE THE LOOKUP, so that this predicate
+# never depends on how bash resolves them as an array subscript.
+#
+# NO REASON IS GIVEN HERE ON PURPOSE. Two drafts of this comment tried, and both
+# shipped something false - first a claim about what `*` means as a subscript,
+# then a claim that neither spelling can reach these guards. The second is wrong
+# for `*`: `pip install *` reaches `is_approved` with `$1` unchanged. The guards
+# are cheap and unconditional; anything further belongs in a test, not in prose
+# that keeps going stale.
+declare -A _APPSET=()
+_appset_build(){{
+  local a
   for a in ${{APPROVED[@]+"${{APPROVED[@]}}"}}; do
-    if [ -n "$a" ] && [ "$a" = "$n" ]; then return 0; fi
+    if [ -n "$a" ]; then
+      case "$a" in "@"|"*") continue ;; esac
+      _APPSET["$a"]=1
+    fi
   done
-  return 1
+}}
+_appset_build
+is_approved(){{
+  case "$1" in ""|"@"|"*") return 1 ;; esac
+  [ -n "${{_APPSET["$1"]+x}}" ]
 }}
 
 # Package name from a token, keeping npm scopes intact.
 #   express@4.1.0 -> express      @scope/pkg@1.2 -> @scope/pkg
 #   requests>=2   -> requests     pytest~=7      -> pytest
-pkg_name(){{
+#
+# [x54-arg-scanner] ASSIGNS TO A GLOBAL RATHER THAN PRINTING, and that is the
+# whole change: the body was already pure parameter expansion, so the ONLY
+# reason a process was created was the `$(...)` around the call. One subshell
+# per package token, on a loop whose trip count a cap-legal command controls.
+# Same idiom as `_ckey`/`_CKEY`, `_uqw`/`_UQW` and `_uqb`/`_UQB` above.
+_PKGNAME=""
+_pkg_name(){{
   local t="$1"
   case "$t" in
     @*/*) local scope="${{t%%/*}}" rest="${{t#*/}}"
-          printf '%s/%s' "$scope" "${{rest%%[<>=@~]*}}" ;;
-    *)    printf '%s' "${{t%%[<>=@~]*}}" ;;
+          _PKGNAME="$scope/${{rest%%[<>=@~]*}}" ;;
+    *)    _PKGNAME="${{t%%[<>=@~]*}}" ;;
   esac
 }}
 
@@ -5702,6 +5735,7 @@ HEAD="^ *${{PFX}}@@INSTALL_TAIL_ERE@@"
 # fix it in the FAIL-OPEN direction. The message names the token, so the
 # cause is legible either way.
 blocked=""
+_bbuf=""
 
 # [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
 # EVERY other value-taking flag left its argument to be read as a package
@@ -6034,10 +6068,18 @@ while IFS= read -r nseg; do
       .|./*|/*|../*) continue ;;          # local path install, not a registry
       *) ;;
     esac
-    name_only="$(pkg_name "$tok")"
+    _pkg_name "$tok"; name_only="$_PKGNAME"
     [ -z "$name_only" ] && continue
     if ! is_approved "$name_only"; then
-      blocked="$blocked $name_only"
+      # [x54-arg-scanner] TWO-LEVEL ACCUMULATION - `norm_cmd`'s fix (B4 / X-50)
+      # applied where it did not reach. `blocked="$blocked ..."` re-copies
+      # everything accumulated so far on EVERY unapproved token, i.e. O(total^2)
+      # in the blocked-name bytes. `_bbuf` is bounded by `_CS_WIN`, so each
+      # append costs O(_CS_WIN) and the flush runs total/_CS_WIN times. The
+      # SAME bytes are appended in the SAME order; `_bbuf` is flushed on the one
+      # path out, below the loop, so `$blocked` is byte-identical at the refusal.
+      _bbuf="$_bbuf $name_only"
+      if [ "${{#_bbuf}}" -ge "$_CS_WIN" ]; then blocked="$blocked$_bbuf"; _bbuf=""; fi
     fi
   done
 # [batch 30-33 close pass] BOTH SPELLINGS, one stream. `is_approved` is the
@@ -6063,6 +6105,10 @@ while IFS= read -r nseg; do
 done < <(cmd_segments "$CMD"
          if [ -n "$_CMD_UNFOLDED" ]; then cmd_segments "$_CMD_UNFOLDED"; fi
          if [ -n "$_CMD_RESOLVED" ]; then cmd_segments "$_CMD_RESOLVED"; fi)
+# [x54-arg-scanner] THE ONE PATH OUT. Both loops run in the CURRENT shell - the
+# outer one is fed by process substitution, not a pipe - so `blocked` survives,
+# and there is no code between the inner `done` and here that could read it.
+blocked="$blocked$_bbuf"; _bbuf=""
 if [ -n "$blocked" ]; then
   echo "Dependency gate: not in deps.md approved list:$blocked" >&2
   echo "Approve in-session and update .claude/steering/deps.md." >&2

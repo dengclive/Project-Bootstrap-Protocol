@@ -158,6 +158,75 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the argument scanner stops paying per token (2026-09-10)
+
+**No version bump** (fix, not surface; freeze exception **78**).
+`x54-arg-scanner-quadratic-and-fork`, the argument-scanner member of the X-54
+cost class. It is the last member the class row *named*, in the order they were
+named - NOT the last one open. The **wrapper** member is still open; see the
+closing section.
+
+**The defect, and it had THREE sites where the backlog row named two.** A segment
+carrying a REAL install head sends its argument list into the scanner, which paid
+per package token: a subshell fork (`pkg_name` printed into a command
+substitution, though its body was already pure parameter expansion), a scan of
+the project's WHOLE approved list with no early exit on a miss, and an O(n²)
+growing-string append. Cap-legal input outran the emitted 60 s ceiling, and a
+cancelled PreToolUse hook exits 124 while only exit 2 blocks — so the deny became
+an allow and the trailing install ran.
+
+**THE THIRD SITE WAS FOUND BY REVIEW, NOT BY THE QUEUE ROW, AND IT IS THE ONE
+THAT SCALES WITH THE PROJECT.** `is_approved`'s cost is O(tokens × approved), and
+the second factor is the operator's own `deps.md`. Against the suite's
+one-package fixture it is invisible; the plan's first measurement therefore
+concluded the other two sites were the whole defect, and that conclusion was
+**wrong**. Measured with the other two fixed: **5.4 s at 1 approved package,
+13.0 s at 60, 31.9 s at 200** — the last already over the ceiling at every
+contention factor this repo has measured.
+
+**Measured on the emitted hooks**, cap-legal payload (81,920 B — exactly
+`_CMD_MAXLEN`, zero headroom — 40,948 argument tokens), idle, one case at a time:
+
+| approved list `K` | unfixed | fork+append fixed | all three fixed |
+|---|---|---|---|
+| 1 | 80.90 s | 5.36 s | *not measured* |
+| 60 | 94.57 s | 13.03 s | *not measured* |
+| 200 | 125.01 s | 31.87 s | **4.96 s** |
+| 500 | *not measured* | 70.26 s | **4.90 s** |
+| 800 | *not measured* | 115.51 s | **4.92 s** |
+
+Every cell above is a single run and is labelled with the K it was measured at.
+The blanks are blank because nothing was run there — **an earlier version of this
+entry carried a three-row before/after table that paired an unfixed K=1 reading
+with a fixed K=200 reading, and quoted an "all three fixed at K=1" figure that
+was never measured.** It was caught by this item's own step-8 re-review and is
+corrected here rather than quietly restated.
+
+The fixed figure is **flat in the approved-list length**, which is what an O(1)
+membership test looks like rather than a scan that merely got cheaper.
+
+**Behaviour unchanged, checked rather than argued.**
+`tests/test_substrate_differential.py` is 4240/0 across the change, and the fix
+was separately shown **output-identical** — byte-for-byte on rc and stderr — on 15
+token spellings including the associative-subscript hazards `*`, `@`, `a[b]` and
+`a$b`, plus empty names, scoped npm names, numeric package names and version
+specifiers. Action counts unchanged at 57 / 69 / 59 and 79 / 93, verified BEFORE
+the re-baseline by rendering the plan from `origin/main` and from this tree and
+diffing action by action; a moved count would have been E5.
+
+**Three test rows, and the third exists because the first two are not enough.**
+Row 5 re-based from `rc == 124` to `rc == 2`; row 6 added at an 800-package
+fixture, the only row that sees the `is_approved` site; row 7 a **ratio** against
+a no-head control at the identical byte count, the only row that sees the fork
+and the append — because reverting either alone leaves 43.3 s and 26.2 s, both
+inside the ceiling and both invisible to an rc. Row 7 is row 4's contention-robust
+shape, not the absolute bound that took `#50 T8` to E7.
+
+**What this does NOT close.** The **wrapper** member of X-54 remains open
+(`x54-wrapper-cost`), as does `install-tail-path-scan-quadratic`. See the X-54
+row in `docs/deferred-backlog.md`, which is the single point of truth for this
+class.
+
 ## Post-2.8.0 — the install-head loop stops evaluating `HEAD` once per completer (2026-08-28)
 
 **No version bump** (fix, not surface; freeze exception **77**).

@@ -4264,29 +4264,172 @@ check(f"X-54 ratio: completer padding costs < 4x its non-completer control "
       "the completer axis is back: padding with completer keys now costs "
       "materially more than the same byte count without them")
 
-# ROW 5 - THE BOUNDARY OF THE CLOSURE. NOT an acceptance criterion for X-54's
-# completer fix. It asserts `rc == 124`, so it PASSES on both trees; it is here
-# so that row 1 going green is never read as "the cap-legal token-count
-# fail-open class is gone on this hook".
+# ROW 5 - RE-BASED 2026-09-10 by `x54-arg-scanner-quadratic-and-fork`. It used
+# to assert `rc == 124` and PASS on both trees, deliberately, so that row 1
+# going green was never read as "the cap-legal token-count fail-open class is
+# gone on this hook". This item fixes the argument scanner, so the row it was
+# holding open BECOMES the acceptance row for that fix, and it is INVERTED
+# rather than deleted - which is what its own failure message and the queue row
+# both instructed.
 #
 # Same completer padding, but under a REAL install head (`bun x`), so `head_txt`
-# is set and `rest` flows into the ARGUMENT SCANNER - which the completer fix
-# does not touch. Two defects share that loop: `blocked="$blocked $name_only"`
-# is an O(n^2) growing-string append (the B4 / X-50 / X-52 shape), and
-# `name_only="$(pkg_name "$tok")"` forks one subshell per token. The guard above
-# pins the shape cap-legal; it is KILLED at 60 s BEFORE and AFTER the fix.
+# is set and `rest` flows into the ARGUMENT SCANNER. THREE per-token costs share
+# that loop, and the third was missed by two earlier enumerations of this defect:
+#   * `name_only="$(pkg_name "$tok")"`   forks one subshell per token
+#   * `is_approved "$name_only"`         scans the WHOLE approved list per token,
+#                                        with no early exit on the miss case -
+#                                        and the miss case is every token here
+#   * `blocked="$blocked $name_only"`    O(n^2) growing-string append (B4/X-50/X-52)
 #
-# COSTS A FULL 60 s EVERY RUN, deliberately: `rc == 124` is the flake-SAFE
-# direction, because contention can only make a cancellation more likely. WHEN
-# THIS ROW GOES RED THE ARGUMENT SCANNER HAS BEEN FIXED - update it, do not
-# delete it.
+# COST PROFILE CHANGED WITH THE RE-BASE, IN THE CHEAP DIRECTION: it used to burn
+# a full 60 s on every run of this suite forever. It now costs ~5 s on a fixed
+# tree and only pays the 60 s ceiling when it is RED.
+#
+# WHAT THIS ROW CANNOT SEE, stated so a green is never over-read. It asserts an
+# rc and captures no clock. MEASURED on the emitted hook at this fixture's
+# one-entry approved list: reverting ONLY the fork fix leaves 43.3 s and
+# reverting ONLY the append fix leaves 26.2 s - both finish inside the ceiling,
+# (an earlier run of the SAME two cells read 42.1 s and 25.9 s; ~3% run-to-run
+# spread, and the pair quoted everywhere else in this change is this one)
+# so both return rc 2 and THIS ROW STAYS GREEN. Row 6 below closes that gap for
+# the `is_approved` site; the other two are carried by the step-4b mutation set
+# at .claude/mutations/x54-arg-scanner-quadratic-and-fork.json, because no
+# cap-legal payload makes either of them cross alone - token count is bounded by
+# the byte cap.
+_th54 = time.time()
 _rch54, _ = shell_run("dependency-gate", bash_payload(_X54_HEAD), timeout=60)
-check("X-54 boundary: an install head plus a long argument list STILL crosses "
-      f"the 60 s ceiling, before and after the completer fix (rc={_rch54})",
-      _rch54 == 124,
-      "if this is now rc 2 the ARGUMENT SCANNER has been fixed - re-baseline "
-      "this row and close its backlog entry; if it is anything else, the shape "
-      "no longer reaches the scanner and the row has gone vacuous")
+_elh54 = time.time() - _th54
+check("X-54: an install head plus a cap-legal argument list DENIES inside the "
+      f"60 s ceiling (rc={_rch54})",
+      _rch54 == 2,
+      "rc 124 is the hook being CANCELLED at the emitted `\"timeout\": 60`. Only "
+      "exit 2 blocks, so the deny became an allow and `pip install evil` runs. "
+      "The three per-token costs named above are the argument scanner's; the "
+      "guard above pins the shape cap-legal")
+
+# ROW 6 - THE APPROVED-LIST DIMENSION, and the only row that can see the
+# `is_approved` site at all.
+#
+# WHY A SECOND FIXTURE IS NEEDED. `is_approved` costs O(K) per token, where K is
+# the length of the project's OWN approved list - so its contribution is invisible
+# at this suite's `approved: ["requests"]`, which is K=1, the single most
+# favourable value of a variable the PROJECT controls. Measured on the emitted
+# hook with the other two sites fixed: K=1 -> 5.4 s, K=60 -> 13.0 s,
+# K=200 -> 31.9 s. The fail-open the item closes is reachable on an ordinary
+# dependency list and NOT reachable at K=1.
+#
+# WHY K=800, SIZED BY MEASUREMENT. With `is_approved` reverted the hook takes
+# 115.5 s here - 1.93x the 60 s ceiling - so this row stays RED unless a box is
+# more than 1.93x faster than the one it was sized on. At K=500 the same cell is
+# 70.3 s, only 1.17x, which is why 500 was rejected. NO OTHER FIGURE IS QUOTED
+# FOR COMPARISON: two drafts tried to justify this margin against a "box
+# variation" number from elsewhere in the repo and both cited it wrongly. The
+# margin is what was measured; sizing it against anything else needs its own
+# measurement, not a pointer.
+#
+# The FIXED cell is 4.96 / 4.90 / 4.92 s at K = 200 / 500 / 800 - flat, which is
+# what an O(1) membership test looks like rather than a scan that got cheaper.
+# THESE LABELS ARE THE MEASURED ONES. A correction round briefly relabelled them
+# 1 / 200 / 800 to match a table elsewhere in this change; that table was the
+# thing in error, and there is NO measurement of the all-three-fixed tree at
+# K=1.
+#
+# FLAKE DIRECTION, checked both ways: the fixed cell survives a 1.35x slower box
+# AND 4.6x core contention at ~30 s, so this row is not the wall-clock shape that
+# took `#50 T8` to E7 - it reads an rc, and both of its margins are ~1.9x.
+_K800_NAMES = ["requests"] + ["pkg%04d" % _i for _i in range(799)]
+_K800_CONFIG = CONFIG.replace(
+    '  approved: ["requests"]\n',
+    "  approved:\n" + "".join('    - "%s"\n' % _n for _n in _K800_NAMES))
+_K800_TMP = tempfile.mkdtemp(prefix="issue54-k800-")
+_K800_PROJ = os.path.join(_K800_TMP, "proj")
+os.makedirs(_K800_PROJ)
+_K800_CFG = os.path.join(_K800_TMP, "config.yaml")
+with open(_K800_CFG, "w", encoding="utf-8") as _fh:
+    _fh.write(_K800_CONFIG)
+_K800_R = subprocess.run([sys.executable, INSTALL, "-c", _K800_CFG, "-C",
+                          _K800_PROJ], capture_output=True, text=True)
+check("X-54 row 6: the large-approved-list fixture installs",
+      _K800_R.returncode == 0, _K800_R.stderr[-400:])
+
+# The fixture's PROPERTY is verified, not assumed - the same discipline the
+# deny-capable fixture above states: a fixture whose approved list did not
+# actually grow would make the row below pass while asserting nothing.
+_K800_HOOK = os.path.join(_K800_PROJ, ".claude", "hooks", "dependency-gate.sh")
+_K800_EMITTED = ""
+if os.path.isfile(_K800_HOOK):
+    with open(_K800_HOOK, encoding="utf-8") as _fh:
+        _K800_EMITTED = _fh.read()
+_K800_BLOCK = _K800_EMITTED.split("mapfile -t APPROVED <<'APPROVED_EOF'\n")
+_K800_COUNT = (len([_l for _l in _K800_BLOCK[1].split("APPROVED_EOF")[0].splitlines()
+                    if _l.strip()]) if len(_K800_BLOCK) > 1 else 0)
+check(f"X-54 row 6: the fixture really carries {len(_K800_NAMES)} approved "
+      f"packages ({_K800_COUNT} emitted)",
+      _K800_COUNT == len(_K800_NAMES),
+      "the row below is about the LENGTH of this list; if it did not grow, the "
+      "row measures the K=1 case again and silently asserts nothing")
+
+
+def _k800_run(payload, timeout=None):
+    """`shell_run`, against the large-approved-list fixture."""
+    _e = dict(os.environ)
+    _e["CLAUDE_PROJECT_DIR"] = _K800_PROJ
+    try:
+        _p = subprocess.run([BASH, _K800_HOOK], input=json.dumps(payload),
+                            capture_output=True, text=True, env=_e,
+                            cwd=_K800_PROJ, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124
+    return _p.returncode
+
+
+_rck800 = _k800_run(bash_payload(_X54_HEAD), timeout=60)
+check("X-54 row 6: the same cap-legal shape DENIES inside the 60 s ceiling "
+      f"against an {len(_K800_NAMES)}-package approved list (rc={_rck800})",
+      _rck800 == 2,
+      "rc 124 is the hook CANCELLED at the emitted timeout, i.e. fail-OPEN. "
+      "`is_approved` scans the whole approved list once per package token with "
+      "no early exit on a miss, so this shape costs O(tokens x approved) - "
+      "invisible at the K=1 fixture above and 115 s here when that site is "
+      "reverted. Name the code, not the line")
+
+# ROW 7 - RATIO, AND THE ONLY ROW THAT SEES THE FORK AND THE APPEND AT ALL.
+#
+# WHY IT HAD TO EXIST. Rows 5 and 6 read an rc, and an rc cannot tell a complete
+# fix from a two-thirds one: MEASURED on the emitted hook, reverting ONLY the
+# fork leaves 43.3 s and reverting ONLY the append leaves 26.2 s, both inside
+# the 60 s ceiling, so both return rc 2 and both rows stay GREEN. Neither cost
+# scales with the approved list, and token count is bounded by `_CMD_MAXLEN`, so
+# no cap-legal payload makes either cross alone. Without this row the two sites
+# would be guarded by nothing mechanical.
+#
+# WHY A RATIO AND NOT A CLOCK. `#50 T8` was DELETED for bounding a reduction at
+# an ABSOLUTE figure on one un-repeated sample. This is row 4's shape instead:
+# both arms run in the same suite at the identical byte count, and the control
+# (`_X54_CTL`, y-padded) carries NO install head, so it never enters the
+# argument scanner and is unaffected by all three sites. Contention inflates
+# both arms together, which is what an absolute bound cannot do.
+#
+# WHY 3.0x, SIZED FROM THE GAP AND NOT FROM THIS RUN. Measured ratios: fixed
+# tree 1.15x; fork reverted 9.83x; append reverted 6.07x; the flush-threshold
+# bypass 6.04x; the unbounded-window bypass 6.30x. The bound sits 2.6x above the
+# fixed tree and 2.0x below the cheapest bypass. DO NOT tighten it toward
+# whatever this run measures - that is what took T8 to E7.
+#
+# WHAT IT DOES NOT SEE, and row 6 does: reverting `is_approved` alone costs
+# 1.18x here, because at this fixture's ONE approved package an O(K) scan and an
+# O(1) lookup are indistinguishable. The two rows are complementary, not
+# redundant - each is blind exactly where the other is not.
+check(f"X-54 arg-scanner ratio: the head-bearing shape costs < 3x its no-head "
+      f"control ({_elh54:.1f}s vs {_ely54:.1f}s = "
+      f"{_elh54 / max(_ely54, 1e-9):.2f}x)",
+      _elh54 < 3.0 * _ely54,
+      "a head-bearing command enters the ARGUMENT SCANNER and the control does "
+      "not, so this ratio is that loop's per-token cost. Above the bound, one "
+      "of the three per-token costs is back: the subshell fork per token, the "
+      "O(approved) scan per token, or the growing-string append")
+
+shutil.rmtree(_K800_TMP, ignore_errors=True)
 
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)

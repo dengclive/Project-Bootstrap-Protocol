@@ -2308,8 +2308,15 @@ EXPECTED_RETROFIT_DIGESTS = {
     # and the X-54 row in docs/deferred-backlog.md is the single point of truth for
     # what this closes and what it does not. Deliberately NOT restated here: a fact
     # repeated on ten surfaces goes stale on nine of them.
-    "service": "7579e1f5832d590f0cf3d7e70e88d4005564af74009ee262851915aae9ae4fd9",
-    "agent": "c44309eaf4512cce58383d0c69917963004eb8b5adfca20e47ec1daa812bc73d",
+    # [freeze-exception no. 78, 2026-09-10] x54-arg-scanner-quadratic-and-fork.
+    # Same change as the greenfield columns: the argument scanner's three
+    # per-token costs are removed, so `.claude/hooks/dependency-gate.sh` moves
+    # and nothing else does. Retrofit action counts unchanged at 79 / 93.
+    # RE-BASELINED 2026-09-10, same exception 78: a corrected comment above
+    # `is_approved` (see the greenfield note). Counts still 79 / 93.
+    # RE-BASELINED 2026-09-10 (3rd time, same exception 78) - see the greenfield note.
+    "service": "9c42907121d101b7d5c15e4535dc4aa3c2b9406bd8aba2106d75b318f4bf37f8",
+    "agent": "e8ae7f1d811104cfb75f663a6246ddfd02c74d1cbdc76401d5b544131df2f0f6",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
