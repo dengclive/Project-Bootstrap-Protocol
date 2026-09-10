@@ -509,6 +509,16 @@ _REQUIRED_SETS = {
         "suites": ["test_greenfield_golden.py", "test_issue_fixes.py",
                    "test_retrofit.py"],
     },
+    "x54-arg-scanner-quadratic-and-fork.json": {
+        "sha256": "970aea79c946d6da132533c03ad7c12a"
+                  "9f7a9e8ed1631063e0e2c5edcc4f2384",
+        "bypasses": ["fork-restored", "approved-scan-restored",
+                     "append-single-level", "flush-every-iteration",
+                     "window-unbounded"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
+        "suites": ["test_issue_fixes.py"],
+    },
     "x54-head-bearing-early-stop.json": {
         "sha256": "debd1c68f08c29c01f4815d35ae612a4"
                   "d9f773e9b4b8d885a942d2f60e1f788d",

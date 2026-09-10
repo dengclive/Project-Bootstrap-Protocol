@@ -1,0 +1,90 @@
+{
+  "guard": "x54-arg-scanner: the argument scanner carries no per-token cost that scales with a cap-legal command",
+  "target": "lib/templates.py",
+  "guard_site": "lib/templates.py, the dependency-gate argument scanner - `_pkg_name`/`_PKGNAME`, the `_APPSET` membership test, and the `_bbuf` two-level append. NAMED, NOT NUMBERED: line numbers into the emitted artifact drift with every comment edit and two earlier rounds of this class got them wrong in OPPOSITE directions.",
+  "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
+  "why": [
+    "THREE per-token costs shared one loop, and only two of them were ever named",
+    "in the queue row. The third - `is_approved` scanning the project's whole",
+    "approved list per token, with no early exit on a miss - scales with a",
+    "variable the PROJECT sets in deps.md, so it was invisible to a fixture that",
+    "approves one package. Measured with the other two fixed: 5.4 s at K=1,",
+    "13.0 s at K=60, 31.9 s at K=200, against a 60 s ceiling that fails OPEN.",
+    "",
+    "TWO ROWS ARE NEEDED AND NEITHER IS REDUNDANT, which is the whole reason",
+    "this set exists rather than a single behavioural check:",
+    "  * row 6 runs at 800 approved packages and reads an rc. It is the ONLY",
+    "    thing that sees the `is_approved` revert (115 s -> cancelled).",
+    "  * row 7 is a RATIO against a no-head control at the same byte count. It",
+    "    is the only thing that sees the fork and the append, because MEASURED",
+    "    those reverts leave 43.3 s and 26.2 s - inside the ceiling, so rc 2, so",
+    "    every rc-based row stays green. Neither scales with K and token count is",
+    "    capped by `_CMD_MAXLEN`, so no cap-legal payload makes them cross alone.",
+    "",
+    "TWO OF THE FIVE BYPASSES LEAVE THE SOURCE SHAPE ENTIRELY PLAUSIBLE.",
+    "`flush-every-iteration` and `window-unbounded` change one threshold and keep",
+    "the two-level buffer, its variable names and its comment byte-identical. A",
+    "source-text pin passes both. That is the class this gate exists for, and",
+    "this repo has already shipped it twice.",
+    "",
+    "A PASS HERE MEANS THE FIVE EDITS BELOW ARE CAUGHT. It is not a closure",
+    "proof: the enumeration is bounded by review, not by this file."
+  ],
+  "mutations": [
+    {
+      "id": "fork-restored",
+      "why": "Put the subshell fork back, per package token. NOT a naive text-revert: `pkg_name` no longer exists, so restoring the old call would be an unbound-command crash rather than a bypass, and the gate correctly scores a crashed cell as evidence of nothing. This wraps the surviving `_pkg_name` in a command substitution instead - a plausible refactor, and it runs. MEASURED 43.3 s vs a 4.4 s control = 9.83x.",
+      "find": "    _pkg_name \"$tok\"; name_only=\"$_PKGNAME\"\n",
+      "replace": "    name_only=\"$(_pkg_name \"$tok\"; printf '%s' \"$_PKGNAME\")\"\n",
+      "expect": {
+        "test_issue_fixes.py": "arg-scanner ratio"
+      }
+    },
+    {
+      "id": "approved-scan-restored",
+      "why": "Put the O(K) linear scan back in place of the set lookup. INVISIBLE to the ratio row (1.18x) because at one approved package a scan and a lookup are indistinguishable - which is exactly why row 6 installs an 800-package fixture. MEASURED 115.5 s there, i.e. cancelled at the ceiling.",
+      "find": "is_approved(){{\n  case \"$1\" in \"\"|\"@\"|\"*\") return 1 ;; esac\n  [ -n \"${{_APPSET[\"$1\"]+x}}\" ]\n}}",
+      "replace": "is_approved(){{\n  local n=\"$1\" a\n  for a in ${{APPROVED[@]+\"${{APPROVED[@]}}\"}}; do\n    if [ -n \"$a\" ] && [ \"$a\" = \"$n\" ]; then return 0; fi\n  done\n  return 1\n}}",
+      "expect": {
+        "test_issue_fixes.py": "800-package approved list"
+      }
+    },
+    {
+      "id": "append-single-level",
+      "why": "Put the growing-string append back. The trailing flush below the loop then appends an empty `_bbuf` and is harmless, so this runs and is O(n^2) again. MEASURED 26.2 s = 6.07x.",
+      "find": "      _bbuf=\"$_bbuf $name_only\"\n      if [ \"${{#_bbuf}}\" -ge \"$_CS_WIN\" ]; then blocked=\"$blocked$_bbuf\"; _bbuf=\"\"; fi\n",
+      "replace": "      blocked=\"$blocked $name_only\"\n",
+      "expect": {
+        "test_issue_fixes.py": "arg-scanner ratio"
+      }
+    },
+    {
+      "id": "flush-every-iteration",
+      "why": "DEFEATS THE BOUND WHILE LEAVING EVERY SOURCE STRING PLAUSIBLE. The two-level buffer, its names and its comment stay byte-identical; only the threshold moves to 0, so the buffer flushes on every token and `blocked=\"$blocked$_bbuf\"` is a growing-string append again. A source-text pin cannot tell this from the fix. MEASURED 25.9 s = 6.04x.",
+      "find": "if [ \"${{#_bbuf}}\" -ge \"$_CS_WIN\" ]; then",
+      "replace": "if [ \"${{#_bbuf}}\" -ge 0 ]; then",
+      "expect": {
+        "test_issue_fixes.py": "arg-scanner ratio"
+      }
+    },
+    {
+      "id": "window-unbounded",
+      "why": "The same threshold in the opposite direction: a window nothing reaches, so the flush never runs inside the loop and `_bbuf` itself becomes the unbounded growing string. Also leaves every pinned string intact. MEASURED 27.1 s = 6.30x.",
+      "find": "if [ \"${{#_bbuf}}\" -ge \"$_CS_WIN\" ]; then",
+      "replace": "if [ \"${{#_bbuf}}\" -ge 999999999 ]; then",
+      "expect": {
+        "test_issue_fixes.py": "arg-scanner ratio"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. A one-word spelling change in a COMMENT inside the same emitted body. It moves the golden digests - which is what digest_suites is for - and must ESCAPE every behavioural suite. If this is ever reported CAUGHT, the suites are red for any edit and every row above is meaningless.",
+      "find": "# [x54-arg-scanner] THE ONE PATH OUT. Both loops run in the CURRENT shell - the",
+      "replace": "# [x54-arg-scanner] THE ONE PATH OUT. Both loops run in the CURRENT SHELL - the",
+      "expect": {
+        "test_issue_fixes.py": null
+      }
+    }
+  ]
+}
