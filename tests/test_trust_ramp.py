@@ -533,6 +533,18 @@ _REQUIRED_SETS = {
         "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
         "suites": ["test_composition.py", "test_hook_behavior.py"],
     },
+    "x54-wrapper-cost.json": {
+        "sha256": "658ae38c1baf12378fcec10eaf41693e"
+                  "02f9d6fa4d5804745643d951df4fd043",
+        "bypasses": ["array-pend-drops-ws", "seen-not-resumed",
+                     "ops-append-no-pend", "scan-append-no-pend",
+                     "ops-restart-no-pend", "ops-restart-seen-kept",
+                     "seed-restarts-walk", "seed-tail-only",
+                     "array-pend-dropped"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
+        "suites": ["test_hook_behavior.py", "test_issue_fixes.py"],
+    },
 }
 # [2026-09-09 round-7] Walk, and do not filter by extension. `os.listdir` plus
 # `endswith(".json")` made a set INVISIBLE to both this check and anti-rot if it

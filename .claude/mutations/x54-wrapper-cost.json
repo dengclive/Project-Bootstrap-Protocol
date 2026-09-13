@@ -1,0 +1,125 @@
+{
+  "guard": "x54-wrapper-cost: `_cs_isinv` resumes its walk from a saved point that is always a suffix of `_CS_TAIL`, instead of re-walking the tail once per quoted run",
+  "target": "lib/templates.py",
+  "guard_site": "lib/templates.py, the shared header - `_cs_isinv`'s seed and its two `_lastw=1` resume writes, plus the `_CS_INVPEND`/`_CS_INVSEEN` maintenance in `_cs_ops`, `_cs_scan` and `cmd_segments`' per-event reset. NAMED, NOT NUMBERED.",
+  "digest_suites": [
+    "test_greenfield_golden.py",
+    "test_retrofit.py"
+  ],
+  "why": [
+    "THE GUARD IS A RESUME POINT, AND IT CAN BE WRONG IN TWO WAYS THAT NEED DIFFERENT ROWS.",
+    "  * An edit that RESTORES THE RESTART is pure cost: every verdict is right and",
+    "    the walk is quadratic again. Rows 1-3 in tests/test_issue_fixes.py see it.",
+    "    Measured 2026-09-13: `sudo` or `!` plus 2,642 quoted runs goes from ~4 s to",
+    "    KILLED at the 60 s ceiling, and row 2's pair from ~1.4x to ~28x.",
+    "  * An edit that makes the resume point WRONG changes a verdict and no cost.",
+    "    ROW 0 sees it, one command per edit. Rows 1-4 cannot be relied on: on the",
+    "    whitespace-dropping candidate all four stayed green.",
+    "",
+    "FOUR ONE-LINE EDITS ARE NOT IN THIS SET, because no row sees them and an entry",
+    "nothing catches can only score ESCAPED. Measured 2026-09-13 on the emitted",
+    "dependency-gate, each changed no verdict on 33 probe commands, no count of the",
+    "runtime suffix pin, and no cost shape out of seven:",
+    "  * scan-restart-no-pend: the `_cs_scan` restart branch, which its own comment",
+    "    records as unreachable, because a quoted run cannot carry a separator.",
+    "  * reset-no-pend: the per-event reset in `cmd_segments`.",
+    "  * lazy-pend-dropped: the lazy-phase resume write.",
+    "  * ops-append-pend-unguarded: the memo guard on the `_cs_ops` pend append.",
+    "The last three are FINDINGS, not proof the sites are dead: a shape that needs",
+    "them may exist, and none was found."
+  ],
+  "mutations": [
+    {
+      "id": "array-pend-drops-ws",
+      "why": "rev 1's live fail-open: the array-phase resume point drops the tail's trailing whitespace, so `sh` and a quoted `'-c'` fuse",
+      "find": "_CS_INVPEND=\"$_w${_tail##*[![:space:]]}\"",
+      "replace": "_CS_INVPEND=\"$_w\"",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0a",
+        "test_hook_behavior.py": "four `{`, then a QUOTED flag"
+      }
+    },
+    {
+      "id": "seen-not-resumed",
+      "why": "resume the position but forget the wrapper was seen",
+      "find": "_seen=\"$_CS_INVSEEN\" ",
+      "replace": "_seen=0 ",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0c"
+      }
+    },
+    {
+      "id": "ops-append-no-pend",
+      "why": "bare tokens appended by `_cs_ops` never reach the resume suffix",
+      "find": "       if [ -z \"$_CS_INVMEMO\" ]; then _CS_INVPEND=\"$_CS_INVPEND$_t\"; fi ;;\n",
+      "replace": "       ;;\n",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0f"
+      }
+    },
+    {
+      "id": "scan-append-no-pend",
+      "why": "quoted runs appended by `_cs_scan` never reach the resume suffix",
+      "find": "         if [ -z \"$_CS_INVMEMO\" ]; then _CS_INVPEND=\"$_CS_INVPEND$_run\"; fi ;;\n",
+      "replace": "         ;;\n",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0e"
+      }
+    },
+    {
+      "id": "ops-restart-no-pend",
+      "why": "a separator leaves the previous segment's resume point",
+      "find": "_CS_TAIL=\"${_t##*$_CS_SEP}\"; _CS_INVMEMO=\"\"; _CS_INVPEND=\"$_CS_TAIL\"; _CS_INVSEEN=0 ;;",
+      "replace": "_CS_TAIL=\"${_t##*$_CS_SEP}\"; _CS_INVMEMO=\"\"; _CS_INVSEEN=0 ;;",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0d"
+      }
+    },
+    {
+      "id": "ops-restart-seen-kept",
+      "why": "a separator keeps the previous segment's wrapper state (over-deny)",
+      "find": "_CS_TAIL=\"${_t##*$_CS_SEP}\"; _CS_INVMEMO=\"\"; _CS_INVPEND=\"$_CS_TAIL\"; _CS_INVSEEN=0 ;;",
+      "replace": "_CS_TAIL=\"${_t##*$_CS_SEP}\"; _CS_INVMEMO=\"\"; _CS_INVPEND=\"$_CS_TAIL\" ;;",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0g"
+      }
+    },
+    {
+      "id": "seed-restarts-walk",
+      "why": "the fix removed at the seed: the walk restarts from the whole tail at `_seen=0`, which is HEAD's behaviour and HEAD's cost",
+      "find": "local _tail=\"$_CS_INVPEND\" _w _b _e _seen=\"$_CS_INVSEEN\" ",
+      "replace": "local _tail=\"$_CS_TAIL\" _w _b _e _seen=0 ",
+      "expect": {
+        "test_issue_fixes.py": "x54-wrapper-cost row 1:"
+      }
+    },
+    {
+      "id": "seed-tail-only",
+      "why": "the wrapper state is resumed but the position is not, so the walk restarts from the whole tail",
+      "find": "local _tail=\"$_CS_INVPEND\" _w",
+      "replace": "local _tail=\"$_CS_TAIL\" _w",
+      "expect": {
+        "test_issue_fixes.py": "x54-wrapper-cost row 3:"
+      }
+    },
+    {
+      "id": "array-pend-dropped",
+      "why": "the array phase never advances the resume point, so every walk restarts from the start of the segment",
+      "find": "_lastw=1; _CS_INVPEND=\"$_w${_tail##*[![:space:]]}\"; _CS_INVSEEN=\"$_seen\"; else",
+      "replace": "_lastw=1; else",
+      "expect": {
+        "test_issue_fixes.py": "x54-wrapper-cost row 2:"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "a case change inside the item's own comment block: no emitted behaviour moves, so every behavioural suite must stay green",
+      "find": "# [x54-wrapper-cost] WHERE THE LAST WALK STOPPED, so the next one RESUMES there.",
+      "replace": "# [x54-wrapper-cost] WHERE THE LAST WALK STOPPED, so the next one resumes there.",
+      "expect": {
+        "test_issue_fixes.py": null
+      }
+    }
+  ]
+}

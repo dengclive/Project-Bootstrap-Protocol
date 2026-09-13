@@ -4592,6 +4592,68 @@ for _tag, _cmd, _want, _why in (
           "0g reads 2 when a separator leaks the previous segment's wrapper "
           "state. Each names one way to get the walk's saved resume point wrong")
 
+# ROW 5 - THE RESUME POINT IS A SUFFIX OF THE TAIL, CHECKED AT RUNTIME. ROW 0
+# names the ways found so far, one command each. This row asserts the property
+# they share, on every `_cs_isinv` entry across a corpus: while the memo is
+# empty, `_CS_TAIL` must END WITH `_CS_INVPEND`. A resume point that LEADS the
+# tail skips words the walk never classified. The source-text pins in
+# `test_composition.py` match one spelling of each write; this row checks the
+# property itself, on whatever spelling the hook carries.
+# The hook is copied and wrapped, never edited in place, and ARMED counts the
+# entries where a resume point was actually set, so a tree that never sets one
+# cannot pass by saying nothing.
+_WC_WRAP = (
+    '_cs_isinv(){\n'
+    '  if [ -z "$_CS_INVMEMO" ]; then\n'
+    '    case "$_CS_TAIL" in\n'
+    '      *"${_CS_INVPEND-}") : ;;\n'
+    "      *) printf 'SUFFIXVIOL\\n' >> \"$_CS_PIN_LOG\" ;;\n"
+    '    esac\n'
+    "    if [ -n \"${_CS_INVPEND-}\" ]; then printf 'ARMED\\n' >> \"$_CS_PIN_LOG\"; fi\n"
+    '  fi\n'
+    '  _cs_isinv_real\n'
+    '}\n')
+with open(os.path.join(HOOKS, "dependency-gate.sh"), encoding="utf-8") as _fh:
+    _wc_body = _fh.read()
+_wc_anchor = _wc_body.count("_cs_isinv(){\n")
+check(f"x54-wrapper-cost row 5 precondition: `_cs_isinv(){{` occurs once in the "
+      f"emitted hook ({_wc_anchor})", _wc_anchor == 1,
+      "the runtime wrapper cannot be installed, so row 5 would assert nothing")
+_wc_pin = os.path.join(TMP, "wc-pin-dependency-gate.sh")
+_wc_log = os.path.join(TMP, "wc-pin.log")
+with open(_wc_pin, "w", encoding="utf-8") as _fh:
+    _fh.write(_wc_body.replace("_cs_isinv(){\n",
+                               _WC_WRAP + "_cs_isinv_real(){\n", 1))
+open(_wc_log, "w").close()
+_WC_CORPUS = (
+    "env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'",
+    "{ { { { sh '-c' 'pip install evilpkg'; }; }; }; }",
+    "! ! ! ! sh '-c' 'pip install evilpkg'",
+    "sudo a b c sh '-c' 'pip install evilpkg'",
+    "sudo 'a' 'b' 'c' 'd' 'e' sh -c 'pip install evilpkg'",
+    "echo 'x'; sh '-c' 'pip install evilpkg'",
+    "! ! ! ! s'h' -c 'pip install evilpkg'",
+    "sudo 'a' 'b' 'c' 'd' 'e'; echo sh 'pip install evilpkg'",
+    "sudo " + " ".join(["'{'"] * 60) + "; pip install evil",
+    "! " + " ".join(["'-xxxx'"] * 60) + "; pip install evil",
+)
+_wc_env = dict(os.environ)
+_wc_env["CLAUDE_PROJECT_DIR"] = PROJ
+_wc_env["_CS_PIN_LOG"] = _wc_log
+for _c in _WC_CORPUS:
+    subprocess.run([BASH, _wc_pin], input=json.dumps(bash_payload(_c)),
+                   capture_output=True, text=True, env=_wc_env, cwd=PROJ,
+                   timeout=60)
+with open(_wc_log, encoding="utf-8") as _fh:
+    _wc_marks = _fh.read().split()
+_wc_viol, _wc_armed = _wc_marks.count("SUFFIXVIOL"), _wc_marks.count("ARMED")
+check(f"x54-wrapper-cost row 5: the resume point is a suffix of the tail at "
+      f"every walk entry ({_wc_viol} violations, {_wc_armed} armed entries)",
+      _wc_armed > 0 and _wc_viol == 0,
+      "violations > 0: the saved resume point LEADS the tail, so the walk skips "
+      "words it never classified. armed == 0: no resume point was ever set, so "
+      "this row asserted nothing")
+
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)
 

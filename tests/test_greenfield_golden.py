@@ -3385,7 +3385,21 @@ EXPECTED_DIGESTS = {
         # about reachability, so the justification prose was SUBTRACTED rather
         # than corrected a third time. Emitted comment text only; blast radius
         # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
-        "ec6e6d8b2be82b00066dbc0756713636563a7f44744674d8b6a6d1446ff23c5b",
+        # [freeze-exception no. 79, 2026-09-13] x54-wrapper-cost. Deliberate
+        # re-baseline, not a drift. `_cs_isinv` RESUMES its walk from a saved
+        # point (`_CS_INVPEND` plus `_CS_INVSEEN`) instead of re-walking the whole
+        # `_CS_TAIL` once per quoted run. SHELL-ONLY and cost-only, on exception
+        # 51's shape and NOT 78's: the change is in the shared header, so every
+        # hook body that carries the header moves, where 78 moved the dependency
+        # gate alone. `.claude/sdk_gates/gates.py` does NOT move.
+        # Measured on the emitted plans against 7f67027: 11 / 15 / 11 bodies move
+        # (default / full_autonomous / design_steering), all of them hooks,
+        # 0 added, 0 removed, action counts unchanged at 57 / 69 / 59.
+        # Behaviour, measured on HEAD 7f67027 against this change: the substrate
+        # differential reads 4,247 passed / 0 failed on both, and the 33
+        # dependency-gate probe commands built for this change read the same rc
+        # on both.
+        "80c58b30c3bb3070ee31abb4e832c5b195ad840dd95cd6340f1a0460968443ed",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3887,7 +3901,21 @@ EXPECTED_DIGESTS = {
         # about reachability, so the justification prose was SUBTRACTED rather
         # than corrected a third time. Emitted comment text only; blast radius
         # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
-        "653081d5f7498bb23ec49d48f67f561864a53f19afe176b37b3ce4c8a9766050",
+        # [freeze-exception no. 79, 2026-09-13] x54-wrapper-cost. Deliberate
+        # re-baseline, not a drift. `_cs_isinv` RESUMES its walk from a saved
+        # point (`_CS_INVPEND` plus `_CS_INVSEEN`) instead of re-walking the whole
+        # `_CS_TAIL` once per quoted run. SHELL-ONLY and cost-only, on exception
+        # 51's shape and NOT 78's: the change is in the shared header, so every
+        # hook body that carries the header moves, where 78 moved the dependency
+        # gate alone. `.claude/sdk_gates/gates.py` does NOT move.
+        # Measured on the emitted plans against 7f67027: 11 / 15 / 11 bodies move
+        # (default / full_autonomous / design_steering), all of them hooks,
+        # 0 added, 0 removed, action counts unchanged at 57 / 69 / 59.
+        # Behaviour, measured on HEAD 7f67027 against this change: the substrate
+        # differential reads 4,247 passed / 0 failed on both, and the 33
+        # dependency-gate probe commands built for this change read the same rc
+        # on both.
+        "a327f7653a7adcd3e966cadcfcaf195bb540ffa98475a55cc006398c18616328",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4326,7 +4354,23 @@ EXPECTED_DIGESTS = {
         # about reachability, so the justification prose was SUBTRACTED rather
         # than corrected a third time. Emitted comment text only; blast radius
         # re-verified as the dependency gate alone, counts still 57 / 69 / 59.
-        "4b8d87011492230e7124632910d6d87d229ca7f5e97cd60a06ada4a51773c149",
+        # [freeze-exception no. 79, 2026-09-13] x54-wrapper-cost. Deliberate
+        # re-baseline, not a drift. `_cs_isinv` RESUMES its walk from a saved
+        # point (`_CS_INVPEND` plus `_CS_INVSEEN`) instead of re-walking the whole
+        # `_CS_TAIL` once per quoted run. SHELL-ONLY and cost-only, on exception
+        # 51's shape and NOT 78's: the change is in the shared header, so every
+        # hook body that carries the header moves, where 78 moved the dependency
+        # gate alone. `.claude/sdk_gates/gates.py` does NOT move.
+        # Measured on the emitted plans against 7f67027: 11 / 15 / 11 bodies move
+        # (default / full_autonomous / design_steering), all of them hooks,
+        # 0 added, 0 removed, action counts unchanged at 57 / 69 / 59.
+        # The three frozen design-steering artifacts are unchanged in this
+        # fixture: every body that moves is a hook.
+        # Behaviour, measured on HEAD 7f67027 against this change: the substrate
+        # differential reads 4,247 passed / 0 failed on both, and the 33
+        # dependency-gate probe commands built for this change read the same rc
+        # on both.
+        "4a122d31ae9e619a6f570ba81ef5033b6c1eb0b9b1b84fa2f5e318fba06b467c",
 }
 
 EXPECTED_ACTION_COUNTS = {

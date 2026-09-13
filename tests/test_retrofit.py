@@ -2315,8 +2315,14 @@ EXPECTED_RETROFIT_DIGESTS = {
     # RE-BASELINED 2026-09-10, same exception 78: a corrected comment above
     # `is_approved` (see the greenfield note). Counts still 79 / 93.
     # RE-BASELINED 2026-09-10 (3rd time, same exception 78) - see the greenfield note.
-    "service": "9c42907121d101b7d5c15e4535dc4aa3c2b9406bd8aba2106d75b318f4bf37f8",
-    "agent": "e8ae7f1d811104cfb75f663a6246ddfd02c74d1cbdc76401d5b544131df2f0f6",
+    # [freeze-exception no. 79, 2026-09-13] x54-wrapper-cost. Same change as the
+    # greenfield columns: `_cs_isinv` resumes its walk instead of re-walking the
+    # tail once per quoted run. It is in the shared header, so every hook body
+    # carrying it moves, and `.claude/sdk_gates/gates.py` does not. Measured on
+    # the emitted plans against 7f67027: 11 / 15 bodies move (service / agent),
+    # all of them hooks, 0 added, 0 removed, action counts unchanged at 79 / 93.
+    "service": "176aec57fcebf98de62529bd220875f3a47ac8055b517ebb176a720fcb110e02",
+    "agent": "24b999579820307a82e263f49fa24b4e54b7796c13f1e976db42eca78edd4505",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
