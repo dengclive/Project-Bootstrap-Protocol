@@ -158,6 +158,95 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the invoker walk resumes instead of restarting (2026-09-13)
+
+**No version bump** (fix, not surface; freeze exception **79**).
+`x54-wrapper-cost`, the wrapper member of the X-54 cost class. The same change
+reaches the jump half of X-55, whose backlog row prescribed the primitive.
+
+**The defect.** `_cs_isinv` runs once per quoted run and walked `_CS_TAIL` from
+its start every time. X-52's memo removes that repeat only when a walk decides
+ON A TOKEN. A walk that ends by EXHAUSTION declines the memo, so every later
+quoted run paid the whole walk again. Cap-legal input outran the emitted 60 s
+ceiling, and a cancelled PreToolUse hook exits 124
+while only exit 2 blocks, so the deny became an allow.
+
+**Exhaustion has two entrances, and only one was ever recorded.** `_seen=1` comes
+from a wrapper head such as `sudo`, which is what the queue row named. `_seen=0`
+comes from a tail of head-transparent words such as `!` or `{`, and needs no
+wrapper at all.
+
+**Measured on the emitted dependency-gate**, 7f67027 against this change, min of 2,
+each hook in its own session with its whole process group killed at the timeout:
+
+| shape | bytes | 7f67027 | this change |
+|---|---|---|---|
+| `sudo` + 2,642 × `'{'` (`_seen=1`) | 10,590 | killed at 60 s (rc 124) | 4.13 s (rc 2) |
+| `!` + 2,642 × `'{'` (`_seen=0`) | 10,587 | killed at 60 s (rc 124) | 3.48 s (rc 2) |
+| `!` + 900 × `'{'`, against `'z'` at identical bytes | 3,619 | 27.06× | 1.32× |
+| X-55 length shape, adjacent runs, N = 1,200 | 20,430 | 8.83 s | 9.38 s |
+
+The shapes the record names, single runs under the same 60 s ceiling:
+
+| shape | bytes | jumps | 7f67027 | this change |
+|---|---|---|---|---|
+| the queue row's own: `sudo` + 2,000 spaced runs | 80,022 | 4,000 | killed at 60 s (rc 124) | 16.24 s (rc 2) |
+| X-55's jump shape at its recorded size | 80,022 | 8,000 | killed at 60 s (rc 124) | **54.33 s** (rc 2) |
+| X-55's jump shape, small | 4,772 | 500 | 24.26 s (rc 2) | 0.73 s (rc 2) |
+
+**The fix, and the direction it must never break.** `_CS_INVPEND` holds the raw
+suffix of `_CS_TAIL` no walk has settled, and `_CS_INVSEEN` holds `_seen` as of its
+start; `_cs_isinv` resumes from them. The resume point may lag the tail and must
+never lead it: a point that leads skips words the walk never classified.
+
+**The first spelling of that fix failed open, and no cost measurement could see
+it.** It saved the array-phase resume point as `"$_w"`, which drops the tail's
+trailing whitespace, so the next quoted run fused onto the saved word:
+`env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'` went from deny to allow. On that
+candidate every cost row stayed green, and so did every verdict row the suite
+already had. The differential's eight array-phase rows all spell the flag bare.
+It was caught by plan review, not by a test.
+
+**So the rows come in two kinds.** Rows 1-4 in `tests/test_issue_fixes.py` are cost
+rows. ROW 0 is eight verdict rows, each red under one one-line edit of the fix
+that was found by mutating it. ROW 5 wraps a copy of the emitted hook and checks
+the suffix property at every walk entry: 0 violations over 154 armed entries on
+this change, 117 violations over 156 on the candidate that failed open. The
+differential gained five quoted-run rows and two controls, and
+`tests/test_hook_behavior.py` gained the same class on `spec-gate-commit`.
+
+**Behaviour unchanged, checked rather than argued.**
+`tests/test_substrate_differential.py` reads 4,247 / 0 on both trees, and the 33
+probe commands built for this change read the same rc on both. Hook bodies move
+11 / 15 / 11 (greenfield) and 11 / 15 (retrofit), every one a hook; nothing is
+added or removed, action counts are unchanged at 57 / 69 / 59 and 79 / 93, and
+`gates.py` does not move.
+
+**Mutation set** `.claude/mutations/x54-wrapper-cost.json`: nine bypasses and one
+control. The full gate on `088c8c4` reads **MERGE GATE: PASS**: all nine bypasses turn a
+named check red, and the control escapes both behavioural suites. Four further one-line edits are not in the set because nothing
+sees them: one edits a branch its own comment calls unreachable, and for the other
+three (`reset-no-pend`, `lazy-pend-dropped`, `ops-append-pend-unguarded`) no shape
+was found that needs the site, which is not proof that none exists.
+
+**A test-harness defect, found on the way.** `subprocess.run(timeout=)` kills only
+the `bash` it started. On a base-tree X-54 shape the hook's forked child outlived
+it, re-parented to init and still running, and contended the timing cells taken
+after the first timeout; that run was discarded. `shell_run` now kills the whole
+process group. `_k800_run`
+has the same idiom and is not changed: nothing in this item makes it time out.
+
+**What this does NOT close.** X-55's jump shape AT ITS RECORDED SIZE: the fix
+turns 80,022 B from killed at 60 s into a deny, but in 54.33 s, which is 1.10×
+under the ceiling on an idle box. That is not a margin, so it is not recorded as
+closed. And the adjacent-run class, X-55's length half, where a run extends one
+trailing word. Measured on the emitted dependency-gate, min of 3 with the two trees alternated
+in each rep: 7.84 s -> 8.75 s at 20,430 B (1.12×) and 17.27 s -> 20.03 s at
+28,930 B (1.16×). The fix was slower in every rep at both sizes, by 1.04× to
+1.24× per rep. Six samples do not settle whether that cost grows with size, so
+it is recorded as an open question, not as a curve. See the X-54 and X-55 rows in
+`docs/deferred-backlog.md`, the single point of truth for this class.
+
 ## Post-2.8.0 — the argument scanner stops paying per token (2026-09-10)
 
 **No version bump** (fix, not surface; freeze exception **78**).
