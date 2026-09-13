@@ -4546,6 +4546,29 @@ check(f"x54-wrapper-cost row 4: the X-55 length shape (20,430 B) still DENIES "
       "rc 124 is fail-OPEN on the adjacent-run class, which this change leaves "
       "open and must not push across the ceiling")
 
+# ROW 6 - THE `*)` (other) ARM'S PEND RESET, WHICH ROWS 1-3 CANNOT SEE. Rows 1
+# and 3 pad with `'{'`, which is head-transparent and handled by the `skip|flag`
+# arm that never reaches `*)`. A one-line edit that resets the resume point
+# inside `_cs_ops`' `*)` arm restarts the walk on every `other` word, restoring
+# O(runs x tail) - and those `'{'`-padded rows stay green on it. `sudo` sets
+# `_seen=1`; each `'a'` is `other` with `_seen=1`, so the walk does not end and
+# exhausts, declining the memo. Measured 2026-09-14 on the emitted hook: HEAD
+# 3.07 s rc 2; with the `*)` reset, KILLED at 60 s rc 124 (fail-open), while
+# rows 1 and 3 read 3.3 s rc 2 on that same mutant.
+_WC_DEC = "sudo " + " ".join(["'a'"] * 2642) + "; pip install evil"
+_b6, _j6 = _x54_caps(_WC_DEC)
+check(f"x54-wrapper-cost row 6 shape is CAP-LEGAL ({_b6} B, {_j6} jumps)",
+      _b6 <= 81920 and _j6 <= 8191,
+      "a shape outside `_CMD_MAXLEN`/`_CMD_MAXJUMP` proves nothing")
+_rcw6, _ = shell_run("dependency-gate", bash_payload(_WC_DEC), timeout=60)
+check(f"x54-wrapper-cost row 6: a `sudo` head plus 2,642 DECIDER runs DENIES "
+      f"inside the 60 s ceiling (rc={_rcw6})",
+      _rcw6 == 2,
+      "rc 124 is fail-OPEN. Resetting the resume point in the `_cs_ops` `*)` arm "
+      "restarts the walk on every `other` word; rows 1 and 3 pad with "
+      "head-transparent `'{'`, which never reaches that arm, so only a "
+      "decider-padded row sees this regression")
+
 # ROW 0 - VERDICT ROWS. A fix for this class RESUMES the walk from a saved point
 # instead of restarting it. Each one-line edit below gets that point wrong in a
 # way that changes a VERDICT. Rows 1-4 cannot be relied on to see such an edit:
@@ -4564,10 +4587,21 @@ check(f"x54-wrapper-cost row 4: the X-55 length shape (20,430 B) still DENIES "
 #   0f  a BARE token is not added to the saved point            DENY -> ALLOW
 #   0g  a separator keeps the previous segment's wrapper state,
 #       so `echo sh '...'` is read as a wrapped invoker          ALLOW -> DENY
+#   0h  a separator INSIDE a quoted run survives to `_cs_scan`'s
+#       restart branch at recursion depth; dropping its reset
+#       walks a stale tail                                       DENY -> ALLOW
+#   0i  a `$'..'`-resolved invoker reaches `cmd_segments` a
+#       second time; dropping the per-event reset reuses the
+#       previous scan's resume point                             DENY -> ALLOW
+#   0j  the 0i edit, reached by a fully hex-encoded spelling     DENY -> ALLOW
 #
 # Every row reads the same verdict on HEAD 7f67027 and on the candidate. 0g
 # needs FIVE quoted runs before the separator: with two it measured unchanged.
-# The last row is a control that changed under none of these edits.
+# 0h and 0i were added 2026-09-14: step 7 proved `_cs_scan`'s SEP branch fires
+# at recursion depth (0h) and the `$'..'`-resolved second `cmd_segments` scan
+# reuses a stale resume point (0i/0j), so both edits ARE reachable and each
+# flips a deny to an allow. The last row is a control that changed under none
+# of these edits.
 _WC_NAME = "x54-wrapper-cost row 0"
 for _tag, _cmd, _want, _why in (
         ("0a", "env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'", 2,
@@ -4584,6 +4618,12 @@ for _tag, _cmd, _want, _why in (
          "the 0a shape with the flag BARE"),
         ("0g", "sudo 'a' 'b' 'c' 'd' 'e'; echo sh 'pip install evilpkg'", 0,
          "`sudo` and five quoted runs, a separator, then `echo sh '...'`"),
+        ("0h", 'sh -c "echo \'q"; sh -c "s\'h -c \'pip install evilpkg\'"', 2,
+         "a quoted run carrying a separator, then a split invoker at depth"),
+        ("0i", "$'s\\x68' -c 'pip install evilpkg'", 2,
+         "a `$'..'`-resolved invoker reached through the second scan"),
+        ("0j", "$'\\x73\\x68' -c 'pip install evilpkg'", 2,
+         "the 0i shape, fully hex-encoded"),
         ("control", "env A=1 B=2 C=3 sh '-c' 'echo ok'", 0,
          "the 0a shape with nothing to deny")):
     _rc0, _ = shell_run("dependency-gate", bash_payload(_cmd))
@@ -4636,14 +4676,33 @@ _WC_CORPUS = (
     "sudo 'a' 'b' 'c' 'd' 'e'; echo sh 'pip install evilpkg'",
     "sudo " + " ".join(["'{'"] * 60) + "; pip install evil",
     "! " + " ".join(["'-xxxx'"] * 60) + "; pip install evil",
+    # [2026-09-14] The `_CMD_RESOLVED`/recursion shapes ROW 0's 0h-0j exercise:
+    # a separator inside a quoted run reaching `_cs_scan`'s SEP branch at depth,
+    # and a `$'..'`-resolved invoker reaching `cmd_segments` a second time. The
+    # shipped corpus above never held either, so the suffix check was blind to
+    # `scan-restart-no-pend` and `reset-no-pend`; with these it reports the
+    # violation each of those edits introduces (0 on this change).
+    'sh -c "echo \'q"; sh -c "s\'h -c \'pip install evilpkg\'"',
+    "$'s\\x68' -c 'pip install evilpkg'",
+    "$'\\x73\\x68' -c 'pip install evilpkg'",
 )
 _wc_env = dict(os.environ)
 _wc_env["CLAUDE_PROJECT_DIR"] = PROJ
 _wc_env["_CS_PIN_LOG"] = _wc_log
 for _c in _WC_CORPUS:
-    subprocess.run([BASH, _wc_pin], input=json.dumps(bash_payload(_c)),
-                   capture_output=True, text=True, env=_wc_env, cwd=PROJ,
-                   timeout=60)
+    # Own session + group kill on timeout: a hung hook would otherwise raise
+    # `TimeoutExpired` at module scope (no summary line, scored CRASHED not RED)
+    # and leave a forked child burning a core, which is the exact defect
+    # `shell_run` was hardened against.
+    _wc_p = subprocess.Popen([BASH, _wc_pin], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=_wc_env, cwd=PROJ,
+                             start_new_session=True)
+    try:
+        _wc_p.communicate(json.dumps(bash_payload(_c)), timeout=60)
+    except subprocess.TimeoutExpired:
+        os.killpg(_wc_p.pid, signal.SIGKILL)
+        _wc_p.communicate()
 with open(_wc_log, encoding="utf-8") as _fh:
     _wc_marks = _fh.read().split()
 _wc_viol, _wc_armed = _wc_marks.count("SUFFIXVIOL"), _wc_marks.count("ARMED")

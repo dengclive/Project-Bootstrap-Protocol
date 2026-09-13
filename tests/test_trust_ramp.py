@@ -534,13 +534,14 @@ _REQUIRED_SETS = {
         "suites": ["test_composition.py", "test_hook_behavior.py"],
     },
     "x54-wrapper-cost.json": {
-        "sha256": "658ae38c1baf12378fcec10eaf41693e"
-                  "02f9d6fa4d5804745643d951df4fd043",
+        "sha256": "ae0d97d31ad62d4dae54dc7910b9335f"
+                  "25707c7ee0108ea414f51d34d20d5fc9",
         "bypasses": ["array-pend-drops-ws", "seen-not-resumed",
                      "ops-append-no-pend", "scan-append-no-pend",
                      "ops-restart-no-pend", "ops-restart-seen-kept",
                      "seed-restarts-walk", "seed-tail-only",
-                     "array-pend-dropped"],
+                     "array-pend-dropped", "scan-restart-no-pend",
+                     "reset-no-pend", "other-arm-restarts"],
         "controls": ["control-inert-comment"],
         "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
         "suites": ["test_hook_behavior.py", "test_issue_fixes.py"],

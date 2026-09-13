@@ -9,24 +9,27 @@
   "why": [
     "THE GUARD IS A RESUME POINT, AND IT CAN BE WRONG IN TWO WAYS THAT NEED DIFFERENT ROWS.",
     "  * An edit that RESTORES THE RESTART is pure cost: every verdict is right and",
-    "    the walk is quadratic again. Rows 1-3 in tests/test_issue_fixes.py see it.",
-    "    Measured 2026-09-13: `sudo` or `!` plus 2,642 quoted runs goes from ~4 s to",
-    "    KILLED at the 60 s ceiling, and row 2's pair from ~1.4x to ~28x.",
+    "    the walk is quadratic again. Rows 1, 3 and 6 in tests/test_issue_fixes.py",
+    "    see it - rows 1/3 on head-transparent padding, and row 6 on decider padding,",
+    "    which the `*)`-arm reset (other-arm-restarts) needs because `'{'` never",
+    "    reaches that arm. Measured: `sudo`/`!` plus 2,642 quoted runs, ~4 s -> KILLED",
+    "    at the 60 s ceiling; row 2's pair ~1.4x -> ~28x.",
     "  * An edit that makes the resume point WRONG changes a verdict and no cost.",
-    "    ROW 0 sees it, one command per edit. Rows 1-4 cannot be relied on: on the",
-    "    whitespace-dropping candidate all four stayed green.",
+    "    ROW 0 sees it, one command per edit. Rows 1-6 cannot be relied on: on the",
+    "    whitespace-dropping candidate every cost row stayed green.",
     "",
-    "FOUR ONE-LINE EDITS ARE NOT IN THIS SET, because no row sees them and an entry",
-    "nothing catches can only score ESCAPED. Measured 2026-09-13 on the emitted",
-    "dependency-gate, each changed no verdict on 33 probe commands, no count of the",
-    "runtime suffix pin, and no cost shape out of seven:",
-    "  * scan-restart-no-pend: the `_cs_scan` restart branch, which its own comment",
-    "    records as unreachable, because a quoted run cannot carry a separator.",
-    "  * reset-no-pend: the per-event reset in `cmd_segments`.",
+    "TWO ONE-LINE EDITS ARE NOT IN THIS SET, because no shape was found that a row",
+    "catches and an entry nothing catches can only score ESCAPED. Re-derived",
+    "2026-09-14 on the emitted dependency-gate, each changed no verdict on ROW 0's",
+    "commands and left ROW 5's suffix check at 0 violations:",
     "  * lazy-pend-dropped: the lazy-phase resume write.",
     "  * ops-append-pend-unguarded: the memo guard on the `_cs_ops` pend append.",
-    "The last three are FINDINGS, not proof the sites are dead: a shape that needs",
-    "them may exist, and none was found."
+    "These are FINDINGS, not proof the sites are dead: a shape that needs them may",
+    "exist, and none was found. scan-restart-no-pend and reset-no-pend were excluded",
+    "here on that same ground and step 7 REFUTED both: `_cs_scan`'s SEP branch fires",
+    "at recursion depth (over the un-scrubbed `_CS_EXTRA`), and the `$'..'`-resolved",
+    "second `cmd_segments` scan reuses a stale resume point. Both are bypasses now",
+    "(ROW 0 0h and 0i), each flipping a cap-legal deny to an allow."
   ],
   "mutations": [
     {
@@ -109,6 +112,33 @@
       "replace": "_lastw=1; else",
       "expect": {
         "test_issue_fixes.py": "x54-wrapper-cost row 2:"
+      }
+    },
+    {
+      "id": "scan-restart-no-pend",
+      "why": "a separator inside a quoted run reaches `_cs_scan`'s restart branch at recursion depth, over the SEP-joined `_CS_EXTRA` that is not sentinel-scrubbed; dropping its resume-point reset there walks a stale tail",
+      "find": "_CS_TAIL=\"${_run##*$_CS_SEP}\"; _CS_INVMEMO=\"\"; _CS_INVPEND=\"$_CS_TAIL\"; _CS_INVSEEN=0 ;;",
+      "replace": "_CS_TAIL=\"${_run##*$_CS_SEP}\"; _CS_INVMEMO=\"\" ;;",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0h"
+      }
+    },
+    {
+      "id": "reset-no-pend",
+      "why": "`cmd_segments`' per-event reset; a `$'..'`-resolved invoker reaches the walk through the second `cmd_segments` scan, which reuses the stale resume point the first left",
+      "find": "_CS_INVMEMO=\"\"; _CS_INVPEND=\"\"; _CS_INVSEEN=0\n",
+      "replace": "_CS_INVMEMO=\"\"\n",
+      "expect": {
+        "test_issue_fixes.py": "row 0 0i"
+      }
+    },
+    {
+      "id": "other-arm-restarts",
+      "why": "resetting the resume point in `_cs_ops`' `*)` (other) arm restarts the walk on every decider word, restoring O(runs x tail); cost-only, invisible to a verdict and to the `'{'`-padded rows 1/3",
+      "find": "      *) if [ \"$_seen\" != \"1\" ]; then\n",
+      "replace": "      *) _CS_INVPEND=\"$_CS_TAIL\"; _CS_INVSEEN=0; if [ \"$_seen\" != \"1\" ]; then\n",
+      "expect": {
+        "test_issue_fixes.py": "wrapper-cost row 6:"
       }
     },
     {
