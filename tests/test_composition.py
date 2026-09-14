@@ -247,7 +247,7 @@ check("the walk's cost window is shell-only",
 # byte-identical segments either way.
 check("_cs_isinv reads the carried segment tail, not the whole buffer",
       "_cs_isinv(){" in _tmpl
-      and 'local _tail="$_CS_TAIL"' in _tmpl
+      and 'local _tail="$_CS_INVPEND"' in _tmpl
       and "_tail=\"${_CS_BUF##*$_CS_SEP}\"" not in _tmpl,
       "re-deriving the tail per quoted run is what put dependency-gate at "
       "62.4 s on a 6010 B quote-dense substitution - past the 60 s ceiling")
@@ -355,8 +355,12 @@ check("the D20 install-head candidate does not re-copy per token",
 # tail first is O(tail) per call and hands the whole class back.
 check("the invoker memo is READ, and read before the tail is copied",
       _tmpl.count('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi') == 1
+      # [x54-wrapper-cost] `.find`, guarded, and NOT `.index`: `.index` RAISES
+      # when the literal is gone, which aborted this whole suite at module scope
+      # (49 of 156 checks ran, no summary line) instead of failing this check.
+      and _tmpl.find('local _tail="$_CS_INVPEND"') >= 0
       and (_tmpl.index('if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi')
-           < _tmpl.index('local _tail="$_CS_TAIL"')),
+           < _tmpl.find('local _tail="$_CS_INVPEND"')),
       "deleting the read disables the memo with every verdict test still green; "
       "reading it after the tail copy restores O(runs x tail) on every hit")
 # [X-52] THE MEMO'S TWO SOUNDNESS CONDITIONS, PINNED - both were got wrong once.
@@ -417,13 +421,16 @@ check("the invoker memo is never written from a decision on the trailing word",
       # constant is real and because the two spellings are semantically
       # equivalent, NOT because it removes a term - see `_cs_isinv` for the
       # numbers and for why sizing the lazy phase must still count this pass.
-      and 'if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      and ('if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; _CS_INVPEND="$_tail"; '
+           '_CS_INVSEEN="$_seen"; else _lastw=0; fi') in _tmpl
       # THE CONJUNCT THAT BITES. The array phase's last element is ALWAYS the
       # trailing word, because the split consumes the whole remainder. A second
       # conjunct testing `_tail` is DEAD - `_an` is derived from `_tail`, so
       # `_an >= 1` already implies it non-empty - and silently disables this
       # phase's guard, which was a live dependency-gate bypass.
-      and 'if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi' in _tmpl
+      and ('if [ "$_ai" -ge "$_an" ]; then _lastw=1; '
+           '_CS_INVPEND="$_w${_tail##*[![:space:]]}"; _CS_INVSEEN="$_seen"; '
+           'else _lastw=0; fi') in _tmpl
       and _tmpl.count('_lastw=1') == 2,
       "a quoted run can EXTEND the trailing word, so a decision taken on it is "
       "not stable under a longer tail - in EITHER phase of the walk")

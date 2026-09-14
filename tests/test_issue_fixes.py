@@ -95,6 +95,7 @@ import importlib.util
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -196,16 +197,29 @@ def shell_run(hook, payload, timeout=None):
     **124** here - the rc a cancelled PreToolUse hook actually exits with, and
     the rc that means FAIL-OPEN because only exit 2 blocks. Default `None`
     keeps every pre-existing caller unchanged.
+
+    [x54-wrapper-cost] ON A TIMEOUT THE HOOK'S WHOLE PROCESS GROUP IS KILLED.
+    `subprocess.run(timeout=)` kills only the `bash` it started, and on a
+    base-tree X-54 shape a forked child SURVIVED that: measured 2026-09-13, it
+    was re-parented to the user's init and still running 4 s after the
+    timeout. A red 60 s row could therefore leave a process burning a core
+    while later rows ran, including this file's ratio and wall-clock rows.
+    With a timeout the hook now runs in its own session, and the group is
+    killed.
     """
     e = dict(os.environ)
     e["CLAUDE_PROJECT_DIR"] = PROJ
+    p = subprocess.Popen([BASH, os.path.join(HOOKS, f"{hook}.sh")],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.PIPE, text=True, env=e, cwd=PROJ,
+                         start_new_session=timeout is not None)
     try:
-        p = subprocess.run([BASH, os.path.join(HOOKS, f"{hook}.sh")],
-                           input=json.dumps(payload), capture_output=True,
-                           text=True, env=e, cwd=PROJ, timeout=timeout)
+        _out, err = p.communicate(json.dumps(payload), timeout=timeout)
     except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+        p.communicate()
         return 124, ""
-    return p.returncode, p.stderr
+    return p.returncode, err
 
 
 def sdk_run(gate, payload):
@@ -4430,6 +4444,277 @@ check(f"X-54 arg-scanner ratio: the head-bearing shape costs < 3x its no-head "
       "O(approved) scan per token, or the growing-string append")
 
 shutil.rmtree(_K800_TMP, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
+# [x54-wrapper-cost] `_cs_isinv` RESTARTS ITS WALK ON EVERY QUOTED RUN
+# --------------------------------------------------------------------------- #
+# `_cs_isinv` runs once per quoted run and walks `_CS_TAIL` from its start. The
+# X-52 memo removes the repeat only when the walk DECIDES ON A TOKEN. A walk that
+# ends by EXHAUSTION declines the memo, so the next run pays the whole walk again.
+# Exhaustion has TWO entrances, and a row below pins each:
+#   * `_seen=1`: a wrapper head (`sudo`) sets it, and no later word decides.
+#   * `_seen=0`: every word is head-transparent (`!`, `{`), so none decides.
+#     This one needs no wrapper at all.
+#
+# MEASURED 2026-09-13 on the emitted hook, dependency-gate, HEAD 7f67027 against
+# the candidate fix, min of 2, load1 1.3-3.0. Each hook ran in its own session
+# and its whole process group was killed at the timeout (see `shell_run`):
+#
+#   row  shape                          bytes  jumps   HEAD             fix
+#   1    `sudo` + 2,642 x `'{'`         10590   5284   60.06 s rc 124   4.13 s rc 2
+#   2    `!` + 900 x `'{'`               3619   1800   21.75 s rc 2     1.03 s rc 2
+#        `!` + 900 x `'z'` (control)     3619   1800    0.80 s rc 2     0.78 s rc 2
+#   3    `!` + 2,642 x `'{'`            10587   5284   60.05 s rc 124   3.48 s rc 2
+#   4    X-55 length shape, N=1,200     20430   2400    8.83 s rc 2     9.38 s rc 2
+#
+# WHAT THESE ROWS CANNOT SEE, stated so a green is never over-read. They are
+# cost rows, and the defect found in an earlier candidate changed no cost. That
+# candidate's resume point dropped `_CS_TAIL`'s trailing whitespace. It turns
+# `env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'` from DENY into ALLOW, and on it
+# all four rows below are GREEN. The verdict rows after row 4 are what catch it.
+_WC_SUDO = "sudo " + " ".join(["'{'"] * 2642) + "; pip install evil"
+_WC_SKIP = "! " + " ".join(["'{'"] * 900) + "; pip install evil"
+_WC_SKIPCTL = "! " + " ".join(["'z'"] * 900) + "; pip install evil"
+_WC_SEEN0 = "! " + " ".join(["'{'"] * 2642) + "; pip install evil"
+_WC_ADJ = "{ { { { s" + "'zzzzzzzzzzzzzzz'" * 1200 + "; pip install evilpkg"
+for _lbl, _cmd in (("sudo + 2642 x '{'", _WC_SUDO), ("! + 900 x '{'", _WC_SKIP),
+                   ("! + 900 x 'z'", _WC_SKIPCTL), ("! + 2642 x '{'", _WC_SEEN0),
+                   ("X-55 length shape", _WC_ADJ)):
+    _b, _j = _x54_caps(_cmd)
+    check(f"x54-wrapper-cost shape `{_lbl}` is CAP-LEGAL ({_b} B, {_j} jumps)",
+          _b <= 81920 and _j <= 8191,
+          "a shape outside `_CMD_MAXLEN`/`_CMD_MAXJUMP` proves nothing - the "
+          "gate rejects it on length before the walk is reached")
+
+# ROW 1 - THE `_seen=1` ENTRANCE, UNDER THE CEILING. 10,590 B, not the queue
+# row's 80,022 B: the fix clears this one 14.5x inside the ceiling, so the row
+# pays the full 60 s only while it is red.
+_rcw1, _ = shell_run("dependency-gate", bash_payload(_WC_SUDO), timeout=60)
+check(f"x54-wrapper-cost row 1: a `sudo` head plus 2,642 quoted runs DENIES "
+      f"inside the 60 s ceiling (rc={_rcw1})",
+      _rcw1 == 2,
+      "rc 124 is the hook CANCELLED at the emitted timeout, i.e. fail-OPEN. A "
+      "wrapper head sets `_seen=1`, no later word decides, so every walk ends by "
+      "exhaustion, the memo declines it, and `_cs_isinv` re-walks the whole "
+      "`_CS_TAIL` once per quoted run")
+
+# ROW 2 - RATIO, ON A PAIR NEITHER ARM OF WHICH IS CENSORED. Row 1's timed run
+# cannot supply a ratio: it is capped at 60 s, so an unfixed tree reads at most
+# 60 s against it, and contention can close that gap. Both arms here finish far
+# inside the ceiling on EVERY tree. They are identical in bytes and jumps. `'{'`
+# is head-transparent, so every walk exhausts. `'z'` decides on its first word
+# and the memo holds. Measured 27.06x on HEAD and 1.32x on the fix with the
+# harness, and this suite read 24.74x and 1.49x in the same session. The bound
+# sits 2.0x above the higher fixed reading and 8x below the lower HEAD reading.
+# DO NOT tighten it toward whatever this run measures; that is what took
+# `#50 T8` to E7.
+_tw2 = time.time()
+_rcw2, _ = shell_run("dependency-gate", bash_payload(_WC_SKIP), timeout=240)
+_elw2 = time.time() - _tw2
+_tw2c = time.time()
+_rcw2c, _ = shell_run("dependency-gate", bash_payload(_WC_SKIPCTL), timeout=240)
+_elw2c = time.time() - _tw2c
+check(f"x54-wrapper-cost row 2: exhaustion costs < 3x a deciding control of the "
+      f"same bytes ({_elw2:.2f}s vs {_elw2c:.2f}s = "
+      f"{_elw2 / max(_elw2c, 1e-9):.2f}x, rc {_rcw2}/{_rcw2c})",
+      _elw2 < 3.0 * _elw2c and _rcw2 == 2 and _rcw2c == 2,
+      "the walk restarts per quoted run again: a tail that never decides costs "
+      "O(runs x tail), where the same bytes that decide on their first word "
+      "cost one walk. Both arms must also still DENY")
+
+# ROW 3 - THE `_seen=0` ENTRANCE, UNDER THE CEILING. Without it the suite pins
+# only the wrapper arm. No wrapper here, only `!` and 2,642 transparent runs.
+_rcw3, _ = shell_run("dependency-gate", bash_payload(_WC_SEEN0), timeout=60)
+check(f"x54-wrapper-cost row 3: `!` plus 2,642 head-transparent runs DENIES "
+      f"inside the 60 s ceiling (rc={_rcw3})",
+      _rcw3 == 2,
+      "rc 124 is fail-OPEN. No wrapper is needed: a tail of head-transparent "
+      "words never decides, so `_seen=0` exhausts too, and the walk restarts "
+      "per quoted run")
+
+# ROW 4 - AN rc ROW ON THE CLASS THE FIX DOES NOT CLOSE, NOT A NOT-WORSE BOUND.
+# Adjacent quoted runs, X-55's length half. The fix does not make this shape
+# cheaper: it measured 9.38 s against HEAD's 8.83 s. No single-tree row can
+# resolve a difference that size, and
+# a bound tight enough to see it is a bound narrowed onto its own measurement.
+# This row asserts only that the shape still DENIES inside the ceiling. The cost
+# on this class belongs in X-55's backlog row, not in an assertion.
+_rcw4, _ = shell_run("dependency-gate", bash_payload(_WC_ADJ), timeout=60)
+check(f"x54-wrapper-cost row 4: the X-55 length shape (20,430 B) still DENIES "
+      f"inside the 60 s ceiling (rc={_rcw4})",
+      _rcw4 == 2,
+      "rc 124 is fail-OPEN on the adjacent-run class, which this change leaves "
+      "open and must not push across the ceiling")
+
+# ROW 6 - THE `*)` (other) ARM'S PEND RESET, WHICH ROWS 1-3 CANNOT SEE. Rows 1
+# and 3 pad with `'{'`, which is head-transparent and handled by the `skip|flag`
+# arm that never reaches `*)`. A one-line edit that resets the resume point
+# inside `_cs_ops`' `*)` arm restarts the walk on every `other` word, restoring
+# O(runs x tail) - and those `'{'`-padded rows stay green on it. `sudo` sets
+# `_seen=1`; each `'a'` is `other` with `_seen=1`, so the walk does not end and
+# exhausts, declining the memo. Measured 2026-09-14 on the emitted hook: HEAD
+# 3.07 s rc 2; with the `*)` reset, KILLED at 60 s rc 124 (fail-open), while
+# rows 1 and 3 read 3.3 s rc 2 on that same mutant.
+_WC_DEC = "sudo " + " ".join(["'a'"] * 2642) + "; pip install evil"
+_b6, _j6 = _x54_caps(_WC_DEC)
+check(f"x54-wrapper-cost row 6 shape is CAP-LEGAL ({_b6} B, {_j6} jumps)",
+      _b6 <= 81920 and _j6 <= 8191,
+      "a shape outside `_CMD_MAXLEN`/`_CMD_MAXJUMP` proves nothing")
+_rcw6, _ = shell_run("dependency-gate", bash_payload(_WC_DEC), timeout=60)
+check(f"x54-wrapper-cost row 6: a `sudo` head plus 2,642 DECIDER runs DENIES "
+      f"inside the 60 s ceiling (rc={_rcw6})",
+      _rcw6 == 2,
+      "rc 124 is fail-OPEN. Resetting the resume point in the `_cs_ops` `*)` arm "
+      "restarts the walk on every `other` word; rows 1 and 3 pad with "
+      "head-transparent `'{'`, which never reaches that arm, so only a "
+      "decider-padded row sees this regression")
+
+# ROW 0 - VERDICT ROWS. A fix for this class RESUMES the walk from a saved point
+# instead of restarting it. Each one-line edit below gets that point wrong in a
+# way that changes a VERDICT. Rows 1-4 cannot be relied on to see such an edit:
+# under the first one, all four stayed green. Each row below changes verdict
+# under one edit, measured 2026-09-13 on the emitted hook against the candidate:
+#
+#   0a  the saved point drops the tail's trailing whitespace, so `sh` and a
+#       quoted `'-c'` fuse into one word                        DENY -> ALLOW
+#   0b  the same, reached through four `{` instead of a wrapper   DENY -> ALLOW
+#   0c  the walk resumes the position but forgets that a
+#       wrapper was already seen                                 DENY -> ALLOW
+#   0d  a separator does not reset the saved point, so the walk
+#       starts inside the previous segment                       DENY -> ALLOW
+#   0e  a quoted run is not added to the saved point, so `s'h'`
+#       is walked as `s`                                         DENY -> ALLOW
+#   0f  a BARE token is not added to the saved point            DENY -> ALLOW
+#   0g  a separator keeps the previous segment's wrapper state,
+#       so `echo sh '...'` is read as a wrapped invoker          ALLOW -> DENY
+#   0h  a separator INSIDE a quoted run survives to `_cs_scan`'s
+#       restart branch at recursion depth; dropping its reset
+#       walks a stale tail                                       DENY -> ALLOW
+#   0i  a `$'..'`-resolved invoker reaches `cmd_segments` a
+#       second time; dropping the per-event reset reuses the
+#       previous scan's resume point                             DENY -> ALLOW
+#   0j  the 0i edit, reached by a fully hex-encoded spelling     DENY -> ALLOW
+#
+# Every row reads the same verdict on HEAD 7f67027 and on the candidate. 0g
+# needs FIVE quoted runs before the separator: with two it measured unchanged.
+# 0h and 0i were added 2026-09-14: step 7 proved `_cs_scan`'s SEP branch fires
+# at recursion depth (0h) and the `$'..'`-resolved second `cmd_segments` scan
+# reuses a stale resume point (0i/0j), so both edits ARE reachable and each
+# flips a deny to an allow. The last row is a control that changed under none
+# of these edits.
+_WC_NAME = "x54-wrapper-cost row 0"
+for _tag, _cmd, _want, _why in (
+        ("0a", "env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'", 2,
+         "a wrapper head, three assignments, then a QUOTED flag"),
+        ("0b", "{ { { { sh '-c' 'pip install evilpkg'; }; }; }; }", 2,
+         "four `{`, then a QUOTED flag"),
+        ("0c", "sudo 'a' 'b' 'c' 'd' 'e' sh -c 'pip install evilpkg'", 2,
+         "`sudo`, five quoted runs, then an invoker"),
+        ("0d", "echo 'x'; sh '-c' 'pip install evilpkg'", 2,
+         "a quoted run, a separator, then an invoker"),
+        ("0e", "! ! ! ! s'h' -c 'pip install evilpkg'", 2,
+         "an invoker SPLIT by a quoted run"),
+        ("0f", "env A=1 B=2 C=3 sh -c 'pip install evilpkg'", 2,
+         "the 0a shape with the flag BARE"),
+        ("0g", "sudo 'a' 'b' 'c' 'd' 'e'; echo sh 'pip install evilpkg'", 0,
+         "`sudo` and five quoted runs, a separator, then `echo sh '...'`"),
+        ("0h", 'sh -c "echo \'q"; sh -c "s\'h -c \'pip install evilpkg\'"', 2,
+         "a quoted run carrying a separator, then a split invoker at depth"),
+        ("0i", "$'s\\x68' -c 'pip install evilpkg'", 2,
+         "a `$'..'`-resolved invoker reached through the second scan"),
+        ("0j", "$'\\x73\\x68' -c 'pip install evilpkg'", 2,
+         "the 0i shape, fully hex-encoded"),
+        ("control", "env A=1 B=2 C=3 sh '-c' 'echo ok'", 0,
+         "the 0a shape with nothing to deny")):
+    _rc0, _ = shell_run("dependency-gate", bash_payload(_cmd))
+    check(f"{_WC_NAME} {_tag}: {_why} -> rc {_want}", _rc0 == _want,
+          f"rc={_rc0} on {_cmd!r}. Rows 0a-0f are fail-OPEN when they read 0; "
+          "0g reads 2 when a separator leaks the previous segment's wrapper "
+          "state. Each names one way to get the walk's saved resume point wrong")
+
+# ROW 5 - THE RESUME POINT IS A SUFFIX OF THE TAIL, CHECKED AT RUNTIME. On every
+# `_cs_isinv` entry across a corpus, while the memo is empty, `_CS_TAIL` must END
+# WITH `_CS_INVPEND`. A resume point that LEADS the tail skips words the walk
+# never classified. This is ONE property - the resume POSITION - so it catches
+# only the ways that move that position wrong. It is BLIND to the ways that get
+# `_CS_INVSEEN` wrong (rows 0c and 0g, measured 0 violations): those change a
+# verdict while the suffix still holds, and ROW 0's verdict rows are what catch
+# them. So ROW 5 and ROW 0 are complementary, not the same net. The source-text
+# pins in `test_composition.py` match one spelling of each write; this row checks
+# the position property itself, on whatever spelling the hook carries.
+# The hook is copied and wrapped, never edited in place, and ARMED counts the
+# entries where a resume point was actually set, so a tree that never sets one
+# cannot pass by saying nothing.
+_WC_WRAP = (
+    '_cs_isinv(){\n'
+    '  if [ -z "$_CS_INVMEMO" ]; then\n'
+    '    case "$_CS_TAIL" in\n'
+    '      *"${_CS_INVPEND-}") : ;;\n'
+    "      *) printf 'SUFFIXVIOL\\n' >> \"$_CS_PIN_LOG\" ;;\n"
+    '    esac\n'
+    "    if [ -n \"${_CS_INVPEND-}\" ]; then printf 'ARMED\\n' >> \"$_CS_PIN_LOG\"; fi\n"
+    '  fi\n'
+    '  _cs_isinv_real\n'
+    '}\n')
+with open(os.path.join(HOOKS, "dependency-gate.sh"), encoding="utf-8") as _fh:
+    _wc_body = _fh.read()
+_wc_anchor = _wc_body.count("_cs_isinv(){\n")
+check(f"x54-wrapper-cost row 5 precondition: `_cs_isinv(){{` occurs once in the "
+      f"emitted hook ({_wc_anchor})", _wc_anchor == 1,
+      "the runtime wrapper cannot be installed, so row 5 would assert nothing")
+_wc_pin = os.path.join(TMP, "wc-pin-dependency-gate.sh")
+_wc_log = os.path.join(TMP, "wc-pin.log")
+with open(_wc_pin, "w", encoding="utf-8") as _fh:
+    _fh.write(_wc_body.replace("_cs_isinv(){\n",
+                               _WC_WRAP + "_cs_isinv_real(){\n", 1))
+open(_wc_log, "w").close()
+_WC_CORPUS = (
+    "env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'",
+    "{ { { { sh '-c' 'pip install evilpkg'; }; }; }; }",
+    "! ! ! ! sh '-c' 'pip install evilpkg'",
+    "sudo a b c sh '-c' 'pip install evilpkg'",
+    "sudo 'a' 'b' 'c' 'd' 'e' sh -c 'pip install evilpkg'",
+    "echo 'x'; sh '-c' 'pip install evilpkg'",
+    "! ! ! ! s'h' -c 'pip install evilpkg'",
+    "sudo 'a' 'b' 'c' 'd' 'e'; echo sh 'pip install evilpkg'",
+    "sudo " + " ".join(["'{'"] * 60) + "; pip install evil",
+    "! " + " ".join(["'-xxxx'"] * 60) + "; pip install evil",
+    # [2026-09-14] The `_CMD_RESOLVED`/recursion shapes ROW 0's 0h-0j exercise:
+    # a separator inside a quoted run reaching `_cs_scan`'s SEP branch at depth,
+    # and a `$'..'`-resolved invoker reaching `cmd_segments` a second time. The
+    # shipped corpus above never held either, so the suffix check was blind to
+    # `scan-restart-no-pend` and `reset-no-pend`; with these it reports the
+    # violation each of those edits introduces (0 on this change).
+    'sh -c "echo \'q"; sh -c "s\'h -c \'pip install evilpkg\'"',
+    "$'s\\x68' -c 'pip install evilpkg'",
+    "$'\\x73\\x68' -c 'pip install evilpkg'",
+)
+_wc_env = dict(os.environ)
+_wc_env["CLAUDE_PROJECT_DIR"] = PROJ
+_wc_env["_CS_PIN_LOG"] = _wc_log
+for _c in _WC_CORPUS:
+    # Own session + group kill on timeout: a hung hook would otherwise raise
+    # `TimeoutExpired` at module scope (no summary line, scored CRASHED not RED)
+    # and leave a forked child burning a core, which is the exact defect
+    # `shell_run` was hardened against.
+    _wc_p = subprocess.Popen([BASH, _wc_pin], stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=_wc_env, cwd=PROJ,
+                             start_new_session=True)
+    try:
+        _wc_p.communicate(json.dumps(bash_payload(_c)), timeout=60)
+    except subprocess.TimeoutExpired:
+        os.killpg(_wc_p.pid, signal.SIGKILL)
+        _wc_p.communicate()
+with open(_wc_log, encoding="utf-8") as _fh:
+    _wc_marks = _fh.read().split()
+_wc_viol, _wc_armed = _wc_marks.count("SUFFIXVIOL"), _wc_marks.count("ARMED")
+check(f"x54-wrapper-cost row 5: the resume point is a suffix of the tail at "
+      f"every walk entry ({_wc_viol} violations, {_wc_armed} armed entries)",
+      _wc_armed > 0 and _wc_viol == 0,
+      "violations > 0: the saved resume point LEADS the tail, so the walk skips "
+      "words it never classified. armed == 0: no resume point was ever set, so "
+      "this row asserted nothing")
 
 del os.environ["CLAUDE_PROJECT_DIR"]
 shutil.rmtree(TMP, ignore_errors=True)

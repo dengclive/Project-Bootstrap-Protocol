@@ -1406,6 +1406,62 @@ check("the gate still DENIES that command (the stop is a cost fix, not a "
       run("dependency-gate", _payload)[0] == 2,
       "    an early stop that changed the verdict would be a different bug")
 
+print("\n== x54-wrapper-cost: a quoted run after the invoker, on spec-gate-commit ==")
+
+# [x54-wrapper-cost] THE WALK THIS ITEM CHANGES IS IN THE SHARED HEADER, SO IT
+# IS NOT dependency-gate's ALONE. `spec-gate-commit` is registered on
+# PreToolUse/Bash, is FAIL_CLOSED=1, and reaches the same walk, which the
+# measurement below shows. A resume point that drops `_CS_TAIL`'s trailing
+# whitespace fuses `sh` and a QUOTED `'-c'` into one word, so the walk misses
+# the invoker. The quoted `git commit` is then never segmented, and the commit
+# goes through.
+#
+# MEASURED 2026-09-13 on the emitted hook, rc on HEAD 7f67027 / that candidate /
+# the corrected candidate: both quoted-flag rows below are 2 / 0 / 2, and the
+# bare-flag control is 2 / 2 / 2.
+#
+# THE ROW OWNS ITS REPOSITORY. `spec-gate-commit` reads the staged set with
+# `git diff --cached` in its WORKING DIRECTORY, and `run()` passes no `cwd`. From
+# `run()` the row would read whatever index the suite happens to start in.
+_wc_proj = os.path.join(TMP, "x54wc-commit")
+os.makedirs(os.path.join(_wc_proj, "src"), exist_ok=True)
+subprocess.run(["git", "init", "-q"], cwd=_wc_proj, check=True)
+with open(os.path.join(_wc_proj, "src", "unreferenced.py"), "w",
+          encoding="utf-8") as fh:
+    fh.write("x = 1\n")
+subprocess.run(["git", "add", "src/unreferenced.py"], cwd=_wc_proj, check=True)
+
+
+def _wc_commit(cmd):
+    """spec-gate-commit, run INSIDE the row's own repository -> rc."""
+    e = dict(os.environ)
+    e["CLAUDE_PROJECT_DIR"] = _wc_proj
+    p = subprocess.run([BASH, os.path.join(HOOKS, "spec-gate-commit.sh")],
+                       input=json.dumps(pre("Bash", command=cmd)),
+                       capture_output=True, text=True, env=e, cwd=_wc_proj)
+    return p.returncode
+
+
+# The precondition. Without a staged implementation path that no spec names,
+# every row below passes on a gate that sees no commit at all.
+check("x54-wrapper-cost precondition: a plain commit of the unreferenced file "
+      "is BLOCKED", _wc_commit("git commit -m x") == 2,
+      "    the staged `src/` path is not blocked, so the rows below are vacuous")
+for _cmd, _want, _why in (
+        ("env A=1 B=2 C=3 sh '-c' 'git commit -m x'", 2,
+         "a wrapper head and three assignments, then a QUOTED flag"),
+        ("{ { { { sh '-c' 'git commit -m x'; }; }; }; }", 2,
+         "four `{`, then a QUOTED flag"),
+        ("env A=1 B=2 C=3 sh -c 'git commit -m x'", 2,
+         "control: the same shape with the flag BARE"),
+        ("env A=1 B=2 C=3 sh '-c' 'echo ok'", 0,
+         "control: the same shape with no commit in it")):
+    _rc = _wc_commit(_cmd)
+    check(f"x54-wrapper-cost spec-gate-commit: {_why} -> {_want}",
+          _rc == _want,
+          f"    rc={_rc} on {_cmd!r}. rc 0 on a quoted-flag row means the walk "
+          "lost the invoker, and the commit it wraps was never checked")
+
 shutil.rmtree(TMP, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")

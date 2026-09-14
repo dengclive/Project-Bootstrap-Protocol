@@ -1314,6 +1314,35 @@ _CS_TAIL=""
 # is the whole optimisation, and clearing there would restore the old cost
 # silently.
 _CS_INVMEMO=""
+# [x54-wrapper-cost] WHERE THE LAST WALK STOPPED, so the next one RESUMES there.
+# The memo above serves only a walk that DECIDES ON A TOKEN. A walk that ends by
+# EXHAUSTION declines it, so `_cs_isinv` used to re-walk the whole `_CS_TAIL`
+# once per quoted run. Exhaustion has two entrances: `_seen=1` from a wrapper
+# head, and `_seen=0` from a tail of head-transparent words, which needs no
+# wrapper at all. `_CS_INVPEND` is the raw suffix of `_CS_TAIL` that no walk has
+# settled yet, and `_CS_INVSEEN` is `_seen` as of its start. `_cs_isinv` seeds
+# from these two instead of from the whole tail at `_seen=0`.
+#
+# SOUNDNESS: THE RESUME POINT MAY LAG THE TAIL AND MUST NEVER LEAD IT. It is
+# reset wherever `_CS_TAIL` restarts, grows with every append while the memo is
+# empty, and advances only in `_cs_isinv`'s two `_lastw=1` branches, to the
+# trailing word. Every word behind that one was already classified, and none of
+# them decided.
+#
+# THE ARRAY-PHASE WRITE KEEPS THE TAIL'S TRAILING WHITESPACE, AND IT MUST. `_w`
+# comes from the normalised split and carries none. A candidate that saved
+# `"$_w"` alone let the next quoted run fuse onto the saved word, so the walk
+# missed the invoker: `env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'` went from
+# DENY to ALLOW. On that candidate every cost row stayed green, and so did every
+# verdict row that existed at the time. ROW 0 in `tests/test_issue_fixes.py` is
+# what goes red on it.
+#
+# MEASURED 2026-09-13, dependency-gate, against 7f67027: `sudo` plus 2,642
+# quoted runs, 60.06 s KILLED (fail-open) -> 4.13 s; `!` plus 2,642 quoted runs,
+# 60.05 s KILLED -> 3.48 s. NOT CLOSED: adjacent quoted runs that keep extending
+# one word, X-55's length half, which measured 8.83 s -> 9.38 s.
+_CS_INVPEND=""
+_CS_INVSEEN=0
 # [round-4 D17] `_CS_INVOKERS` used to live here: emitted into every hook,
 # ZERO call sites, and already drifted (it was missing `su`). A second, silent
 # invoker list whose only effect was to make the count of them look smaller.
@@ -1510,8 +1539,9 @@ _cs_ops(){                      # operator -> segment break, UNQUOTED text only
   # tail restarts after the last of them; the `##` here runs on the short `_t`,
   # never on the accumulated buffer.
   case "$_t" in
-    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO="" ;;
-    *) _CS_TAIL="$_CS_TAIL$_t" ;;
+    *"$_CS_SEP"*) _CS_TAIL="${_t##*$_CS_SEP}"; _CS_INVMEMO=""; _CS_INVPEND="$_CS_TAIL"; _CS_INVSEEN=0 ;;
+    *) _CS_TAIL="$_CS_TAIL$_t"
+       if [ -z "$_CS_INVMEMO" ]; then _CS_INVPEND="$_CS_INVPEND$_t"; fi ;;
   esac
   return 0
 }
@@ -2365,7 +2395,7 @@ _cs_isinv(){
   # run long - which is where X-52's shapes live and where linear-vs-quadratic
   # is worth a whole-tail pass.
   if [ -n "$_CS_INVMEMO" ]; then return "$_CS_INVMEMO"; fi
-  local _tail="$_CS_TAIL" _w _b _e _seen=0 _k _words _t _f _ai=-1 _an=0 _lz=0 _lastw=0
+  local _tail="$_CS_INVPEND" _w _b _e _seen="$_CS_INVSEEN" _k _words _t _f _ai=-1 _an=0 _lz=0 _lastw=0
   # Safe for the callees: `_cs_head_kind`, `_cs_inv_word` and `_xp_iw` match
   # with `case` on quoted words and perform no word splitting of their own.
   local IFS=' '
@@ -2416,7 +2446,7 @@ _cs_isinv(){
       # is exactly the growth X-54 and X-55 are about. Found by adversarial
       # review of this commit's own claim, and reproduced before being written
       # down.
-      if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; else _lastw=0; fi
+      if [ -z "${_tail:${#_w}:1}" ]; then _lastw=1; _CS_INVPEND="$_tail"; _CS_INVSEEN="$_seen"; else _lastw=0; fi
     else
       # ARRAY PHASE - the remainder, split once. Reached only after the walk
       # has already stepped through `_CS_LAZYMAX` head-transparent tokens, so
@@ -2446,7 +2476,7 @@ _cs_isinv(){
       # where the guard works. The array phase needs `_CS_LAZYMAX` transparent
       # tokens in front, which no existing row had. Rows for both spellings are
       # pinned now.
-      if [ "$_ai" -ge "$_an" ]; then _lastw=1; else _lastw=0; fi
+      if [ "$_ai" -ge "$_an" ]; then _lastw=1; _CS_INVPEND="$_w${_tail##*[![:space:]]}"; _CS_INVSEEN="$_seen"; else _lastw=0; fi
     fi
     # [X-45] `${_w##*/}` is the same quadratic expansion, here on the WORD:
     # 0.046 s at 1 KB and 10.23 s at 16 KB per 200 reps. A word with no `/` is
@@ -2633,8 +2663,9 @@ _cs_scan(){
     # one pattern test on a short string and removes the assumption rather than
     # documenting it.
     case "$_run" in
-      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO="" ;;
-      *) _CS_TAIL="$_CS_TAIL$_run" ;;
+      *"$_CS_SEP"*) _CS_TAIL="${_run##*$_CS_SEP}"; _CS_INVMEMO=""; _CS_INVPEND="$_CS_TAIL"; _CS_INVSEEN=0 ;;
+      *) _CS_TAIL="$_CS_TAIL$_run"
+         if [ -z "$_CS_INVMEMO" ]; then _CS_INVPEND="$_CS_INVPEND$_run"; fi ;;
     esac
     if [ -z "$_w" ] && [ -z "$_s" ]; then break; fi
   done
@@ -2709,7 +2740,7 @@ cmd_segments_real(){
   _s="${_s//$_CS_SEP/ }"; _s="${_s//$_CS_WS/ }"
   _s="${_s//$_CS_ESC/ }"; _s="${_s//$_CS_EDQ/ }"
   _s="${_s//$_CS_ESQ/ }"; _s="${_s//$_CS_ESP/ }"
-  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""; _CS_INVMEMO=""
+  _CS_BUF=""; _CS_EXTRA=""; _CS_TAIL=""; _CS_INVMEMO=""; _CS_INVPEND=""; _CS_INVSEEN=0
   # [item 1] Lift double-quoted command substitutions BEFORE the scan and seed
   # the recursion queue with them; the loop below re-scans each (invoker rule
   # re-applied) exactly as it does an invoker's quoted argument. `_s` is the RAW

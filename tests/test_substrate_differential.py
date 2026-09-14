@@ -1655,6 +1655,41 @@ for _c, _g, _why in (
     differential(_g, bash(_c), "deny", "X-52 invoker memo, array phase: %s"
                  % _why)
 
+# [x54-wrapper-cost] THE SAME PHASE, WITH THE TOKEN AFTER THE INVOKER ARRIVING
+# AS A QUOTED RUN. Every row above spells that token BARE (`sh -c "..."`), and a
+# bare token reaches `_CS_TAIL` through `_cs_ops`, which appends to the tail and
+# the buffer identically. Only `_cs_scan`'s quoted-run append can EXTEND the
+# trailing word. A resume point that drops the tail's trailing whitespace then
+# fuses `sh` and `-c` into one word, and the walk no longer finds the invoker.
+# That spelling was a candidate fix for this item. On it, every row above stays
+# green while the first five rows below ALLOW.
+#
+# MEASURED 2026-09-13 on the emitted hook, dependency-gate, rc on HEAD 7f67027 /
+# that candidate / the corrected candidate: the first five rows are
+# 2 / 0 / 2, and the last two are 2 / 2 / 2. The SDK denies all seven. The
+# double-quoted-flag row is here because the discriminator is the QUOTED RUN,
+# not the quote character: it fuses exactly as the single-quoted rows do.
+for _c, _why in (
+        ("{ { { { sh '-c' 'pip install evilpkg'; }; }; }; }",
+         "four `{` reach the array phase and `'-c'` arrives as a quoted run"),
+        ("! ! ! ! sh '-c' 'pip install evilpkg'",
+         "the `!` spelling of the same phase"),
+        ("env A=1 B=2 C=3 sh '-c' 'pip install evilpkg'",
+         "a wrapper head and three assignments reach the same phase"),
+        ('{ { { { sh "-c" "pip install evilpkg"; }; }; }; }',
+         "a DOUBLE-quoted flag is a quoted run too"),
+        ("sudo a b c sh '-c' 'pip install evilpkg'",
+         "`sudo` with three words before the invoker"),
+        # CONTROLS, green on all three trees. They isolate the discriminator: a
+        # regression that also fails these is not this one.
+        ("env A=1 sh '-c' 'pip install evilpkg'",
+         "control: fewer than `_CS_LAZYMAX` transparent tokens, so the walk "
+         "decides in the lazy phase"),
+        ("env A=1 B=2 C=3 sh -c 'pip install evilpkg'",
+         "control: the same shape with the flag BARE")):
+    differential("dependency-gate", bash(_c), "deny",
+                 "x54-wrapper-cost, a quoted run after the invoker: %s" % _why)
+
 # THE `inv` ARM, which the rows above do not touch. All of them exercise the
 # `other`-with-no-wrapper write (`_CS_INVMEMO=1`); the `inv` write
 # (`_CS_INVMEMO=0`) has the same trailing-word exposure in the OTHER direction:
