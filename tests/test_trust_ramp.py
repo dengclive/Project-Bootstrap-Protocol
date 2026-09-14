@@ -416,8 +416,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # 78), graded `harmful` -- two correction commits pushed false claims to ORIGIN,
 # including a table quoting a figure that was never measured. The runbook's
 # step-10b "pin moved in the same commit".
+# +1 on 2026-09-14 for x54-wrapper-cost: the wrapper member of the X-54 cost class
+# closed (PR #104, merge 93af8c6, freeze exception 79) -- all three X-54 members
+# are now closed, though the class and leg (a) are not. Graded `harmful` by the
+# §10b "anything wrong reached origin" rule: a stale "9/9 on 088c8c4" mutation
+# count reached origin in 9999da3 while the set was already 12, caught by the
+# item's own step-8.3 review and fixed in c593bcf before merge. The runbook's
+# step-10b "pin moved in the same commit".
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 45, f"{len(es)} entries")
+      len(es) == 46, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
