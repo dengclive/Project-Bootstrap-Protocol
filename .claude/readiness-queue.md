@@ -329,22 +329,6 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   a shape the X-54 payloads never touched — cell D of that item's ablation says
   nothing about it. NOT MEASURED YET: measure before assuming it crosses.
 
-
-- **[ready] x54-wrapper-cost** · `CODE` · eligible: **yes**
-  **FILED 2026-08-31 at step 10 by `x54-completer-cost`.** The X-54 row records
-  this member and measures it; **no queue row has ever carried it**, so nothing
-  was scheduled to do it. `sudo` + 2,000 quoted runs is cap-legal at 80,022 B /
-  4,000 jump targets and was measured at **167.15 s** carrying a would-otherwise
-  -DENY tail — killed at the 60 s ceiling, fail-OPEN, execution-proven under
-  `x54-deny-shape`. Untouched by the completer fix: it crosses through
-  `_cs_isinv`, not the install-head candidate loop.
-  **Read the X-54 row before planning — it carries why X-52's memo cannot serve
-  this class:** a WRAPPER head sets `_seen=1`, which is the arm that stops the
-  walk deciding ON A TOKEN, so it decides by EXHAUSTION and an exhausted answer
-  must not be cached. Overlaps `shell-walk-residual-superlinear` (B) on
-  mechanism; that row is scoped to the brace-glue shape and `_ckey`, this one to
-  the wrapper class. **Check before planning whether they should be merged.**
-
 ## B — makes shipping-with-known-risk honest
 
 - **[ready] shell-walk-residual-superlinear** · `CODE` · eligible: **yes**
@@ -457,6 +441,20 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
 **Batch these.** One branch, one PR, one review, one checkpoint. They are
 separate items only because they were discovered separately.
 
+- **[ready] x54-wrapper-emitted-comments-stale** · `EMITTED` · eligible: **yes**
+  **FILED 2026-09-14 at step 10 by `x54-wrapper-cost`, found by its step-8.3
+  review.** The shared-header comments shipped in all 13 emitted hooks describe
+  the walk from BEFORE this fix: `_cs_isinv`'s seed comment says it reads
+  `$_CS_TAIL` (it now seeds `$_CS_INVPEND`), and the exhaustion comments name
+  only the `_seen=1` entrance (there are two — the `_seen=0` head-transparent
+  tail this item added rows for). The new `_CS_INVPEND` block also omits the
+  54.33 s jump-shape and calls the length half the "adjacent-run class" where
+  the jump half is adjacent runs too. Left in `x54-wrapper-cost` deliberately: a
+  comment fix in `lib/templates.py` re-baselines FIVE golden digests
+  (greenfield default/full_autonomous/design_steering + retrofit service/agent)
+  and needs its own freeze exception, so it must not ride a cost PR. Name the
+  code, not the line.
+
 - **[ready] prefix-run-record-layer** · `DOC` · **batch with `x58-table-render`,
   they touch the same rows** · scope `lib/cmdpos.py`, `lib/sdk_gates_template.py`,
   `lib/templates.py`, `tests/test_issue_fixes.py`,
@@ -507,6 +505,26 @@ separate items only because they were discovered separately.
   Step 4 needs a case proving the old form passed wrongly.
 
 ## Measurement residuals
+
+- **[ready] hook-deny-fixture-test-gate-ci-mirror** · `TEST-CONTRACT` · eligible: **yes**
+  **FILED 2026-09-14 by `x54-wrapper-cost`, named by its step-7 completeness
+  critic.** Every fixture in the shared-header cost/verdict tests sets
+  `commands.test`/`ci_local` to `true`, so `test-gate` and `ci-mirror` never
+  DENY, and no row ever observed either hook's verdict on the quoted-flag shapes
+  on the whitespace-dropping candidate — only `dependency-gate` and
+  `spec-gate-commit` (FAIL_CLOSED) were exercised. Add a fixture with `false`
+  so those two `PreToolUse`/`Bash` hooks can deny, then a ROW-0-style verdict
+  row for each. Small, no emission moves.
+
+- **[ready] mutation-expect-differential-rows** · `TEST-CONTRACT` · eligible: **yes**
+  **FILED 2026-09-14 by `x54-wrapper-cost`, named by its step-7 critic.** The
+  five quoted-run rows `b8b15df` added to
+  `tests/test_substrate_differential.py` read `2/0/2` on the whitespace-dropping
+  candidate — they DO catch it — but no mutation set names that suite in any
+  `expect`, so the gate never scores them. Add `test_substrate_differential.py`
+  to `array-pend-drops-ws`'s `expect` (or a note that the suite is deliberately
+  outside the gate). Belt-and-suspenders: `array-pend-drops-ws` is already caught
+  in two suites; this makes the differential's coverage gate-visible.
 
 - **[ready] e8-detector-counts-its-own-string** · `MEASUREMENT` · eligible: **yes**
   **FILED 2026-09-11 by `x54-arg-scanner-quadratic-and-fork`.** The runbook §6
@@ -581,6 +599,43 @@ the nine historical fail-closed sites (historical record); the PR-attribution
 defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
+
+**`x54-wrapper-cost` PR #104 `93af8c6` — the invoker walk resumes instead of
+restarting per quoted run.** Closed 2026-09-14. Freeze exception **79**. Graded
+**`harmful`** — see the ledger (a stale mutation-count reached origin and was
+caught by the item's own step-8.3 review before merge). Closes the **wrapper**
+member of the X-54 cost class; with the completer (77) and argument-scanner (78)
+members already closed, **all three X-54 members are now closed** — but the CLASS
+is not, and the leg is not proven, by closing members of it.
+
+**THE STEP-8 STORY IS THE COVERAGE STEP 7 PROVED MISSING.** The first-round PR
+excluded two edits from its mutation set as "unreachable" / "no shape found";
+step 7 refuted both and re-derivation confirmed a third cost blind spot. All
+three are bypasses now: `scan-restart-no-pend` (`_cs_scan`'s separator branch
+fires at recursion depth over the un-scrubbed `_CS_EXTRA`) and `reset-no-pend`
+(the `$'..'`-resolved second `cmd_segments` scan reuses a stale resume point)
+each flip a cap-legal DENY→ALLOW → ROW 0 `0h`/`0i`/`0j`; `other-arm-restarts`
+restores the quadratic on decider padding (`sudo`+2,642×`'a'` → killed at 60 s)
+which the `'{'`-padded rows 1/3 cannot see → decider-padded ROW 6. Mutation set
+`.claude/mutations/x54-wrapper-cost.json` **9 → 12 bypasses**, SET-SHA256
+`ae0d97d3`, **MERGE GATE: PASS 12/12 + control**, re-run on the merged-fix bytes
+(`f102b4a`). A single-property runtime pin (ROW 5, suffix-of-tail) catches the
+position drops; the `_CS_INVSEEN` ways (0c/0g) are ROW 0's — complementary nets.
+
+**THE VERDICT DID NOT MOVE.** `main` stays **NOT PRODUCTION READY** on leg (a).
+The X-54 wrapper member closed, but leg (a) still stands on **X-37 Class B** and
+**`install-tail-path-scan-quadratic`** (both separate, neither an X-54 member),
+and a class is not closed by closing its members. `docs/production-readiness.md`
+gains a dated layer saying exactly that. **NOT CLOSED at X-55's recorded size:**
+the jump shape at 80,022 B denies in 54.33 s (1.10× under the ceiling); the
+adjacent-run/length half is open and the fix costs there.
+
+**RESIDUALS FILED:** `x54-wrapper-emitted-comments-stale` (C, below),
+`hook-deny-fixture-test-gate-ci-mirror` and `mutation-expect-differential-rows`
+(Measurement residuals, below). Two one-line edits stay OUT of the set as
+findings, not proofs — `lazy-pend-dropped` and `ops-append-pend-unguarded`, no
+shape found. Record-only: `088c8c4`'s message says "Seven sites"; the emitted
+delta touches nine.
 
 **`x54-arg-scanner-quadratic-and-fork` PR #102 `01976cc` — three per-token costs
 out of the argument scanner.** Closed 2026-09-11. Freeze exception **78**. Graded

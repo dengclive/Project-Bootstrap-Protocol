@@ -1,5 +1,31 @@
 # Production-readiness analysis — `main`
 
+**X-54's WRAPPER MEMBER CLOSED, 2026-09-14 — THE VERDICT DOES NOT MOVE, AND THE
+CLASS IS NOT CLOSED BY CLOSING ITS LAST MEMBER.** `main` @ `93af8c6` is still
+**NOT PRODUCTION READY**, on leg (a) alone. `x54-wrapper-cost` (PR #104, freeze
+exception 79) made `_cs_isinv` resume its walk from a saved suffix of `_CS_TAIL`
+instead of re-walking once per quoted run: the queue row's own shape (`sudo` +
+2,000 spaced runs, 80,022 B / 4,000 jumps) went from KILLED at the 60 s ceiling —
+a live fail-open, since a cancelled PreToolUse hook exits 124 and only exit 2
+blocks — to a deny in 16.24 s, and at the JUMP CAP (77,827 B / 8,190 jumps)
+25.42 s, 2.36× under. **With the completer (77) and argument-scanner (78) members
+already closed, all THREE members of the X-54 cost class are now closed** — but a
+class is not closed by closing its members, and the boundary is not proven by
+closing a class. **Leg (a) — the emitted gates are not yet a proven boundary —
+still stands on `X-37 Class B` and `install-tail-path-scan-quadratic`, neither of
+which is an X-54 member.**
+
+**WHAT THIS DOES NOT CLOSE, SO IT IS NOT READ AS MORE THAN IT IS.** X-55's jump
+shape at ITS RECORDED SIZE (80,022 B / 8,000 jumps) denies in 54.33 s — 1.10×
+under the ceiling on an idle box, i.e. fail-open under any contention, not a
+margin — and the adjacent-run/length half of X-55 stays open, with the fix
+costing ~1.1× there. **This item also carried the coverage its own first round
+missed:** two edits the PR had excluded as "unreachable"/"no shape found" were
+live removable fail-opens (`scan-restart-no-pend`, `reset-no-pend`), found by the
+step-7 review and pinned in step 8 (mutation set 9→12, MERGE GATE PASS 12/12) —
+the reusable half is that a "no shape found" exclusion is a claim, not a fact, and
+review bounds the enumeration the gate cannot.
+
 **X-54's ARGUMENT-SCANNER MEMBER CLOSED, 2026-09-11 — THE VERDICT DOES NOT
 MOVE.** `main` @ `01976cc` is still **NOT PRODUCTION READY**, on leg (a) alone,
 and this layer exists to say what changed WITHOUT letting it read as more than it
