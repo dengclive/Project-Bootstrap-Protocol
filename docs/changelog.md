@@ -184,7 +184,10 @@ each hook in its own session with its whole process group killed at the timeout:
 | `sudo` + 2,642 × `'{'` (`_seen=1`) | 10,590 | killed at 60 s (rc 124) | 4.13 s (rc 2) |
 | `!` + 2,642 × `'{'` (`_seen=0`) | 10,587 | killed at 60 s (rc 124) | 3.48 s (rc 2) |
 | `!` + 900 × `'{'`, against `'z'` at identical bytes | 3,619 | 27.06× | 1.32× |
-| X-55 length shape, adjacent runs, N = 1,200 | 20,430 | 8.83 s | 9.38 s |
+
+(The adjacent-run shape the fix does NOT speed up is measured under *What this
+does NOT close* below, min of 3, so it is not duplicated with a second sampling
+here.)
 
 The shapes the record names, single runs under the same 60 s ceiling:
 
@@ -207,27 +210,35 @@ candidate every cost row stayed green, and so did every verdict row the suite
 already had. The differential's eight array-phase rows all spell the flag bare.
 It was caught by plan review, not by a test.
 
-**So the rows come in two kinds.** Rows 1-4 in `tests/test_issue_fixes.py` are cost
-rows. ROW 0 is eight verdict rows, each red under one one-line edit of the fix
-that was found by mutating it. ROW 5 wraps a copy of the emitted hook and checks
-the suffix property at every walk entry: 0 violations over 154 armed entries on
-this change, 117 violations over 156 on the candidate that failed open. The
-differential gained five quoted-run rows and two controls, and
-`tests/test_hook_behavior.py` gained the same class on `spec-gate-commit`.
+**So the rows come in two kinds.** Rows 1-4 and 6 in `tests/test_issue_fixes.py`
+are cost rows; row 6 pads with decider words, which the `'{'`-padded rows 1-3
+cannot reach. ROW 0 is ten verdict rows — each red under at least one one-line
+edit of the fix in the mutation set — and a control that is red under none. ROW 5
+wraps a copy of the emitted hook and checks the suffix property at every walk
+entry: 0 violations over 173 armed entries on this change, 117 over 175 on the
+candidate that failed open. The differential gained five quoted-run rows and two
+controls, and `tests/test_hook_behavior.py` gained the same class on
+`spec-gate-commit`.
 
 **Behaviour unchanged, checked rather than argued.**
-`tests/test_substrate_differential.py` reads 4,247 / 0 on both trees, and the 33
-probe commands built for this change read the same rc on both. Hook bodies move
+`tests/test_substrate_differential.py` reads 4,247 / 0 on both code trees with
+this PR's differential rows (this PR adds 7; 7f67027's own file is 4,240), and the
+33 probe commands built for this change read the same rc on both. Hook bodies move
 11 / 15 / 11 (greenfield) and 11 / 15 (retrofit), every one a hook; nothing is
 added or removed, action counts are unchanged at 57 / 69 / 59 and 79 / 93, and
 `gates.py` does not move.
 
-**Mutation set** `.claude/mutations/x54-wrapper-cost.json`: nine bypasses and one
-control. The full gate on `088c8c4` reads **MERGE GATE: PASS**: all nine bypasses turn a
-named check red, and the control escapes both behavioural suites. Four further one-line edits are not in the set because nothing
-sees them: one edits a branch its own comment calls unreachable, and for the other
-three (`reset-no-pend`, `lazy-pend-dropped`, `ops-append-pend-unguarded`) no shape
-was found that needs the site, which is not proof that none exists.
+**Mutation set** `.claude/mutations/x54-wrapper-cost.json`: twelve bypasses and one
+control (SET-SHA256 `ae0d97d3`). The full gate on `f102b4a` reads **MERGE
+GATE: PASS**: all twelve bypasses turn a named check red, and the control escapes
+both behavioural suites. **Two** further one-line edits are not in the set because
+no shape catches them — `lazy-pend-dropped` and `ops-append-pend-unguarded` — which
+is a finding, not proof the sites are dead. `scan-restart-no-pend` and
+`reset-no-pend` were excluded on that same ground until step 7 refuted it:
+`_cs_scan`'s separator branch fires at recursion depth over the un-scrubbed
+`_CS_EXTRA`, and the `$'..'`-resolved second `cmd_segments` scan reuses a stale
+resume point, so each flips a cap-legal deny to an allow and both are bypasses now
+(ROW 0 `0h`/`0i`).
 
 **A test-harness defect, found on the way.** `subprocess.run(timeout=)` kills only
 the `bash` it started. On a base-tree X-54 shape the hook's forked child outlived
