@@ -4632,13 +4632,16 @@ for _tag, _cmd, _want, _why in (
           "0g reads 2 when a separator leaks the previous segment's wrapper "
           "state. Each names one way to get the walk's saved resume point wrong")
 
-# ROW 5 - THE RESUME POINT IS A SUFFIX OF THE TAIL, CHECKED AT RUNTIME. ROW 0
-# names the ways found so far, one command each. This row asserts the property
-# they share, on every `_cs_isinv` entry across a corpus: while the memo is
-# empty, `_CS_TAIL` must END WITH `_CS_INVPEND`. A resume point that LEADS the
-# tail skips words the walk never classified. The source-text pins in
-# `test_composition.py` match one spelling of each write; this row checks the
-# property itself, on whatever spelling the hook carries.
+# ROW 5 - THE RESUME POINT IS A SUFFIX OF THE TAIL, CHECKED AT RUNTIME. On every
+# `_cs_isinv` entry across a corpus, while the memo is empty, `_CS_TAIL` must END
+# WITH `_CS_INVPEND`. A resume point that LEADS the tail skips words the walk
+# never classified. This is ONE property - the resume POSITION - so it catches
+# only the ways that move that position wrong. It is BLIND to the ways that get
+# `_CS_INVSEEN` wrong (rows 0c and 0g, measured 0 violations): those change a
+# verdict while the suffix still holds, and ROW 0's verdict rows are what catch
+# them. So ROW 5 and ROW 0 are complementary, not the same net. The source-text
+# pins in `test_composition.py` match one spelling of each write; this row checks
+# the position property itself, on whatever spelling the hook carries.
 # The hook is copied and wrapped, never edited in place, and ARMED counts the
 # entries where a resume point was actually set, so a tree that never sets one
 # cannot pass by saying nothing.
