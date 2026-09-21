@@ -674,8 +674,11 @@ def not_words(words, cls: str) -> str:
     gate goes silently permissive. glibc accepts it, so this box cannot see it.
     """
     assert cls.startswith("[^") and cls.endswith("]"), cls
+    words = tuple(words)
     root = {}
     for w in sorted(words):
+        if not (w.isascii() and w.isalnum()):
+            raise ValueError("not_words: word %r is not ASCII-alphanumeric" % w)
         d = root
         for ch in w:
             d = d.setdefault(ch, {})
