@@ -738,6 +738,83 @@ check("the spaced-brace guard CAN fail: bounding the word run drops "
       "bounding the word run no longer deletes spaced-brace runs, so these "
       "rows are not pinning what they claim to pin")
 
+# ==== REV3 Guard 2: not_words raise-predicate rows (prefix-run-language-guard) ====
+# ==========================================================================
+# Guard 2 (prefix-run-language-guard): not_words rejects a non-ASCII-alphanumeric
+# word with an explicit ValueError, at BUILD time.
+#
+# WHY THIS IS A GUARD, NOT A STYLE CHECK. not_words() does class arithmetic on
+# raw word bytes: minus() splices each trie edge character straight into the
+# negated class `[^/ ...kids...]`. A word carrying a class metacharacter
+# corrupts the emitted regex, and the corruption is a SILENT fail-open on the
+# shell substrate: a `[` opens a bracket sub-expression that is never closed,
+# so bash `[[ =~ ]]` returns 2, the surrounding `if` reads 2 as false, and the
+# gate goes permissive (measured: word "a[b" -> exit 2, "invalid regular
+# expression ... Unmatched ["). The SDK substrate re.compile()s the same string
+# and raises instead. A `-` between two spliced bytes silently forms a
+# character RANGE and widens the excluded set with no error at all.
+#
+# not_words is called ONCE, with ALL_PREFIXES (all clean), so there is no live
+# fail-open today. The guard converts the NEXT wrapper word that is not clean
+# from a silent build-time corruption into a loud build-time ValueError. It
+# moves zero emitted bytes (test_greenfield_golden stays 13/0, digests
+# unchanged), so it needs no freeze exception.
+#
+# RAISE, NOT ASSERT (D4). The rows below pin the exception TYPE (ValueError),
+# not merely "some exception". An assert-based guard raises AssertionError and
+# is stripped under -O / PYTHONOPTIMIZE, so a type-pinned row reddens on the
+# assert form as well. (Re-derived: no run path in this repo invokes python
+# with -O or sets PYTHONOPTIMIZE; every shebang is plain `python3`.)
+# ==========================================================================
+_G2_CLS = "[^/ ]"                      # the `_seg` class not_words is really called with
+
+
+def _g2_raises(words):
+    """True iff not_words rejects `words` with a ValueError (the guard fired)."""
+    try:
+        cmdpos.not_words(words, _G2_CLS)
+        return False
+    except ValueError:
+        return True
+    except Exception:                  # AssertionError (assert form), re.error, ...
+        return False
+
+
+# One clean wrapper word ("env") always rides along so the trie has a real arm;
+# the second word is the one under test.
+check("not_words word predicate [raise]: name_hyphen",
+      _g2_raises(("env", "time-machine")))     # ASCII, NOT alnum  (hyphen)
+check("not_words word predicate [raise]: name_rbracket",
+      _g2_raises(("env", "time]x")))            # ASCII, NOT alnum  (])
+check("not_words word predicate [raise]: name_backslash",
+      _g2_raises(("env", "time\\x")))           # ASCII, NOT alnum  (\)
+check("not_words word predicate [raise]: name_lbracket",
+      _g2_raises(("env", "a[b")))               # ASCII, NOT alnum; the measured shell fail-open
+check("not_words word predicate [raise]: name_nonascii",
+      _g2_raises(("env", "timé")))         # alnum, NOT ASCII  (time-acute)
+check("not_words word predicate [raise]: name_empty",
+      _g2_raises(("env", "")))                  # ASCII, NOT alnum  (empty string)
+
+
+def _g2_iter_materialize():
+    """Regression pin for D5's `words = tuple(words)`.
+
+    HONEST SCOPE: production never passes a generator -- not_words is called
+    once, with the ALL_PREFIXES tuple -- so this row catches no live fail-open.
+    It pins that IF the guard is ever split into a SEPARATE pre-pass over
+    `words`, the words are materialised FIRST. Without that, the pre-pass drains
+    the generator, sorted(words) sees an empty set, the trie is empty, and the
+    sink `([^/ ][^/ ]*)` matches every word it was built to EXCLUDE. The
+    single-loop guard plus the tuple line holds this; the twoloop-reintroduced
+    mutation is exactly what breaks it.
+    """
+    r = cmdpos.not_words((w for w in ("ssh",)), _G2_CLS)
+    return re.fullmatch(r, "ssh") is None       # "ssh" is a word => must be EXCLUDED
+
+
+check("not_words word predicate [raise]: iter_materialize",
+      _g2_iter_materialize())
+
 # --------------------------------------------------------------------------
 # 2. The sampled composition sweep, at GATE level, on BOTH substrates.
 # --------------------------------------------------------------------------

