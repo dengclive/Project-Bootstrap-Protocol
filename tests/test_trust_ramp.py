@@ -423,8 +423,17 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # count reached origin in 9999da3 while the set was already 12, caught by the
 # item's own step-8.3 review and fixed in c593bcf before merge. The runbook's
 # step-10b "pin moved in the same commit".
+# [prefix-run-language-guard closeout, 2026-09-22] closed (PR #113, merge
+# adec611, NO freeze exception -- it emits no byte and moves no golden digest).
+# Graded `harmful` by the same 10b "anything wrong reached origin" rule, and it
+# is MILDER than the x54-wrapper instance above: the stale claim was a CI-status
+# sentence in the posted PR BODY, true when written and falsified 4 s later by
+# GitHub's own auto-trigger, caught by this item's step-7 review OF THE LIVE PR
+# and deleted before merge. Nothing wrong is in any commit or tree -- the object
+# store is clean, which 9999da3 above could not say. Pin moved 46 -> 47 in the
+# same commit, per runbook step 10b.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 46, f"{len(es)} entries")
+      len(es) == 47, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's

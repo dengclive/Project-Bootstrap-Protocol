@@ -1,5 +1,40 @@
 # Production-readiness analysis — `main`
 
+**THE COMMAND-POSITION LANGUAGE BECAME CHECKABLE, 2026-09-22 — THE VERDICT DOES
+NOT MOVE, AND MAKING A GAP VISIBLE IS NOT CLOSING IT.** `main` @ `adec611` is
+still **NOT PRODUCTION READY**, on leg (a) alone. `prefix-run-language-guard`
+(PR #113, **no freeze exception** — it emits no byte and moves no golden digest)
+landed the three guards PR #92 wrote and stripped. Only one is code:
+`not_words()` now raises `ValueError` at build time on a word that is not
+ASCII-alphanumeric, closing a path where a bracket metacharacter in a word set
+silently changed what the emitted pattern MEANS — bash's `regcomp` accepts
+`time\\x` and re-parses the group structure while Python's `re.compile` raises,
+so the SDK failed at import while the shell quietly matched something else. The
+other two guards needed no code; **what they lacked was a check that could go
+red**, and that is what the other two commits are.
+
+**WHAT ACTUALLY CHANGED IS THE REPO'S ABILITY TO NOTICE.** Before this, the row
+that tracked it recorded a one-word mutation —
+`not_words(ALL_PREFIXES + ("foo",), _seg)` — flipping
+`A=1/foo pip install evilpkg` from deny to **ALLOW** on both substrates while
+**9,826 of 9,831 checks stayed green**, and the five that moved were opaque
+golden digests. There are now 52 enumerated bypasses and a control, and
+**MERGE GATE: PASS 52/52 + 1 control escaped** at the merged bytes.
+
+**WHAT IT DOES NOT CLOSE, STATED SO IT IS NOT READ AS MORE THAN IT IS.** **The
+gate bounds REMOVABILITY; only review bounds ENUMERATION**, and per-dimension
+coverage shipped **open by operator decision**. A mutation pins only the
+narrowing its own `find`/`replace` makes, so a set can pass 52/52 while a
+different member of a construct it covers walks through. Two such narrowings are
+measured, and were re-measured end to end on the real emitted hooks: the
+`_DIALECT` head class narrowed to exclude **digits**, and the glued-redirect fd
+class `[0-9]` narrowed to drop **`3`**, each flipping a real install deny →
+**ALLOW** on both substrates with every verdict row green. **Neither is a hole in
+the shipped tree** — both are dimensions nothing would catch a regression in —
+and both are tracked as `prefix-run-per-dimension-mutation-coverage`. **Leg (a)
+still stands on `x37-class-b` and `install-tail-path-scan-quadratic`**, neither
+touched here.
+
 **X-54's WRAPPER MEMBER CLOSED, 2026-09-14 — THE VERDICT DOES NOT MOVE, AND THE
 CLASS IS NOT CLOSED BY CLOSING ITS LAST MEMBER.** `main` @ `93af8c6` is still
 **NOT PRODUCTION READY**, on leg (a) alone. `x54-wrapper-cost` (PR #104, freeze
