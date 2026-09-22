@@ -85,59 +85,6 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   wrong, not the pins.
 
 
-- **[ready] prefix-run-language-guard** · `CODE` · eligible: **yes**
-  · full ceremony · scope `lib/cmdpos.py`, `tests/test_composition.py`,
-  `tests/test_substrate_differential.py`
-  **`CODE`, NOT `TEST-CONTRACT`, and the distinction is the runbook's own:**
-  bullet 2 below prescribes a predicate change in `lib/cmdpos.py`, and §2 puts
-  anything touching `lib/` at full ceremony. Two lenses is the level under which
-  these same additions drew six of ten MAJOR/BLOCKER findings.
-  **THE THREE THINGS PR #92 PROVED IT NEEDED AND DID NOT SHIP.** Its guards were
-  written, reviewed, and STRIPPED at E2 because the round that added them
-  diverged (20 → 22 findings, six of the ten MAJOR/BLOCKER ones on the additions
-  themselves). They are real; they belong here, where each gets a red row of its
-  own instead of riding a fix commit.
-  * **The language claim has no in-repo check that can go red.** `prefix_run`'s
-    assignment and glued-redirect arms stopped accepting one READING of a token
-    on the argument that the wrapper arm already takes it. A step-7 lens mutated
-    one call — `not_words(ALL_PREFIXES, _seg)` → `not_words(ALL_PREFIXES +
-    ("foo",), _seg)` — emitted a probe, and got `A=1/foo pip install evilpkg`
-    deny → **ALLOW** on both substrates while **9,826 of 9,831 checks stayed
-    green — exactly 5 move**, and all five are opaque golden digests, which is
-    what a freeze exception re-baselines. (A figure of "8,658" circulated during
-    the item; it counts a subset of suites and is withdrawn.) The stripped shape was 18 rows at the regex plus a
-    calibration applying that exact mutation; **a step-8 lens then showed those
-    rows pin ONE substitution, not the class** — of four ordinary narrowings
-    tried, **two walked through with both suites green** (`noplus`, dropping
-    `[+]?`; and `asgbound`, bounding the assignment run). The other two are
-    caught, but only by the FULL differential and not by these rows:
-    `redbound` → 4,244/1, `pathbound` → 4,241/4. Any row taken here must cover
-    the class, not the one mutation.
-  * **`not_words` does class arithmetic on raw word bytes.** `minus()` appends
-    word characters straight into a bracket expression and nothing guards
-    `words`. Measured on this tree: `time-machine` forms a RANGE and silently
-    rejects `timeXy`/`time0y`/`timeAy`/`time_y`/`timeZy`; `time]x` closes the
-    class early; `time\\x` makes the pattern uncompilable **in Python** -- bash's
-    `regcomp` accepts it and re-parses the group structure instead, because
-    in ERE `\\(` is a literal `(`, so the SDK fails at `gates.py` import
-    while the shell silently changes what the pattern means. The "returns 2
-    and reads as false" consequence belongs to the NULL-ALTERNATIVE hazard,
-    not this one. **`isalnum()` IS NOT THE PREDICATE**: it admits non-ASCII, and a
-    bracket expression carrying one is locale-dependent in bash and not in
-    Python — a lens drove `timç` to `A=1/timé pip install evilpkg` denying under
-    `LC_ALL=C.UTF-8` and **ALLOWING under `LC_ALL=C`** on the shell while the
-    SDK denied. `_w.isascii() and _w.isalnum()`.
-  * **Shell verdict coverage on the changed arms is uncharacterised, and TWO
-    attempts to describe it were wrong in OPPOSITE directions** — first "not
-    differentiated by this item" (false), then "pinned by the shell control each
-    cost row carries" (also false: the control asserts `deny` for every row
-    including the `foo` controls, so it is invariant to the arm's reading, and
-    `interpreter_word`'s two narrowed scans are reached by no cost payload —
-    none contains a `$`, a backtick or an interpreter word). PR #92 ships the
-    third attempt, which states only the measurements. Real coverage exists in
-    the `differential()` and `_AMB_LANG` rows; **naming it precisely is the
-    work**, and it is why this bullet is a row rather than a sentence.
-
 - **[ready] pipe-rule-url-pipe-cubic** · `CODE` · eligible: **yes** · full
   ceremony · **taken 2026-08-23, worked to step 4, CLOSED OUT WITH NO FIX —
   PR #90, merge `36fef02`. The defect STANDS and this row stays in A; only the
@@ -538,6 +485,66 @@ separate items only because they were discovered separately.
   "system"` and `subtype == "model_refusal_fallback"` — calibrated here against a
   known-positive session (`339bedbb`) so the negative is not vacuous.
 
+- **[ready] e8-detector-blind-on-sidechains** · `MEASUREMENT` · eligible: **yes**
+  **FILED 2026-09-22 by `prefix-run-language-guard`. This is the FALSE-NEGATIVE
+  half; `e8-detector-counts-its-own-string` above is the false-POSITIVE half, and
+  they are different defects.** Runbook §6 says E8 reads the **top-level**
+  transcript because §4 shows that is the only place a
+  `model_refusal_fallback` is recorded. The premise is refuted in the direction
+  that matters: **a sidechain reroutes with NO event at all**, so a fan-out lens
+  that latches degrades **silently and undetectably** — §4 already records
+  **0 of 14** events on a sidechain against **8,907** Fable sidechain turns in
+  this repo. A clean E8 delta therefore says nothing whatever about the agents,
+  only about the driver. **And `model_refusal_no_fallback` is invisible to the §6
+  grep entirely**, which matches only the `_fallback` spelling. The census that
+  does work is per-file `message.model` over the workflow's own agent
+  transcripts; this item used it and should not have had to invent it.
+
+- **[ready] mutation-gate-wall-clock-unbudgetable** · `MEASUREMENT`
+  · eligible: **yes**
+  **FILED 2026-09-22 by `prefix-run-language-guard`.** The gate is a **blocking
+  measurement of unbounded duration**: **6,412 s** at 53 entries on an idle box,
+  and it grows with the set. Three consequences were paid inside one item.
+  (1) **It cannot live inside a subagent** — a REV 5 gate agent started the run,
+  correctly refused to end its turn, and died at `signal 15` when its lifetime
+  expired. Only the top level outlives it, via a background task.
+  (2) **It cannot run beside a fan-out** — a contended wall-clock red inside its
+  private checkout can flip the control to CONTROL-FAIL and void the whole run.
+  (3) **Any prose fix restarts it.** Two runs were started and stopped in one
+  session because an edit landed after they began; the third ran on the tree that
+  shipped. Nothing in the runbook budgets for this, and §2's ceremony sizing does
+  not mention it.
+
+- **[ready] prefix-run-per-dimension-mutation-coverage** · `TEST-CONTRACT`
+  · eligible: **yes**
+  **FILED 2026-09-22 at step 10 by `prefix-run-language-guard`, promised in that
+  item's PR body and C3 commit message.** A mutation pins only the narrowing its
+  own `find`/`replace` makes. **"Gated" is a per-construct word; fail-opens are
+  per-dimension** — a set can pass 52/52 while a DIFFERENT member of a construct
+  it calls covered walks through. Two are measured and were re-measured on the
+  real emitted hooks during that item's live-PR review: the `_DIALECT` head class
+  narrowed to exclude **digits** (`9x/env pip install evil`) and the fd class
+  `[0-9]` narrowed to drop **`3`** (`3>x pip install evil`) each flip deny →
+  **ALLOW** on both substrates with every verdict row of
+  `tests/test_substrate_differential.py` green. Neither is a hole in the shipped
+  tree; both are dimensions nothing would catch a regression in.
+  **WHAT THE DESIGN HAS TO CLEAR, measured rather than assumed:**
+  * **One mutation per dimension does not scale.** The gate is **6,412 s** at 53
+    entries and grows with the set. See
+    `mutation-gate-wall-clock-unbudgetable`.
+  * **A row loop generated from the tuple under test cannot pin that tuple's
+    members** — the loop shrinks with it. A sweep must iterate a FIXED literal
+    alphabet or member list.
+  * **Sizing, regex-level and NOT a hook verdict:** excluding one printable
+    ASCII character from the `_DIALECT` head class and asking whether
+    `curl u | <c>x/sh` still matches, **89 of the 94** printable non-space
+    characters flip it (all but `$`, backtick, `(`, `{`, `|`; `(`/`{` are already
+    excluded). The shipped `[head_upper]` row can catch the exclusion of `A`
+    only.
+  * **NOT MEASURED AT ALL:** the arm C `(_asg|_red)` alt-drop at `lib/cmdpos.py`
+    :804, and the consumers' own constructs — `runners_regex`,
+    `install_head_tail`, `redirect_norm`.
+
 - **[ready] doc-citations-need-anchor-text** · `TEST-CONTRACT` · eligible: **yes**
   **FILED 2026-09-11 by `x54-arg-scanner-quadratic-and-fork`.**
   `tests/test_doc_citations.py` pins citations by LINE NUMBER, and
@@ -599,6 +606,75 @@ the nine historical fail-closed sites (historical record); the PR-attribution
 defect (fixed, `fc37aaa`); the `count.py` rule (fixed).
 
 ## Done
+
+**`prefix-run-language-guard` PR #113 `adec611` — the three guards PR #92 proved
+necessary and then stripped, each landed with a red row of its own and a mutation
+set that proves it load-bearing.** Closed 2026-09-22. **No freeze exception** —
+the change emits no byte, moves no golden digest, and needs none. Graded
+**`harmful`** — see the ledger; a status claim that the act of opening the PR
+falsified reached origin in the PR body and was caught by this item's own step-7
+review of the LIVE PR, before merge.
+
+**ONLY ONE THIRD OF IT IS CODE, AND THAT THIRD IS THREE LINES.** `lib/cmdpos.py`
++3: `not_words()` materializes `words` with `tuple()` and raises `ValueError` at
+build time on any word failing `w.isascii() and w.isalnum()`. A raise, not an
+assert, so `python -O` cannot strip it. Measured on the parent tree with the word
+`a[b`: bash `[[ =~ ]]` returns **2** — which the emitted hooks read as a
+NON-match — and Python's `re.compile` raises. `ALL_PREFIXES` is the only word set
+passed in and all **20** entries pass, so the emitted regex is byte-identical and
+no golden digest moves. **Guards 1 and 3 needed no code at all**: what they
+lacked was a check that could go red, and that is the other two commits.
+
+**THE RED CAME FIRST AND IS PASTED INTO THE COMMIT.** `tests/test_composition.py`
++77 and `tests/test_substrate_differential.py` +481 land the Guard 2 predicate
+rows and the verdict rows for the command-position language that `prefix_run()`
+and `interpreter_word()` build. `python3 tests/test_composition.py` on that
+commit is **157 passed, 6 failed** — exactly the six predicate rows — and
+**163 / 0** on the next.
+
+**THE GATE BOUNDS REMOVABILITY, NOT ENUMERATION, AND THE RECORD SAYS SO IN THOSE
+WORDS.** `.claude/mutations/prefix-run-language-guard.json` (+509) carries **52
+bypasses and 1 control**, registered by `sha256` in `_REQUIRED_SETS`
+(`tests/test_trust_ramp.py` +30). **MERGE GATE: PASS — 52/52 bypasses turn a
+NAMED check red; 1 control escaped as required**, SET-SHA256 `fd60c5a4…`, rc 0 in
+**6,412 s**, zero ESCAPED / INCONCLUSIVE / PARTIAL / ROTTED. It ran at tree
+`f1547686`, which **is** `d66f4b1`'s root tree, so the run binds the exact bytes
+that merged — a content-addressed chain, not a four-day-old proxy.
+
+**PER-DIMENSION COVERAGE IS OPEN, AND SHIPPED OPEN BY OPERATOR DECISION.** A
+mutation pins only the narrowing its own `find`/`replace` makes; other members,
+alternatives and bounds of the same construct are NOT pinned. Two escapes are
+measured and disclosed in the PR body, and both were re-measured end-to-end
+during the live-PR review on the real emitted hooks: the `_DIALECT` head class
+narrowed to exclude **digits** (`9x/env pip install evil`) and the glued-redirect
+fd class `[0-9]` narrowed to drop **`3`** (`3>x pip install evil`) each flip
+deny → **ALLOW** on BOTH substrates with every verdict row of
+`tests/test_substrate_differential.py` green. **Neither is introduced here** —
+both are unpinned dimensions of guards `main` already carried, so what is open is
+the COVERAGE, not a live hole in the shipped tree. Filed as
+`prefix-run-per-dimension-mutation-coverage`.
+
+**THE VERDICT DID NOT MOVE.** `main` stays **NOT PRODUCTION READY** on leg (a).
+This item makes the command-position language claim *checkable* — it was not
+before, and the row this entry replaces recorded a one-word mutation
+(`not_words(ALL_PREFIXES + ("foo",), _seg)`) flipping an install deny → ALLOW on
+both substrates while **9,826 of 9,831 checks stayed green**. But a boundary is
+not proven by making its absence visible. Leg (a) still stands on **`x37-class-b`**
+and **`install-tail-path-scan-quadratic`**, neither touched here. **A holds 8
+`[ready]` rows** after this closure — counted from the section, not from memory.
+
+**THE ROW THIS REPLACES NAMED 3 OF 5 SCOPE GLOBS** (`lib/cmdpos.py`,
+`tests/test_composition.py`, `tests/test_substrate_differential.py`), omitting
+`.claude/mutations/prefix-run-language-guard.json` and `tests/test_trust_ramp.py`
+— a round-5 MINOR, discharged here rather than carried: the shipped scope is
+those **five** files, `git diff --name-only 0e6108c..d66f4b1`, **+1,100 / -0**.
+
+**RESIDUALS FILED:** `prefix-run-per-dimension-mutation-coverage`,
+`e8-detector-blind-on-sidechains` and `mutation-gate-wall-clock-unbudgetable`
+(all under Measurement residuals, below). **Record-only, noted not filed:** the
+merged `#104` and `#105` carry commits attributed to **Opus 4.8** against runbook
+§4's "Opus 5 drives every step" — true of those items, not of this one, and not
+this item's to fix.
 
 **`x54-wrapper-cost` PR #104 `93af8c6` — the invoker walk resumes instead of
 restarting per quoted run.** Closed 2026-09-14. Freeze exception **79**. Graded
