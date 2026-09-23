@@ -592,6 +592,17 @@ _REQUIRED_SETS = {
         "digest_suites": ["test_greenfield_golden.py", "test_retrofit.py"],
         "suites": ["test_composition.py", "test_substrate_differential.py"],
     },
+    "pipe-rule-url-pipe-cubic.json": {
+        "sha256": "effe34d85360230c7236f95c7629729b"
+                  "cb9f7d38ad8d9cae07a7923baaa0cfa8",
+        "bypasses": ["e0-strict", "no-segment-split", "split-semicolon-only",
+                     "split-amp-only", "downloader-dropped", "first-pipe-only",
+                     "tail-unanchored", "latest-end", "pipe-from-seg-start",
+                     "all-sites-reverted", "one-site-reverted"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": ["test_greenfield_golden.py"],
+        "suites": ["test_substrate_differential.py"],
+    },
 }
 # [2026-09-09 round-7] Walk, and do not filter by extension. `os.listdir` plus
 # `endswith(".json")` made a set INVISIBLE to both this check and anti-rot if it

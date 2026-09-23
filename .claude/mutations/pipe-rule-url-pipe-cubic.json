@@ -1,0 +1,136 @@
+{
+  "guard": "pipe-rule-url-pipe-cubic: the SDK decides `_PIPE_TO_SHELL.search(s)` with `_pipe_to_shell(s)` - per `[^;&]` segment, the earliest downloader END, then the anchored `_PIPE_TAIL` once per pipe after it - and no runtime code searches `_PIPE_TO_SHELL`",
+  "target": "lib/sdk_gates_template.py",
+  "guard_site": "lib/sdk_gates_template.py, `_pipe_to_shell` and `_PIPE_SEGS` in _STATIC_BODY just above `_scan_install_line`, and the five call sites in `_scan_install_line`. NAMED, NOT NUMBERED.",
+  "digest_suites": [
+    "test_greenfield_golden.py"
+  ],
+  "why": [
+    "THE REWRITE MUST DECIDE THE SAME LANGUAGE AS THE REGEX IT REPLACES, AND MUST BE CALLED.",
+    "Nine bypasses change the language: each is caught by one DETERMINISTIC row in",
+    "tests/test_substrate_differential.py (an edge row or a per-downloader row), not",
+    "only by the seeded fuzz. Screened against the emitted gates.py before this set",
+    "was written: every one is red on its named row, and the unmutated module is",
+    "green on all of them.",
+    "Two bypasses put the cubic back without changing the language:",
+    "  * all-sites-reverted: the five call sites search `_PIPE_TO_SHELL` again.",
+    "    The cost row sees it (38.29 s CPU at ba6330b against a 10 s bound).",
+    "  * one-site-reverted: ONE site searches it. That alone may stay under the",
+    "    10 s bound on this payload, so the row that owns it is the source pin",
+    "    that no emitted code calls `_PIPE_TO_SHELL` at runtime.",
+    "EQUIVALENT MUTANTS LEFT OUT, with the reason: min-END -> min-START and",
+    "`s.find(w, a, b)` -> `s.find(w, a)`. No downloader contains `|`, `;` or `&`,",
+    "so neither changes an answer; the second only changes cost."
+  ],
+  "mutations": [
+    {
+      "id": "e0-strict",
+      "find": "j = s.find(\"|\", e0, b)",
+      "replace": "j = s.find(\"|\", e0 + 1, b)",
+      "why": "a pipe glued to the downloader's end is skipped: `curl|sh`",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl|sh'"
+      }
+    },
+    {
+      "id": "no-segment-split",
+      "find": "_PIPE_SEGS = re.compile(r\"[^;&]+\")",
+      "replace": "_PIPE_SEGS = re.compile(r\".+\", re.S)",
+      "why": "a downloader in an earlier `;` segment reaches a later pipe",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl u ; x | sh'"
+      }
+    },
+    {
+      "id": "split-semicolon-only",
+      "find": "_PIPE_SEGS = re.compile(r\"[^;&]+\")",
+      "replace": "_PIPE_SEGS = re.compile(r\"[^;]+\")",
+      "why": "`&` stops ending the window the regex's `[^;&]*` ends",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl u & x | sh'"
+      }
+    },
+    {
+      "id": "split-amp-only",
+      "find": "_PIPE_SEGS = re.compile(r\"[^;&]+\")",
+      "replace": "_PIPE_SEGS = re.compile(r\"[^&]+\")",
+      "why": "`;` stops ending the window",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl u | x ; y | sh'"
+      }
+    },
+    {
+      "id": "downloader-dropped",
+      "find": "        for w in _DOWNLOADERS:",
+      "replace": "        for w in sorted(_DOWNLOADERS)[1:]:",
+      "why": "one downloader (aria2c, first in sort order) is never looked for: the SDK-more-permissive direction",
+      "expect": {
+        "test_substrate_differential.py": "] aria2c: _pipe_to_shell"
+      }
+    },
+    {
+      "id": "first-pipe-only",
+      "find": "j = s.find(\"|\", j + 1, b)",
+      "replace": "j = -1",
+      "why": "only the first pipe after the downloader is tried",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl u | x | sh'"
+      }
+    },
+    {
+      "id": "tail-unanchored",
+      "find": "if _PIPE_TAIL.match(s, j):",
+      "replace": "if _PIPE_TAIL.search(s, j):",
+      "why": "the tail is searched, so it can start at a pipe in a later segment",
+      "expect": {
+        "test_substrate_differential.py": "edge 'curl u | x ; y | sh'"
+      }
+    },
+    {
+      "id": "latest-end",
+      "find": "if i >= 0 and (e0 < 0 or i + len(w) < e0):",
+      "replace": "if i >= 0 and (e0 < 0 or i + len(w) > e0):",
+      "why": "the LATEST downloader end is used, so a pipe between two downloaders is missed",
+      "expect": {
+        "test_substrate_differential.py": "edge 'wget u | sh curl'"
+      }
+    },
+    {
+      "id": "pipe-from-seg-start",
+      "find": "j = s.find(\"|\", e0, b)",
+      "replace": "j = s.find(\"|\", a, b)",
+      "why": "pipes are counted from the segment start, before the downloader",
+      "expect": {
+        "test_substrate_differential.py": "edge 'x | sh curl u'"
+      }
+    },
+    {
+      "id": "all-sites-reverted",
+      "find": "    if (_pipe_to_shell(norm)\n            or _pipe_to_shell(_xp_unquote(norm))\n            or _pipe_to_shell(_rn)\n            or _pipe_to_shell(_xp_unquote(_rn))\n            or (_pkok and _pipe_to_shell(_pk))):",
+      "replace": "    if (_PIPE_TO_SHELL.search(norm)\n            or _PIPE_TO_SHELL.search(_xp_unquote(norm))\n            or _PIPE_TO_SHELL.search(_rn)\n            or _PIPE_TO_SHELL.search(_xp_unquote(_rn))\n            or (_pkok and _PIPE_TO_SHELL.search(_pk))):",
+      "why": "the five call sites search the cubic regex again: same answers, cubic cost",
+      "expect": {
+        "test_substrate_differential.py": "SDK adjudicates in < 10s: downloader in every JSON value"
+      }
+    },
+    {
+      "id": "one-site-reverted",
+      "find": "    if (_pipe_to_shell(norm)\n",
+      "replace": "    if (_PIPE_TO_SHELL.search(norm)\n",
+      "why": "one call site searches the cubic regex again",
+      "expect": {
+        "test_substrate_differential.py": "no emitted code calls _PIPE_TO_SHELL at runtime"
+      }
+    },
+    {
+      "id": "control-inert-comment",
+      "control": true,
+      "find": "    # NOT LINEAR. Each tail probe still re-reads",
+      "replace": "    # Not linear. Each tail probe still re-reads",
+      "why": "a case change inside the item's own comment: no behaviour moves, so every behavioural suite must stay green",
+      "expect": {
+        "test_substrate_differential.py": null
+      }
+    }
+  ]
+}

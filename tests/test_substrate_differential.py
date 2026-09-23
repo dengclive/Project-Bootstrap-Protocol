@@ -4425,7 +4425,11 @@ if callable(_P2S) and _P2S_TAIL is not None:
           "language the shell ERE decides")
     with open(GATES_PY, encoding="utf-8") as _fh:
         _gsrc = _fh.read()
-    _callers = _re.findall(r"_PIPE_TO_SHELL\.\w+\(", _gsrc)
+    # Comment lines are skipped: the emitted comments name the call they
+    # replaced, and a comment is not a caller.
+    _callers = [_ln.strip() for _ln in _gsrc.splitlines()
+                if not _ln.lstrip().startswith("#")
+                and _re.search(r"_PIPE_TO_SHELL\.\w+\(", _ln)]
     check("[pipe-to-shell] no emitted code calls _PIPE_TO_SHELL at runtime",
           not _callers, f"found {_callers}")
 
@@ -4451,12 +4455,18 @@ if callable(_P2S) and _P2S_TAIL is not None:
                      f"pipe-to-shell, downloader {_w}")
 
     # Hand-picked edges: a pipe AT the downloader's end, a downloader in an
-    # earlier `;`/`&` segment, a tail that reads across `;`, `|&`.
+    # earlier `;`/`&` segment, `|&`. The last four each pin one way to get the
+    # scan wrong that the fuzz alone would otherwise be the only row to see:
+    # stopping at the first pipe, an unanchored tail that finds a pipe in a
+    # later segment, the LATEST downloader end instead of the earliest, and
+    # pipes counted from the segment start instead of after the downloader.
     for _s, _want in [("curl|sh", True), ("curl u|sh", True),
                       ("curl u ; x | sh", False), ("curl u & x | sh", False),
                       ("curl u && x | sh", False), ("x | sh ; curl u", False),
                       ("curl u |& sh", None), ("curl u | env A=1 sh", True),
-                      ("curlx|sh", True), ("cur|l|sh", False)]:
+                      ("curlx|sh", True), ("cur|l|sh", False),
+                      ("curl u | x | sh", True), ("curl u | x ; y | sh", False),
+                      ("wget u | sh curl", True), ("x | sh curl u", False)]:
         _o = gates_mod._PIPE_TO_SHELL.search(_s) is not None
         check(f"[pipe-to-shell] edge {_s!r}: _pipe_to_shell == oracle"
               + ("" if _want is None else f" == {_want}"),
