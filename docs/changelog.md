@@ -158,6 +158,83 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — a word set can no longer corrupt the pattern it is spliced into (2026-09-22)
+
+**No version bump** (fix, not surface; **no freeze exception** — it emits no
+byte and moves no golden digest). `prefix-run-language-guard`, the three guards
+PR #92 wrote, reviewed and STRIPPED at E2 when its round diverged. PR #113,
+merge `adec611`; the closeout is PR #114, merge `b3e030c`.
+
+**The defect.** `not_words()` splices each word of a word set RAW into a negated
+bracket expression, and nothing guarded `words`. A word carrying a bracket
+metacharacter therefore changes what the emitted pattern MEANS. Measured on the
+parent tree with the word `a[b`: bash's `[[ =~ ]]` returns **2**, which the
+emitted hooks read as a NON-match, while Python's `re.compile` raises. That is
+the fail-open direction on the shell side and an import-time crash on the SDK
+side — the same substrate split, from one unguarded argument.
+
+**Nothing is live today, and that is a fact about the caller, not the guard.**
+`ALL_PREFIXES` is the only word set passed in; all **20** entries are
+ASCII-alphanumeric, so the emitted regex is byte-identical and no golden digest
+moves. The guard closes the class before a future word set opens it.
+
+**The fix is three lines.** `not_words()` materializes `words` with `tuple()`
+and raises `ValueError` at build time on any word failing
+`w.isascii() and w.isalnum()`. A **raise, not an assert**, so `python -O` cannot
+strip it. `isalnum()` alone is not the predicate: it admits non-ASCII, and a
+bracket expression carrying one is locale-dependent in bash and not in Python.
+
+**The red came first and is pasted into the commit.** `tests/test_composition.py`
++77 and `tests/test_substrate_differential.py` +481 land the Guard 2 predicate
+rows and the verdict rows for the command-position language that `prefix_run()`
+and `interpreter_word()` build. `python3 tests/test_composition.py` on the first
+commit is **157 passed, 6 failed** — exactly the six predicate rows — and
+**163 / 0** on the second.
+
+**Mutation set** `.claude/mutations/prefix-run-language-guard.json`: **52
+bypasses and one control** (SET-SHA256 `fd60c5a4…`), registered by sha256 in
+`tests/test_trust_ramp.py`. The full gate reads **MERGE GATE: PASS — 52/52
+bypasses turn a NAMED check red; 1 control escaped as required**, rc 0 in
+6,412 s, with zero ESCAPED / INCONCLUSIVE / PARTIAL / ROTTED. It ran at tree
+`f1547686`, which **is** `adec611`'s own root tree, so the run binds the exact
+bytes that merged rather than a sibling of them.
+
+**Why this item existed at all: a green suite said nothing.** The queue row it
+closes recorded a one-word mutation — `not_words(ALL_PREFIXES + ("foo",), _seg)`
+— flipping `A=1/foo pip install evilpkg` from deny to **ALLOW on both
+substrates while 9,826 of 9,831 checks stayed green**, and the five that moved
+were opaque golden digests. The language claim had no in-repo check that could
+go red. It has 52 now.
+
+**What this does NOT close.** **The gate bounds REMOVABILITY; only review bounds
+ENUMERATION.** Per-dimension coverage ships **open, by operator decision**: a
+mutation pins only the narrowing its own `find`/`replace` makes, so a set can
+pass 52/52 while a different member of a construct it covers walks through. Two
+such narrowings are measured, and were re-measured end to end on the real
+emitted hooks during the review of the live PR: the `_DIALECT` head class
+narrowed to exclude **digits** (`9x/env pip install evil`) and the glued-redirect
+fd class `[0-9]` narrowed to drop **`3`** (`3>x pip install evil`) each flip a
+real install deny → **ALLOW** on both substrates with every verdict row of
+`tests/test_substrate_differential.py` green. **Neither is a hole in the shipped
+tree** — both are dimensions nothing would catch a regression in. Tracked as
+`prefix-run-per-dimension-mutation-coverage` in `.claude/readiness-queue.md`,
+which is the single point of truth for that class.
+
+**The record defect, written in rather than edited out.** The posted PR body
+closed with *"CI has not run on this branch yet"*. It was true when posted and
+GitHub auto-triggered the run **four seconds later**, so it sat false on origin
+for roughly 19 hours before the review of the LIVE PR caught it and it was fixed
+by deletion. Ledger entry **47** grades the item `harmful` under the §10b
+"anything wrong reached origin" rule and records the `corrected` counter-reading;
+nothing wrong is in any commit or tree. The reusable half: **do not write a
+status claim that your own next action will falsify** — four pre-push review
+rounds read that sentence while it was still true and none flagged the shape.
+
+**Suite 25 suites, 9,977 checks, 0 failed** on the merged tree; CI green on the
+PR head and on `main`. **THE VERDICT DID NOT MOVE:** `main` stays NOT PRODUCTION
+READY on leg (a), which still stands on `x37-class-b` and
+`install-tail-path-scan-quadratic`.
+
 ## Post-2.8.0 — the invoker walk resumes instead of restarting (2026-09-13)
 
 **No version bump** (fix, not surface; freeze exception **79**).
