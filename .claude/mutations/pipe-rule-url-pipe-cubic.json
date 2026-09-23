@@ -21,10 +21,20 @@
     "  * one-site-re-search: the same revert spelled `re.search(_PIPE_TO_SHELL,",
     "    norm)`. Step 7 found the first pin (a `_PIPE_TO_SHELL.<method>(` line",
     "    match) blind to it, with the cost row at 8.03 s against its 10 s bound;",
-    "    the pin now counts `_PIPE_TO_SHELL` NAME tokens, which sees any spelling.",
+    "    the pin now counts `_PIPE_TO_SHELL` NAME tokens. A string-keyed",
+    "    lookup such as `globals()[...]` is still not seen (SABOTAGE reach).",
     "EQUIVALENT MUTANTS LEFT OUT, with the reason: min-END -> min-START and",
     "`s.find(w, a, b)` -> `s.find(w, a)`. No downloader contains `|`, `;` or `&`,",
-    "so neither changes an answer; the second only changes cost."
+    "so neither changes an answer; the second only changes cost.",
+    "More from the pre-merge adversarial review of PR #116:",
+    "  * scan WINDOWS (finditer-window, finditer-start-window,",
+    "    segment-length-cap, pipe-window, pipe-window-64k): each let the SDK allow",
+    "    a long curl|sh the shell denies, with every behavioural suite green,",
+    "    until the long pipe-rule-only rows landed. pipe-window-64k is seen only",
+    "    by the rows padded to the length cap;",
+    "  * tail-flag: a flag on the `_PIPE_TAIL` emission kept the structural pin",
+    "    green (it compared .pattern only) and split shell/SDK verdicts on",
+    "    `curl u | SH`; the pin now compares flags too."
   ],
   "mutations": [
     {
@@ -133,6 +143,60 @@
       "why": "one call site reverted in a spelling the first pin could not see",
       "expect": {
         "test_substrate_differential.py": "no emitted code calls _PIPE_TO_SHELL at runtime"
+      }
+    },
+    {
+      "id": "finditer-window",
+      "find": "    for _m in _PIPE_SEGS.finditer(s):\n",
+      "replace": "    for _m in _PIPE_SEGS.finditer(s, 0, 16384):\n",
+      "why": "a scan window: segments past 16 KB are never looked at",
+      "expect": {
+        "test_substrate_differential.py": "long, pipe rule only: heredoc, then curl | bash, 20,000-byte pad"
+      }
+    },
+    {
+      "id": "segment-length-cap",
+      "find": "_PIPE_SEGS = re.compile(r\"[^;&]+\")",
+      "replace": "_PIPE_SEGS = re.compile(r\"[^;&]{1,4096}\")",
+      "why": "a segment-length cap: a long segment is cut, so a downloader and its pipe land in different pieces",
+      "expect": {
+        "test_substrate_differential.py": "long, pipe rule only: header between the downloader and the pipe, 20,000-byte pad"
+      }
+    },
+    {
+      "id": "pipe-window",
+      "find": "j = s.find(\"|\", e0, b)",
+      "replace": "j = s.find(\"|\", e0, min(b, e0 + 4096))",
+      "why": "a pipe-distance cap: a pipe more than 4 KB past the downloader is never tried",
+      "expect": {
+        "test_substrate_differential.py": "long, pipe rule only: header between the downloader and the pipe, 20,000-byte pad"
+      }
+    },
+    {
+      "id": "tail-flag",
+      "find": "\"_PIPE_TAIL = re.compile(%r)\\n\"",
+      "replace": "\"_PIPE_TAIL = re.compile(%r, re.I)\\n\"",
+      "why": "the tail compiled case-insensitively: the SDK denies `curl u | SH` where the shell allows it",
+      "expect": {
+        "test_substrate_differential.py": "with the same flags"
+      }
+    },
+    {
+      "id": "finditer-start-window",
+      "find": "    for _m in _PIPE_SEGS.finditer(s):\n",
+      "replace": "    for _m in _PIPE_SEGS.finditer(s, max(0, len(s) - 16384)):\n",
+      "why": "a scan window anchored at the END: segments before the last 16 KB are never looked at",
+      "expect": {
+        "test_substrate_differential.py": "long, pipe rule only: curl | sh, then text, 20,000-byte pad"
+      }
+    },
+    {
+      "id": "pipe-window-64k",
+      "find": "j = s.find(\"|\", e0, b)",
+      "replace": "j = s.find(\"|\", e0, min(b, e0 + 65536))",
+      "why": "a pipe-distance cap wider than every 20,000-byte pad: only the rows padded to the length cap see it",
+      "expect": {
+        "test_substrate_differential.py": "long, pipe rule only: header between the downloader and the pipe, pad at the length cap"
       }
     },
     {

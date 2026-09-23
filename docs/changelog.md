@@ -167,8 +167,8 @@ shipped no fix. **This narrows the item. It does not close it**; see *What
 this does NOT close* below.
 
 **The defect.** The SDK called `_PIPE_TO_SHELL.search` up to five times per
-command spelling, once on each of five derived strings (raw, quote-stripped,
-redirect-normalized, both, and parked). The rule is a
+command spelling, once on each of five derived strings (`norm` and four forms
+of it: quote-stripped, redirect-normalized, both, and parked). The rule is a
 downloader alternation, then `[^;&]*`, then a pipe and a tail naming an
 interpreter. The alternation has no word boundary, so every `http://` in the
 text is a downloader start, and `search` retries the whole rest of the rule
@@ -222,20 +222,22 @@ differential by:
 * one row per downloader, whose string holds no other downloader except for
   `wget2` and `https`, which contain `wget` and `http`;
 * fourteen segment and pipe edges;
-* a seeded fuzz over the five derived strings, comparing it with the regex on
-  18,989 strings, 581 of them positive.
+* long inputs where the pipe rule is the only reason to deny;
+* a seeded fuzz comparing it with the regex.
+Further rows run `lib/cmdpos.py` with non-literal downloaders and require it
+to refuse to build.
 
-**Mutation gate: PASS on `688da58`**, 12/12 edits caught and the control
-green (SET-SHA256 `a40f20a3…`). `.claude/mutations/pipe-rule-url-pipe-cubic.json`
-holds 12 edits of the fix and one control. Nine change the answer, and each is caught
-by a fixed edge or per-downloader row, not only by the fuzz. Three restore the
-cubic without changing any answer: all five call sites reverted is caught by
-the cost row, and one site reverted, in either of two spellings, by the pin
-on `_PIPE_TO_SHELL`. That second spelling, `re.search(_PIPE_TO_SHELL, norm)`,
-was found by step-7 review. The first version of the pin missed it, and the
-cost row saw only 8.03 s against its 10 s bound. An 11-edit version of the set
-passed on `16f5da6`. The gate bounds how removable the fix is, not how
-complete the list of edits is.
+**Mutation gate.** `.claude/mutations/pipe-rule-url-pipe-cubic.json` holds
+edits of the fix and one control, and each edit must turn a named check red.
+Most change the answer. The scan windows and a flag on `_PIPE_TAIL` among them
+passed every behavioural suite until the pre-merge review found them; the rows
+that catch them landed with them. Three restore the cubic without changing an
+answer: all five call sites reverted is caught by the cost
+row, and one site reverted, in either of two spellings, by the pin on
+`_PIPE_TO_SHELL`. The first version of that pin matched only
+`_PIPE_TO_SHELL.<method>(` and missed `re.search(_PIPE_TO_SHELL, norm)`. The
+gate bounds how removable the fix is, not how complete the list of edits
+is.
 
 **What this does NOT close.** Each tail probe still re-reads the
 whitespace-free run after its pipe, so a pipe-dense run is quadratic. At the
@@ -243,6 +245,10 @@ length cap it still crosses the ceiling: `http|` × 16,362 in a heredoc
 (81,855 B) takes 68.4 s and 69.2 s wall-clock on this change and still denies,
 after the hook would already have been cancelled. That factor is
 `pipe-run-glued-pipe-axis`, which stays open, as does this item's queue row.
+The rewrite also tries pipes left to right, where the regex, backtracking,
+tried them right to left. So the quadratic moved between two mirror shapes: a
+pipe-dense run with the interpreter last, which the regex denied at once, now
+pays it, and the run with the interpreter first no longer does.
 The shell substrate also crosses 60 s near its jump cap on the filed spelling
 (43,032 B, 8,190 jumps: 61.7 s and 62.3 s wall-clock). That cost is not this
 rule's: it stays at 55.1 s with no downloader and 58.4 s with no pipe.
