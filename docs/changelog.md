@@ -213,6 +213,16 @@ rows: one per downloader with no other downloader in the string, fourteen
 segment and pipe edges, and a seeded fuzz over the five strings the gate
 searches.
 
+**Mutation gate: PASS on `16f5da6`.** `.claude/mutations/pipe-rule-url-pipe-cubic.json`
+(SET-SHA256 `effe34d8…`) holds 11 one-line edits of the fix and one control.
+Each edit turns a named check red, and the control leaves every behavioural
+suite green. Nine edits change the answer, and each is caught by a fixed edge
+or per-downloader row, not only by the fuzz. Two restore the cubic without
+changing any answer: all five call sites reverted is caught by the cost row,
+and one site reverted by the pin that no runtime code calls `_PIPE_TO_SHELL`.
+The gate bounds how removable the fix is, not how complete the list of edits
+is.
+
 **What this does NOT close.** Each tail probe still re-reads the
 whitespace-free run after its pipe, so a pipe-dense run is quadratic. At the
 length cap it still crosses the ceiling: `http|` × 16,362 in a heredoc
