@@ -227,8 +227,10 @@ differential by:
 Further rows run `lib/cmdpos.py` with non-literal downloaders and require it
 to refuse to build.
 
-**Mutation gate.** `.claude/mutations/pipe-rule-url-pipe-cubic.json` holds
-edits of the fix and one control, and each edit must turn a named check red.
+**Mutation gate: PASS on `eb3dde6`**, 18/18 edits caught and the control
+green (SET-SHA256 `3ecc1a16…`). `.claude/mutations/pipe-rule-url-pipe-cubic.json`
+holds edits of the fix and one control, and each edit must turn a named check
+red.
 Most change the answer. The scan windows and a flag on `_PIPE_TAIL` among them
 passed every behavioural suite until the pre-merge review found them; the rows
 that catch them landed with them. Three restore the cubic without changing an
