@@ -4347,6 +4347,30 @@ _COST_ROWS = [
     # they are `install-tail-path-scan-quadratic`, a filed row of its own.
     ("glued brace run x the left edge of every scan, { x15000",
      _COST_HEAD + "{" * 15000 + " " + _COST_TAIL),
+    # [pipe-rule-url-pipe-cubic] THE DOWNLOADER-START FACTOR. `search` retries
+    # the whole `[^;&]*[|]` + tail from EVERY downloader start, and the
+    # alternation has no word boundary, so each `http://` in a JSON heredoc is
+    # one. Downloader starts x pipes x the whitespace-free run = cubic.
+    # MEASURED on the emitted dependency-gate at `ba6330b`: 38.29 s CPU for
+    # the first row, 17.56 s for the third; the controls take 0.01 s, so the
+    # cost is the downloader and not the length. The shell denies all four in
+    # about a second.
+    #
+    # THESE ROWS DO NOT CLAIM THE AXIS IS CLOSED. `_pipe_to_shell` removes the
+    # downloader-start factor only. A pipe-dense whitespace-free run still
+    # costs pipes x run inside `_PIPE_TAIL`, quadratic, and at the length cap
+    # it crosses the 60 s ceiling (`http|` x n, 81,885 B, 69.0 s at
+    # `ba6330b` with the fix patched in). That is `pipe-run-glued-pipe-axis`.
+    ("downloader in every JSON value, heredoc, {u:http://e/a|x}, x500",
+     "cat > f.json <<EOF\n" + "{u:http://e/a|x}," * 500
+     + "\nEOF\npip install evilpkg"),
+    ("CONTROL, no downloader, {u:hxxp://e/a|x}, x500",
+     "cat > f.json <<EOF\n" + "{u:hxxp://e/a|x}," * 500
+     + "\nEOF\npip install evilpkg"),
+    ("downloader run then pipe run, curl x300 + | x1500",
+     "curl " * 300 + "|" * 1500 + " " + _COST_TAIL),
+    ("CONTROL, slashes for pipes, curl x300 + / x1500",
+     "curl " * 300 + "/" * 1500 + " " + _COST_TAIL),
 ]
 
 for _lbl, _cmd in _COST_ROWS:
@@ -4373,6 +4397,96 @@ for _lbl, _cmd in _COST_ROWS:
     # thing.
     check(f"[dependency-gate] CONTROL: the shell denies the same string: {_lbl}",
           shell_verdict("dependency-gate", bash(_cmd)) == "deny")
+
+# --------------------------------------------------------------------------- #
+# [pipe-rule-url-pipe-cubic] `_pipe_to_shell` IS `_PIPE_TO_SHELL.search`, MINUS
+# ONE FACTOR. The SDK no longer searches `_PIPE_TO_SHELL`; it splits the string
+# into `[^;&]` segments, takes the EARLIEST downloader END in each (the
+# downloaders are plain literals, so `str.find` is the alternation), and tries
+# the anchored `_PIPE_TAIL` once per `|` after it. For a yes/no answer that is
+# the same language: `[^;&]*` can be empty, and any pipe after a later
+# downloader is also after the earliest one. The shell ERE is untouched.
+#
+# `_PIPE_TO_SHELL` stays emitted as the ORACLE for these rows and for the
+# calibration above, and for nothing else: the pin below fails if any runtime
+# code calls it again, because one caller puts the cubic back with every
+# verdict row green.
+_P2S = getattr(gates_mod, "_pipe_to_shell", None)
+_P2S_TAIL = getattr(gates_mod, "_PIPE_TAIL", None)
+check("[pipe-to-shell] the emitted module defines _pipe_to_shell and "
+      "_PIPE_TAIL", callable(_P2S) and _P2S_TAIL is not None)
+if callable(_P2S) and _P2S_TAIL is not None:
+    check("[pipe-to-shell] _PIPE_TO_SHELL is exactly the downloader "
+          "alternation + [^;&]* + _PIPE_TAIL",
+          gates_mod._PIPE_TO_SHELL.pattern
+          == "(?:" + "|".join(_cmdpos.DOWNLOADERS) + ")[^;&]*"
+          + _P2S_TAIL.pattern,
+          "the two builders drifted -- _pipe_to_shell no longer decides the "
+          "language the shell ERE decides")
+    with open(GATES_PY, encoding="utf-8") as _fh:
+        _gsrc = _fh.read()
+    _callers = _re.findall(r"_PIPE_TO_SHELL\.\w+\(", _gsrc)
+    check("[pipe-to-shell] no emitted code calls _PIPE_TO_SHELL at runtime",
+          not _callers, f"found {_callers}")
+
+    def _p2s_forms(s):
+        _rn = gates_mod._redirect_norm(s)
+        out = [s, gates_mod._xp_unquote(s), _rn, gates_mod._xp_unquote(_rn)]
+        _pk, _ok = gates_mod._xp_park(s)
+        if _ok:
+            out.append(_pk)
+        return out
+
+    # One row per downloader, with NO other downloader in the string: the
+    # corpus carries `http` in nearly every URL, which masks a dropped word.
+    # (`wget2` and `https` contain `wget` and `http`, so those two rows
+    # cannot tell a dropped long form apart; the other eight can.)
+    for _w in _cmdpos.DOWNLOADERS:
+        _s = _w + " -o- u | sh"
+        check(f"[pipe-to-shell] {_w}: _pipe_to_shell agrees with the oracle "
+              f"and says yes",
+              _P2S(_s) is True
+              and gates_mod._PIPE_TO_SHELL.search(_s) is not None)
+        differential("dependency-gate", bash(_s), "deny",
+                     f"pipe-to-shell, downloader {_w}")
+
+    # Hand-picked edges: a pipe AT the downloader's end, a downloader in an
+    # earlier `;`/`&` segment, a tail that reads across `;`, `|&`.
+    for _s, _want in [("curl|sh", True), ("curl u|sh", True),
+                      ("curl u ; x | sh", False), ("curl u & x | sh", False),
+                      ("curl u && x | sh", False), ("x | sh ; curl u", False),
+                      ("curl u |& sh", None), ("curl u | env A=1 sh", True),
+                      ("curlx|sh", True), ("cur|l|sh", False)]:
+        _o = gates_mod._PIPE_TO_SHELL.search(_s) is not None
+        check(f"[pipe-to-shell] edge {_s!r}: _pipe_to_shell == oracle"
+              + ("" if _want is None else f" == {_want}"),
+              _P2S(_s) == _o and (_want is None or _o == _want),
+              f"_pipe_to_shell={_P2S(_s)} oracle={_o}")
+
+    # Seeded fuzz over the five strings the gate actually searches. The
+    # alphabet is built from the EMITTED _DOWNLOADERS, so a dropped member is
+    # reachable here and not only in the rows above.
+    import random as _random
+    _rng = _random.Random(20260923)
+    _alpha = (sorted(gates_mod._DOWNLOADERS)
+              + ["http://x", " ", "|", "||", "|&", ";", "&", "&&", "\n",
+                 "sh", "bash", "python3", "${SHELL}", "`x`", "env ", "A=1 ",
+                 "sudo ", "2>&1", ">f", "(", "{", "/usr/bin/", "x", "-c",
+                 "'", '"', "\\", "tee a", " "])
+    _n_fz = _diff = _pos = 0
+    _first = None
+    for _ in range(4000):
+        _s = "".join(_rng.choice(_alpha) for _ in range(_rng.randint(1, 12)))
+        for _v in _p2s_forms(_s):
+            _o = gates_mod._PIPE_TO_SHELL.search(_v) is not None
+            _n_fz += 1
+            _pos += _o
+            if _P2S(_v) != _o:
+                _diff += 1
+                _first = _first or _v
+    check(f"[pipe-to-shell] seeded fuzz: _pipe_to_shell == oracle on "
+          f"{_n_fz} strings ({_pos} positive)",
+          _diff == 0 and _pos > 0, f"{_diff} disagree, first {_first!r}")
 
 # --------------------------------------------------------------------------- #
 # THE SELF-AMBIGUITY AXIS. The block above closes ONE axis -- token count at
