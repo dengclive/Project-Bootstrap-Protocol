@@ -54,9 +54,14 @@ possible place for an overclaim.
 - **The gates fail closed on THEIR OWN errors** — missing parser, unwritable
   filesystem, malformed input. **They do NOT fail closed when the runtime kills
   them**; see §1.
-- **Verdicts agree across the two substrates on the 4104 differential rows** —
-  that is agreement on the corpus, not a general equivalence claim, and several
-  open rows above are precisely where they diverge off-corpus.
+- **Verdicts agree across the two substrates on every row of the substrate
+  differential** — `tests/test_substrate_differential.py` is 4,291 checks on
+  this tree, and each differential row asserts `shell == sdk == want`. That is
+  agreement on the corpus, not a general equivalence claim, and several open
+  rows above are precisely where they diverge off-corpus. It is also agreement
+  on the ENUMERATED corpus only: two narrowings of the command-position language
+  are measured to flip a real install deny → allow on **both** substrates with
+  every verdict row green (see `prefix-run-per-dimension-mutation-coverage`).
 
 That is still the common case and still most of what goes wrong day to day. It
 is simply narrower than "these gates block secret reads."
