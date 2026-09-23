@@ -166,9 +166,9 @@ not an order). `pipe-rule-url-pipe-cubic`, attempt 2. Attempt 1 (PR #90)
 shipped no fix. **This narrows the item. It does not close it**; see *What
 this does NOT close* below.
 
-**The defect.** For each command line it scans, the SDK called
-`_PIPE_TO_SHELL.search` five times, once on each of five derived strings (raw,
-quote-stripped, redirect-normalized, both, and parked). The rule is a
+**The defect.** The SDK called `_PIPE_TO_SHELL.search` up to five times per
+command spelling, once on each of five derived strings (raw, quote-stripped,
+redirect-normalized, both, and parked). The rule is a
 downloader alternation, then `[^;&]*`, then a pipe and a tail naming an
 interpreter. The alternation has no word boundary, so every `http://` in the
 text is a downloader start, and `search` retries the whole rest of the rule
