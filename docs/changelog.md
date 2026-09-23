@@ -225,8 +225,9 @@ differential by:
 * a seeded fuzz over the five derived strings, comparing it with the regex on
   18,989 strings, 581 of them positive.
 
-**Mutation gate.** `.claude/mutations/pipe-rule-url-pipe-cubic.json` holds 12
-edits of the fix and one control. Nine change the answer, and each is caught
+**Mutation gate: PASS on `688da58`**, 12/12 edits caught and the control
+green (SET-SHA256 `a40f20a3…`). `.claude/mutations/pipe-rule-url-pipe-cubic.json`
+holds 12 edits of the fix and one control. Nine change the answer, and each is caught
 by a fixed edge or per-downloader row, not only by the fuzz. Three restore the
 cubic without changing any answer: all five call sites reverted is caught by
 the cost row, and one site reverted, in either of two spellings, by the pin
