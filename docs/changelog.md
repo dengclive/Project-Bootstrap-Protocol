@@ -158,6 +158,103 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the SDK pipe-to-shell rule stops restarting at every downloader (2026-09-23)
+
+**No version bump** (fix, not surface; freeze exception **81**; 80 is reserved
+for the queued `protocol-doc-snapshot-retire`, and the numbers are identifiers,
+not an order). `pipe-rule-url-pipe-cubic`, attempt 2. Attempt 1 (PR #90)
+shipped no fix. **This narrows the item. It does not close it**; see *What
+this does NOT close* below.
+
+**The defect.** The SDK called `_PIPE_TO_SHELL.search` up to five times per
+command spelling, once on each of five derived strings (`norm` and four forms
+of it: quote-stripped, redirect-normalized, both, and parked). The rule is a
+downloader alternation, then `[^;&]*`, then a pipe and a tail naming an
+interpreter. The alternation has no word boundary, so every `http://` in the
+text is a downloader start, and `search` retries the whole rest of the rule
+from each one. On an ordinary heredoc that writes URLs into a JSON file, the
+cost is downloader starts × pipes × the whitespace-free run, which is cubic. A
+deny that runs past the emitted 60 s ceiling is cancelled, and a cancelled
+hook does not block.
+
+**PR #92 did not change this.** The queue row expected #92's arm-overlap
+removal to make this axis linear. Re-measured on `ba6330b`, after #92, it is
+still cubic.
+
+**The fix.** `_pipe_to_shell(s)` gives the same yes/no answer without the
+downloader-start factor. It splits the string into `[^;&]` segments, takes the
+earliest downloader END in each, and matches the new `_PIPE_TAIL` anchored at
+each pipe after that point. The downloaders are plain literals holding no `;`,
+`&` or `|`, and `lib/cmdpos.py` now refuses to build if one is not, so
+`str.find` finds exactly what the alternation finds. The tail is the regex's
+own suffix, split out of `cmdpos.pipe_to_shell_regex` rather than written
+again.
+
+**SDK only.** The shell ERE is byte-identical, so no hook body moves. In each
+greenfield fixture exactly one body moves, `.claude/sdk_gates/gates.py`.
+`_PIPE_TO_SHELL` stays emitted as the oracle the tests compare against. A test
+counts its occurrences as code (Python NAME tokens, so comments and strings do
+not count) and fails on any beyond the definition.
+
+**Measured on the emitted SDK dependency-gate**, whole gate, wall-clock, one
+run per cell. Filed payload: `cat > f.json <<'EOF'`, a newline,
+`{"u":"http://e/a|x"},` × n, a newline, `EOF`, a newline, and
+`pip install evilpkg`:
+
+| n | bytes | `ba6330b` | this change |
+|---|---|---|---|
+| 200 | 4,245 | 2.001 s | 0.035 s |
+| 300 | 6,345 | 6.787 s | 0.075 s |
+| 400 | 8,445 | 15.805 s | 0.127 s |
+
+Every row denies on both trees. A second shape the review found is worse on
+`ba6330b`: `curl ` × 1,000 then `|` × 5,000 (10,000 B) takes 123.4 s for ONE
+call of the regex, and 0.13 s for one call of `_pipe_to_shell` (wall-clock,
+minimum of 3).
+
+**Same answers, checked rather than argued.** A prototype of `_pipe_to_shell`,
+run against the regex emitted at `ba6330b`, disagreed 0 times over 4,664 string
+literals from four test files, each in three spellings, and over 200,000
+random strings. Two review lenses found no disagreement either, one in a
+grammar-aware fuzz and an exhaustive run over short strings, one on this
+branch's emitted module. The shipped function is checked in the substrate
+differential by:
+* one row per downloader, whose string holds no other downloader except for
+  `wget2` and `https`, which contain `wget` and `http`;
+* fourteen segment and pipe edges;
+* long inputs where the pipe rule is the only reason to deny;
+* a seeded fuzz comparing it with the regex.
+Further rows run `lib/cmdpos.py` with non-literal downloaders and require it
+to refuse to build.
+
+**Mutation gate: PASS on `eb3dde6`**, 18/18 edits caught and the control
+green (SET-SHA256 `3ecc1a16…`). `.claude/mutations/pipe-rule-url-pipe-cubic.json`
+holds edits of the fix and one control, and each edit must turn a named check
+red.
+Most change the answer. The scan windows and a flag on `_PIPE_TAIL` among them
+passed every behavioural suite until the pre-merge review found them; the rows
+that catch them landed with them. Three restore the cubic without changing an
+answer: all five call sites reverted is caught by the cost
+row, and one site reverted, in either of two spellings, by the pin on
+`_PIPE_TO_SHELL`. The first version of that pin matched only
+`_PIPE_TO_SHELL.<method>(` and missed `re.search(_PIPE_TO_SHELL, norm)`. The
+gate bounds how removable the fix is, not how complete the list of edits
+is.
+
+**What this does NOT close.** Each tail probe still re-reads the
+whitespace-free run after its pipe, so a pipe-dense run is quadratic. At the
+length cap it still crosses the ceiling: `http|` × 16,362 in a heredoc
+(81,855 B) takes 68.4 s and 69.2 s wall-clock on this change and still denies,
+after the hook would already have been cancelled. That factor is
+`pipe-run-glued-pipe-axis`, which stays open, as does this item's queue row.
+The rewrite also tries pipes left to right, where the regex, backtracking,
+tried them right to left. So the quadratic moved between two mirror shapes: a
+pipe-dense run with the interpreter last, which the regex denied at once, now
+pays it, and the run with the interpreter first no longer does.
+The shell substrate also crosses 60 s near its jump cap on the filed spelling
+(43,032 B, 8,190 jumps: 61.7 s and 62.3 s wall-clock). That cost is not this
+rule's: it stays at 55.1 s with no downloader and 58.4 s with no pipe.
+
 ## Post-2.8.0 — a word set can no longer corrupt the pattern it is spliced into (2026-09-22)
 
 **No version bump** (fix, not surface; **no freeze exception** — it emits no

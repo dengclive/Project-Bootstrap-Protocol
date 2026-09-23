@@ -324,6 +324,16 @@ DOWNLOADERS = (
     "curl", "wget", "aria2c", "axel", "http", "https", "fetch",
     "lwp-download", "lwp-request", "wget2",
 )
+# [pipe-rule-url-pipe-cubic] The SDK finds these with `str.find`, not with the
+# alternation (see _pipe_to_shell in lib/sdk_gates_template.py). The two agree
+# only while every member is a plain literal, so a member that is not one must
+# stop the build rather than silently narrow the SDK's rule. A raise, not an
+# assert: `python -O` strips asserts.
+for _w in DOWNLOADERS:
+    if not (_w and all(c.isascii() and (c.isalnum() or c == "-")
+                       for c in _w)):
+        raise ValueError(f"DOWNLOADERS member {_w!r} is not a plain literal")
+del _w
 
 # Interpreters that will execute a script on stdin. A superset of the invoker
 # set: `python3 -`, `perl`, `ruby` are not shell invokers but do run what they
@@ -920,8 +930,22 @@ def pipe_to_shell_regex(space: str = " +", nonspace: str = "[^ ]",
     copy of the prefix alternation. See prefix_run for what the private copy
     cost.
     """
-    return ("(" + alt(DOWNLOADERS) + ")[^;&]*[|] *"
-            + prefix_run(space, nonspace)
+    return ("(" + alt(DOWNLOADERS) + ")[^;&]*"
+            + pipe_to_shell_tail(space, nonspace, ws))
+
+
+def pipe_to_shell_tail(space: str = " +", nonspace: str = "[^ ]",
+                       ws: str = "[[:space:]]") -> str:
+    """pipe_to_shell_regex from its `[|]` on: what must follow the pipe.
+
+    [pipe-rule-url-pipe-cubic] Split out so the SDK can match it ANCHORED at
+    each pipe instead of searching the whole rule. A search retries this tail
+    from every downloader start, and the alternation has no word boundary, so
+    every `http://` in a JSON heredoc is a start: downloader starts x pipes x
+    the whitespace-free run is cubic. The shell ERE is the same bytes as
+    before the split.
+    """
+    return ("[|] *" + prefix_run(space, nonspace)
             + interpreter_word(space, nonspace, ws))
 
 

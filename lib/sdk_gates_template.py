@@ -1712,7 +1712,8 @@ _SEGMENT = re.compile(r"[;&|()]")
 # Remote-script execution: same "unapproved software arrives" class, with no
 # inspectable package name, so it is always denied (shell parity).
 # [round-4 D16/D20] Defined in the emitted prelude from lib/cmdpos.py:
-#   _PIPE_TO_SHELL   _DOWNLOADERS   _INTERPRETERS   _REMOTE_RUN   _UV_WITH
+#   _PIPE_TO_SHELL   _PIPE_TAIL   _DOWNLOADERS   _INTERPRETERS   _REMOTE_RUN
+#   _UV_WITH
 # [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
 # every other value-taking flag left its argument to be read as a package
 # name and the gate blocked - naming the wrong token:
@@ -3076,6 +3077,45 @@ def _install_head_split(seg):
     return None, ""
 
 
+_PIPE_SEGS = re.compile(r"[^;&]+")
+
+
+def _pipe_to_shell(s):
+    # [pipe-rule-url-pipe-cubic] `_PIPE_TO_SHELL.search(s)`, as a yes/no,
+    # without its downloader-START factor. A search retries `[^;&]*[|]` + the
+    # tail from every downloader start, and the alternation has no word
+    # boundary, so every `http://` in a JSON heredoc is a start: starts x
+    # pipes x the whitespace-free run is cubic (the whole gate at 8,445 B:
+    # 15.8 s).
+    #
+    # The same language, because the downloaders are plain literals holding
+    # no `;`, `&` or `|` (cmdpos refuses to build otherwise): a pipe can follow
+    # a downloader through `[^;&]*` exactly when both sit in one `[^;&]`
+    # segment with the pipe at or after the downloader's END, and any pipe
+    # after a later downloader is also after the EARLIEST end. So: per
+    # segment, the earliest end, then the anchored tail once per pipe after
+    # it. The tail is not confined to the segment - neither is the regex's.
+    #
+    # NOT LINEAR. Each tail probe still re-reads the whitespace-free run after
+    # its pipe, so a pipe-dense run is quadratic: that is
+    # `pipe-run-glued-pipe-axis`, not this.
+    for _m in _PIPE_SEGS.finditer(s):
+        a, b = _m.span()
+        e0 = -1
+        for w in _DOWNLOADERS:
+            i = s.find(w, a, b)
+            if i >= 0 and (e0 < 0 or i + len(w) < e0):
+                e0 = i + len(w)
+        if e0 < 0:
+            continue
+        j = s.find("|", e0, b)
+        while j >= 0:
+            if _PIPE_TAIL.match(s, j):
+                return True
+            j = s.find("|", j + 1, b)
+    return False
+
+
 def _scan_install_line(line, approved):
     # Returns (reason, names): `reason` is a complete refusal message for
     # the three cases that are NOT about the approved list (and stops the
@@ -3122,11 +3162,11 @@ def _scan_install_line(line, approved):
     # closes and keeps closed.
     _pk, _pkok = _xp_park(norm)
     _rn = _redirect_norm(norm)
-    if (_PIPE_TO_SHELL.search(norm)
-            or _PIPE_TO_SHELL.search(_xp_unquote(norm))
-            or _PIPE_TO_SHELL.search(_rn)
-            or _PIPE_TO_SHELL.search(_xp_unquote(_rn))
-            or (_pkok and _PIPE_TO_SHELL.search(_pk))):
+    if (_pipe_to_shell(norm)
+            or _pipe_to_shell(_xp_unquote(norm))
+            or _pipe_to_shell(_rn)
+            or _pipe_to_shell(_xp_unquote(_rn))
+            or (_pkok and _pipe_to_shell(_pk))):
         # [batch 30-33, issue #32] THE REFUSAL IS UNCONDITIONAL, and the
         # MESSAGE is what changed. #32's complaint is not that the rule is
         # wrong - it is that "vendor the installer, review it, then run it
@@ -3863,7 +3903,12 @@ def sdk_gates_module(cfg: dict) -> str:
         "# operators a write target cannot carry across the correlation.\n"
         "_XP_WS = %r\n"
         "_XP_OPS = %r\n"
+        "# [pipe-rule-url-pipe-cubic] The ORACLE: kept so tests can check\n"
+        "# _pipe_to_shell against it. No runtime code calls it - one caller\n"
+        "# puts the cubic back - and a test pins that.\n"
         "_PIPE_TO_SHELL = re.compile(%r)\n"
+        "# _PIPE_TO_SHELL from its `[|]` on, matched ANCHORED at each pipe.\n"
+        "_PIPE_TAIL = re.compile(%r)\n"
         "# [issue #36] The whole install anchor after the prefix run -\n"
         "# tools, verbs, runner channels and the `python -m` transparent\n"
         "# prefix - ONE rendering with the shell gate's HEAD.\n"
@@ -3897,6 +3942,8 @@ def sdk_gates_module(cfg: dict) -> str:
            cmdpos.XP_WS, tuple(cmdpos.XP_OPS),
            _py(cmdpos.pipe_to_shell_regex(space=r"\s+", nonspace=r"\S",
                                           ws=r"\s")),
+           _py(cmdpos.pipe_to_shell_tail(space=r"\s+", nonspace=r"\S",
+                                         ws=r"\s")),
            _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
                                         space0=r"\s*", wsp=r"\s")),
            sorted(cmdpos.install_completers()), cmdpos.COMPLETER_GLUE,

@@ -3399,7 +3399,17 @@ EXPECTED_DIGESTS = {
         # differential reads 4,247 passed / 0 failed on both, and the 33
         # dependency-gate probe commands built for this change read the same rc
         # on both.
-        "80c58b30c3bb3070ee31abb4e832c5b195ad840dd95cd6340f1a0460968443ed",
+        # [freeze-exception no. 81, 2026-09-23] pipe-rule-url-pipe-cubic.
+        # Deliberate re-baseline, not a drift. The SDK stops SEARCHING
+        # `_PIPE_TO_SHELL` and calls `_pipe_to_shell`, which splits the string
+        # into `[^;&]` segments and matches the new `_PIPE_TAIL` anchored at
+        # each pipe after the earliest downloader. That removes the
+        # downloader-START factor of a cubic (8,445 B: 15.8 s). SDK-ONLY:
+        # the shell ERE is byte-identical, and no hook body moves.
+        # Measured on the emitted plans against ba6330b: exactly one body
+        # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
+        # counts unchanged at 57 / 69 / 59.
+        "9ea20046e9a887e7dae5eeef4690361fb962d77aff83d4fa9ed9d2434341bbe6",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3915,7 +3925,17 @@ EXPECTED_DIGESTS = {
         # differential reads 4,247 passed / 0 failed on both, and the 33
         # dependency-gate probe commands built for this change read the same rc
         # on both.
-        "a327f7653a7adcd3e966cadcfcaf195bb540ffa98475a55cc006398c18616328",
+        # [freeze-exception no. 81, 2026-09-23] pipe-rule-url-pipe-cubic.
+        # Deliberate re-baseline, not a drift. The SDK stops SEARCHING
+        # `_PIPE_TO_SHELL` and calls `_pipe_to_shell`, which splits the string
+        # into `[^;&]` segments and matches the new `_PIPE_TAIL` anchored at
+        # each pipe after the earliest downloader. That removes the
+        # downloader-START factor of a cubic (8,445 B: 15.8 s). SDK-ONLY:
+        # the shell ERE is byte-identical, and no hook body moves.
+        # Measured on the emitted plans against ba6330b: exactly one body
+        # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
+        # counts unchanged at 57 / 69 / 59.
+        "8af159d30d813ae23e1893fd6338910373663f6cfc4ed91af8b4f20db9ab8d52",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4370,7 +4390,17 @@ EXPECTED_DIGESTS = {
         # differential reads 4,247 passed / 0 failed on both, and the 33
         # dependency-gate probe commands built for this change read the same rc
         # on both.
-        "4a122d31ae9e619a6f570ba81ef5033b6c1eb0b9b1b84fa2f5e318fba06b467c",
+        # [freeze-exception no. 81, 2026-09-23] pipe-rule-url-pipe-cubic.
+        # Deliberate re-baseline, not a drift. The SDK stops SEARCHING
+        # `_PIPE_TO_SHELL` and calls `_pipe_to_shell`, which splits the string
+        # into `[^;&]` segments and matches the new `_PIPE_TAIL` anchored at
+        # each pipe after the earliest downloader. That removes the
+        # downloader-START factor of a cubic (8,445 B: 15.8 s). SDK-ONLY:
+        # the shell ERE is byte-identical, and no hook body moves.
+        # Measured on the emitted plans against ba6330b: exactly one body
+        # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
+        # counts unchanged at 57 / 69 / 59.
+        "b0d925fc8f11b7554b3c8206f41f3622c313af5e6316ed644697f6635617107f",
 }
 
 EXPECTED_ACTION_COUNTS = {
