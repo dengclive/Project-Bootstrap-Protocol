@@ -12,12 +12,16 @@
     "only by the seeded fuzz. Screened against the emitted gates.py before this set",
     "was written: every one is red on its named row, and the unmutated module is",
     "green on all of them.",
-    "Two bypasses put the cubic back without changing the language:",
+    "Three bypasses put the cubic back without changing the language:",
     "  * all-sites-reverted: the five call sites search `_PIPE_TO_SHELL` again.",
     "    The cost row sees it (38.29 s CPU at ba6330b against a 10 s bound).",
     "  * one-site-reverted: ONE site searches it. That alone may stay under the",
     "    10 s bound on this payload, so the row that owns it is the source pin",
     "    that no emitted code calls `_PIPE_TO_SHELL` at runtime.",
+    "  * one-site-re-search: the same revert spelled `re.search(_PIPE_TO_SHELL,",
+    "    norm)`. Step 7 found the first pin (a `_PIPE_TO_SHELL.<method>(` line",
+    "    match) blind to it, with the cost row at 8.03 s against its 10 s bound;",
+    "    the pin now counts `_PIPE_TO_SHELL` NAME tokens, which sees any spelling.",
     "EQUIVALENT MUTANTS LEFT OUT, with the reason: min-END -> min-START and",
     "`s.find(w, a, b)` -> `s.find(w, a)`. No downloader contains `|`, `;` or `&`,",
     "so neither changes an answer; the second only changes cost."
@@ -118,6 +122,15 @@
       "find": "    if (_pipe_to_shell(norm)\n",
       "replace": "    if (_PIPE_TO_SHELL.search(norm)\n",
       "why": "one call site searches the cubic regex again",
+      "expect": {
+        "test_substrate_differential.py": "no emitted code calls _PIPE_TO_SHELL at runtime"
+      }
+    },
+    {
+      "id": "one-site-re-search",
+      "find": "    if (_pipe_to_shell(norm)\n",
+      "replace": "    if (re.search(_PIPE_TO_SHELL, norm)\n",
+      "why": "one call site reverted in a spelling the first pin could not see",
       "expect": {
         "test_substrate_differential.py": "no emitted code calls _PIPE_TO_SHELL at runtime"
       }

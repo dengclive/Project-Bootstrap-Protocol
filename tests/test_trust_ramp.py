@@ -593,12 +593,13 @@ _REQUIRED_SETS = {
         "suites": ["test_composition.py", "test_substrate_differential.py"],
     },
     "pipe-rule-url-pipe-cubic.json": {
-        "sha256": "effe34d85360230c7236f95c7629729b"
-                  "cb9f7d38ad8d9cae07a7923baaa0cfa8",
+        "sha256": "a40f20a36ac894df3a354fc1d7d7dafb"
+                  "11a39795bcef466c53203219facb5ae8",
         "bypasses": ["e0-strict", "no-segment-split", "split-semicolon-only",
                      "split-amp-only", "downloader-dropped", "first-pipe-only",
                      "tail-unanchored", "latest-end", "pipe-from-seg-start",
-                     "all-sites-reverted", "one-site-reverted"],
+                     "all-sites-reverted", "one-site-reverted",
+                     "one-site-re-search"],
         "controls": ["control-inert-comment"],
         "digest_suites": ["test_greenfield_golden.py"],
         "suites": ["test_substrate_differential.py"],

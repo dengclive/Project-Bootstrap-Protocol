@@ -4359,8 +4359,9 @@ _COST_ROWS = [
     # THESE ROWS DO NOT CLAIM THE AXIS IS CLOSED. `_pipe_to_shell` removes the
     # downloader-start factor only. A pipe-dense whitespace-free run still
     # costs pipes x run inside `_PIPE_TAIL`, quadratic, and at the length cap
-    # it crosses the 60 s ceiling (`http|` x n, 81,885 B, 69.0 s at
-    # `ba6330b` with the fix patched in). That is `pipe-run-glued-pipe-axis`.
+    # it crosses the 60 s ceiling (`http|` x 16,362 in a heredoc, 81,855 B:
+    # 68.4 s and 69.2 s wall-clock on the fixed tree). That is
+    # `pipe-run-glued-pipe-axis`.
     ("downloader in every JSON value, heredoc, {u:http://e/a|x}, x500",
      "cat > f.json <<EOF\n" + "{u:http://e/a|x}," * 500
      + "\nEOF\npip install evilpkg"),
@@ -4408,7 +4409,7 @@ for _lbl, _cmd in _COST_ROWS:
 # downloader is also after the earliest one. The shell ERE is untouched.
 #
 # `_PIPE_TO_SHELL` stays emitted as the ORACLE for these rows and for the
-# calibration above, and for nothing else: the pin below fails if any runtime
+# calibration below, and for nothing else: the pin below fails if any runtime
 # code calls it again, because one caller puts the cubic back with every
 # verdict row green.
 _P2S = getattr(gates_mod, "_pipe_to_shell", None)
@@ -4425,13 +4426,25 @@ if callable(_P2S) and _P2S_TAIL is not None:
           "language the shell ERE decides")
     with open(GATES_PY, encoding="utf-8") as _fh:
         _gsrc = _fh.read()
-    # Comment lines are skipped: the emitted comments name the call they
-    # replaced, and a comment is not a caller.
-    _callers = [_ln.strip() for _ln in _gsrc.splitlines()
-                if not _ln.lstrip().startswith("#")
-                and _re.search(r"_PIPE_TO_SHELL\.\w+\(", _ln)]
+    # Counted as NAME TOKENS, not matched as `_PIPE_TO_SHELL.<method>(`. The
+    # method-shape pin missed `re.search(_PIPE_TO_SHELL, s)`, a space before
+    # the paren, and an alias - each of which put the cubic back at one call
+    # site with every other row green (a step-7 review measured 8.03 s against
+    # the cost row's 10 s bound). Comments and strings are not NAME tokens, so
+    # the emitted comments that name the replaced call do not count. The one
+    # permitted occurrence is the definition.
+    import io as _io
+    import tokenize as _tokenize
+    _name_lines = [_t.start[0] for _t in _tokenize.generate_tokens(
+                       _io.StringIO(_gsrc).readline)
+                   if _t.type == _tokenize.NAME
+                   and _t.string == "_PIPE_TO_SHELL"]
+    _defn = [_n for _n, _ln in enumerate(_gsrc.splitlines(), 1)
+             if _ln.startswith("_PIPE_TO_SHELL = re.compile(")]
     check("[pipe-to-shell] no emitted code calls _PIPE_TO_SHELL at runtime",
-          not _callers, f"found {_callers}")
+          _name_lines == _defn and len(_defn) == 1,
+          f"_PIPE_TO_SHELL appears as code on lines {_name_lines}; only the "
+          f"definition {_defn} is allowed")
 
     def _p2s_forms(s):
         _rn = gates_mod._redirect_norm(s)
@@ -4982,7 +4995,7 @@ check("the interpreter-word scan block ran every row it declares",
 
 # ============================================================================ #
 # GUARD 1 (wrapper arm) -- prefix_run wrapper leftpath scan coverage.
-# prefix_run's wrapper arm at lib/cmdpos.py:821-822 carries the SAME leftpath
+# prefix_run's wrapper arm at lib/cmdpos.py:831-832 carries the SAME leftpath
 # idiom Guard 3 bounds for interpreter_word -- `(/|HEAD nonspace*/)?` before
 # `alt(ALL_PREFIXES)` -- but Guard 1 is scoped to the nonabs block :787-802 and
 # Guard 3 to interpreter_word, so this SIBLING copy is bounded by NEITHER. A
@@ -5229,7 +5242,7 @@ del os.environ["CLAUDE_PROJECT_DIR"]
 
 # ============================================================================ #
 # REV 5 inventory site PR-TRAILBRACE-REP -- the trailing space-free brace arm's
-# REPETITION, `[({]*` at lib/cmdpos.py:857.  The class (drop `{`) is inventory
+# REPETITION, `[({]*` at lib/cmdpos.py:867.  The class (drop `{`) is inventory
 # site PR-TRAILBRACE-CLASS and is caught by the existing `wrapper + glued brace`
 # rows; the space run is PR-NONABS-BRACESPACE (`{ npx evil`).  The COUNT bound
 # `*` -> `{0,1}` is caught by NEITHER: measured 2026-09-16 at C3'' (tree
