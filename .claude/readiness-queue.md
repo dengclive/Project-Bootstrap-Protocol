@@ -388,6 +388,83 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
 **Batch these.** One branch, one PR, one review, one checkpoint. They are
 separate items only because they were discovered separately.
 
+- **[ready] protocol-doc-snapshot-retire** · `EMITTED` · eligible: **yes**
+  · full ceremony · **freeze exception required — next free number is 80**
+  · scope `Bootstrap-Protocol-v2-{0,2,4,5}-0.md`,
+  `Bootstrap-Protocol-Companion-v2-{0,2,4,5}-0.md`, `lib/`, `tests/`,
+  `docs/changelog.md`
+  **FILED 2026-09-22 by operator decision, taken with the blast radius already
+  measured. The decision is: DELETE all eight pre-2.8.0 PRD/Companion files and
+  REPOINT every citation, including the v2-0-0 hook citations that freeze
+  exception 15 deliberately froze — which this item therefore RETIRES, and must
+  say so at every surface that records it.** Git history keeps the content; the
+  files were introduced by `git mv`-preserving commits and `git log --follow`
+  still reaches the 2.0.0-era ones. **No protocol doc has ever been deleted in
+  this repo's history** (`git log --diff-filter=D -- 'Bootstrap-Protocol-*.md'`
+  is empty), so this is unprecedented and wants its plan reviewed before step 4.
+  **WHY IT IS `EMITTED` AND NOT `DOC`:** `lib/templates.py` cites these files by
+  name inside bodies that ship. `lib/templates.py:3150` sits in
+  `_assumption_ledger`, which `lib/installer.py:188` writes to
+  `.claude/steering/assumption-ledger.md` in EVERY fixture; `:7299` is a runtime
+  `echo` in the emitted `auto.sh` telling the operator to
+  "Implement the dispatch loop per Bootstrap-Protocol-v2-2-0.md Phase 9.7".
+  Repointing those moves emitted bytes → **five aggregate golden digests
+  re-baseline** (three in `test_greenfield_golden.py`, two in `test_retrofit.py`).
+  Action counts do NOT move — no path is added or removed — so a moved count is
+  **E5**, not an expected consequence.
+  **THE CITATION CENSUS, counted by command 2026-09-22 (call sites, not files):**
+  65 protocol-doc filename citations in `lib/` + `bin/` — v2-0-0 **41**,
+  v2-2-0 **13**, v2-4-0 **7**, v2-5-0 **4**, and only **6** to the live v2-8-0.
+  The 41 v2-0-0 ones spread over seven files, `lib/prd_heuristics.py` alone
+  carrying 19.
+  **WHAT BREAKS, PER FILE — two suites CRASH rather than fail, and a crash
+  prints no count at all:**
+  * `v2-0-0.md` → **CRASH** `test_ic_gate.py:248` (unguarded `open().read()`,
+    asserts `"[2.1.0 update — substrate OPERATIVE]"`) and **CRASH**
+    `test_doc_citations.py` (`FROZEN_V200` at `:77`, read at `:186`).
+  * `v2-5-0.md` → **CRASH** `test_interview.py:584`, killing all 109 checks.
+  * `v2-2-0.md` + its Companion → `test_usage_limit_contract.py:274-277` FAIL
+    (`os.path.isfile`). `v2-4-0.md` + its Companion → `test_installer.py:667-670`
+    FAIL, same shape.
+  * `Companion-v2-0-0.md` and `Companion-v2-5-0.md` → **nothing.** No test, no
+    `lib/`, no `bin/`, no glob, no digest. The only two that are free.
+  **THE CASCADE THE FIRST PASS WILL MISS.** Deleting `v2-0-0.md` *and* dropping
+  the two `FROZEN_V200` rows to stop the crash then fails
+  `test_doc_citations.py` **Section 4**, whose `SCAN` over `git ls-files`
+  demands a table row for every live `…md:NNN`. Two live `v2-0-0.md:1336`
+  citations sit at `test_goal_evaluator_keys.py:4` and
+  `test_greenfield_golden.py:482` and are in neither `HISTORICAL` nor
+  `HISTORICAL_LINE_MARKERS`. **So deleting one file needs edits in four.**
+  **ALREADY SETTLED, SO THE NEXT SESSION DOES NOT RE-DERIVE IT:**
+  * **The DS-01 drift guard CAN be re-pointed without loss.** `test_interview.py`
+    extracts the design-steering question byte-for-byte from `v2-5-0.md` as a
+    drift guard on `lib/interview.py`, which calls that doc "the SOLE verbatim
+    source". Measured: the question line occurs **exactly once** in BOTH
+    `v2-5-0.md` and `v2-8-0.md`, both extractions are **690 chars and
+    byte-identical**, and both equal `IV.DESIGN_STEERING_QUESTION`. Re-point to
+    `v2-8-0.md` and the guard survives intact. **Do not delete the guard.**
+  * **The cited SECTIONS survive in the live PRD**, so repointing is semantically
+    sound and not merely dangling-avoidance: Phase 9.7 ×20, Phase 9.5 ×37,
+    "Recovery & State" ×17, `exit_reason` ×32 all present in `v2-8-0.md`.
+  * **Golden digests do NOT hash the docs.** Both digest functions hash only the
+    emitted plan's actions; the docs move a digest ONLY via `lib/templates.py`.
+  * **Runbook §0's glob is safe.** `Bootstrap-Protocol-*.md` still expands (the
+    v2-8-0 pair survives) and the assertion is "must print nothing", so removing
+    files can only shrink the search set. Coverage narrows; nothing breaks.
+  **SUITE COUNTS WILL MOVE** — roughly a dozen assertions disappear — so every
+  prose "9,977" goes stale in the same commit. The "25 suites" claims do NOT
+  move: no test file is added or removed.
+  **CHEAPEST FEEDBACK LOOP, measured:** `test_doc_citations` 0.10 s catches every
+  citation defect; the full rename/delete set is
+  `doc_citations + usage_limit_contract + worktree_command_compat + interview +
+  ic_gate + greenfield_golden + retrofit + installer` ≈ **14.2 s**, versus 276 s
+  for `bin/run-tests`.
+  **NOT IN SCOPE, decided the same day:** the PRD keeps `**Version:** 2.8.0` and
+  its filename. A version bump is a *separate* axis — it would move
+  `lib/installer.py:37`, `lib/templates.py:18`, `plugin/plugin.json`, two README
+  lines and both doc headers together, and it is not what retiring a snapshot
+  requires.
+
 - **[ready] x54-wrapper-emitted-comments-stale** · `EMITTED` · eligible: **yes**
   **FILED 2026-09-14 at step 10 by `x54-wrapper-cost`, found by its step-8.3
   review.** The shared-header comments shipped in all 13 emitted hooks describe
