@@ -116,8 +116,7 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     both `ba6330b` and `696d699` and denies (re-measured 2026-09-24). The
     jump-dense filed spelling at 43,032 B / 8,190 jumps takes 61.7 s and 62.3 s
     on the shell (measured 2026-09-23), but not through this rule: 55.1 s
-    without a downloader, 58.4 s without a pipe. That is X-55's quote-dense
-    class. It is not filed as a row in this closeout (operator scope).
+    without a downloader, 58.4 s without a pipe. It is not filed as a row in this closeout (operator scope).
   * **Stale citations.** `lib/sdk_gates_template.py:3124-3129`, cited in this
     row and in `cost-guard-raw-string-soundness`, predates #116. The five call
     sites are in `_scan_install_line` and now call `_pipe_to_shell` on the same
