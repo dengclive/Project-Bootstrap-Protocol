@@ -89,6 +89,42 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   ceremony · **taken 2026-08-23, worked to step 4, CLOSED OUT WITH NO FIX —
   PR #90, merge `36fef02`. The defect STANDS and this row stays in A; only the
   candidate died. Start from the refutation below.**
+  **ATTEMPT 2 NARROWED IT — PR #116, merge `696d699`. Read the 2026-09-24
+  layer directly below first, then the attempt-1 refutation.**
+  **[2026-09-24 LAYER — ATTEMPT 2 NARROWED THE AXIS AND DID NOT CLOSE IT; THIS
+  ROW STAYS IN A.]** All timings in this layer are wall-clock.
+  * **What landed.** The five `_PIPE_TO_SHELL.search` call sites in the SDK's
+    `_scan_install_line` now call `_pipe_to_shell`: per `[^;&]` segment, the
+    earliest downloader END, then the anchored `_PIPE_TAIL` once per pipe after
+    it. Same yes/no answer, without the downloader-START factor. The shell ERE
+    is byte-identical. Freeze exception 81. Mutation gate PASS 18/18 on
+    `eb3dde6`. CI green on `main` at `696d699` (run 35886935267). Filed payload,
+    whole SDK gate, 8,445 B: 15.805 s on `ba6330b`, 0.127 s after; the table is
+    in `docs/changelog.md`'s entry for this change.
+  * **What stays open.** Each tail probe still re-reads the whitespace-free run
+    after its pipe, so a pipe-dense run is quadratic: `http|` × 16,362 in a
+    heredoc (81,855 B) takes 68.4 s and 69.2 s on the fix and still denies,
+    after the 60 s ceiling. That is `pipe-run-glued-pipe-axis`. Pipes are now
+    tried left to right where the regex tried them right to left, so the
+    quadratic moved between two mirror shapes (interpreter last, interpreter
+    first).
+  * **Correction: PR #92 did not make this axis linear.** Re-measured on
+    `ba6330b`, after #92: 2.001 / 6.787 / 15.805 s at 4,245 / 6,345 / 8,445 B,
+    exponent about 3. See the `[REFUTED …]` note in this row.
+  * **Correction: "THE AXIS IS SDK-ONLY" was measured only up to 10,545 B.** At
+    the caps: the jump-free filed shape at 81,898 B takes 53.3 s on the shell on
+    both `ba6330b` and `696d699` and denies (re-measured 2026-09-24). The
+    jump-dense filed spelling at 43,032 B / 8,190 jumps takes 61.7 s and 62.3 s
+    on the shell (measured 2026-09-23), but not through this rule: 55.1 s
+    without a downloader, 58.4 s without a pipe. That is X-55's quote-dense
+    class. It is not filed as a row in this closeout (operator scope).
+  * **Stale citations.** `lib/sdk_gates_template.py:3124-3129`, cited in this
+    row and in `cost-guard-raw-string-soundness`, predates #116. The five call
+    sites are in `_scan_install_line` and now call `_pipe_to_shell` on the same
+    five derived strings. Name the code, not the line.
+  * **Out of scope, held by the operator.** The pre-merge review reported
+    pre-existing findings outside this item. They are not filed here.
+  * Ledger entry 48, `pipe-rule-url-pipe-cubic-2` (attempt 2).
   **CUBIC, BENIGN-REACHABLE, AND IT CARRIES A DENY — settled by measurement
   2026-08-22 after a step-7 lens reported it `allow` at every size.** The lens
   measured the BARE form only. An ordinary `cat > f.json <<'EOF'` heredoc whose
@@ -142,6 +178,7 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
     regex does not read.** `_redirect_norm` maps `|&` → `|`, and the rule
     searches `_redirect_norm(norm)` among its five derived strings
     (`lib/sdk_gates_template.py:3124-3129`), so writing `|&` for `|` shatters
+    [pre-#116 line numbers; see this row's 2026-09-24 layer]
     the RAW string into 2-byte segments while the copy the regex reads is
     **byte-identical** to the baseline — `_redirect_norm(decoy) == filed` is
     `True`. Measured on the emitted object:
@@ -168,7 +205,9 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   belonged to `prefix-run-assignment-wrapper-overlap` — **closed 2026-08-25,
   PR #92 `abe3f48`, see Done; the overlap is removed, so read this paragraph as
   history** — which was then the A-tier row directly
-  above. Remove the arm overlap and this axis is linear; a cap bolted on top of a
+  above. Remove the arm overlap and this axis is linear; [REFUTED
+  2026-09-23: re-measured on `ba6330b`, after #92, the axis is still cubic; see
+  the 2026-09-24 layer at the top of this row] a cap bolted on top of a
   cubic moves a crossing, it does not remove one — PR #87's own lesson.
 
 - **[ready] install-tail-path-scan-quadratic** · `CODE` · eligible: **yes**
@@ -185,6 +224,14 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   (`_CMD_MAXLEN`), 0 jump bytes, guard PASS, deny on both trees, MEASURED not
   projected 2026-08-22: **`main` 341.645 s, PR #87's branch 330.457 s** — 5.5–5.7×
   the 60 s ceiling. Earlier records say "~133–152 s"; those are superseded.
+  **[2026-09-24] RE-MEASURED AFTER PR #116, AND THE HALVING IS NOT THIS
+  AXIS.** SDK dependency-gate, CPU, 20,480 B, each figure one run: with a
+  one-start prefix `curl u `, `ba6330b` 9.996 / 10.032 s and `696d699`
+  10.083 / 9.999 s (1.00×); with this row's two-start prefix
+  `curl http://e/i.sh `, `ba6330b` 19.902 s and `696d699` 10.131 s. The halving
+  is the second downloader start (`http` inside the URL) that #116 removed, not
+  a change to this axis. The 341.645 s cap figure above predates #92 and #116
+  and was not re-measured.
 
 
 - **[ready] jump-bytes-emission-divergence** · `CODE` · eligible: **yes**
@@ -298,6 +345,8 @@ See Done. The two items directly below are the work STRIPPED out of it.)*
   ONE.** `_cost_guard` is handed `_rc_raw` — the RAW command — but the rules it
   protects search **five derived strings**
   (`lib/sdk_gates_template.py:3124-3129`: `norm`, `_xp_unquote(norm)`,
+  [pre-#116 line numbers: the five call sites are in `_scan_install_line`, and
+  since PR #116 they call `_pipe_to_shell` on these same strings]
   `_redirect_norm(norm)`, `_xp_unquote(_rn)` and the parked copy). **A bound
   computed on the raw string is sound only if no derivation can RAISE the
   quantity it bounds.** `_redirect_norm` violates that: it maps `|&` → `|` with
@@ -1046,6 +1095,15 @@ operator — the first merge in this run the loop did not perform itself**, whic
 is exactly what 9b now requires.
 
 ## Owed
+
+**[2026-09-24]** `pipe-rule-url-pipe-cubic` attempt 2 merged as a NARROWING,
+**PR #116, merge `696d699`**, and its row stays in A; see the row's 2026-09-24
+layer. **THE VERDICT DID NOT MOVE.** `docs/production-readiness.md` is untouched
+by this closeout (runbook step 10 amends it only when the verdict moves), and
+`main` stays **NOT PRODUCTION READY** on leg (a). **COUNTED OFF THE SECTION
+BULLETS, NOT FROM MEMORY: A = 8 `[ready]`, B = 8 `[ready]` + 1 `[blocked]`,
+C = 7 `[ready]`, measurement residuals = 9 `[ready]`.** This closeout adds and
+removes no row.
 
 **[2026-08-31]** `x54-completer-cost` closed, **PR #98, merge `8cc107f`** —
 **and it introduced a fail-open that is not yet fixed on `main`.** Closing the

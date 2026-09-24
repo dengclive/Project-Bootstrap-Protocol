@@ -432,8 +432,14 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # and deleted before merge. Nothing wrong is in any commit or tree -- the object
 # store is clean, which 9999da3 above could not say. Pin moved 46 -> 47 in the
 # same commit, per runbook step 10b.
+# [pipe-rule-url-pipe-cubic attempt 2 closeout, 2026-09-24] narrowed, NOT
+# closed (PR #116, merge 696d699, freeze exception 81); the queue row stays in
+# A. Graded `harmful` by the same 10b rule: two record "corrections" were
+# themselves false and reached origin in pushed commit messages, both caught by
+# the item's own reviews and restored before merge. Pin moved 47 -> 48 in the
+# same commit, per runbook step 10b.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 47, f"{len(es)} entries")
+      len(es) == 48, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
