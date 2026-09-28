@@ -35,10 +35,12 @@ _FIXTURE = {
 }
 
 
-def _resolved_fixture():
+def _resolved_fixture(**top):
+    """The fixture, resolved. `top` adds top-level config keys (IC-5 passes
+    gate_substrate) so they go through resolve_config's own validation."""
     from defaults import resolve_config
     import copy
-    cfg, errs = resolve_config(copy.deepcopy(_FIXTURE))
+    cfg, errs = resolve_config({**copy.deepcopy(_FIXTURE), **top})
     if errs:
         raise RuntimeError(f"IC fixture must resolve cleanly: {errs}")
     return cfg
@@ -136,7 +138,11 @@ def _ic5_sdk_gates() -> tuple[bool, str]:
     """IC-5: the SDK gate module is emitted per seam §9 (single public
     builder, parseable Python, security-critical tier)."""
     import installer
-    cfg = _resolved_fixture()
+    # [WP1 / D4 (a)] gates.py is emitted only when the config requests the
+    # SDK substrate, so IC-5 renders the fixture WITH that request. Only
+    # this check sets it: IC-3 probes _write_state with the shell fixture,
+    # where the sdk-callable write-side refusal stays inert.
+    cfg = _resolved_fixture(gate_substrate="sdk-callable")
     try:
         plan = installer.build_plan(cfg)
     except RuntimeError as e:

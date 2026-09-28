@@ -106,6 +106,18 @@ commands:
   ci_local: ""
 """
 
+# Fixture D: [freeze-exception no. 82, 2026-09-28] the default config with
+# gate_substrate "sdk-callable". WP1 D4 (a) emits `.claude/sdk_gates/gates.py`
+# only when the config requests the SDK substrate, and fixtures A-C are all
+# shell, so after WP1 no digest here covered the security-critical SDK module
+# (a one-byte change to lib/sdk_gates_template.py left every suite green,
+# measured by the WP1 review, tests/F1 and rulings/F3). This fixture restores
+# that byte pin, and pins the rest of an SDK-substrate install with it. Its
+# digest is a deliberate golden ADDITION, NOT a re-baseline. build_plan does
+# not run the IC-1..IC-7 gate (main() does), so the plan is the one a granted
+# install writes.
+FIXTURE_SDK_CALLABLE = 'gate_substrate: "sdk-callable"\n' + FIXTURE_DEFAULT
+
 
 # --------------------------------------------------------------------------- #
 # Digest
@@ -3409,7 +3421,27 @@ EXPECTED_DIGESTS = {
         # Measured on the emitted plans against ba6330b: exactly one body
         # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
         # counts unchanged at 57 / 69 / 59.
-        "9ea20046e9a887e7dae5eeef4690361fb962d77aff83d4fa9ed9d2434341bbe6",
+        # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
+        # Deliberate re-baseline, not a drift. WP1 reaches this fixture three
+        # ways, and a fourth for full_autonomous only:
+        #   - `.claude/sdk_gates/gates.py` is emitted only when the config
+        #     requests gate_substrate "sdk-callable" (D4 (a)); this fixture
+        #     is shell, so the action is DROPPED;
+        #   - `.claude/settings.json` registers each hook as
+        #     `"$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.sh`, quoted, so a
+        #     project path with a space no longer splits it;
+        #   - `.claude/steering/tech.md` says which hook runs which command
+        #     (I-6(b)) instead of claiming every TODO cell fails loudly;
+        #   - full_autonomous only: `.claude/hooks/test-gate.sh` gains the
+        #     exit-5 "no tests collected" arm, because its test command is
+        #     `pytest -q`.
+        # format-lint-gate.sh does NOT move in any fixture: I-6(a), the
+        # empty-lint TODO, is deferred to WP2. The re-tier (D4 (a)) lives
+        # in the manifest, not in the plan, so it moves no digest.
+        # Measured on the emitted plans against 24cd8a3: 0 added, 1 removed
+        # (gates.py), 2 bodies move (settings.json, tech.md); action count
+        # 57 -> 56.
+        "497601c1338b801460cbe4f91391b359184b41b0f6f056e8c30f20591f27a171",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3935,7 +3967,33 @@ EXPECTED_DIGESTS = {
         # Measured on the emitted plans against ba6330b: exactly one body
         # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
         # counts unchanged at 57 / 69 / 59.
-        "8af159d30d813ae23e1893fd6338910373663f6cfc4ed91af8b4f20db9ab8d52",
+        # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
+        # Deliberate re-baseline, not a drift. WP1 reaches this fixture three
+        # ways, and a fourth for full_autonomous only:
+        #   - `.claude/sdk_gates/gates.py` is emitted only when the config
+        #     requests gate_substrate "sdk-callable" (D4 (a)); this fixture
+        #     is shell, so the action is DROPPED;
+        #   - `.claude/settings.json` registers each hook as
+        #     `"$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.sh`, quoted, so a
+        #     project path with a space no longer splits it;
+        #   - `.claude/steering/tech.md` says which hook runs which command
+        #     (I-6(b)) instead of claiming every TODO cell fails loudly;
+        #   - full_autonomous only: `.claude/hooks/test-gate.sh` gains the
+        #     exit-5 "no tests collected" arm, because its test command is
+        #     `pytest -q`.
+        # format-lint-gate.sh does NOT move in any fixture: I-6(a), the
+        # empty-lint TODO, is deferred to WP2. The re-tier (D4 (a)) lives
+        # in the manifest, not in the plan, so it moves no digest.
+        # Measured on the emitted plans against 24cd8a3: 0 added, 1 removed
+        # (gates.py), 3 bodies move (test-gate.sh, settings.json, tech.md);
+        # action count 69 -> 68.
+        # RE-BASELINED 2026-09-28, same exception 82 (review rulings/F5):
+        # tech.md's test-gate sentence gains "A run that collects no tests
+        # (exit 5) is allowed, with a notice.", because `pytest -q` gets the
+        # exit-5 arm. Measured against the previous digest (ccc5eb7b...):
+        # exactly one body moves, tech.md; 0 added, 0 removed, count 68. The
+        # three fixtures whose test command is empty do not move.
+        "1368c5714b50e003c8cc00c4d1b89acff0e18c9e96b37dd4533c7fb1c00046f9",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4400,7 +4458,43 @@ EXPECTED_DIGESTS = {
         # Measured on the emitted plans against ba6330b: exactly one body
         # moves, `.claude/sdk_gates/gates.py`; 0 added, 0 removed, action
         # counts unchanged at 57 / 69 / 59.
-        "b0d925fc8f11b7554b3c8206f41f3622c313af5e6316ed644697f6635617107f",
+        # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
+        # Deliberate re-baseline, not a drift. WP1 reaches this fixture three
+        # ways, and a fourth for full_autonomous only:
+        #   - `.claude/sdk_gates/gates.py` is emitted only when the config
+        #     requests gate_substrate "sdk-callable" (D4 (a)); this fixture
+        #     is shell, so the action is DROPPED;
+        #   - `.claude/settings.json` registers each hook as
+        #     `"$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.sh`, quoted, so a
+        #     project path with a space no longer splits it;
+        #   - `.claude/steering/tech.md` says which hook runs which command
+        #     (I-6(b)) instead of claiming every TODO cell fails loudly;
+        #   - full_autonomous only: `.claude/hooks/test-gate.sh` gains the
+        #     exit-5 "no tests collected" arm, because its test command is
+        #     `pytest -q`.
+        # format-lint-gate.sh does NOT move in any fixture: I-6(a), the
+        # empty-lint TODO, is deferred to WP2. The re-tier (D4 (a)) lives
+        # in the manifest, not in the plan, so it moves no digest.
+        # Measured on the emitted plans against 24cd8a3: 0 added, 1 removed
+        # (gates.py), 2 bodies move (settings.json, tech.md); action count
+        # 59 -> 58. The three frozen design-steering artifacts do not move.
+        "0c73dcc3699062fed2f0ddd69f6ad4d6fdb124a5952dc9ed61bfb60ab0386fbc",
+    # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
+    # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
+    # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
+    # only fixture whose plan carries `.claude/sdk_gates/gates.py`, so it is
+    # the byte pin on the security-critical SDK module that the three shell
+    # fixtures above lost; an SDK-only change of the class freeze exception
+    # 81 recorded moves this digest and no other.
+    # VERIFIED per-file, not assumed: against this tree's `default` plan,
+    # 1 action added (gates.py, tier security-critical), 0 removed, 0 bodies
+    # moved - the SDK substrate changes what is EMITTED only by that one
+    # file; settings.json still wires the shell hooks (the runner is
+    # Tessera-owned, seam §9). Action count 57 = the 56-file default + gates.py.
+    # Measured on this tree only: 24cd8a3 had no such fixture, so there is no
+    # previous digest.
+    "sdk_callable":
+        "5ed422b13e191a0bcccc972916178dd790057e1692d2c8456df770814ed0ebb5",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -4414,9 +4508,18 @@ EXPECTED_ACTION_COUNTS = {
     # version bump moves one body (settings.json), adds no file; design steering
     # is off in both. The flag-on design_steering fixture is 59 = a 56-file
     # fullstack baseline + the 3 design artifacts.
-    "default": 57,
-    "full_autonomous": 69,
-    "design_steering": 59,
+    # [freeze-exception no. 82, 2026-09-28] WP1 D4 (a): gates.py is emitted
+    # only when the config requests gate_substrate "sdk-callable", and all
+    # three fixtures are shell, so each loses exactly that one action:
+    # 57 -> 56, 69 -> 68, 59 -> 58 (design_steering is now a 55-file
+    # fullstack baseline + the 3 design artifacts). Nothing is added.
+    "default": 56,
+    "full_autonomous": 68,
+    "design_steering": 58,
+    # [freeze-exception no. 82, 2026-09-28] fixture D (golden ADDITION): the
+    # 56-file default + `.claude/sdk_gates/gates.py`, the one action the
+    # sdk-callable substrate adds.
+    "sdk_callable": 57,
 }
 
 
@@ -4469,6 +4572,17 @@ def run_fixture(label, yaml_text):
 run_fixture("default", FIXTURE_DEFAULT)
 run_fixture("full_autonomous", FIXTURE_FULL_AUTONOMOUS)
 run_fixture("design_steering", FIXTURE_DESIGN_STEERING)
+run_fixture("sdk_callable", FIXTURE_SDK_CALLABLE)
+
+# Fixture D is only a gates.py pin while its plan really carries gates.py
+# and the shell fixtures really do not (non-vacuity, both directions).
+_sdk_paths = [a["path"] for a in plan_actions(FIXTURE_SDK_CALLABLE)[1]]
+check("golden[sdk_callable]: the plan carries .claude/sdk_gates/gates.py",
+      ".claude/sdk_gates/gates.py" in _sdk_paths)
+check("golden[default]: the shell plan carries no gates.py (so fixture D is "
+      "the only pin on it)",
+      ".claude/sdk_gates/gates.py"
+      not in [a["path"] for a in plan_actions(FIXTURE_DEFAULT)[1]])
 
 
 # --------------------------------------------------------------------------- #
@@ -4483,6 +4597,10 @@ run_fixture("design_steering", FIXTURE_DESIGN_STEERING)
 # A fourth aggregate fixture would pin ~60 actions to observe ONE new body, and
 # would enlarge every future re-baseline for no added coverage. This is the
 # targeted form instead: one flag flip on fixture C, one body, one digest.
+# [freeze-exception no. 82, 2026-09-28] Fixture D (sdk_callable) is a fourth
+# aggregate fixture after all, and its flag is off too. The trade-off differs
+# there: the body it exists for, gates.py, is security-critical, and the
+# three shell fixtures lost their pin on it (WP1 review, tests/F1).
 print("\n=== TEL-01: telemetry.md body is pinned ===")
 
 FIXTURE_TELEMETRY = FIXTURE_DESIGN_STEERING.replace(
@@ -4526,7 +4644,8 @@ if _tel_on is not None:
 if os.environ.get("GOLDEN_UPDATE") != "1":
     for label, fixt in [("default", FIXTURE_DEFAULT),
                         ("full_autonomous", FIXTURE_FULL_AUTONOMOUS),
-                        ("design_steering", FIXTURE_DESIGN_STEERING)]:
+                        ("design_steering", FIXTURE_DESIGN_STEERING),
+                        ("sdk_callable", FIXTURE_SDK_CALLABLE)]:
         _, p1 = plan_actions(fixt)
         _, p2 = plan_actions(fixt)
         check(f"determinism[{label}]: two passes produce identical digests",

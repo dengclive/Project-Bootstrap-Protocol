@@ -304,10 +304,20 @@ try:
     open(os.path.join(d, "bootstrap.config.yaml"), "w").write(BASE)
     r = subprocess.run([sys.executable, BIN, "-C", d],
                        capture_output=True, text=True)
+    # [WP1 / D4 (a)] A shell config no longer plans gates.py, so the
+    # warning now comes from _reconcile_orphaned_substrate (it runs before
+    # _write_state, whose own "downgraded" line would claim the module
+    # "remains on disk" - no longer true for an unmodified one).
     check("fix: substrate downgrade on re-apply warns loudly",
-          "downgraded" in r.stderr and r.returncode == 0, r.stderr)
+          'reconciled to "shell"' in r.stderr and r.returncode == 0,
+          r.stderr)
     check("fix: downgrade actually writes shell",
           json.load(open(sp))["gate_substrate"] == "shell")
+    check("D4: shell re-apply removes the unmodified gates.py",
+          not os.path.exists(os.path.join(d, ".claude", "sdk_gates",
+                                          "gates.py"))
+          and "REMOVE .claude/sdk_gates/gates.py" in r.stdout,
+          r.stdout[-600:])
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

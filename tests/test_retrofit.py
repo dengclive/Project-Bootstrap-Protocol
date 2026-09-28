@@ -1946,6 +1946,15 @@ try:
     check("18.8: auto-defaulted hybrid cfg validates (R0.7 gate satisfied)",
           not validate_config_dict(cfg_obj),
           f"errors={validate_config_dict(cfg_obj)}")
+    # [WP1, review records/R5] The installer warns about an empty test,
+    # lint or format command only; the header claims no more than that.
+    with open(os.path.join(d, "bootstrap.config.yaml")) as fh:
+        _hdr = fh.read()
+    check("R5(retrofit): the synthesized header scopes its warning claim to "
+          "commands.test/lint/format",
+          "empty commands.test/lint/format are intentional per OD-3: the "
+          "installer warns about each one." in _hdr
+          and "empty commands.* are" not in _hdr, _hdr[:400])
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
@@ -2321,8 +2330,26 @@ EXPECTED_RETROFIT_DIGESTS = {
     # carrying it moves, and `.claude/sdk_gates/gates.py` does not. Measured on
     # the emitted plans against 7f67027: 11 / 15 bodies move (service / agent),
     # all of them hooks, 0 added, 0 removed, action counts unchanged at 79 / 93.
-    "service": "176aec57fcebf98de62529bd220875f3a47ac8055b517ebb176a720fcb110e02",
-    "agent": "24b999579820307a82e263f49fa24b4e54b7796c13f1e976db42eca78edd4505",
+    # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install. Same
+    # change as the greenfield columns, minus gates.py, which the retrofit
+    # track never emits: `.claude/settings.json` registers each hook with the
+    # placeholder quoted (`"$CLAUDE_PROJECT_DIR"/...`), and
+    # `.claude/steering/tech.md` says which hook runs which command, with one
+    # retrofit-only sentence about the warn-only rollout weeks. In `agent`,
+    # whose test command is `pytest`, `.claude/hooks/test-gate.sh` also gains
+    # the exit-5 "no tests collected" arm; `service` runs `true` and does not
+    # get it. format-lint-gate.sh does not move (I-6(a) is deferred to WP2).
+    # Measured on the emitted plans against 24cd8a3: 2 / 3 bodies move
+    # (service / agent), 0 added, 0 removed, action counts unchanged at
+    # 79 / 93.
+    # RE-BASELINED 2026-09-28, same exception 82 (review rulings/F5): `agent`'s
+    # tech.md also says that a run collecting no tests (exit 5) is allowed,
+    # with a notice, because its test command is `pytest` and test-gate
+    # carries that arm. Measured against the previous `agent` digest
+    # (f7d2b931...): exactly one body moves, tech.md; `service` does not move.
+    # Against 24cd8a3 the counts above still hold.
+    "service": "5c141e549e19c38467c5a25b15237be9b59c171c96862eda44d67c9e30af092a",
+    "agent": "fc66cfb7ef5fef4e8a2a58b5d3fb9a0dae9dacedbc6a9fb3d93262dfc5cffb19",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
@@ -2375,6 +2402,255 @@ check("retrofit fixtures exercise different `kind` sets (so kind matters)",
       f"    service={sorted(_kinds_service)} agent={sorted(_kinds_agent)}")
 
 
+# RI-STASH: `synthesize` over a corrupt proposal stash refuses with rc=2 and a
+# readable error. It was an uncaught JSONDecodeError traceback, rc=1.
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    subprocess.run([sys.executable, BIN_INTERVIEW, "analyze", "-C", d],
+                   capture_output=True, text=True, timeout=60)
+    _stash = os.path.join(d, "bootstrap.interview.md.proposal.json")
+    check("RI-STASH: analyze wrote the proposal stash", os.path.exists(_stash))
+    with open(_stash, "w") as fh:
+        fh.write("{broken")
+    _r = subprocess.run([sys.executable, BIN_INTERVIEW, "synthesize", "-C", d],
+                        capture_output=True, text=True, timeout=60)
+    check("RI-STASH: a corrupt proposal stash -> rc=2, no traceback",
+          _r.returncode == 2 and "proposal stash" in _r.stderr
+          and "Traceback" not in _r.stderr,
+          f"rc={_r.returncode}\n{_r.stderr[-400:]}")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 # --------------------------------------------------------------------------- #
+
+# [WP1] validate_with_installer given a RELATIVE config path in a
+# subdirectory. The CLI always passes an absolute path (root is resolved),
+# but the function had the greenfield shape: -c as given, -C its parent, and
+# the installer resolves a relative -c against -C (sub/sub/c.yaml, rc=2).
+import retrofit_interview as _RI                  # noqa: E402
+_rel_d = tempfile.mkdtemp()
+_rel_cwd = os.getcwd()
+try:
+    os.makedirs(os.path.join(_rel_d, "sub"))
+    with open(os.path.join(_rel_d, "sub", "c.yaml"), "w") as _fh:
+        _fh.write(SERVICE_RETROFIT_CFG)
+    os.chdir(_rel_d)
+    _rel_rc, _rel_out = _RI.validate_with_installer(
+        Path(os.path.join("sub", "c.yaml")))
+    check("WP1: retrofit validate_with_installer accepts a relative path in "
+          "a subdirectory", _rel_rc == 0, _rel_out[-300:])
+finally:
+    os.chdir(_rel_cwd)
+    shutil.rmtree(_rel_d, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
+# [WP1 D3] The retrofit route has the same master switch (critic G7).
+# [I-10] _retrofit_warnings reach stderr, as _command_warnings do.
+# --------------------------------------------------------------------------- #
+print("\n=== WP1: D3 and I-10 on the retrofit route ===")
+_rf_d3, _rf_d3_err = cfg_from(SERVICE_RETROFIT_CFG.replace(
+    "deps:\n  enabled: true", "deps:\n  enabled: false"))
+check("D3(retrofit): deps.enabled false drops dependency-gate",
+      _rf_d3_err == [] and "dependency-gate" not in _rf_d3["_resolved_hooks"])
+check("D3(retrofit): no dependency-gate.sh in the plan",
+      ".claude/hooks/dependency-gate.sh"
+      not in [a["path"] for a in build_plan(_rf_d3)])
+_rw_text = SERVICE_RETROFIT_CFG.replace(
+    '  legacy_allowlist:\n    - "src/**"\n    - "tests/**"\n',
+    '  legacy_allowlist: []\n  spec_patterns:\n    migration: true\n')
+_rw_cfg, _rw_err = cfg_from(_rw_text)
+check("I-10(retrofit): fixture raises a retrofit warning (precondition)",
+      _rw_err == [] and len(_rw_cfg.get("_retrofit_warnings", [])) == 1,
+      str(_rw_err))
+_rw_dir = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_rw_dir, "bootstrap.config.yaml"), "w") as _fh:
+        _fh.write(_rw_text)
+    _rw = subprocess.run([sys.executable, BIN_INSTALL, "-C", _rw_dir,
+                          "--dry-run"], capture_output=True, text=True)
+    check("I-10(retrofit): --dry-run prints the retrofit warning",
+          _rw.returncode == 0
+          and "warning: retrofit.spec_patterns.migration" in _rw.stderr,
+          _rw.stderr[-300:])
+finally:
+    shutil.rmtree(_rw_dir, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
+# [WP1 D3, review correctness/F1, fix round 2 F1/RR1] Since D3, deps_enabled
+# false REMOVES the dependency gate, so the retrofit heuristic NEVER proposes
+# false. Round 1 proposed false for the shapes it believed the scanner could
+# see in full, and the next review found two it could not: a root
+# requirements.txt of only `-r` includes, and a root manifest that shadows a
+# same-named one below it. So these rows pin the rule, not a list of safe
+# shapes: whatever the tree holds, the proposal is true, a declared list is
+# CONF_HIGH, anything else is a CONF_LOW guess, and every rationale tells the
+# operator how to turn the gate off.
+# --------------------------------------------------------------------------- #
+print("\n=== WP1: the retrofit deps proposal is never false ===")
+from prd_heuristics import CONF_HIGH, CONF_LOW           # noqa: E402
+from retrofit_heuristics import propose_deps_retrofit    # noqa: E402
+
+_DEPS_OFF = "deps_enabled: false"
+
+
+def _deps_tree(files):
+    """A scratch tree holding `files`; the caller removes it."""
+    _dd = tempfile.mkdtemp()
+    for rel, text in files.items():
+        os.makedirs(os.path.dirname(os.path.join(_dd, rel)) or _dd,
+                    exist_ok=True)
+        with open(os.path.join(_dd, rel), "w") as _fh:
+            _fh.write(text)
+    return _dd
+
+
+def _deps_proposal(files):
+    """propose_deps_retrofit over a scratch tree holding `files`."""
+    _dd = _deps_tree(files)
+    try:
+        return propose_deps_retrofit(scan_repo(Path(_dd)))
+    finally:
+        shutil.rmtree(_dd, ignore_errors=True)
+
+
+_MAIN_PY = {"main.py": "print(1)\n"}
+_EMPTY_REQS = {"requirements.txt": "# none yet\n", **_MAIN_PY}
+_INCLUDE_ONLY = {"requirements.txt": "-r requirements/base.txt\n",
+                 "requirements/base.txt": "requests==2.31\ndjango>=4\n",
+                 **_MAIN_PY}
+_SHADOW_REQS = {"requirements.txt": "",
+                "services/api/requirements.txt": "flask>=3\n",
+                "services/api/app.py": "print(1)\n"}
+_SHADOW_PKG = {"package.json": '{"scripts": {"build": "tsc"}}\n',
+               "web/package.json": '{"dependencies": {"react": "^18"}}\n',
+               "web/index.js": "x\n"}
+_GO = {"go.mod": "module ex.com/app\n\ngo 1.22\n\nrequire "
+                 "github.com/spf13/cobra v1.8.0\n",
+       "main.go": "package main\nfunc main() {}\n"}
+_RUBY = {"Gemfile": "gem 'rails'\n", "app.rb": "puts 1\n"}
+_DEPS_SHAPES = (
+    ("an empty root requirements.txt", _EMPTY_REQS),
+    ("a root requirements.txt of only -r includes", _INCLUDE_ONLY),
+    ("an empty root requirements.txt shadowing a nested one", _SHADOW_REQS),
+    ("a scripts-only root package.json shadowing a nested one", _SHADOW_PKG),
+    ("a Go repo (go.mod)", _GO),
+    ("a Ruby repo (Gemfile)", _RUBY),
+    ("a repo with no manifest at all", _MAIN_PY),
+)
+for _label, _files in _DEPS_SHAPES:
+    _dp = _deps_proposal(_files)
+    check(f"WP1 deps(retrofit): {_label} -> proposed TRUE at CONF_LOW, "
+          f"never false",
+          _dp["enabled"] is True and _dp["confidence"] == CONF_LOW,
+          f"got {_dp}")
+    check(f"WP1 deps(retrofit): {_label} -> the rationale says how to drop "
+          f"the dependency gate",
+          _DEPS_OFF in _dp["rationale"]
+          and "drops the dependency gate" in _dp["rationale"],
+          _dp["rationale"])
+_dp = _deps_proposal({"requirements.txt": "requests>=2\n"})
+check("WP1 deps(retrofit) control: declared dependencies propose true at "
+      "CONF_HIGH, with the same note",
+      _dp["enabled"] is True and _dp["confidence"] == CONF_HIGH
+      and _DEPS_OFF in _dp["rationale"], f"got {_dp}")
+
+# The rule, not the shapes: every combination of the scanner's manifest
+# flags and root files, with nothing declared, still proposes true. A future
+# branch keyed on which manifests were seen goes red here.
+_base_d = tempfile.mkdtemp()
+try:
+    _base_inv = scan_repo(Path(_base_d))
+finally:
+    shutil.rmtree(_base_d, ignore_errors=True)
+_flag_names = sorted(_base_inv["languages"]["manifests"])
+_false_at = []
+for _mask in range(1 << len(_flag_names)):
+    _on = [n for i, n in enumerate(_flag_names) if _mask >> i & 1]
+    _inv = {**_base_inv,
+            "languages": {**_base_inv["languages"],
+                          "manifests": {n: n in _on for n in _flag_names}},
+            "structure": {**_base_inv["structure"], "top_level_files": _on}}
+    if propose_deps_retrofit(_inv)["enabled"] is not True:
+        _false_at.append(_on)
+        if len(_false_at) > 3:
+            break
+check(f"WP1 deps(retrofit): all {1 << len(_flag_names)} manifest-flag "
+      f"combinations with nothing declared propose true",
+      _false_at == [], f"false for {_false_at}")
+
+# Accept-all keeps the dependency gate, in the resolved hooks AND in the
+# plan, on the two shapes the round-2 review reproduced end to end and on
+# the empty requirements.txt that round 1 still proposed false for.
+for _label, _files in (_DEPS_SHAPES[0], _DEPS_SHAPES[1], _DEPS_SHAPES[2]):
+    _aa_d = _deps_tree(_files)
+    _aa_cwd = os.getcwd()
+    try:
+        os.chdir(_aa_d)   # propose_commands reads ./.github and ./package.json
+        _aa_prop = build_retrofit_proposal(scan_repo(Path(_aa_d)),
+                                           project_fallback="app")
+        _aa_cfg, _aa_err = resolve_config(answers_to_config(
+            default_answers(_aa_prop), _aa_prop))
+        _aa_paths = ({a["path"] for a in build_plan(_aa_cfg)}
+                     if not _aa_err else set())
+    finally:
+        os.chdir(_aa_cwd)
+        shutil.rmtree(_aa_d, ignore_errors=True)
+    check(f"WP1 deps(retrofit): accept-all on {_label} keeps "
+          f"dependency-gate (resolved and planned)",
+          _aa_err == [] and "dependency-gate" in _aa_cfg["_resolved_hooks"]
+          and ".claude/hooks/dependency-gate.sh" in _aa_paths,
+          f"errs={_aa_err} hooks={_aa_cfg.get('_resolved_hooks')}")
+
+# [review correctness/F3] The retrofit ANSWERS parser read any unreadable
+# boolean as false with no message; for the two policy switches that now
+# removes a security gate, so it is an error naming the line.
+import retrofit_interview as _RIP                  # noqa: E402
+_rp_d = tempfile.mkdtemp()
+_rp_cwd = os.getcwd()
+try:
+    with open(os.path.join(_rp_d, "requirements.txt"), "w") as _fh:
+        _fh.write("requests>=2\n")       # both switches proposed true
+    with open(os.path.join(_rp_d, "main.py"), "w") as _fh:
+        _fh.write("print(1)\n")
+    os.chdir(_rp_d)
+    _rp_prop = build_retrofit_proposal(scan_repo(Path(_rp_d)),
+                                       project_fallback="pyapp")
+    _rp_text = _RIP.render_interview(_rp_prop, Path(_rp_d))
+finally:
+    os.chdir(_rp_cwd)
+    shutil.rmtree(_rp_d, ignore_errors=True)
+for _pk in ("deps_enabled", "secrets_enabled"):
+    _bad = _rp_text.replace(f"{_pk}: true", f"{_pk}: flase")
+    try:
+        _RIP.parse_interview_answers(_bad)
+        _rp_err = ""
+    except ValueError as _exc:
+        _rp_err = str(_exc)
+    check(f"D3(retrofit): an unreadable {_pk} is an error naming its line",
+          f"{_pk}: flase" in _bad and _rp_err.startswith("line ")
+          and f"{_pk}: 'flase'" in _rp_err, _rp_err or "no error raised")
+_rp_ok = _RIP.parse_interview_answers(_rp_text)
+check("D3(retrofit) control: the rendered file parses, both switches true",
+      _rp_ok["deps_enabled"] is True and _rp_ok["secrets_enabled"] is True)
+
+# [review rulings/F1] The debt entry for a repo with no lint config reaches
+# the emitted .claude/debt.md; it used to promise that format-lint-gate
+# "will fail loudly with a TODO", which it never did (it runs `true`).
+from retrofit_heuristics import propose_debt_entries    # noqa: E402
+_nl_d = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_nl_d, "main.py"), "w") as _fh:
+        _fh.write("print(1)\n")
+    _nl_plan = " ".join(e["plan"] for e in propose_debt_entries(
+        scan_repo(Path(_nl_d))) if "lint" in e["what"])
+    check("rulings/F1: the no-lint debt entry exists (precondition)",
+          bool(_nl_plan))
+    check("rulings/F1: the no-lint debt entry no longer claims a loud TODO",
+          "fail" not in _nl_plan and "TODO" not in _nl_plan
+          and "checks nothing" in _nl_plan, _nl_plan)
+finally:
+    shutil.rmtree(_nl_d, ignore_errors=True)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

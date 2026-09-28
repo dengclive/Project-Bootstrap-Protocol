@@ -78,7 +78,10 @@ sys.modules["claude_agent_sdk"] = _stub
 
 # ai-agent + tdd required so BOTH substrates carry all seven SDK gates and
 # their shell twins (eval-gate and tdd-gate are archetype/policy gated).
-CONFIG = """project:
+# [WP1 / D4 (a)] gates.py is emitted only for the SDK substrate; this
+# suite loads the emitted module, so its fixture requests it.
+CONFIG = """gate_substrate: "sdk-callable"
+project:
   name: "differential"
   archetype: "ai-agent"
   shell: "bash"
@@ -1287,7 +1290,7 @@ for cmd, want in (
     differential("dependency-gate", bash(cmd), want, repr(cmd))
 
 # --------------------------------------------------------------------------- #
-# REASON strings, not just verdicts. SEAM-CONTRACT-v2-0-0.md §3.3 requires
+# REASON strings, not just verdicts. SEAM-CONTRACT-v3-0-0.md §3.3 requires
 # refusals to carry reasons "semantically equivalent to the shell gates'",
 # and §6.2 obliges a consumer to relay them faithfully -- so a matching
 # verdict with a wrong reason still breaks the contract, and this suite
@@ -5327,6 +5330,142 @@ differential("dependency-gate",
 check("the REV5 trailbrace-rep row ran",
       (passed + failed) - _TBREP_BEFORE == 1,
       "deleting this row must fail HERE, not silently reduce the count")
+
+# ============================================================================ #
+# [WP1] "No tests collected" is a pass - for pytest and `python -m unittest`,
+# whose exit 5 means exactly that, and for nothing else. The runners here are
+# FAKES on PATH (a script named `pytest` that exits 5), so the rows test the
+# contract - program name plus exit code - without needing pytest installed.
+# The `mocha` row is the reason the table exists: mocha exits with its failure
+# count, so five red tests exit 5 (measured, mocha 10.2.0).
+# ============================================================================ #
+print("\n== [WP1] test-gate: no tests collected ==")
+from sdk_gates_template import NO_TESTS_NOTICE, NO_TESTS_RC5_RE  # noqa: E402
+import re as _re                                                   # noqa: E402
+
+for _c in ("pytest", "pytest -q", "py.test -x", "python -m pytest",
+           "python3 -m pytest -q", "python3.12 -m unittest discover -s tests",
+           ".venv/bin/pytest -q", "uv run pytest", "PYTHONPATH=src pytest",
+           "pytest -k 'not slow'", 'pytest -m "not e2e"'):
+    check(f"[no-tests table] accepts {_c!r}",
+          _re.fullmatch(NO_TESTS_RC5_RE, _c) is not None)
+for _c in ("npm test", "jest", "mocha", "make test", "tox", "cargo test",
+           "timeout 60 pytest", "pytest -q && echo ok", "pytest -q; true",
+           "pytest | tee log", "pytest $(cat args)", "pytest `cat args`",
+           "pytest -q # note", "pytest-watch", "sh -c pytest",
+           "true;/usr/bin/pytest", 'pytest "$ARGS"', "poetry run pytest"):
+    check(f"[no-tests table] rejects {_c!r}",
+          _re.fullmatch(NO_TESTS_RC5_RE, _c) is None)
+
+_NT_TMP = tempfile.mkdtemp(prefix="substrate-diff-notests-")
+
+
+def _nt_fake(name, rc):
+    """A PATH whose `name` prints a line and exits `rc`."""
+    d = os.path.join(_NT_TMP, f"bin-{name}-{rc}")
+    os.makedirs(d)
+    f = os.path.join(d, name)
+    with open(f, "w") as fh:
+        fh.write(f"#!/bin/sh\necho 'fake {name}: exiting {rc}'\nexit {rc}\n")
+    os.chmod(f, 0o755)
+    return d + os.pathsep + os.environ.get("PATH", "")
+
+
+def _nt_tree(label, test_cmd):
+    proj = os.path.join(_NT_TMP, label)
+    os.makedirs(proj)
+    cfgp = os.path.join(_NT_TMP, label + ".yaml")
+    with open(cfgp, "w", encoding="utf-8") as fh:
+        fh.write(CONFIG.replace('test: "true"', f'test: "{test_cmd}"'))
+    rr = subprocess.run([sys.executable, INSTALL, "-c", cfgp, "-C", proj],
+                        capture_output=True, text=True)
+    check(f"[no-tests] {label} tree installs", rr.returncode == 0,
+          (rr.stdout + rr.stderr)[-300:])
+    sp = importlib.util.spec_from_file_location(
+        f"emitted_gates_nt_{label}",
+        os.path.join(proj, ".claude", "sdk_gates", "gates.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return proj, mod
+
+
+def _nt_both(proj, mod, payload, path=None):
+    """(shell rc, shell stdout, sdk result), with `path` as PATH."""
+    path = path or os.environ.get("PATH", "")
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=proj, PATH=path)
+    p = subprocess.run([BASH, os.path.join(proj, ".claude", "hooks",
+                                           "test-gate.sh")],
+                       input=json.dumps(payload), capture_output=True,
+                       text=True, env=env, cwd=proj)
+    _keep = {k: os.environ.get(k) for k in ("CLAUDE_PROJECT_DIR", "PATH")}
+    os.environ.update(CLAUDE_PROJECT_DIR=proj, PATH=path)
+    try:
+        res = asyncio.run(mod._GATE_FACTORIES["test-gate"](
+            mod.RESOLVED_CONFIG)(payload, "tu-1", None))
+    finally:
+        for k, v in _keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    return p.returncode, p.stdout, res or {}
+
+
+def _nt_verdicts(rc, res):
+    sh = {0: "allow", 2: "deny"}.get(rc, f"rc={rc}")
+    hso = res.get("hookSpecificOutput") or {}
+    sd = "deny" if hso.get("permissionDecision") == "deny" else "allow"
+    return sh, sd
+
+
+_WANT_JSON = {"systemMessage": NO_TESTS_NOTICE,
+              "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                     "additionalContext": NO_TESTS_NOTICE}}
+try:
+    _p5, _p1, _m5 = _nt_fake("pytest", 5), _nt_fake("pytest", 1), \
+        _nt_fake("mocha", 5)
+    _proj, _mod = _nt_tree("pytest", "pytest -q")
+    _rc, _out, _res = _nt_both(_proj, _mod, bash("git commit -m first"), _p5)
+    _sh, _sd = _nt_verdicts(_rc, _res)
+    check("[no-tests] pytest exit 5: shell==sdk==allow",
+          _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+    try:
+        _got = json.loads(_out)
+    except ValueError:
+        _got = None
+    check("[no-tests] the shell's stdout is ONLY the notice JSON",
+          _got == _WANT_JSON, repr(_out[:200]))
+    check("[no-tests] the SDK returns the same notice", _res == _WANT_JSON,
+          repr(_res)[:200])
+    _rc, _out, _res = _nt_both(_proj, _mod, bash("git status"), _p5)
+    check("[no-tests] a non-commit command runs nothing and says nothing",
+          _rc == 0 and _out == "" and _res == {}, repr((_rc, _out, _res)))
+
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod, bash("git commit -m x"),
+                                      _p1)[::2])
+    check("[no-tests] POSITIVE CONTROL: the same tree blocks a red suite "
+          "(exit 1)", _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
+
+    _proj, _mod = _nt_tree("mocha", "mocha")
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod, bash("git commit -m x"),
+                                      _m5)[::2])
+    check("[no-tests] exit 5 from a runner NOT in the table still blocks "
+          "(mocha: exit 5 = five failures)",
+          _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
+
+    # One REAL runner, stdlib only: `python3 -m unittest` exits 5 on an empty
+    # project from Python 3.12 (before that it exits 0, which proves nothing).
+    if sys.version_info >= (3, 12):
+        _proj, _mod = _nt_tree("unittest", "python3 -m unittest")
+        _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod,
+                                          bash("git commit -m x"))[::2])
+        check("[no-tests] real `python3 -m unittest`, empty project: "
+              "shell==sdk==allow", _sh == _sd == "allow",
+              f"shell={_sh} sdk={_sd}")
+    else:
+        print("  SKIP  real unittest row: Python < 3.12 exits 0, not 5")
+finally:
+    shutil.rmtree(_NT_TMP, ignore_errors=True)
 
 shutil.rmtree(TMP, ignore_errors=True)
 

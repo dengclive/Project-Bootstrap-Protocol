@@ -23,8 +23,15 @@ config.
 
 3. Summarize the plan for the operator: archetype, autonomous-mode flags,
    number of files, and anything in the "skipped (locally modified)" set.
-   Surface any `_command_warnings` (empty test/lint/format commands produce
-   loud TODO markers in the hooks).
+   Surface every `warning:` line the dry run prints on stderr, verbatim.
+   Each one is advisory and leaves the exit code alone. For example, the
+   dry run prints one for each empty test, lint or format command; for a
+   test command whose "no tests yet" the test gate cannot tell from a
+   failing suite; for each hook script the run leaves alone rather than
+   update, so a config change will not reach it (on a tree with no
+   installer manifest the line names `--adopt`); and when the run would
+   re-create a `settings.json` that was renamed to `settings.json.disabled`
+   to turn hooks off.
 
 4. On operator approval, apply:
 
@@ -37,8 +44,13 @@ config.
    skipped, or a hook is emitted-but-unregistered / registered-but-absent.
    The stdout counts look like a success in that case, so read stderr and
    surface it verbatim; do not tell the operator the install succeeded.
-   (Exit 2 is a config refusal — nothing was written. Exit 0 is the only
-   outcome whose enforcement was verified.)
+   (Exit 2 is a config refusal — nothing was written; an unparseable
+   config names its file and line. Exit 0 is the only outcome
+   whose enforcement was verified.) On exit 0, still surface every
+   `warning:` line on stderr, verbatim: the apply repeats the dry run's,
+   and adds one for each of the operator's own hook registrations that
+   begin with an unquoted `$CLAUDE_PROJECT_DIR` in a project path that
+   contains a space, tab, newline or glob character.
 
 6. Report the create/update/unchanged/skipped counts. Remind the operator
    that local edits to generated files are preserved unless `--force` is

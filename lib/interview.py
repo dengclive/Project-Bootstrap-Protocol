@@ -13,7 +13,7 @@ Invariants enforced everywhere:
 
   * Proposes, never silently decides. Ambiguity becomes an OPEN QUESTION.
   * commands.test/lint/format are NEVER guessed - emitted empty and flagged
-    HUMAN-REQUIRED, consistent with the installer's loud-TODO gates.
+    HUMAN-REQUIRED; the installer warns about each one it finds empty.
   * The emitted config is validated by shelling `bin/bootstrap-install
     --print-config`; the tool refuses to finish on validation failure.
   * The proposal core (build_proposal) is a pure function of PRD text:
@@ -26,6 +26,7 @@ Invariants enforced everywhere:
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import os
 import subprocess
@@ -35,7 +36,7 @@ from pathlib import Path
 import prd_heuristics as H
 import llm_advisor as LLM
 from configemit import emit
-from defaults import resolve_config
+from defaults import DEFAULTS, resolve_config
 from minyaml import load_yaml
 
 HERE = Path(__file__).resolve().parent
@@ -44,6 +45,46 @@ BIN = HERE.parent / "bin" / "bootstrap-install"
 INTERVIEW_DEFAULT = "bootstrap.interview.md"
 CONFIG_DEFAULT = "bootstrap.config.yaml"
 
+# [WP1] The Phase 6 per-hook toggles the ANSWERS block exposes, in render
+# order. Each name is a `hooks.<name>` key in bootstrap.config.yaml and the
+# answer key is `hooks_<name>`. The set is exactly the toggle keys of
+# DEFAULTS["hooks"] (the drift_* thresholds are numbers, not toggles) MINUS
+# the two security gates, and a test pins that, so a toggle added to the
+# installer cannot go unasked here. tdd_gate and eval_gate default to None in
+# DEFAULTS ("derive it"), so they take a third value, `auto`.
+#
+# [D3 ruling] secrets_gate and dependency_gate are deliberately NOT offered:
+# secrets_enabled and deps_enabled are the only interview switches for the
+# two security gates. A hand-written `hooks.secrets_gate/dependency_gate:
+# false` in bootstrap.config.yaml predates WP1 and resolve_config still
+# honours it; the interview just never writes one.
+SECURITY_HOOK_TOGGLES = frozenset({"secrets_gate", "dependency_gate"})
+# The two answers that do switch them, and the gate each one switches. Both
+# predate WP1, but since D3 false removes a gate, so an unreadable value is
+# an error, not the "read as false" older boolean keys still get.
+POLICY_ANSWER_KEYS = {"secrets_enabled": "the secrets gate",
+                      "deps_enabled": "the dependency gate"}
+HOOK_TOGGLES = (
+    ("spec_gate_entry", "prints a notice when a prompt has no active spec"),
+    ("spec_gate_commit", "blocks a commit of files no active spec names"),
+    ("test_gate", "runs commands.test before a commit; blocks on failure"),
+    ("format_lint_gate", "runs commands.lint after a Write or Edit"),
+    ("ci_mirror", "runs commands.ci_local before a push; blocks on failure"),
+    ("cost_log", "appends one line per session event to .claude/logs/"),
+    ("tdd_gate", "tests-before-source gate; auto = on when tdd_policy is "
+                 "required"),
+    ("eval_gate", "eval-before-push gate; auto = on for the ai-agent "
+                  "archetype"),
+    ("drift_detector", "counts tool calls; prints a notice past the "
+                       "threshold"),
+    ("task_done_alarm", "prints a notice when a subagent finishes"),
+    ("decision_required_alarm", "prints a notice when the session needs "
+                                "you"),
+)
+HOOK_TOGGLE_NAMES = tuple(n for n, _ in HOOK_TOGGLES)
+HOOK_TRISTATE = frozenset({"tdd_gate", "eval_gate"})
+HOOK_ANSWER_KEYS = tuple(f"hooks_{n}" for n in HOOK_TOGGLE_NAMES)
+
 # Keys whose answers the human supplies in the ANSWERS block. Each maps to a
 # (section, builder) the synthesize step understands. Order is the order the
 # interview file presents them and the order interactive mode prompts them.
@@ -51,7 +92,13 @@ ANSWER_KEYS = [
     "project_name",
     "archetype",
     "prd_tier",
+    # [WP1] Phase 0 classification fields answers_to_config used to hard-code.
+    "prd_path",
+    "shell",
+    "cicd_opt_out",
     "principles_ranked",
+    # [WP1] Phase 4 step 5; answers_to_config used to hard-code [].
+    "principles_tiebreakers",
     "tdd_policy",
     "secrets_enabled",
     "secrets_never_read_paths",
@@ -77,6 +124,8 @@ ANSWER_KEYS = [
     # false makes the installer drop `isolation: worktree` rather than emit a
     # gate that tests a tree the agent never wrote to.
     "commands_execute_in_cwd",
+    # [WP1] Phase 6: one toggle per hook (see HOOK_TOGGLES).
+    *HOOK_ANSWER_KEYS,
 ]
 
 
@@ -149,17 +198,27 @@ def build_proposal(prd_text: str, *, project_fallback: str = "my-project",
     return det
 
 
-def default_answers(proposal: dict) -> dict:
+def default_answers(proposal: dict, prd_path: str | None = None) -> dict:
     """The answer set if the human edits nothing - i.e. accept every
     proposal. Every value here is a conscious proposal with a rationale, so
     this still satisfies 'proposes, never silently decides': the human saw
-    each one and chose not to override."""
+    each one and chose not to override.
+
+    [WP1] `prd_path` is the PRD this interview read, as the config records
+    it (see _config_prd_path). Without one, the answer is the installer's
+    default location, which is what every earlier version emitted."""
     p = proposal
     return {
         "project_name": p["project_name"]["value"],
         "archetype": p["archetype"]["value"],
         "prd_tier": p["prd_tier"]["value"],
+        "prd_path": prd_path or DEFAULTS["project"]["prd_path"],
+        "shell": DEFAULTS["project"]["shell"],
+        "cicd_opt_out": DEFAULTS["project"]["cicd_opt_out"],
         "principles_ranked": list(p["principles"]["ranked"]),
+        # Never guessed from the PRD: tiebreakers name principles in tension,
+        # which is the operator's call (Phase 4 step 5).
+        "principles_tiebreakers": [],
         "tdd_policy": p["tdd_policy"]["value"],
         "secrets_enabled": p["secrets"]["enabled"],
         "secrets_never_read_paths": [".env*", "secrets/**", "*.pem", "*.key"],
@@ -188,6 +247,9 @@ def default_answers(proposal: dict) -> dict:
         # it can tell us the commands themselves, so it is proposed, shown, and
         # overridable — never inferred from the PRD text.
         "commands_execute_in_cwd": True,
+        # [WP1] The installer's own defaults: True, or None ("auto") for the
+        # two derived gates.
+        **{f"hooks_{n}": DEFAULTS["hooks"][n] for n in HOOK_TOGGLE_NAMES},
     }
 
 
@@ -198,18 +260,24 @@ def answers_to_config(ans: dict) -> dict:
     """Assemble a config dict in the schema bootstrap.config.yaml uses.
 
     We deliberately emit only the fields a human decides; resolve_config
-    fills the rest (hook toggles, drift thresholds, etc.) from DEFAULTS.
+    fills the rest (drift thresholds, etc.) from DEFAULTS.
+
+    [WP1] Every key added for WP1 is read with .get() and the value earlier
+    versions hard-coded, so a hand-built or older answers dict still works.
+    The `hooks:` block carries only the toggles that differ from DEFAULTS, so
+    accepting every proposal emits no `hooks:` key at all.
     """
     paths = ans.get("secrets_never_read_paths") \
         or [".env*", "secrets/**", "*.pem", "*.key"]
-    return {
+    cfg = {
         "project": {
             "name": ans["project_name"],
             "archetype": ans["archetype"],
-            "shell": "bash",
+            "shell": ans.get("shell") or DEFAULTS["project"]["shell"],
             "prd_tier": ans["prd_tier"],
-            "prd_path": "docs/prd/PRD.md",
-            "cicd_opt_out": False,
+            "prd_path": ans.get("prd_path")
+            or DEFAULTS["project"]["prd_path"],
+            "cicd_opt_out": bool(ans.get("cicd_opt_out", False)),
         },
         "autonomous_modes": {
             "loop_mode_enabled": bool(ans["loop_mode_enabled"]),
@@ -233,7 +301,7 @@ def answers_to_config(ans: dict) -> dict:
             bool(ans.get("design_review_skill_enabled", False)),
         "principles": {
             "ranked": list(ans["principles_ranked"]),
-            "tiebreakers": [],
+            "tiebreakers": list(ans.get("principles_tiebreakers") or []),
             "tdd_policy": ans["tdd_policy"],
         },
         "secrets": {
@@ -254,6 +322,34 @@ def answers_to_config(ans: dict) -> dict:
             "execute_in_cwd": bool(ans.get("commands_execute_in_cwd", True)),
         },
     }
+    hooks = {}
+    for name in HOOK_TOGGLE_NAMES:
+        default = DEFAULTS["hooks"][name]
+        value = ans.get(f"hooks_{name}", default)
+        # [D3] HOOK_TOGGLE_NAMES has no security gate, so nothing here
+        # writes `hooks.secrets_gate/dependency_gate`: secrets.enabled and
+        # deps.enabled are their switches, applied in resolve_config.
+        # Writing `false` for them whenever a policy was off made gate-off
+        # STICKY - flipping the policy back to true in the config left both
+        # gates off.
+        if value != default:
+            hooks[name] = value
+    if hooks:
+        cfg["hooks"] = hooks
+    return cfg
+
+
+def _config_prd_path(prd: Path, out: Path) -> str:
+    """[WP1] The PRD path as bootstrap.config.yaml records it.
+
+    The tool treats the directory it writes into as the project root, so
+    a PRD under that directory is recorded relative to it:
+    `docs/prd/PRD.md` in the README flow. A PRD outside it is recorded as
+    given. Either way the ANSWERS block shows the value for review."""
+    try:
+        return prd.resolve().relative_to(out.resolve().parent).as_posix()
+    except ValueError:
+        return prd.as_posix()
 
 
 def validate_config_dict(cfg: dict) -> list[str]:
@@ -289,6 +385,10 @@ def validate_config_dict(cfg: dict) -> list[str]:
 def validate_with_installer(config_path: Path) -> tuple[int, str]:
     """Shell `bin/bootstrap-install --print-config` - the authoritative gate
     named in the session constraints. Returns (returncode, combined output)."""
+    # [WP1] Absolute: the installer resolves a relative -c against -C, so
+    # `-o sub/c.yaml` asked it for sub/sub/c.yaml and the tool reported its
+    # own valid draft as rejected.
+    config_path = config_path.resolve()
     proc = subprocess.run(
         [sys.executable, str(BIN), "-c", str(config_path),
          "-C", str(config_path.parent), "--print-config"],
@@ -356,10 +456,48 @@ COMMANDS_CWD_QUESTION = (
     """Do your test, lint, format, typecheck and CI commands run in the directory they are invoked from? Answer yes for anything that runs locally (`pytest -q`, `npm test`, `make ci`) and for container invocations that follow the caller (`docker run -v "$(pwd)":/app ...`). Answer NO if a command reaches its code through a fixed mount — `docker compose exec`, `kubectl exec`, `ssh`, `vagrant ssh`, a devcontainer CLI — because those land in a tree the mount chose, not the one you were standing in. This matters because the implementer subagent works in its own git worktree: if the gates cannot follow it there, they compile and test the main checkout instead, and report green on code that was never built. Answering no makes the installer drop the worktree isolation rather than leave you with a gate that lies."""
 )
 
+# [WP1] Five more sections of the same shape as TELEMETRY_SECTION_MARKER, one
+# per decision answers_to_config used to hard-code. Each is rendered
+# unconditionally, so its marker dates the file: marker present and key
+# missing means a deleted or misspelled line (fail loud); marker absent means
+# the file predates the key, and the key takes the value earlier versions
+# emitted, so an older file keeps meaning what it meant. Unlike the three
+# older markers these are matched as WHOLE LINES, so a rationale that happens
+# to contain the text cannot date a file.
+PRD_PATH_SECTION_TITLE = "PRD location"
+SHELL_SECTION_TITLE = "Shell"
+CICD_SECTION_TITLE = "CI/CD applicability"
+TIEBREAKERS_SECTION_TITLE = "Principle tiebreakers"
+HOOKS_SECTION_TITLE = "Hooks"
+
+# Phase 0 step 5, verbatim from the protocol doc. The answer is inverted:
+# "no" means cicd_opt_out: true.
+CICD_QUESTION = ("Does this project have CI/CD pipelines, or will it "
+                 "(within 3 months)?")
+
+# answer key -> (section title, value when the section is absent)
+_WP1_KEY_SECTIONS = {
+    "prd_path": (PRD_PATH_SECTION_TITLE, DEFAULTS["project"]["prd_path"]),
+    "shell": (SHELL_SECTION_TITLE, DEFAULTS["project"]["shell"]),
+    "cicd_opt_out": (CICD_SECTION_TITLE, DEFAULTS["project"]["cicd_opt_out"]),
+    "principles_tiebreakers": (TIEBREAKERS_SECTION_TITLE, []),
+    **{f"hooks_{n}": (HOOKS_SECTION_TITLE, DEFAULTS["hooks"][n])
+       for n in HOOK_TOGGLE_NAMES},
+}
+
+_TRUE_WORDS = ("true", "1", "yes", "on")
+_FALSE_WORDS = ("false", "0", "no", "off")
+
+# SEAM-CONTRACT-v3-0-0.md §7.3 and §8.2 items 1, 2 and 10: an ANSWERS block
+# written by Tessera may carry `source:` provenance markers and a
+# `targets_seam_version` field, which synthesize accepts by ignoring. They
+# stay ignored WITHOUT a warning, so that path's stderr is what it was.
+_SEAM_IGNORED_KEYS = frozenset({"source", "targets_seam_version"})
+
 
 def render_interview(proposal: dict, prd_path: str) -> str:
     p = proposal
-    ans = default_answers(p)
+    ans = default_answers(p, prd_path=prd_path)
     L: list[str] = []
     w = L.append
 
@@ -415,6 +553,27 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "_You may raise the tier but not lower it below the floor "
         "(Bootstrap-Protocol-v2-0-0.md Phase 0)._",
     ])
+    # [WP1] The three Phase 0 fields answers_to_config used to hard-code.
+    section(PRD_PATH_SECTION_TITLE, [
+        f"**Proposed:** `{ans['prd_path']}` (the PRD this interview read)",
+        "",
+        "Recorded as `project.prd_path`: product.md cites it and the state "
+        "file stores it. The installer does not copy or move the PRD.",
+    ])
+    section(SHELL_SECTION_TITLE, [
+        f"**Proposed:** `{ans['shell']}`",
+        "",
+        "Recorded as `project.shell` in tech.md. It does not change how the "
+        "hooks run: every emitted hook is a bash script.",
+    ])
+    section(CICD_SECTION_TITLE, [
+        "**Proposed:** `cicd_opt_out = false` (the project has CI/CD, or "
+        "will)",
+        "",
+        f"\"{CICD_QUESTION}\" If the answer is no, set `cicd_opt_out: true`. "
+        "ci-cd.md then records \"No CI/CD\" as the decision, and the "
+        "ci-mirror hook is not installed.",
+    ])
 
     pr = p["principles"]
     pl = [
@@ -430,6 +589,14 @@ def render_interview(proposal: dict, prd_path: str) -> str:
             pl.append(f"  - {a['principle']}  — _{a['rationale']}_")
     pl += ["", pr["rationale"]]
     section("Principles", pl)
+    section(TIEBREAKERS_SECTION_TITLE, [
+        "**Proposed:** none. The tool does not guess which principles are in "
+        "tension; principles.md shows a placeholder until you add one.",
+        "",
+        "Add one `  - ` line per tiebreaker under `principles_tiebreakers`, "
+        "for example `  - DRY vs YAGNI: prefer YAGNI until the third "
+        "duplication` (Phase 4 step 5).",
+    ])
 
     section("TDD policy", [
         f"**Proposed:** `{p['tdd_policy']['value']}`  "
@@ -502,12 +669,13 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "`commands.test`, `commands.lint`, `commands.format`, "
         "`commands.typecheck`, `commands.ci_local`",
         "",
-        "A PRD does not contain these. They are emitted **empty**. The "
-        "installer turns empty gate commands into hooks that **fail loudly "
-        "with a TODO** rather than silently passing — this is intentional "
-        "(see README 'Honest limitations'). Fill them in the ANSWERS block "
-        "only if you actually know them; otherwise leave empty and complete "
-        "them before relying on the gates.",
+        "A PRD does not contain these. They are emitted **empty** (see "
+        "README 'Honest limitations'). An empty test "
+        "command makes `test-gate` block every commit; an empty lint "
+        "command means `format-lint-gate` checks nothing; no hook runs "
+        "format or typecheck. Fill them in the ANSWERS block only if you "
+        "actually know them; otherwise leave empty and complete them before "
+        "relying on the gates.",
     ])
     # [W-1] Emitted UNCONDITIONALLY (like telemetry and design), so
     # COMMANDS_CWD_SECTION_MARKER dates any interview file that carries it —
@@ -522,6 +690,22 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "",
         f"\"{COMMANDS_CWD_QUESTION}\"",
     ])
+    # [WP1] Phase 6: one toggle per hook (see HOOK_TOGGLES). Rendered
+    # unconditionally so the marker dates the file (see _WP1_KEY_SECTIONS).
+    hl = [
+        "**Proposed:** the installer's standard set for this archetype and "
+        "TDD policy.",
+        "",
+        "Each `hooks_<name>` line in the ANSWERS block switches one hook: "
+        "`true` installs it and `false` leaves it out. `hooks_tdd_gate` and "
+        "`hooks_eval_gate` also take `auto`. The secrets gate and the "
+        "dependency gate have no line here: `secrets_enabled` and "
+        "`deps_enabled` switch them, and false removes that policy's gate.",
+        "",
+    ]
+    for name, desc in HOOK_TOGGLES:
+        hl.append(f"- `hooks_{name}`: {desc}.")
+    section(HOOKS_SECTION_TITLE, hl)
 
     if p["open_questions"]:
         w("## ⚠ OPEN QUESTIONS — these were too ambiguous to propose")
@@ -541,12 +725,16 @@ def render_interview(proposal: dict, prd_path: str) -> str:
     w("")
     w(ANSWERS_BEGIN)
     w("# Booleans: true/false. Leave commands empty unless known.")
-    w("# List values (principles_ranked, secrets_never_read_paths) are")
-    w("# written one item per line as '  - item' so an item may safely")
-    w("# contain commas; edit/add/remove '  - ' lines under the key.")
+    w("# List values (principles_ranked, principles_tiebreakers,")
+    w("# secrets_never_read_paths) are written one item per line as")
+    w("# '  - item' so an item may safely contain commas; edit/add/remove")
+    w("# '  - ' lines under the key.")
     for k in ANSWER_KEYS:
         v = ans[k]
-        if isinstance(v, list):
+        if v is None:
+            # [WP1] only the two tri-state hook toggles are ever None.
+            w(f"{k}: auto")
+        elif isinstance(v, list):
             # one item per indented '- ' line: no in-band delimiter, so a
             # principle containing a comma round-trips intact (finding R-3).
             w(f"{k}:")
@@ -561,8 +749,16 @@ def render_interview(proposal: dict, prd_path: str) -> str:
     return "\n".join(L)
 
 
-def parse_interview_answers(text: str) -> dict:
-    """Extract the ANSWERS block back into a typed answers dict."""
+def parse_interview_answers(text: str, warnings: list | None = None) -> dict:
+    """Extract the ANSWERS block back into a typed answers dict.
+
+    [WP1] A line the parser cannot use is no longer dropped silently: an
+    unknown key, a repeated key, a stray list item, a line with no colon and
+    an unreadable pre-WP1 boolean each append one message to `warnings` (the
+    same sink pattern as configemit.emit). The WP1 keys are strict instead:
+    an unreadable value raises, since no older file can carry one.
+    """
+    sink: list = warnings if warnings is not None else []
     lines = text.splitlines()
     try:
         i0 = lines.index(ANSWERS_BEGIN)
@@ -579,14 +775,23 @@ def parse_interview_answers(text: str) -> dict:
         "design_steering_enabled", "design_review_skill_enabled",
         # [W-1] the command-execution-location fact.
         "commands_execute_in_cwd",
+        # [WP1]
+        "cicd_opt_out",
+        *(f"hooks_{n}" for n in HOOK_TOGGLE_NAMES if n not in HOOK_TRISTATE),
     }
-    list_keys = {"principles_ranked", "secrets_never_read_paths"}
+    tristate_keys = {f"hooks_{n}" for n in HOOK_TRISTATE}
+    list_keys = {"principles_ranked", "secrets_never_read_paths",
+                 "principles_tiebreakers"}
+    known = set(ANSWER_KEYS)
 
     raw: dict[str, str] = {}
+    raw_line: dict[str, int] = {}
     list_raw: dict[str, list[str]] = {}
+    first_seen: dict[str, int] = {}
     body = lines[i0 + 1:i1]
     cur_list_key: str | None = None
-    for line in body:
+    last_key: str | None = None
+    for lineno, line in enumerate(body, start=i0 + 2):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -596,12 +801,46 @@ def parse_interview_answers(text: str) -> dict:
                 item = stripped[1:].strip()
                 if item:
                     list_raw.setdefault(cur_list_key, []).append(item)
+            else:
+                if last_key is None:
+                    why = "no key comes before it"
+                elif last_key not in known:
+                    why = f"it belongs to the unknown key '{last_key}'"
+                elif last_key in list_keys:
+                    why = (f"'{last_key}' already has a value on its own "
+                           "line; put every item on a '  - ' line instead")
+                else:
+                    why = f"'{last_key}' takes a single value"
+                sink.append(f"line {lineno}: list item {stripped!r} "
+                            f"ignored: {why}.")
             continue
         if ":" not in stripped:
+            sink.append(f"line {lineno}: {stripped!r} ignored: not a "
+                        "'key: value' line.")
             continue
         k, _, v = stripped.partition(":")
         k = k.strip()
         v = v.strip()
+        last_key = k
+        if k in _SEAM_IGNORED_KEYS:
+            cur_list_key = None
+            continue
+        if k not in known:
+            cur_list_key = None
+            msg = f"line {lineno}: unknown key '{k}' ignored."
+            hint = difflib.get_close_matches(k, ANSWER_KEYS, n=1)
+            if hint:
+                msg += f" Did you mean '{hint[0]}'?"
+            sink.append(msg)
+            continue
+        if k in first_seen:
+            sink.append(
+                f"line {lineno}: '{k}' appears again (first on line "
+                f"{first_seen[k]}); "
+                + ("the items under both are kept." if k in list_keys
+                   else "this later value is the one used."))
+        else:
+            first_seen[k] = lineno
         if k in list_keys and v == "":
             # one-item-per-line form: items follow on '- ' lines.
             cur_list_key = k
@@ -609,6 +848,7 @@ def parse_interview_answers(text: str) -> dict:
         else:
             cur_list_key = None
             raw[k] = v
+            raw_line[k] = lineno
 
     out: dict = {}
     for k in ANSWER_KEYS:
@@ -618,11 +858,22 @@ def parse_interview_answers(text: str) -> dict:
                 out[k] = [x.strip() for x in list_raw[k] if x.strip()]
                 continue
             if k in raw:
+                if k == "principles_tiebreakers":
+                    # [WP1] No legacy comma form to honour, and a tiebreaker
+                    # sentence often has a comma: an inline value is ONE item.
+                    out[k] = [raw[k]] if raw[k] else []
+                    continue
                 # legacy inline 'key: a, b, c' form (back-compat)
                 out[k] = [x.strip() for x in raw[k].split(",") if x.strip()]
                 continue
+            if k in _WP1_KEY_SECTIONS:
+                out[k] = _wp1_absent(k, lines)
+                continue
             raise ValueError(f"ANSWERS block missing key: {k}")
         if k not in raw:
+            if k in _WP1_KEY_SECTIONS:
+                out[k] = _wp1_absent(k, lines)
+                continue
             # TEL-01 (v2.4.0 fold): back-compat — a pre-2.4.0 ANSWERS block has
             # no telemetry line, and rejecting an otherwise-valid older
             # interview file is not acceptable. But an unconditional exemption
@@ -682,11 +933,48 @@ def parse_interview_answers(text: str) -> dict:
                     "compiled.")
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
-        if k in bool_keys:
-            out[k] = val.strip().lower() in ("true", "1", "yes", "on")
+        word = val.strip().lower()
+        if k in tristate_keys:
+            if word == "auto":
+                out[k] = None
+            elif word in _TRUE_WORDS or word in _FALSE_WORDS:
+                out[k] = word in _TRUE_WORDS
+            else:
+                raise ValueError(
+                    f"{k}: {val!r} is not auto, true or false.")
+        elif k in bool_keys:
+            if word not in _TRUE_WORDS and word not in _FALSE_WORDS:
+                if k in _WP1_KEY_SECTIONS:
+                    raise ValueError(f"{k}: {val!r} is not true or false.")
+                if k in POLICY_ANSWER_KEYS:
+                    # [WP1 D3] false removes a security gate, so a typo here
+                    # is refused, never read as false.
+                    raise ValueError(
+                        f"line {raw_line[k]}: {k}: {val!r} is not true or "
+                        f"false. It switches {POLICY_ANSWER_KEYS[k]}, and "
+                        "false removes it, so a value that is neither is "
+                        "refused rather than read as false.")
+                # Pre-WP1 key: keep reading it as false, as every earlier
+                # version did, but say so.
+                sink.append(f"{k}: {val!r} is not true or false; read as "
+                            "false.")
+            out[k] = word in _TRUE_WORDS
         else:
             out[k] = val
     return out
+
+
+def _wp1_absent(k: str, lines: list[str]):
+    """[WP1] The value of a WP1 key the ANSWERS block lacks: the value earlier
+    versions emitted if the file predates the key's section, else an error."""
+    title, legacy = _WP1_KEY_SECTIONS[k]
+    if f"## {title}" not in lines:
+        return list(legacy) if isinstance(legacy, list) else legacy
+    raise ValueError(
+        f"ANSWERS block missing key: {k}. This interview file carries the "
+        f"'{title}' section, so the key was deleted or misspelled rather "
+        f"than predating it. Restore the `{k}:` line; the tool does not "
+        "default a decision the file shows it asked.")
 
 
 # --------------------------------------------------------------------------- #
@@ -722,18 +1010,19 @@ def _ask(prompt: str, default: str, *, instream, outstream,
 
 def run_interactive(prd_text: str, *, instream, outstream,
                      project_fallback: str = "my-project",
-                     use_llm: bool = False) -> dict:
+                     use_llm: bool = False,
+                     prd_path: str | None = None) -> dict:
     """Prompt the human one decision at a time over stdin; return answers.
 
     Equivalent to editing the questionnaire: every prompt shows the proposal
     and rationale; empty input accepts it. OPEN QUESTIONs are asked as
     sequential prompts (never batched). commands.* are explicitly NOT
-    prompted as guessable - the human may optionally supply them with the
-    loud-TODO consequence stated.
+    prompted as guessable - the human may optionally supply them, with the
+    consequence of leaving them empty stated.
     """
     p = build_proposal(prd_text, project_fallback=project_fallback,
                         use_llm=use_llm)
-    ans = default_answers(p)
+    ans = default_answers(p, prd_path=prd_path)
     o = outstream.write
     eof = _EOF()  # shared sticky end-of-input flag (review finding I-1)
 
@@ -798,6 +1087,33 @@ def run_interactive(prd_text: str, *, instream, outstream,
             break
         o(f"  must be one of micro|standard|full and >= floor '{floor}'.\n")
 
+    # [WP1] The Phase 0 fields answers_to_config used to hard-code.
+    show(PRD_PATH_SECTION_TITLE,
+         "Recorded as project.prd_path (product.md and the state file). "
+         "Relative to the project root.")
+    ans["prd_path"] = _ask("PRD path", ans["prd_path"], instream=instream,
+                           outstream=outstream, eof=eof)
+    show(SHELL_SECTION_TITLE,
+         "Recorded in tech.md. Every emitted hook is a bash script "
+         "whatever this says.")
+    ans["shell"] = _ask("Shell", ans["shell"], instream=instream,
+                        outstream=outstream, eof=eof)
+    show(CICD_SECTION_TITLE,
+         "If no, ci-cd.md records \"No CI/CD\" and the ci-mirror hook is not "
+         "installed.")
+    while True:
+        v = _ask(f"{CICD_QUESTION} yes|no",
+                 "no" if ans["cicd_opt_out"] else "yes",
+                 instream=instream, outstream=outstream, eof=eof)
+        word = v.strip().lower()
+        if word in _TRUE_WORDS or word in _FALSE_WORDS:
+            ans["cicd_opt_out"] = word in _FALSE_WORDS
+            break
+        if eof.hit:
+            o("  (end of input; keeping the proposal)\n")
+            break
+        o("  must be yes or no.\n")
+
     show("Principles", p["principles"]["rationale"])
     o("  Proposed ranked set:\n")
     for i, s in enumerate(ans["principles_ranked"], 1):
@@ -807,6 +1123,16 @@ def run_interactive(prd_text: str, *, instream, outstream,
              instream=instream, outstream=outstream, eof=eof)
     ans["principles_ranked"] = [x.strip() for x in v.replace(";", ",").split(",")
                                 if x.strip()]
+    # [WP1] Phase 4 step 5. Split on ';' only: a tiebreaker sentence often
+    # carries a comma ("DRY vs YAGNI: prefer YAGNI, until ...").
+    show(TIEBREAKERS_SECTION_TITLE,
+         "Optional. Name principles in tension and which wins, for example "
+         "\"DRY vs YAGNI: prefer YAGNI until the third duplication\".")
+    v = _ask("Tiebreakers (separate with ';', empty for none)",
+             "; ".join(ans["principles_tiebreakers"]),
+             instream=instream, outstream=outstream, eof=eof)
+    ans["principles_tiebreakers"] = [x.strip() for x in v.split(";")
+                                     if x.strip()]
 
     show("TDD policy", p["tdd_policy"]["rationale"])
     while True:
@@ -825,11 +1151,26 @@ def run_interactive(prd_text: str, *, instream, outstream,
             break
         o("  must be off|encouraged|required.\n")
 
+    def ask_policy(key, prompt):
+        # [WP1 D3, review RR4] false removes a security gate, so a reply
+        # that is not a clear yes or no is asked again, as the CI/CD prompt
+        # does, instead of being read as false. The ANSWERS parser refuses
+        # the same replies (POLICY_ANSWER_KEYS).
+        while True:
+            v = _ask(prompt, str(ans[key]).lower(), instream=instream,
+                     outstream=outstream, eof=eof)
+            word = v.strip().lower()
+            if word in _TRUE_WORDS or word in _FALSE_WORDS:
+                ans[key] = word in _TRUE_WORDS
+                return
+            if eof.hit:
+                o("  (end of input; keeping the proposal)\n")
+                return
+            o(f"  must be true or false (yes or no); false removes "
+              f"{POLICY_ANSWER_KEYS[key]}.\n")
+
     show("Secrets policy", p["secrets"]["rationale"])
-    v = _ask("Secrets enabled? true|false",
-             str(ans["secrets_enabled"]).lower(),
-             instream=instream, outstream=outstream, eof=eof)
-    ans["secrets_enabled"] = v.lower() in ("true", "1", "yes", "on")
+    ask_policy("secrets_enabled", "Secrets enabled? true|false")
     v = _ask("Never-read globs (comma-separated)",
              ", ".join(ans["secrets_never_read_paths"]),
              instream=instream, outstream=outstream, eof=eof)
@@ -837,10 +1178,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
                                        if x.strip()]
 
     show("Dependency policy", p["deps"]["rationale"])
-    v = _ask("Deps policy enabled? true|false",
-             str(ans["deps_enabled"]).lower(),
-             instream=instream, outstream=outstream, eof=eof)
-    ans["deps_enabled"] = v.lower() in ("true", "1", "yes", "on")
+    ask_policy("deps_enabled", "Deps policy enabled? true|false")
 
     show("Autonomous modes", p["autonomous_modes"]["rationale"])
     for mk, label in (("loop_mode_enabled", "Loop mode (scaffold-only)"),
@@ -909,9 +1247,9 @@ def run_interactive(prd_text: str, *, instream, outstream,
     # else: both flags stay at their False default, no prompt shown.
 
     o("\n--- Project commands (HUMAN-REQUIRED) ---\n"
-      "A PRD cannot supply these. Empty => the installer emits gates that "
-      "FAIL LOUDLY\nwith a TODO (intentional). Leave empty unless you truly "
-      "know them now.\n")
+      "A PRD cannot supply these. An empty test blocks every commit; an\n"
+      "empty lint checks nothing. Leave empty unless you truly know them "
+      "now.\n")
     for ck, label in (("commands_test", "test"), ("commands_lint", "lint"),
                       ("commands_format", "format"),
                       ("commands_typecheck", "typecheck"),
@@ -929,6 +1267,28 @@ def run_interactive(prd_text: str, *, instream, outstream,
              str(ans["commands_execute_in_cwd"]).lower(),
              instream=instream, outstream=outstream, eof=eof)
     ans["commands_execute_in_cwd"] = v.lower() in ("true", "1", "yes", "on")
+
+    # [WP1] Phase 6. One prompt, not thirteen: name the hooks to leave out.
+    # Forcing tdd_gate or eval_gate ON stays an ANSWERS-block edit; here they
+    # keep `auto` unless named.
+    show(HOOKS_SECTION_TITLE,
+         "The installer's standard set is proposed. "
+         "The secrets and dependency gates are not listed: "
+         "secrets_enabled and deps_enabled switch them.\n"
+         + "\n".join(f"  {n}: {d}" for n, d in HOOK_TOGGLES))
+    while True:
+        v = _ask("Hooks to leave out (comma-separated names, empty for none)",
+                 "", instream=instream, outstream=outstream, eof=eof)
+        names = [x.strip() for x in v.split(",") if x.strip()]
+        bad = [x for x in names if x not in HOOK_TOGGLE_NAMES]
+        if not bad:
+            for x in names:
+                ans[f"hooks_{x}"] = False
+            break
+        if eof.hit:
+            o("  (end of input; keeping every proposed hook)\n")
+            break
+        o(f"  unknown hook name(s): {', '.join(bad)}.\n")
 
     return ans
 
@@ -950,9 +1310,9 @@ def _finalize(answers: dict, out_path: Path, *, outstream) -> int:
 
     header = ("GENERATED BY bin/bootstrap-interview — a PROPOSAL reviewed by a "
               "human.\nEvery value here was shown with a rationale before "
-              "acceptance.\nempty commands.* are intentional: the installer "
-              "emits loud-TODO gates.\nRe-run bin/bootstrap-install --dry-run "
-              "to preview the .claude/ tree.")
+              "acceptance.\nempty commands.test/lint/format are intentional: "
+              "the installer warns about each one.\nRe-run "
+              "bin/bootstrap-install --dry-run to preview the .claude/ tree.")
     emit_warnings: list[str] = []
     out_path.write_text(emit(cfg, header=header, warnings=emit_warnings))
     for w in emit_warnings:
@@ -1022,7 +1382,8 @@ def main(argv: list[str]) -> int:
         proposal = build_proposal(
             prd.read_text(), project_fallback=prd.stem or "my-project",
             use_llm=use_llm)
-        Path(args.out).write_text(render_interview(proposal, str(prd)))
+        Path(args.out).write_text(render_interview(
+            proposal, _config_prd_path(prd, Path(args.out))))
         for n in proposal.get("_llm", {}).get("notices", []):
             print(f"  ! {n}")
         n_oq = len(proposal["open_questions"])
@@ -1039,11 +1400,15 @@ def main(argv: list[str]) -> int:
             print("Run `bin/bootstrap-interview analyze --prd <PRD>` first.",
                   file=sys.stderr)
             return 2
+        parse_warnings: list[str] = []
         try:
-            answers = parse_interview_answers(ip.read_text())
+            answers = parse_interview_answers(ip.read_text(),
+                                              warnings=parse_warnings)
         except ValueError as e:
-            print(f"error: {e}", file=sys.stderr)
+            print(f"error: {ip}: {e}", file=sys.stderr)
             return 2
+        for pw in parse_warnings:
+            print(f"warning: {ip}: {pw}", file=sys.stderr)
         if args.validate_only:
             # IC-1: validation only - no file is ever written on this path.
             cfg = answers_to_config(answers)
@@ -1066,7 +1431,8 @@ def main(argv: list[str]) -> int:
         use_llm = LLM.llm_requested(getattr(args, "llm", False))
         answers = run_interactive(
             prd.read_text(), instream=sys.stdin, outstream=sys.stdout,
-            project_fallback=prd.stem or "my-project", use_llm=use_llm)
+            project_fallback=prd.stem or "my-project", use_llm=use_llm,
+            prd_path=_config_prd_path(prd, Path(args.out)))
         return _finalize(answers, Path(args.out), outstream=sys.stdout)
 
     return 2  # pragma: no cover

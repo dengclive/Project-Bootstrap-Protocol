@@ -391,6 +391,529 @@ try:
 except ValueError as ex:
     check("Y-1: tab indentation rejected", "tab" in str(ex).lower())
 
+# --------------------------------------------------------------------------- #
+# Y-2: an inline list or map NESTED in another one is parsed, never returned
+# as its source text. It was: `principles: {ranked: ["A", "B"]}` gave ranked
+# the STRING '["A", "B"]', which principles.md rendered one character per
+# principle with rc=0, and the mcp example bootstrap.config.yaml documents
+# (`servers: [{name: ..., command: ...}]`) gave a list of strings that
+# crashed build_plan with AttributeError at templates.py `_tools`.
+# --------------------------------------------------------------------------- #
+import minyaml as _my                           # noqa: E402
+
+
+def _yaml_err(text):
+    """The exception load_yaml raises for `text`, or None if it parses."""
+    try:
+        load_yaml(text)
+    except Exception as exc:                    # noqa: BLE001
+        return exc
+    return None
+
+
+check("Y-2: an inline list inside an inline map is a list",
+      load_yaml('principles: {tdd_policy: required, '
+                'ranked: ["A over B", "C"]}')["principles"]["ranked"]
+      == ["A over B", "C"])
+check("Y-2: nesting parses to depth 3 in both directions",
+      load_yaml("a: {b: [{c: [1, 2]}, [x, {d: e}]]}")
+      == {"a": {"b": [{"c": [1, 2]}, ["x", {"d": "e"}]]}})
+check("Y-2: a nested inline list in a block list item is a list",
+      load_yaml("x:\n  - {name: a, args: [1, 2]}\n")
+      == {"x": [{"name": "a", "args": [1, 2]}]})
+
+# PIN THE THING, NOT ITS NAME: parse the example bootstrap.config.yaml itself
+# documents in its `mcp:` comments, not a copy of it.
+with open(os.path.join(ROOT, "bootstrap.config.yaml")) as _fh:
+    _mcp_ex = {ln.split(":", 1)[0].strip(): ln.split("#", 1)[1].strip()
+               for ln in _fh if ln.lstrip().startswith(("servers:",
+                                                        "rejected:"))}
+check("Y-2: the shipped config still documents both mcp examples",
+      sorted(_mcp_ex) == ["rejected", "servers"]
+      and all(v.startswith("[{") for v in _mcp_ex.values()))
+_mcp_doc = ("project:\n  name: demo\n  archetype: service\nmcp:\n"
+            f"  servers: {_mcp_ex.get('servers', '[]')}\n"
+            f"  rejected: {_mcp_ex.get('rejected', '[]')}\n")
+_mcp_raw = load_yaml(_mcp_doc)["mcp"]
+check("Y-2: the documented mcp example parses to lists of maps",
+      all(isinstance(v, list) and v and all(isinstance(e, dict) for e in v)
+          for v in _mcp_raw.values()))
+try:
+    _mcp_cfg, _mcp_errs = resolve_config(load_yaml(_mcp_doc))
+    _mcp_tools = {a["path"]: a["body"] for a in build_plan(_mcp_cfg)}[
+        ".claude/steering/tools.md"]
+except Exception as _exc:                       # noqa: BLE001
+    _mcp_errs, _mcp_tools = [repr(_exc)], ""
+check("Y-2: the documented mcp example installs and lists the server",
+      not _mcp_errs and "- **github** - `npx -y "
+      "@modelcontextprotocol/server-github`" in _mcp_tools
+      and "- linear: specs are source of truth" in _mcp_tools)
+
+_pr_cfg, _pr_errs = cfg_from('project: {name: demo, archetype: cli}\n'
+                             'principles: {ranked: ["A over B", "C"]}\n')
+_pr_md = {a["path"]: a["body"] for a in build_plan(_pr_cfg)}[
+    ".claude/steering/principles.md"] if not _pr_errs else ""
+check("Y-2: inline-map principles render as two principles, not one "
+      "per character",
+      "1. A over B\n2. C\n\n" in _pr_md and "\n3. " not in _pr_md)
+
+# Refusals: a flow value that is not closed on its own line, or whose
+# brackets do not match, used to be silently truncated or mis-split.
+for _lbl, _doc, _line in (
+        ("an unclosed inline list", "x: 1\na: [1, 2\n", 2),
+        ("an unclosed inline map", "x: 1\na: {b: 1\n", 2),
+        ("text after an inline list", "a: [1, 2] junk\n", 1),
+        ("a mismatched bracket", "x: 1\ny: 2\na: [1, {b: 2]]\n", 3),
+        ("an extra closing bracket", "a: [1], 2]\n", 1)):
+    _e = _yaml_err(_doc)
+    check(f"Y-2: {_lbl} is refused, not silently mis-parsed",
+          isinstance(_e, ValueError))
+    check(f"Y-3: {_lbl} is refused with its line ({_line})",
+          getattr(_e, "line", None) == _line)
+
+# Controls: quoted text keeps its brackets and commas; empty spellings hold.
+check("Y-2 control: quoted brackets and commas stay one string",
+      load_yaml('a: ["[ -f x ] && y", "x, y"]\n')
+      == {"a": ["[ -f x ] && y", "x, y"]})
+check("Y-2 control: empty inline list/map spellings are unchanged",
+      load_yaml("a: []\nb: {}\nc: [ ]\nd:\n  - []\n  - {}\n")
+      == {"a": [], "b": {}, "c": [], "d": [[], {}]})
+
+# --------------------------------------------------------------------------- #
+# Y-3: a config the parser refuses names its FILE and LINE and exits 2 from
+# every CLI path that loads it.
+# --------------------------------------------------------------------------- #
+_ye = getattr(_my, "YAMLError", None)
+check("Y-3: YAMLError exists and is a ValueError (old callers still catch)",
+      isinstance(_ye, type) and issubclass(_ye, ValueError))
+for _lbl, _doc, _line in (
+        ("over-indented key", "project:\n  name: x\n   shell: bash\n", 3),
+        ("line with no key", "project:\n  name: x\njust text\n", 3),
+        ("block list of maps", "mcp:\n  servers:\n    - name: g\n"
+                               "      command: c\n", 4),
+        ("multi-line string", "secrets:\n  rotation_policy: >-\n"
+                              "    folded\n", 2),
+        ("tab indentation", "project:\n\tname: x\n", 2)):
+    _e = _yaml_err(_doc)
+    check(f"Y-3: {_lbl} is refused with its line ({_line})",
+          getattr(_e, "line", None) == _line
+          and str(_e).startswith(f"line {_line}: "))
+
+_yd = tempfile.mkdtemp()
+try:
+    _bad = os.path.join(_yd, "bad.yaml")
+    with open(_bad, "w") as _fh:
+        _fh.write("project:\n  name: demo\n  archetype: cli\n"
+                  "principles:\n  ranked: [a, b\n")
+    os.mkdir(os.path.join(_yd, "adir.yaml"))
+    for _flag in ([], ["--dry-run"], ["--print-config"]):
+        _r = subprocess.run([sys.executable, BIN, "-C", _yd, "-c", _bad]
+                            + _flag, capture_output=True, text=True)
+        _lbl = _flag[0] if _flag else "install"
+        check(f"Y-3: {_lbl}: unparseable config -> rc=2, file:line, "
+              f"no traceback",
+              _r.returncode == 2 and f"{_bad}:5:" in _r.stderr
+              and "Traceback" not in _r.stderr)
+        _r = subprocess.run([sys.executable, BIN, "-C", _yd, "-c",
+                             os.path.join(_yd, "adir.yaml")] + _flag,
+                            capture_output=True, text=True)
+        check(f"Y-3: {_lbl}: unreadable config -> rc=2, no traceback",
+              _r.returncode == 2 and "cannot read config" in _r.stderr
+              and "Traceback" not in _r.stderr)
+    check("Y-3: a refused config writes nothing",
+          not os.path.exists(os.path.join(_yd, ".claude")))
+finally:
+    shutil.rmtree(_yd, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
+# Y-4: a section or list of the wrong SHAPE is a validation error, not a
+# crash in resolve_config/build_plan and not a principle per character.
+# --------------------------------------------------------------------------- #
+from defaults import DEFAULTS as _DEFAULTS     # noqa: E402
+
+
+def _resolve_or_crash(raw):
+    try:
+        cfg, errs = resolve_config(raw)
+        if not errs:
+            build_plan(cfg)
+        return errs
+    except Exception as exc:                    # noqa: BLE001
+        return exc
+
+
+_base = {"project": {"name": "d", "archetype": "cli"}}
+for _sect in _DEFAULTS:
+    for _v in (None, "x", [1]):
+        _r = _resolve_or_crash({**_base, _sect: _v})
+        check(f"Y-4: {_sect}: {_v!r} is a validation error, not a crash",
+              isinstance(_r, list)
+              and any(e.startswith(f"{_sect} must be a mapping")
+                      for e in _r))
+for _sect, _key, _v in (("principles", "ranked", "A over B"),
+                        ("principles", "tiebreakers", "x"),
+                        ("principles", "ranked", [["a", "b"]]),
+                        ("mcp", "servers", ["github"]),
+                        ("mcp", "rejected", "linear"),
+                        ("secrets", "never_read_paths", [["a"]])):
+    _r = _resolve_or_crash({**_base, _sect: {_key: _v}})
+    check(f"Y-4: {_sect}.{_key}: {_v!r} is a validation error",
+          isinstance(_r, list) and any(e.startswith(f"{_sect}.{_key}")
+                                       for e in _r))
+for _sect, _key in (("principles", "tiebreakers"), ("mcp", "servers"),
+                    ("mcp", "rejected")):
+    _r = _resolve_or_crash({**_base, _sect: {_key: None}})
+    check(f"Y-4: {_sect}.{_key}: null means empty, not a crash", _r == [])
+_r = _resolve_or_crash({"mode": "retrofit", **_base, "retrofit": "x"})
+check("Y-4: retrofit: a scalar retrofit section is a validation error",
+      isinstance(_r, list)
+      and any(e.startswith("retrofit must be a mapping") for e in _r))
+_r = _resolve_or_crash({"project": {"name": "d", "archetype": "bogus"},
+                        "principles": {"ranked": "A over B"}})
+check("Y-4: a list-shape error batches with the other validation errors",
+      isinstance(_r, list)
+      and any(e.startswith("principles.ranked") for e in _r)
+      and any(e.startswith("project.archetype") for e in _r))
+# Controls: the spellings that installed before still install, unchanged.
+_ctl, _ctl_e = cfg_from("project:\n  name: d\n  archetype: cli\n"
+                        "principles:\n  ranked:\n  tiebreakers: []\n"
+                        "mcp:\n  servers:\n")
+check("Y-4 control: empty `ranked:` still means the starter set",
+      not _ctl_e and _ctl["principles"]["ranked"]
+      and not _ctl["mcp"]["servers"])
+
+# Y-5: an apostrophe does not swallow a comma. It was: `[Don't guess, B]`
+# opened a quote at the apostrophe that never closed, so the comma was
+# swallowed and two principles became one, with rc=0.
+check("Y-5: an apostrophe in an inline list item does not merge items",
+      load_yaml("a: [Don't guess, B, users' data]\n")
+      == {"a": ["Don't guess", "B", "users' data"]})
+check("Y-5: an apostrophe in an inline map value does not eat later keys",
+      load_yaml("p: {name: Bob's app, archetype: cli}\n")
+      == {"p": {"name": "Bob's app", "archetype": "cli"}})
+check("Y-5 control: a quoted value after a space keeps its comma",
+      load_yaml("c: {test: pytest -k \"a, b\", lint: pytest -k 'c, d'}\n")
+      == {"c": {"test": 'pytest -k "a, b"', "lint": "pytest -k 'c, d'"}})
+# [review correctness/F6] The comment stripper used the old rule, so the same
+# apostrophe hid a trailing `# comment` (the shipped config writes them).
+def _y5(text):
+    try:
+        return load_yaml(text)
+    except ValueError as exc:
+        return exc
+
+
+check("Y-5: an apostrophe does not hide a trailing comment after a list",
+      _y5("p:\n  ranked: [Don't guess, B]  # note\n")
+      == {"p": {"ranked": ["Don't guess", "B"]}})
+check("Y-5: an apostrophe does not pull a trailing comment into a scalar",
+      _y5("project:\n  name: Don't panic  # note\n")
+      == {"project": {"name": "Don't panic"}})
+check("Y-5 control: a `#` inside a quoted value is still not a comment",
+      _y5("c:\n  test: \"pytest -k 'x # y'\"  # note\n")
+      == {"c": {"test": "pytest -k 'x # y'"}})
+# [fix round 2, review fix-correctness/F2] Round 1's rule (a quote opens only
+# where a value can start) regressed a quote after `=` or a letter that
+# encloses `#`: `--grep="#smoke"` lost `#smoke"` and the install exited 2
+# blaming an unbalanced quote. 24cd8a3 and PyYAML both keep these whole.
+def _check_d(name, cond, detail):
+    """check(), printing `detail` under a failing row."""
+    check(name, cond)
+    if not cond:
+        print(f"        {detail}")
+
+
+for _y5_text, _y5_want in (
+        ('commands:\n  test: npm test -- --grep="#smoke"\n',
+         {"commands": {"test": 'npm test -- --grep="#smoke"'}}),
+        ("commands:\n  lint: ruff check --exclude='#scratch'\n",
+         {"commands": {"lint": "ruff check --exclude='#scratch'"}}),
+        ('commands:\n  test: pytest -k"#x"\n',
+         {"commands": {"test": 'pytest -k"#x"'}}),
+        ('commands:\n  test: echo x="#1"  # note\n',
+         {"commands": {"test": 'echo x="#1"'}}),
+        ("commands:\n  test: echo it's a#b\n",
+         {"commands": {"test": "echo it's a#b"}}),
+        ("project:\n  name: Don't#x\n", {"project": {"name": "Don't#x"}})):
+    _check_d(f"Y-5 (24cd8a3 parse kept): "
+             f"{_y5_text.splitlines()[-1].strip()}",
+             _y5(_y5_text) == _y5_want, repr(_y5(_y5_text)))
+
+
+# The whole class, not the six lines above: on every line where 24cd8a3's
+# rule (every quote toggles) ends with its quotes closed, the comment
+# stripper cuts exactly where 24cd8a3 did. It differs only on a line that
+# 24cd8a3 left inside an unclosed quote, which is the apostrophe case above.
+def _strip_24cd8a3(line):
+    """lib/minyaml.py's _strip_comment at 24cd8a3, verbatim."""
+    q = None
+    for i, ch in enumerate(line):
+        if q:
+            if ch == q:
+                q = None
+        elif ch in ("'", '"'):
+            q = ch
+        elif ch == "#":
+            return line[:i]
+    return line
+
+
+def _closed_24cd8a3(line):
+    q = None
+    for ch in line:
+        if q:
+            if ch == q:
+                q = None
+        elif ch in ("'", '"'):
+            q = ch
+        elif ch == "#":
+            return True
+    return q is None
+
+
+import itertools as _it                          # noqa: E402
+from minyaml import _strip_comment as _strip_now  # noqa: E402
+_y5_n, _y5_diff = 0, []
+for _y5_len in range(7):
+    for _y5_t in _it.product("a '\"#=", repeat=_y5_len):
+        _y5_s = "".join(_y5_t)
+        if _closed_24cd8a3(_y5_s):
+            _y5_n += 1
+            if _strip_now(_y5_s) != _strip_24cd8a3(_y5_s):
+                _y5_diff.append(_y5_s)
+_check_d(f"Y-5: on all {_y5_n} closed-quote lines up to 6 chars, the "
+         f"comment stripper cuts where 24cd8a3 did",
+         _y5_n > 1000 and not _y5_diff,
+         f"{len(_y5_diff)} differ: {_y5_diff[:5]!r}")
+
+# [fix round 3, review RV4-1] Round 1's rule for inline lists and maps (a
+# quote opens only where a value can start) opened a run at the quote of
+# ` 'em` that never closed, so `[Don't use 'em, B]` became one principle
+# with rc=0; 24cd8a3 and PyYAML both read two. It also split a quoted comma
+# glued to the text before it, which 24cd8a3 kept whole: `--exclude='a,b'`
+# became `--exclude='a` plus a stray key `b'`.
+for _y5_text, _y5_want in (
+        ("p:\n  ranked: [Don't use 'em, B]\n",
+         {"p": {"ranked": ["Don't use 'em", "B"]}}),
+        ("p:\n  ranked: [Don't use 'em, B]  # note\n",
+         {"p": {"ranked": ["Don't use 'em", "B"]}}),
+        ("p:\n  ranked: [Don't use 'em, 'B']\n",
+         {"p": {"ranked": ["Don't use 'em", "B"]}}),
+        ("k: [a' ',]\n", {"k": ["a' '"]}),
+        ("c:\n  - {name: lint, command: ruff --exclude='a,b'}\n",
+         {"c": [{"name": "lint", "command": "ruff --exclude='a,b'"}]}),
+        ('c:\n  - {name: t, command: pytest -k"a, b"}\n',
+         {"c": [{"name": "t", "command": 'pytest -k"a, b"'}]}),
+        ('c:\n  - {name: t, command: echo x="1,2"}\n',
+         {"c": [{"name": "t", "command": 'echo x="1,2"'}]}),
+        ("k: [cut -d ',', b]\n", {"k": ["cut -d ','", "b"]})):
+    _check_d(f"Y-5 (24cd8a3 split kept): "
+             f"{_y5_text.splitlines()[-1].strip()}",
+             _y5(_y5_text) == _y5_want, repr(_y5(_y5_text)))
+# The regression the changelog discloses: a single-quoted comma glued to a
+# letter splits, which 24cd8a3 kept whole. Review measured keeping it whole
+# and rejected that: it merged `[users', '.env']` and refused
+# `[{name: users'}, '.env']`, both of which PyYAML reads. The row above is
+# the workaround the changelog gives.
+_check_d("Y-5: a glued single-quoted comma splits, as disclosed",
+         _y5("k: [cut -d',', b]\n") == {"k": ["cut -d'", "'", "b"]},
+         repr(_y5("k: [cut -d',', b]\n")))
+# 24cd8a3 paired two apostrophes across a comma and merged the items. A
+# single-quote pair with a letter or digit immediately outside it, before
+# the first quote or after the second, no longer spans a comma.
+for _y5_text, _y5_want in (
+        ("p:\n  ranked: [users' data, B, it's fine]\n",
+         {"p": {"ranked": ["users' data", "B", "it's fine"]}}),
+        ("p:\n  ranked: [use 'em, B, it's fine]\n",
+         {"p": {"ranked": ["use 'em", "B", "it's fine"]}}),
+        ("k: [o'clock, it's]\n", {"k": ["o'clock", "it's"]}),
+        ("k: [users', 'B']\n", {"k": ["users'", "B"]})):
+    _check_d(f"Y-5: an apostrophe pair does not span a comma: "
+             f"{_y5_text.splitlines()[-1].strip()}",
+             _y5(_y5_text) == _y5_want, repr(_y5(_y5_text)))
+# [fix round 3 review, pin-strength lens] One row per dimension of that rule,
+# each turned red by a one-token slip in it: the letter test reads the
+# character next to the quote, not the start of the string; a digit and a
+# non-ASCII letter count; a double quote with no partner is literal too; a
+# comma immediately inside either quote counts. PyYAML reads each row the
+# same way, and 24cd8a3 merged each one but the last, which pins the
+# partner search.
+for _y5_text, _y5_want in (
+        ("p:\n  ranked: [Protect users' data, Respect admins' time]\n",
+         {"p": {"ranked": ["Protect users' data", "Respect admins' time"]}}),
+        ("p: {first: users' data, second: admins' time}\n",
+         {"p": {"first": "users' data", "second": "admins' time"}}),
+        ("p:\n  ranked: [Keep '90s compat, Drop '00s hacks]\n",
+         {"p": {"ranked": ["Keep '90s compat", "Drop '00s hacks"]}}),
+        ("p:\n  ranked: [a 10' pole, a 20' pole]\n",
+         {"p": {"ranked": ["a 10' pole", "a 20' pole"]}}),
+        ("p:\n  ranked: [м'ясо, п'ять]\n",
+         {"p": {"ranked": ["м'ясо", "п'ять"]}}),
+        ('p:\n  ranked: [Use 12" screens, B]\n',
+         {"p": {"ranked": ['Use 12" screens', "B"]}}),
+        ('p: {name: 2" pipe, archetype: cli}\n',
+         {"p": {"name": '2" pipe', "archetype": "cli"}}),
+        ("p:\n  ranked: [Protect users', admins' time]\n",
+         {"p": {"ranked": ["Protect users'", "admins' time"]}}),
+        ("p:\n  ranked: [it's,'B']\n", {"p": {"ranked": ["it's", "B"]}}),
+        ("k: [5'10, 6' tall]\n", {"k": ["5'10", "6' tall"]}),
+        ("k: [5', 6']\n", {"k": ["5'", "6'"]}),
+        ("p:\n  ranked: [it''s ok, users' data]\n",
+         {"p": {"ranked": ["it''s ok", "users' data"]}})):
+    _check_d(f"Y-5 (one rule dimension): "
+             f"{_y5_text.splitlines()[-1].strip()}",
+             _y5(_y5_text) == _y5_want, repr(_y5(_y5_text)))
+# A bracket that does not match inside an item is refused, not read as text
+# (WP1 g4; the same review found neither check pinned). So is a nest too
+# deep for the parser's stack, inline or by indentation: RecursionError is
+# not a ValueError, so it escaped as a traceback.
+for _lbl, _doc, _line in (
+        ("a mismatched bracket inside an item", "x: 1\nk: [a[}, b]\n", 2),
+        ("an unclosed bracket inside a map value",
+         "c:\n  - {name: t, command: grep a[, b: c}\n", 2),
+        ("an inline list nested 600 deep",
+         "x: 1\nk: " + "[" * 600 + "]" * 600 + "\n", 2),
+        ("a block map nested 600 deep",
+         "x: 1\n" + "".join("  " * _d + f"k{_d}:\n" for _d in range(600))
+         + "  " * 600 + "z: 1\n", None)):
+    _e = _yaml_err(_doc)
+    _check_d(f"Y-3: {_lbl} is refused"
+             + (f" with its line ({_line})" if _line else " with a line"),
+             isinstance(_e, _my.YAMLError)
+             and (_e.line == _line if _line else bool(_e.line)), repr(_e))
+
+
+# The whole class, as for the stripper: on every string over `a1 '",=` up to
+# 6 chars where 24cd8a3's quotes all close and no single-quote pair is one
+# the rule above reads as apostrophes, _split_top splits exactly where
+# 24cd8a3 did. That drops exactly the strings the rule acts on, so a second
+# row pins the splitter's output on those by digest: a change to the rule
+# moves it, as a change to an emitted file moves a golden.
+def _split_24cd8a3(s, sep):
+    """lib/minyaml.py's _split_top at 24cd8a3, verbatim."""
+    out, depth, buf, q = [], 0, [], None
+    for ch in s:
+        if q:
+            buf.append(ch)
+            if ch == q:
+                q = None
+        elif ch in ("'", '"'):
+            q = ch
+            buf.append(ch)
+        elif ch in "[{":
+            depth += 1
+            buf.append(ch)
+        elif ch in "]}":
+            depth -= 1
+            buf.append(ch)
+        elif ch == sep and depth == 0:
+            out.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    out.append("".join(buf))
+    return out
+
+
+def _split_kept_24cd8a3(s):
+    q, start = None, 0
+    for i, ch in enumerate(s):
+        if q:
+            if ch == q:
+                if q == "'" and "," in s[start + 1:i] \
+                        and (s[start - 1:start].isalnum()
+                             or s[i + 1:i + 2].isalnum()):
+                    return False
+                q = None
+        elif ch in ("'", '"'):
+            q, start = ch, i
+    return q is None
+
+
+import hashlib as _hl                         # noqa: E402
+from minyaml import _split_top as _split_now  # noqa: E402
+_y5_n, _y5_diff, _y5_rest, _y5_h = 0, [], 0, _hl.sha256()
+for _y5_len in range(7):
+    for _y5_t in _it.product("a1 '\",=", repeat=_y5_len):
+        _y5_s = "".join(_y5_t)
+        if _split_kept_24cd8a3(_y5_s):
+            _y5_n += 1
+            if _split_now(_y5_s, ",") != _split_24cd8a3(_y5_s, ","):
+                _y5_diff.append(_y5_s)
+        else:
+            _y5_rest += 1
+            _y5_h.update(repr((_y5_s, _split_now(_y5_s, ","))).encode())
+_check_d(f"Y-5: on all {_y5_n} kept-quote strings over `a1 '\",=` up to 6 "
+         f"chars, the inline-list splitter splits where 24cd8a3 did",
+         _y5_n > 1000 and not _y5_diff,
+         f"{len(_y5_diff)} differ: {_y5_diff[:5]!r}")
+# [fix round 3 review] The splitter's output on the other strings, where the
+# rule departs from 24cd8a3. Measured when this row was added; re-derive it
+# only for a deliberate rule change, as for a golden.
+_Y5_REST_SHA256 = (
+    "fbfba69278a115e08248e14fb6ed79a4b4a40c9c1f3e584561a42e89884752f0")
+_check_d(f"Y-5: on the {_y5_rest} strings the class row drops, the "
+         f"inline-list splitter's output matches its pinned digest",
+         _y5_rest > 1000 and _y5_h.hexdigest() == _Y5_REST_SHA256,
+         f"digest {_y5_h.hexdigest()}")
+
+# [review correctness/F3] Since D3, secrets.enabled and deps.enabled each
+# switch a security gate off when false. Read by truthiness, a blank
+# `enabled:` (minyaml reads {}), null or 0 switched the gate off silently,
+# and a typo or a quoted "no" left it on. A value that is not true or false
+# is now a config error: exit 2, file:line.
+print("\n-- D3: the policy switches take true or false only --")
+_ps_tmp = tempfile.mkdtemp()
+try:
+    _ps_cfg = os.path.join(_ps_tmp, "c.yaml")
+    for _sect, _val, _shown in (("deps", "flase", "'flase'"),
+                                ("deps", "", "{}"),
+                                ("deps", "null", "None"),
+                                ("deps", "0", "0"),
+                                ("secrets", "flase", "'flase'"),
+                                ("secrets", '"no"', "'no'")):
+        with open(_ps_cfg, "w") as _fh:
+            _fh.write(f"project:\n  name: w\n  archetype: cli\n"
+                      f"{_sect}:\n  enabled: {_val}\n")
+        _r = subprocess.run([sys.executable, BIN, "-c", _ps_cfg, "-C",
+                             _ps_tmp, "--print-config"],
+                            capture_output=True, text=True)
+        check(f"D3: {_sect}.enabled: {_val or '(blank)'} -> rc=2 naming "
+              f"file:line and the value",
+              _r.returncode == 2
+              and f"error: {_ps_cfg}:5: {_sect}.enabled must be true or "
+                  f"false; got {_shown}" in _r.stderr
+              and "Traceback" not in _r.stderr)
+    for _val in ("true", "false"):
+        with open(_ps_cfg, "w") as _fh:
+            _fh.write(f"project:\n  name: w\n  archetype: cli\n"
+                      f"deps:\n  enabled: {_val}\nsecrets:\n"
+                      f"  enabled: {_val}\n")
+        _r = subprocess.run([sys.executable, BIN, "-c", _ps_cfg, "-C",
+                             _ps_tmp, "--print-config"],
+                            capture_output=True, text=True)
+        check(f"D3 control: enabled: {_val} on both switches -> rc=0",
+              _r.returncode == 0)
+finally:
+    shutil.rmtree(_ps_tmp, ignore_errors=True)
+# [fix round 2, review fix-correctness/F3] The fail-safe matters only for a
+# FALSY non-boolean: `flase` is truthy, so a row fed only `flase` stayed
+# green with the fail-safe deleted. Each row goes red if resolve_config stops
+# forcing the switch back to true.
+for _sect, _gate in (("deps", "dependency-gate"), ("secrets", "secrets-gate")):
+    for _val in (None, 0, {}, "", "flase"):
+        _ps_c, _ps_e = resolve_config(
+            {"project": {"name": "w", "archetype": "cli"},
+             _sect: {"enabled": _val}})
+        _check_d(f"D3: resolve_config refuses {_sect}.enabled: {_val!r} "
+                 f"and, for a caller that ignores errors, keeps {_gate} on",
+                 any(e.startswith(f"{_sect}.enabled must be true or false")
+                     for e in _ps_e)
+                 and _ps_c.get(_sect, {}).get("enabled") is True
+                 and _gate in _ps_c.get("_resolved_hooks", ()),
+                 f"errs={_ps_e} {_sect}={_ps_c.get(_sect)} "
+                 f"hooks={_ps_c.get('_resolved_hooks')}")
+
 # C-1: user-set falsy values survive _deep_default (latent-bug guard)
 cc, _ = cfg_from("""project:
   name: x
@@ -1936,6 +2459,162 @@ check("D18: the default never_read_paths list is unchanged",
       and _c.get("_config_notices") == [])
 
 # --------------------------------------------------------------------------- #
+# [WP1 D3] deps.enabled is the dependency gate's master switch, the way
+# secrets.enabled is the secrets gate's. The secrets row is the reference
+# arm: it is green before D3, so a red below is D3's and not the harness's.
+# --------------------------------------------------------------------------- #
+print("\n-- D3: deps.enabled false removes the dependency gate --")
+_D3 = "project:\n  name: x\n  archetype: cli\n"
+_c_ref, _ = cfg_from(_D3 + "secrets:\n  enabled: false\n"
+                     "hooks:\n  secrets_gate: true\n")
+check("D3 reference: secrets.enabled false beats hooks.secrets_gate true",
+      "secrets-gate" not in _c_ref["_resolved_hooks"])
+_c_on, _ = cfg_from(_D3)
+check("D3: the default config keeps dependency-gate",
+      "dependency-gate" in _c_on["_resolved_hooks"])
+_c_off, _e_off = cfg_from(_D3 + "deps:\n  enabled: false\n")
+check("D3: deps.enabled false drops dependency-gate",
+      not _e_off and "dependency-gate" not in _c_off["_resolved_hooks"])
+_c_tru, _ = cfg_from(_D3 + "deps:\n  enabled: false\n"
+                     "hooks:\n  dependency_gate: true\n")
+check("D3: hooks.dependency_gate true does not re-arm it",
+      "dependency-gate" not in _c_tru["_resolved_hooks"])
+_p_off = {a["path"]: a["body"] for a in build_plan(_c_off)}
+check("D3: the plan emits neither dependency-gate.sh nor deps.md",
+      ".claude/hooks/dependency-gate.sh" not in _p_off
+      and ".claude/steering/deps.md" not in _p_off)
+check("D3: settings.json does not wire dependency-gate",
+      "dependency-gate" not in _p_off[".claude/settings.json"])
+_gates_line = [ln for ln in _tmpl.TEMPLATES["sdk_gates"](_c_off).splitlines()
+               if ln.startswith("GATES = ")]
+check("D3: gates.py GATES does not carry dependency-gate",
+      len(_gates_line) == 1 and '"dependency-gate"' not in _gates_line[0])
+
+# --------------------------------------------------------------------------- #
+# [I-10] The installer prints _command_warnings. resolve_config computed them
+# and nothing printed them; bootstrap-apply.md told the AI to surface them
+# from --dry-run output that never carried them.
+# --------------------------------------------------------------------------- #
+print("\n-- I-10: the installer prints _command_warnings --")
+_w_tmp = tempfile.mkdtemp()
+try:
+    _w_cfg = os.path.join(_w_tmp, "c.yaml")
+
+    def _w_run(text):
+        with open(_w_cfg, "w") as _fh:
+            _fh.write(text)
+        return subprocess.run([sys.executable, BIN, "-c", _w_cfg, "-C",
+                               _w_tmp, "--dry-run"],
+                              capture_output=True, text=True)
+    _r = _w_run("project:\n  name: w\n  archetype: cli\n")
+    check("I-10: --dry-run with empty commands still exits 0",
+          _r.returncode == 0)
+    for _n in ("test", "lint", "format"):
+        check(f"I-10: --dry-run warns that commands.{_n} is empty",
+              f"warning: commands.{_n} is empty" in _r.stderr)
+    # I-6(a) is deferred to WP2: format-lint-gate is byte-identical and an
+    # empty lint runs `true` in silence, so no line may promise a TODO.
+    check("I-10: the lint warning says the gate checks nothing, and no line "
+          "claims format-lint-gate prints a TODO",
+          "warning: commands.lint is empty: format-lint-gate checks nothing"
+          in _r.stderr and "TODO after" not in _r.stderr
+          and "prints a TODO" not in _r.stderr)
+    _r = _w_run('project:\n  name: w\n  archetype: cli\ncommands:\n'
+                '  test: "true"\n  lint: "true"\n  format: "true"\n')
+    check("I-10: no command warning when every command is set",
+          "warning: commands." not in _r.stderr)
+    _r = _w_run("project:\n  name: w\n  archetype: cli\n"
+                "hooks:\n  test_gate: false\n")
+    check("I-10: the warning does not claim a hook the config turned off",
+          "warning: commands.test is empty" in _r.stderr
+          and "test-gate blocks" not in _r.stderr)
+finally:
+    shutil.rmtree(_w_tmp, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
+# [I-6] tech.md says which hook runs which command. It claimed every TODO
+# cell made "the corresponding gate" fail loudly; only Test had such a gate.
+# --------------------------------------------------------------------------- #
+print("\n-- I-6: tech.md states what the hooks do with each command --")
+_c_emp, _ = cfg_from("project:\n  name: t\n  archetype: cli\n")
+_tech_emp = _tmpl.TEMPLATES["tech"](_c_emp)
+check("I-6: tech.md no longer claims every TODO cell fails loudly",
+      "fail loudly" not in _tech_emp)
+check("I-6: tech.md says no hook runs Format or Typecheck",
+      "No hook runs Format or Typecheck." in _tech_emp)
+check("I-6: tech.md says an empty Lint checks nothing (the hook runs `true`)",
+      "`format-lint-gate` runs Lint after every edit and never blocks. "
+      "While its cell says TODO it checks nothing and prints nothing."
+      in _tech_emp and "TODO notice" not in _tech_emp)
+_c_tg, _ = cfg_from("project:\n  name: t\n  archetype: cli\n"
+                    "hooks:\n  test_gate: false\n")
+check("I-6: tech.md does not describe a test-gate the config turned off",
+      "`test-gate`" not in _tmpl.TEMPLATES["tech"](_c_tg))
+# [review rulings/F5] tech.md is where an adopter reads per-hook behaviour, so
+# it states the exit-5 allowance whenever test-gate carries the exit-5 arm
+# (the same NO_TESTS_RC5_RE predicate), and only then.
+_RC5_LINE = "A run that collects no tests (exit 5) is allowed, with a notice."
+_c_py, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
+                    'commands:\n  test: "pytest -q"\n')
+check("I-6: tech.md states the exit-5 allowance for a pytest test command",
+      _RC5_LINE in _tmpl.TEMPLATES["tech"](_c_py))
+_c_js, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
+                    'commands:\n  test: "npx jest"\n')
+check("I-6: tech.md states no exit-5 allowance for jest (control)",
+      _RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_js)
+      and "no tests" not in _tmpl.TEMPLATES["tech"](_c_emp))
+
+# ---------------------------------------------------------------------------
+# WP1 (rest): the rename-to-disable warning, MCP `purpose`
+# ---------------------------------------------------------------------------
+print("\n-- WP1: re-install over a settings.json renamed to disable hooks --")
+_d = tempfile.mkdtemp()
+try:
+    open(os.path.join(_d, "bootstrap.config.yaml"), "w").write(SERVICE)
+    _r0 = subprocess.run([sys.executable, BIN, "-C", _d],
+                         capture_output=True, text=True)
+    _s = os.path.join(_d, ".claude", "settings.json")
+    check("RENAME-0: a plain re-install prints no rename warning (control)",
+          _r0.returncode == 0 and "settings.json.disabled" not in _r0.stderr)
+    os.rename(_s, _s + ".disabled")
+    _rd = subprocess.run([sys.executable, BIN, "-C", _d, "--dry-run"],
+                         capture_output=True, text=True)
+    check("RENAME-1: --dry-run warns that it would re-enable the hooks",
+          _rd.returncode == 0
+          and "warning: .claude/settings.json.disabled exists" in _rd.stderr
+          and "would create" in _rd.stderr and not os.path.exists(_s))
+    _r1 = subprocess.run([sys.executable, BIN, "-C", _d],
+                         capture_output=True, text=True)
+    check("RENAME-2: the re-install that recreates settings.json says so on "
+          "stderr and still exits 0",
+          _r1.returncode == 0 and os.path.exists(_s)
+          and "warning: .claude/settings.json.disabled exists" in _r1.stderr
+          and "turns every hook back on" in _r1.stderr)
+    _r2 = subprocess.run([sys.executable, BIN, "-C", _d],
+                         capture_output=True, text=True)
+    check("RENAME-3: with settings.json present again, no rename warning "
+          "(control)",
+          _r2.returncode == 0 and "settings.json.disabled" not in _r2.stderr)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+print("\n-- WP1: tools.md records what each MCP server is for --")
+_mc, _me = cfg_from(SERVICE + """mcp:
+  servers:
+    - {name: github, command: "npx -y gh-mcp", purpose: "PR and issue access"}
+    - {name: ctx, command: "npx -y ctx-mcp"}
+""")
+_tools_md = _tmpl.TEMPLATES["tools"](_mc)
+check("MCP-1: a server's purpose is rendered in tools.md",
+      _me == [] and "- **github** - `npx -y gh-mcp` - PR and issue access"
+      in _tools_md)
+check("MCP-2: a server with no purpose says so instead of looking complete",
+      "- **ctx** - `npx -y ctx-mcp` - TODO: purpose not recorded" in _tools_md)
+_mc0, _ = cfg_from(SERVICE)
+check("MCP-3: no servers still renders the minimal-start line (control)",
+      "_(none - minimal start, by design)_" in _tmpl.TEMPLATES["tools"](_mc0))
+
+# --------------------------------------------------------------------------- #
 # Every lib module compiles CLEAN — no SyntaxWarning
 # --------------------------------------------------------------------------- #
 # WHY THIS EXISTS, because the failure mode is genuinely sneaky: CPython emits
@@ -1967,6 +2646,46 @@ for _mod in sorted(f for f in os.listdir(_LIB) if f.endswith(".py")):
     if _syn:                                # this suite's check() is (name, cond)
         print(f"        {_mod}: {_syn}")
     check(f"lib/{_mod} compiles with no SyntaxWarning", not _syn)
+
+# ---------------------------------------------------------------------------
+# [WP1] Test commands whose "no tests" the test gate cannot see are named at
+# install time. Advisory: rc stays 0 and the gate is unchanged.
+# ---------------------------------------------------------------------------
+print("\n-- [WP1] install-time notes: test commands the gate cannot read --")
+_NPM_INIT_PKG = {"name": "x", "version": "1.0.0", "scripts": {
+    "test": 'echo "Error: no test specified" && exit 1'}}
+
+
+def _notes_for(test_cmd, pkg=None):
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "c.yaml"), "w") as fh:
+            fh.write('project:\n  name: x\n  archetype: service\n'
+                     f'commands:\n  test: {_json.dumps(test_cmd)}\n')
+        if pkg is not None:
+            with open(os.path.join(d, "package.json"), "w") as fh:
+                _json.dump(pkg, fh)
+        r = subprocess.run([sys.executable, BIN, "-c", "c.yaml", "-C", d],
+                           capture_output=True, text=True)
+        return r.returncode, [ln for ln in r.stderr.splitlines()
+                              if ln.startswith("warning: ")
+                              and " is empty: " not in ln]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+_rc, _n = _notes_for("npm test", _NPM_INIT_PKG)
+check("npm's placeholder test script is named at install time",
+      any("npm's placeholder" in n for n in _n))
+check("and the install still exits 0", _rc == 0)
+_rc, _n = _notes_for("npm test", {"scripts": {"test": "node --test"}})
+check("a real npm test script draws no note", _n == [])
+_rc, _n = _notes_for("npx jest")
+check("jest without --passWithNoTests is named", any("jest" in n for n in _n))
+_rc, _n = _notes_for("vitest run --passWithNoTests")
+check("vitest with --passWithNoTests draws no note", _n == [])
+_rc, _n = _notes_for("pytest -q")
+check("pytest draws no note (the gate reads its exit 5 itself)", _n == [])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

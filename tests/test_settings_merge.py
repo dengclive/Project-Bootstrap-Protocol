@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 from installer import (                          # noqa: E402
     _SETTINGS_OWNED_KEYS, _SETTINGS_SHARED_KEYS, _is_ours_here, _merge_hooks,
-    _merge_settings, _settings_mergeable,
+    _merge_settings, _settings_mergeable, _resolved_hook_path,
 )
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
@@ -59,6 +59,8 @@ principles:
   tdd_policy: required
 commands:
   test: "true"
+  lint: "true"
+  format: "true"
 secrets:
   enabled: true
   never_read_paths: [".env*", "secrets/**", "*.pem"]
@@ -587,7 +589,7 @@ finally:
 # matcher we do not emit; command-keyed ownership deleted that silently.
 _d = tempfile.mkdtemp()
 try:
-    ours_cmd = "$CLAUDE_PROJECT_DIR/.claude/hooks/secrets-gate.sh"
+    ours_cmd = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/secrets-gate.sh'
     theirs = {"hooks": {
         "PreToolUse": [{"matcher": "WebFetch", "hooks": [
             {"type": "command", "command": ours_cmd}]}],
@@ -683,8 +685,13 @@ finally:
 print("\n-- --adopt breaks a manifest-less tree out of a permanent rc=3 --")
 # The transition has to actually CHANGE a security-critical file, or there is
 # nothing for the manifest's absence to misjudge. eval_gate moves gates.py.
-_HOOKS_ON = SERVICE + "hooks: {cost_log: true, eval_gate: true}\n"
-_HOOKS_OFF = SERVICE + "hooks: {cost_log: false, eval_gate: false}\n"
+# [WP1 / D4 (a)] gates.py is emitted only for the SDK substrate, and
+# eval-gate.sh is no longer security-critical, so request the substrate
+# to keep a security-critical file in the transition.
+_HOOKS_ON = (SERVICE + 'gate_substrate: "sdk-callable"\n'
+             + "hooks: {cost_log: true, eval_gate: true}\n")
+_HOOKS_OFF = (SERVICE + 'gate_substrate: "sdk-callable"\n'
+              + "hooks: {cost_log: false, eval_gate: false}\n")
 _d = tempfile.mkdtemp()
 try:
     install(_d, cfg_text=_HOOKS_ON)
@@ -788,7 +795,7 @@ for _label, _grp in (
             check(f"{_label}: our own wiring still lands",
                   len([c for c in commands_in(_s)
                        if isinstance(c, str)
-                       and c.startswith("$CLAUDE_PROJECT_DIR/")]) == 13)
+                       and _resolved_hook_path(c) is not None]) == 13)
     finally:
         shutil.rmtree(_d, ignore_errors=True)
 
@@ -813,7 +820,7 @@ try:
           json.dumps(_after))
     check("uninstall still retires OUR registrations",
           not [c for c in commands_in(_after)
-               if isinstance(c, str) and c.startswith("$CLAUDE_PROJECT_DIR/")])
+               if isinstance(c, str) and _resolved_hook_path(c) is not None])
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 
@@ -954,6 +961,64 @@ try:
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 
+
+# [WP1] The hook command's placeholder became `"$CLAUDE_PROJECT_DIR"`. A
+# re-install over a tree whose manifest is gone (a fresh clone: the manifest
+# is gitignored) has no record of which registrations were ours, and the old
+# unquoted spelling no longer equals ours - so every earlier registration was
+# kept as the operator's, beside ours, and every hook ran TWICE (measured: 16
+# registrations for 8 scripts).
+print("\n-- [WP1] the unquoted spelling at our own site is ours --")
+_d = tempfile.mkdtemp()
+try:
+    install(_d)
+    _s = read(_d)
+    for _grps in _s["hooks"].values():
+        for _g in _grps:
+            for _e in _g["hooks"]:
+                _e["command"] = _e["command"].replace(
+                    '"$CLAUDE_PROJECT_DIR"/', "$CLAUDE_PROJECT_DIR/")
+    _s["model"] = "opus"                 # theirs, so the file must MERGE
+    seed(_d, _s)
+    os.remove(os.path.join(_d, ".claude", ".installer-manifest.json"))
+    _before = len(commands_in(_s))
+    _r = install(_d)
+    _after = read(_d)
+    _cmds = commands_in(_after)
+    _sites = [(ev, g.get("matcher"), e["command"])
+              for ev, grps in _after["hooks"].items()
+              for g in grps for e in g["hooks"]]
+    check("a manifest-less re-install does not register any hook twice",
+          len(_cmds) == _before and len(set(_sites)) == len(_sites),
+          f"{_before} before, {len(_cmds)} after")
+    check("and leaves no unquoted spelling of ours behind",
+          not [c for c in _cmds if c.startswith("$CLAUDE_PROJECT_DIR/")],
+          str(_cmds[:3]))
+    check("while the operator's own key survives",
+          _after.get("model") == "opus")
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# A manifest written before ownership was site-keyed names bare commands, and
+# a bare command is retired EVERYWHERE only when we no longer carry it. We
+# still carry the script, under the quoted spelling, so the operator's own
+# registration of it at a site we never emit must survive.
+_OLD = "$CLAUDE_PROJECT_DIR/.claude/hooks/test-gate.sh"
+_NEW = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/test-gate.sh'
+_merged, _ = _merge_hooks(
+    {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": _NEW}]}]},
+    {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": _OLD}]}],
+     "SessionStart": [{"hooks": [{"type": "command", "command": _OLD}]}]},
+    [_OLD])
+check("pre-site manifest: the unquoted spelling at OUR site is replaced",
+      [e["command"] for g in _merged["PreToolUse"] for e in g["hooks"]]
+      == [_NEW], json.dumps(_merged["PreToolUse"]))
+check("pre-site manifest: their registration at THEIR site survives",
+      _merged.get("SessionStart") == [{"hooks": [
+          {"type": "command", "command": _OLD}]}],
+      json.dumps(_merged.get("SessionStart")))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

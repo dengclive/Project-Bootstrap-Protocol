@@ -9,11 +9,13 @@ timestamps, no randomness, no environment reads in any body.
 from __future__ import annotations
 
 import json
+import re
 
 import cmdpos                                    # round-4: THE command-position
                                                  # model, one definition for
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
+from sdk_gates_template import NO_TESTS_NOTICE, NO_TESTS_RC5_RE  # [WP1]
 
 PROTOCOL_VERSION = "2.8.0"
 
@@ -107,6 +109,39 @@ def _execution_location(cfg):
             f"{consequence}\n")
 
 
+def _command_contract(cfg):
+    """[I-6] Which hook runs which command, for this install. The paragraph
+    this replaces said a TODO cell makes "the corresponding gate" fail
+    loudly. That held for Test only: an empty Lint renders `true` in
+    format-lint-gate, which checks nothing and prints nothing, and no hook
+    runs Format or Typecheck. Sentences follow the resolved hook set, so a
+    hook the config turned off is never described as running."""
+    hooks = cfg["_resolved_hooks"]
+    lines = []
+    if "test-gate" in hooks:
+        lines.append("`test-gate` runs Test before every commit and blocks "
+                     "the commit when it fails or while its cell says TODO.")
+        test_cmd = cfg["commands"].get("test") or ""
+        if test_cmd and re.fullmatch(NO_TESTS_RC5_RE, test_cmd) is not None:
+            # [WP1] The same predicate that gives test-gate its exit-5 arm.
+            lines.append("A run that collects no tests (exit 5) is allowed, "
+                         "with a notice.")
+        if cfg.get("mode") == "retrofit":
+            lines.append("During the retrofit rollout it only warns in the "
+                         "weeks `.claude/hooks/rollout-schedule.md` marks "
+                         "warn-only.")
+    if "format-lint-gate" in hooks:
+        lines.append("`format-lint-gate` runs Lint after every edit and never "
+                     "blocks. While its cell says TODO it checks nothing and "
+                     "prints nothing.")
+    if "ci-mirror" in hooks:
+        lines.append("`ci-mirror` runs CI local before every push, or Test "
+                     "when CI local is (none), and blocks the push when it "
+                     "fails. While both are unset it checks nothing.")
+    lines.append("No hook runs Format or Typecheck.")
+    return "\n".join(lines) + "\n"
+
+
 def _tech(cfg):
     p = cfg["project"]
     c = cfg["commands"]
@@ -125,9 +160,7 @@ def _tech(cfg):
 | Typecheck | `{c['typecheck'] or '(none)'}` |
 | CI local  | `{c['ci_local'] or '(none)'}` |
 
-These commands are the contract the hooks enforce. If a cell says TODO the
-corresponding gate will fail loudly until it is filled.
-
+{_command_contract(cfg)}
 {_execution_location(cfg)}"""
 
 
@@ -318,8 +351,12 @@ Placeholder for future CI addition. Re-run the wizard's CI setup to populate.
 
 def _tools(cfg):
     m = cfg["mcp"]
+    # Phase 6.5 step 5: tools.md records "which MCP servers are installed and
+    # what each is for". A server with no `purpose` says so, rather than
+    # rendering like a complete entry.
     inst = "\n".join(
-        f"- **{s.get('name','?')}** - `{s.get('command','?')}`"
+        f"- **{s.get('name','?')}** - `{s.get('command','?')}` - "
+        f"{s.get('purpose') or 'TODO: purpose not recorded (mcp.servers[].purpose)'}"
         for s in m["servers"]) or "_(none - minimal start, by design)_"
     rej = "\n".join(
         f"- {r.get('name','?')}: {r.get('reason','')}"
@@ -3266,6 +3303,33 @@ for re-validating the subagent token-multiplier assumption on any pinned-model c
 """
 
 
+# [WP1] The test gate's exit-5 arm, emitted only for a command that
+# sdk_gates_template.NO_TESTS_RC5_RE accepts (pytest, `python -m unittest`).
+# A plain string interpolated into the f-string body, so its braces are
+# literal; `\\n` here is `\n` in the emitted hook.
+#
+# The notice goes out on the JSON channel because it is the only one that
+# shows at exit 0: stderr from an exit-0 hook reaches the debug log and
+# nothing else. `systemMessage` is shown to the user, `additionalContext` is
+# delivered to the model. There is no `permissionDecision`, so the normal
+# permission flow still applies - the arm allows the commit, it does not
+# approve it. The test command's stdout goes to stderr in this variant
+# (`>&2` on the run line), or pytest's "no tests ran" line would precede the
+# JSON and Claude Code would read the whole stdout as plain text.
+_NO_TESTS_JSON = json.dumps({
+    "systemMessage": NO_TESTS_NOTICE,
+    "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                           "additionalContext": NO_TESTS_NOTICE}})
+assert "'" not in _NO_TESTS_JSON, "the JSON is emitted inside single quotes"
+_TEST_GATE_RC5_ARM = (
+    '    elif [ "$rc" -eq 5 ]; then\n'
+    '      # [WP1] pytest / `python -m unittest` exit 5: no tests collected.\n'
+    '      # Allowed, with a notice. See lib/sdk_gates_template.py\n'
+    '      # NO_TESTS_RC5_RE for which commands get this arm and why.\n'
+    '      log "test-gate allow: no tests collected (exit 5)"\n'
+    "      printf '%s\\n' '" + _NO_TESTS_JSON + "'\n")
+
+
 def _hook_body(name: str, cfg: dict):
     # [round-4 D17] The hook's posture is filled into the SHARED HEADER, from
     # the body's own declaration, because the header's empty-payload check
@@ -4331,6 +4395,13 @@ exit 0
     if name == "test-gate":
         cmd = c["test"] or \
             "echo 'TODO: commands.test unset' >&2 && exit 127"
+        # [WP1] Only a command sdk_gates_template.NO_TESTS_RC5_RE accepts
+        # gets the exit-5 arm (see there for why the table is that short).
+        # Every other command emits exactly the bytes it did before.
+        no_tests = bool(c["test"]) and \
+            re.fullmatch(NO_TESTS_RC5_RE, c["test"]) is not None
+        run = f"( {cmd} ) >&2 || rc=$?" if no_tests else f"( {cmd} ) || rc=$?"
+        rc5_arm = _TEST_GATE_RC5_ARM if no_tests else ""
         return _HOOK_HEADER + f'''
 # PreToolUse git commit: block unless the configured test command passes.
 #
@@ -4368,7 +4439,7 @@ if git_verb "$NCMD" "commit"; then
     # trap, and the trap is not inherited by the subshell (no `set -E`), so
     # this reaches the dispatch with the real status.
     rc=0
-    ( {cmd} ) || rc=$?
+    {run}
     if [ "$rc" -eq 0 ]; then
       :
     elif [ "$rc" -eq 127 ]; then
@@ -4377,7 +4448,7 @@ if git_verb "$NCMD" "commit"; then
       echo "Commit blocked: test command not found (exit 127): {cmd}" >&2
       echo "Install the toolchain or fix commands.test in bootstrap.config.yaml." >&2
       exit 2
-    else
+{rc5_arm}    else
       echo "Commit blocked: tests failing (exit $rc)." >&2; exit 2
     fi
 fi
@@ -6672,9 +6743,18 @@ def _settings_json(cfg):
     for hk in hooks:
         registrations = [HOOK_EVENT_MAP[hk]] + HOOK_EXTRA_EVENTS.get(hk, [])
         for ev, matcher in registrations:
+            # [WP1] The placeholder is DOUBLE-QUOTED. This is shell form (no
+            # `args`), which Claude Code hands to `sh -c`; an unquoted
+            # expansion is field-split, so in a project path containing a
+            # space every hook ran `/path/My` and exited 127 - a non-blocking
+            # error, so every gate was off while the install reported rc=0.
+            # The hooks reference: "In shell form, wrap each placeholder in
+            # double quotes." Exec form (`args: []`) is the other documented
+            # cure, but on Windows it cannot spawn a `.sh`, and the installer's
+            # ownership and wiring checks key on this spelling.
             entry = {
                 "type": "command",
-                "command": f"$CLAUDE_PROJECT_DIR/.claude/hooks/{hk}.sh",
+                "command": f'"$CLAUDE_PROJECT_DIR"/.claude/hooks/{hk}.sh',
             }
             if hk in TIMEOUTS:
                 entry["timeout"] = TIMEOUTS[hk]

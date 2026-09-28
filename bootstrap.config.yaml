@@ -83,8 +83,10 @@ hooks:
   drift_file_read_threshold: 3
 
 # Commands that run the project's gates. The installer cannot guess these;
-# the wizard fills them from Phase 2/5. Empty strings produce a TODO marker
-# in the hook so it fails loud rather than silently passing.
+# the wizard fills them from Phase 2/5. The installer warns about an empty
+# test, lint or format command. An empty test makes test-gate block every
+# commit; an empty lint means format-lint-gate checks nothing. No hook runs
+# format or typecheck.
 commands:
   test: ""              # e.g. "pytest -q"
   lint: ""              # e.g. "ruff check ."
@@ -105,7 +107,8 @@ commands:
 
 # ---- Phase 6.5: Tools & MCP -------------------------------------------------
 mcp:
-  servers: []           # [{name: "github", command: "npx -y @modelcontextprotocol/server-github"}]
+  # `purpose` is what the server is for (Phase 6.5 step 5); tools.md prints it.
+  servers: []           # [{name: "github", command: "npx -y @modelcontextprotocol/server-github", purpose: "PR and issue access"}]
   rejected: []           # [{name: "linear", reason: "specs are source of truth"}]
 
 # ---- Phase 7: Skills/commands/agents ---------------------------------------

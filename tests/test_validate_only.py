@@ -65,6 +65,20 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 # stripping it from the new output reproduces the previous digest
 # 9544a945...bit-for-bit. Freeze exception, not a drive-by. Previous digest:
 # 9544a945a166ad99cb7f699cfa42c3e900d60dc1e8759e3541b68b6c0cc9a1e9.
+#
+# [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
+# RE-BASELINED again, same discipline. Exactly two lines of the synthesized
+# config move: the generated header's third line, which claimed "empty
+# commands.* are intentional: the installer emits loud-TODO gates" and now
+# says "empty commands.test/lint/format are intentional: the installer warns
+# about each one" (the installer warns about those three, not typecheck or
+# ci_local: review records/R5), and `project.prd_path`, which records the
+# PRD this interview read ("PRD.md") instead of the installer default
+# ("docs/prd/PRD.md"). VERIFIED by a line diff of this fixture's output on
+# 24cd8a3 against this tree: those two lines and nothing else. Previous
+# digest: de6d5086e0a5366ce0261d21ed9e52b9a84f5a8ceffb8be81752430f570a1089;
+# an intermediate WP1 digest, ce688bb3..., carried the unscoped header
+# "empty commands.* are intentional: the installer warns about each one".
 def _run(args, cwd):
     return subprocess.run([sys.executable, BIN] + args, cwd=cwd,
                           capture_output=True, text=True)
@@ -122,13 +136,37 @@ finally:
     shutil.rmtree(d, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
+# [WP1] A key the tool does not know is a WARNING on stderr, not a violation:
+# exit stays 0 and nothing is written. The seam's accepted-by-ignoring
+# fields (source:, targets_seam_version:) stay silent.
+# --------------------------------------------------------------------------- #
+d = tempfile.mkdtemp()
+try:
+    iv_path = _mk_interview(d)
+    body = open(iv_path).read()
+    open(iv_path, "w").write(body.replace(
+        "# ===== END ANSWERS =====",
+        "source: human-confirmed\ntargets_seam_version: 2.0.0\n"
+        "cicd_optout: true\n# ===== END ANSWERS ====="))
+    before = sorted(os.listdir(d))
+    r = _run(["synthesize", "-i", "iv.md", "-o", "out.yaml",
+              "--validate-only"], d)
+    check("WP1: unknown key -> exit 0, nothing written",
+          r.returncode == 0 and sorted(os.listdir(d)) == before, r.stderr)
+    check("WP1: unknown key -> one warning on stderr, naming the key",
+          r.stderr.count("warning:") == 1
+          and "unknown key 'cicd_optout'" in r.stderr, repr(r.stderr))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --------------------------------------------------------------------------- #
 # AC-2-3: absent the flag, synthesize is byte-identical to the 1.9.0 path.
 # Locked as a mini-golden digest over the emitted config for the fixture
 # PRD (see note above); plus flag-then-no-flag leaves the no-flag output
 # unaffected (the flag branch has no side effects).
 # --------------------------------------------------------------------------- #
 EXPECTED_NOFLAG_SHA256 = \
-    "de6d5086e0a5366ce0261d21ed9e52b9a84f5a8ceffb8be81752430f570a1089"
+    "0c1c7931d29f281bba042c163e18e1e65525b59cfaa22ed9ce598302951c3178"
 
 d = tempfile.mkdtemp()
 try:

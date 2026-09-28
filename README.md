@@ -96,7 +96,7 @@ the archetype principle starter sets from `lib/defaults.py` verbatim
 (`PRINCIPLE_STARTERS` is imported, not re-listed) — the interview only proposes
 *deltas* from those defaults. It **never guesses** `commands.test/lint/format`
 (a PRD does not contain them); they are emitted empty and flagged
-HUMAN-REQUIRED, consistent with the installer's loud-failing TODO gates. Every
+HUMAN-REQUIRED, and the installer warns about each one it finds empty. Every
 draft it emits is validated by shelling `bootstrap-install --print-config`
 (the same `resolve_config` the installer uses, enforcing the skip-policy
 invariants such as queue⇒loop|goal); the tool refuses to finish if validation
@@ -259,9 +259,11 @@ deterministic installer).
   *proposer*: a human reviews and edits every draft before it is used. It does
   not replace the interview's judgement.
 - `commands.test/lint/format` cannot be guessed — a PRD does not contain them.
-  The interview leaves them empty and flags them HUMAN-REQUIRED; if left empty
-  the installer emits gates that **fail loudly** with a TODO rather than
-  silently passing — by design.
+  The interview leaves them empty and flags them HUMAN-REQUIRED. If one is
+  still empty at install time, the installer prints a `warning:` line for it.
+  An empty test command makes `test-gate` block every commit. An empty lint
+  command means `format-lint-gate` checks nothing and prints nothing. No hook
+  runs the format or typecheck command.
 - `auto.sh` is scaffolded as a guarded skeleton. The full Phase 9.7 dispatch
   loop is intentionally left for the operator to complete before unattended
   use, matching Bootstrap-Protocol-v2-0-0.md's own trust-ramp guidance.

@@ -346,5 +346,44 @@ check("README states the licence, so an adopter finds it without reading LICENSE
       "    README carries no licence statement — the exact clause C-1's row named")
 
 
+# =========================================================================== #
+# 6. The seam contract live code cites is in the tree  [WP1, records/R1]
+# =========================================================================== #
+# The seam-3.0.0 re-cut renamed the contract file with a plain `mv`, so git
+# sees a deletion plus an untracked file. `git add -u` stages only the
+# deletion, and before this section nothing opened the seam file: a commit
+# with NO seam contract passed every suite. This checks the WORKING TREE, not
+# `git ls-files`, so it holds before the rename is staged; in CI the checkout
+# is the commit, so a commit that lost the file turns CI red.
+# =========================================================================== #
+print("\n=== Section 6: the seam contract live code cites exists ===")
+
+_SEAM_RE = re.compile(r"SEAM-CONTRACT-v\d+-\d+-\d+\.md")
+_seam_cites = {}
+for _base in ("lib", "bin", os.path.join("plugin", "commands"), "tests"):
+    for _dp, _dirs, _fns in os.walk(os.path.join(ROOT, _base)):
+        _dirs[:] = [x for x in _dirs if x != "__pycache__"]
+        for _fn in sorted(_fns):
+            _rel = os.path.relpath(os.path.join(_dp, _fn), ROOT)
+            if _rel == os.path.join("tests", "test_doc_citations.py"):
+                continue
+            with open(os.path.join(ROOT, _rel), encoding="utf-8",
+                      errors="replace") as _fh:
+                for _name in _SEAM_RE.findall(_fh.read()):
+                    _seam_cites.setdefault(_name, []).append(_rel)
+check("live code cites a seam contract by file name (non-vacuity)",
+      bool(_seam_cites),
+      "    no SEAM-CONTRACT-v*.md citation in lib/, bin/, plugin/ or tests/; "
+      "this section is checking nothing")
+for _name, _where in sorted(_seam_cites.items()):
+    check(f"{_name} (cited by {', '.join(sorted(set(_where)))}) exists",
+          os.path.isfile(os.path.join(ROOT, _name)),
+          f"    {_name} is missing. If a seam rename is being committed, stage "
+          f"BOTH paths: `git add {_name}` and `git rm --cached` the old one.")
+_root_seams = sorted(f for f in os.listdir(ROOT) if _SEAM_RE.fullmatch(f))
+check("exactly one seam contract sits at the repo root",
+      len(_root_seams) == 1, f"    found {_root_seams!r}")
+
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

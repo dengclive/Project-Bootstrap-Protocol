@@ -18,8 +18,9 @@ session constraints):
   * It does NOT reinvent the archetype principle starter sets. It imports
     them from lib/defaults.py and only proposes *deltas*.
   * It NEVER guesses commands.test/lint/format - a PRD does not contain them.
-    Those are surfaced as human-required, consistent with the installer's
-    loud-failing empty-command gates.
+    Those are surfaced as human-required; the installer prints a `warning:`
+    line for each one it finds empty. Only an empty test fails loudly, in
+    test-gate; an empty lint checks nothing, and no hook runs format.
 
 The archetype table, PRD-tier definitions, and skip-policy invariant encoded
 below are taken from the bundled Bootstrap-Protocol-v2-0-0.md (Project Archetypes table,
