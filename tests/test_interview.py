@@ -438,6 +438,15 @@ _ok_cfg["project"] = dict(_bad_cfg["project"], prd_tier="full")
 check("F-3: legitimate tier upgrade still passes",
       IV.validate_config_dict(_ok_cfg) == [])
 
+# [WP1 D3] The interview route. deps_enabled false in the ANSWERS block must
+# take the dependency gate out, as secrets_enabled false takes the secrets
+# gate out; before D3 only a hand-added hooks.dependency_gate: false did.
+_d3_cfg, _d3_err = resolve_config(_ok_cfg)
+check("D3: interview secrets_enabled false -> no secrets-gate (reference)",
+      _d3_err == [] and "secrets-gate" not in _d3_cfg["_resolved_hooks"])
+check("D3: interview deps_enabled false -> no dependency-gate",
+      _d3_err == [] and "dependency-gate" not in _d3_cfg["_resolved_hooks"])
+
 # R-3 (Medium): a principle (or name) containing a comma must round-trip
 # through render_interview -> parse_interview_answers intact, and the legacy
 # inline 'key: a, b' form must still parse for back-compat.
@@ -733,6 +742,458 @@ for _arch in sorted(__import__("defaults").ARCHETYPES):
     check(f"DS-01 interactive: archetype '{_arch}' offered == "
           f"{_arch in _OFFERED_SPEC}",
           _offered == (_arch in _OFFERED_SPEC))
+
+
+# --------------------------------------------------------------------------- #
+# WP1: the interview can express a gates-off install. Per-hook toggles,
+# cicd_opt_out, the real prd_path, shell and tiebreakers reach the config, and
+# a line the parser cannot use produces a warning instead of vanishing. Rows
+# are written so each fails on its own on a tree without the feature (no
+# AttributeError or TypeError takes the rest of the suite down with it).
+# --------------------------------------------------------------------------- #
+from defaults import DEFAULTS  # noqa: E402
+
+
+def _wp1(fn):
+    """(ok, value): run fn, turning any exception into a failed row."""
+    try:
+        return True, fn()
+    except Exception as e:  # noqa: BLE001 - a missing feature is a red row
+        return False, e
+
+
+def _resolved(cfg):
+    rc, errs = resolve_config(cfg)
+    return rc["_resolved_hooks"] if not errs else errs
+
+
+def _wired(project_dir):
+    s = json.load(open(os.path.join(project_dir, ".claude", "settings.json")))
+    return {h["command"].rsplit("/", 1)[-1]
+            for ev in s["hooks"].values() for m in ev for h in m["hooks"]}
+
+
+_wp = IV.build_proposal(SAMPLE_TEXT)
+_wr = IV.render_interview(_wp, "docs/prd/PRD.md")
+
+# The toggle set is exactly the installer's: every non-numeric hooks.* key,
+# minus the two security gates (D3 ruling: secrets_enabled and deps_enabled
+# are the only interview switches for them).
+_SECURITY_TOGGLES = {"secrets_gate", "dependency_gate"}
+_toggle_spec = {k for k, v in DEFAULTS["hooks"].items()
+                if v is None or isinstance(v, bool)} - _SECURITY_TOGGLES
+check("WP1: HOOK_TOGGLES == the toggle keys of DEFAULTS['hooks'] minus the "
+      "two security gates",
+      {n for n, _ in getattr(IV, "HOOK_TOGGLES", ())} == _toggle_spec)
+check("WP1: every toggle has an ANSWERS line in a fresh render",
+      all(f"\nhooks_{k}: " in _wr for k in _toggle_spec))
+# [D3 ruling, review rulings/F2] The interview offers no second switch for
+# the security gates: no ANSWERS line, no answer key, no interactive name.
+check("D3: a fresh render has no hooks_secrets_gate/hooks_dependency_gate "
+      "line",
+      all(f"hooks_{k}" not in _wr for k in _SECURITY_TOGGLES))
+check("D3: neither security toggle is an ANSWERS key",
+      not ({f"hooks_{k}" for k in _SECURITY_TOGGLES} & set(IV.ANSWER_KEYS)))
+_wsec = []
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(
+    _wr.replace(IV.ANSWERS_END,
+                "hooks_secrets_gate: false\n" + IV.ANSWERS_END),
+    warnings=_wsec))
+check("D3: a hand-added hooks_secrets_gate: false is an unknown key that "
+      "leaves the secrets gate on",
+      _ok and any("unknown key 'hooks_secrets_gate'" in x for x in _wsec)
+      and "secrets-gate" in _resolved(IV.answers_to_config(_pa)))
+
+# A fresh render parses back to exactly the default answers, every key typed.
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_wr)
+                == IV.default_answers(_wp, prd_path="docs/prd/PRD.md"))
+check("WP1: a fresh render round-trips to default_answers exactly",
+      _ok and _pa is True)
+
+# Accepting every proposal emits no hooks: block (default install unchanged).
+_dcfg0 = IV.answers_to_config(IV.default_answers(_wp))
+check("WP1: default answers emit no hooks: key", "hooks" not in _dcfg0)
+check("WP1: default answers still resolve both security gates",
+      {"secrets-gate", "dependency-gate"} <= set(_resolved(_dcfg0)))
+
+# D3 at the decision layer: deps_enabled false removes the dependency gate.
+_off = dict(IV.default_answers(_wp), secrets_enabled=False,
+            deps_enabled=False)
+_offcfg = IV.answers_to_config(_off)
+# [D3 ruling] secrets.enabled and deps.enabled are the only switches, applied
+# in resolve_config. The interview writes no hooks.* line for them: a forced
+# `hooks.secrets_gate/dependency_gate: false` kept both gates off after the
+# operator flipped the policies back to true (the sticky row below).
+check("WP1: deps/secrets off -> no hooks key in the config",
+      "hooks" not in _offcfg)
+check("WP1: deps/secrets off -> neither security gate resolves",
+      not ({"secrets-gate", "dependency-gate"} & set(_resolved(_offcfg))))
+_flip = json.loads(json.dumps(_offcfg))
+_flip["secrets"]["enabled"] = True
+_flip["deps"]["enabled"] = True
+check("WP1: gate-off is not sticky: re-enabling both policies in the config "
+      "brings both gates back",
+      {"secrets-gate", "dependency-gate"} <= set(_resolved(_flip)))
+
+# A per-hook toggle edited in the ANSWERS block reaches the resolved set.
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_wr.replace(
+    "hooks_spec_gate_commit: true", "hooks_spec_gate_commit: false")))
+check("WP1: hooks_spec_gate_commit: false removes spec-gate-commit",
+      _ok and "spec-gate-commit" not in _resolved(IV.answers_to_config(_pa)))
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_wr.replace(
+    "hooks_tdd_gate: auto", "hooks_tdd_gate: true")))
+check("WP1: hooks_tdd_gate: true forces tdd-gate under tdd encouraged",
+      _ok and _pa["tdd_policy"] == "encouraged"
+      and "tdd-gate" in _resolved(IV.answers_to_config(_pa)))
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_wr))
+check("WP1: hooks_tdd_gate: auto parses to None (derive from policy)",
+      _ok and _pa.get("hooks_tdd_gate", "missing") is None)
+
+# cicd_opt_out, shell and tiebreakers reach the config.
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(
+    _wr.replace("cicd_opt_out: false", "cicd_opt_out: true")
+    .replace("shell: bash", "shell: zsh")
+    .replace("principles_tiebreakers:",
+             "principles_tiebreakers:\n  - DRY vs YAGNI: prefer YAGNI, "
+             "until the third duplication")))
+_pc = IV.answers_to_config(_pa) if _ok else {}
+check("WP1: cicd_opt_out: true reaches the config and drops ci-mirror",
+      _pc.get("project", {}).get("cicd_opt_out") is True
+      and "ci-mirror" not in _resolved(_pc))
+check("WP1: shell: zsh reaches project.shell",
+      _pc.get("project", {}).get("shell") == "zsh")
+check("WP1: a tiebreaker with a colon and a comma survives as one item",
+      _pc.get("principles", {}).get("tiebreakers")
+      == ["DRY vs YAGNI: prefer YAGNI, until the third duplication"])
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_wr.replace(
+    "principles_tiebreakers:", "principles_tiebreakers: A vs B, prefer A")))
+check("WP1: an inline tiebreaker is one item, not split at the comma",
+      _ok and _pa.get("principles_tiebreakers") == ["A vs B, prefer A"])
+
+# prd_path: the PRD the interview read, relative to the output directory.
+_cpp = getattr(IV, "_config_prd_path", None)
+with tempfile.TemporaryDirectory() as _d:
+    _out = os.path.join(_d, "iv.md")
+    check("WP1: an absolute PRD path under the project is made relative",
+          _cpp is not None and _cpp(__import__("pathlib").Path(
+              os.path.join(_d, "docs", "prd", "x.md")),
+              __import__("pathlib").Path(_out)) == "docs/prd/x.md")
+    check("WP1: a PRD outside the project is recorded as given",
+          _cpp is not None and _cpp(__import__("pathlib").Path(
+              "/elsewhere/prd.md"), __import__("pathlib").Path(_out))
+          == "/elsewhere/prd.md")
+
+# Warnings instead of silent drops.
+_ok, _ = _wp1(lambda: IV.parse_interview_answers(_wr, warnings=[]))
+_w0 = []
+if _ok:
+    IV.parse_interview_answers(_wr, warnings=_w0)
+check("WP1: a fresh render parses with no warnings", _ok and _w0 == [])
+_add = _wr.replace(IV.ANSWERS_END,
+                   "tiebreakers: prefer A\n  - orphan item\n"
+                   "just some words\n"
+                   "tdd_policy: required\n" + IV.ANSWERS_END)
+_wadd = []
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_add, warnings=_wadd))
+check("WP1: an unknown key warns and suggests the real key",
+      _ok and any("unknown key 'tiebreakers'" in x
+                  and "principles_tiebreakers" in x for x in _wadd))
+check("WP1: a list item under an unknown key warns",
+      _ok and any("orphan item" in x for x in _wadd))
+check("WP1: a line with no colon warns",
+      _ok and any("just some words" in x for x in _wadd))
+check("WP1: a repeated key warns and the later value is used",
+      _ok and any("'tdd_policy' appears again" in x for x in _wadd)
+      and _pa["tdd_policy"] == "required")
+_ws = []
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(
+    _wr.replace("archetype: service",
+                "archetype: service\nsource: PRD-derived")
+    .replace(IV.ANSWERS_END, "targets_seam_version: 2.0.0\n"
+             + IV.ANSWERS_END), warnings=_ws))
+check("WP1: seam provenance lines (source:, targets_seam_version:) are "
+      "ignored without a warning",
+      _ok and _ws == []
+      and _pa == IV.parse_interview_answers(_wr))
+_wb = []
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(
+    _wr.replace("loop_mode_enabled: false", "loop_mode_enabled: flase"),
+    warnings=_wb))
+check("WP1: an unreadable pre-WP1 boolean warns and still reads false",
+      _ok and _pa["loop_mode_enabled"] is False
+      and any("loop_mode_enabled" in x for x in _wb))
+_ok, _e = _wp1(lambda: IV.parse_interview_answers(
+    _wr.replace("hooks_test_gate: true", "hooks_test_gate: ture")))
+check("WP1: an unreadable WP1 boolean is an error, not a guess",
+      not _ok and "hooks_test_gate" in str(_e))
+# [review correctness/F3] Since D3, deps_enabled/secrets_enabled false removes
+# a security gate, so their typo is an error with its line, not "read as
+# false" with a warning (the route that dropped the dependency gate).
+for _pk in ("deps_enabled", "secrets_enabled"):
+    _ok, _e = _wp1(lambda: IV.parse_interview_answers(
+        _wr.replace(f"{_pk}: true", f"{_pk}: flase")))
+    _pk_line = next(i for i, l in enumerate(_wr.splitlines(), 1)
+                    if l.startswith(f"{_pk}: "))
+    check(f"D3: an unreadable {_pk} is an error naming its line, not false",
+          not _ok and f"line {_pk_line}: {_pk}: 'flase'" in str(_e))
+with tempfile.TemporaryDirectory() as _d:
+    open(os.path.join(_d, "iv.md"), "w").write(
+        _wr.replace("deps_enabled: true", "deps_enabled: flase"))
+    _r = subprocess.run([sys.executable, BIN, "synthesize", "-i", "iv.md",
+                         "-o", "c.yaml"], cwd=_d, capture_output=True,
+                        text=True)
+    check("D3 e2e: synthesize refuses deps_enabled: flase with rc 2, naming "
+          "the file and line, and writes no config",
+          _r.returncode == 2 and "error: iv.md: line " in _r.stderr
+          and "deps_enabled: 'flase'" in _r.stderr
+          and not os.path.exists(os.path.join(_d, "c.yaml")))
+
+# Section-marker discriminator: deleted key fails loud; older file defaults.
+_ok, _e = _wp1(lambda: IV.parse_interview_answers("\n".join(
+    l for l in _wr.splitlines()
+    if not l.startswith("hooks_test_gate:"))))
+check("WP1: a deleted hooks_ line in a current file fails loud",
+      not _ok and "hooks_test_gate" in str(_e))
+_wp1_titles = ("PRD location", "Shell", "CI/CD applicability",
+               "Principle tiebreakers", "Hooks")
+_old_lines, _skip = [], False
+for _l in _wr.splitlines():
+    if _l.startswith("## "):
+        _skip = _l[3:] in _wp1_titles
+    if _l.startswith("---"):
+        _skip = False
+    if _skip or _l.split(":", 1)[0] in (
+            "prd_path", "shell", "cicd_opt_out", "principles_tiebreakers") \
+            or _l.startswith("hooks_"):
+        continue
+    _old_lines.append(_l)
+_old = "\n".join(_old_lines)
+_ok, _pa = _wp1(lambda: IV.parse_interview_answers(_old))
+check("WP1: a pre-WP1 file (no WP1 sections) still parses",
+      _ok and _pa.get("prd_path") == "docs/prd/PRD.md"
+      and _pa.get("hooks_test_gate") is True)
+check("WP1: a pre-WP1 file synthesizes today's config",
+      _ok and IV.answers_to_config(_pa) == _dcfg0)
+
+# End to end: analyze -> edit -> synthesize -> REAL install.
+with tempfile.TemporaryDirectory() as _d:
+    os.makedirs(os.path.join(_d, "specs"))
+    open(os.path.join(_d, "specs", "prd.md"), "w").write(SAMPLE_TEXT)
+    subprocess.run(["git", "init", "-q", _d], check=True)
+    _r = subprocess.run([sys.executable, BIN, "analyze", "--prd",
+                         "specs/prd.md"], cwd=_d, capture_output=True,
+                        text=True)
+    _iv = os.path.join(_d, "bootstrap.interview.md")
+    _t = open(_iv).read()
+    open(_iv, "w").write(
+        _t.replace("secrets_enabled: true", "secrets_enabled: false")
+        .replace("deps_enabled: true", "deps_enabled: false"))
+    _r2 = subprocess.run([sys.executable, BIN, "synthesize"], cwd=_d,
+                         capture_output=True, text=True)
+    _r3 = subprocess.run([sys.executable, INSTALL_BIN, "-c",
+                          os.path.join(_d, "bootstrap.config.yaml"),
+                          "-C", _d], capture_output=True, text=True)
+    check("WP1 e2e: gates-off answers synthesize and install (rc 0, 0)",
+          _r2.returncode == 0 and _r3.returncode == 0)
+    check("WP1 e2e: no warnings for a clean edit", _r2.stderr == "")
+    _hooks_dir = os.path.join(_d, ".claude", "hooks")
+    check("WP1 e2e: neither security gate script is emitted",
+          not os.path.exists(os.path.join(_hooks_dir, "secrets-gate.sh"))
+          and not os.path.exists(os.path.join(_hooks_dir,
+                                              "dependency-gate.sh")))
+    check("WP1 e2e: neither security gate is wired in settings.json",
+          _r3.returncode == 0 and not ({"secrets-gate.sh",
+                                        "dependency-gate.sh"}
+                                       & _wired(_d)))
+    check("WP1 e2e: every other default hook is still wired",
+          _r3.returncode == 0 and _wired(_d)
+          == {h + ".sh" for h in _resolved(_dcfg0)}
+          - {"secrets-gate.sh", "dependency-gate.sh"})
+    check("WP1 e2e: the config records the PRD the interview read",
+          'prd_path: "specs/prd.md"'
+          in open(os.path.join(_d, "bootstrap.config.yaml")).read())
+    # [review records/R5] The installer warns about an empty test, lint or
+    # format command, not typecheck or ci_local; the header says only that.
+    _hdr = open(os.path.join(_d, "bootstrap.config.yaml")).read()
+    check("R5: the synthesized header scopes its warning claim to "
+          "commands.test/lint/format",
+          "# empty commands.test/lint/format are intentional: the installer "
+          "warns about each one." in _hdr and "empty commands.* are" not in _hdr)
+
+with tempfile.TemporaryDirectory() as _d:
+    open(os.path.join(_d, "p.md"), "w").write(SAMPLE_TEXT)
+    open(os.path.join(_d, "iv.md"), "w").write(_wr.replace(
+        IV.ANSWERS_END, "cicd_opt_outt: true\n" + IV.ANSWERS_END))
+    _r = subprocess.run([sys.executable, BIN, "synthesize", "-i", "iv.md",
+                         "-o", "c.yaml"], cwd=_d, capture_output=True,
+                        text=True)
+    check("WP1 e2e: synthesize prints the unknown-key warning on stderr",
+          _r.returncode == 0 and "unknown key 'cicd_opt_outt'" in _r.stderr
+          and "cicd_opt_out" in _r.stderr)
+
+# [WP1] `synthesize -o <relative path in a subdirectory>` validated its own
+# draft against the wrong file: validate_with_installer passed -c as given
+# with -C set to its parent, and the installer resolves a relative -c
+# against -C, so it looked for sub/sub/c.yaml and reported a valid draft as
+# REJECTED with rc=2.
+with tempfile.TemporaryDirectory() as _d:
+    open(os.path.join(_d, "p.md"), "w").write(SAMPLE_TEXT)
+    os.makedirs(os.path.join(_d, "sub"))
+    subprocess.run([sys.executable, BIN, "analyze", "--prd", "p.md", "-o",
+                    "iv.md"], cwd=_d, capture_output=True, text=True)
+    _r = subprocess.run([sys.executable, BIN, "synthesize", "-i", "iv.md",
+                         "-o", os.path.join("sub", "c.yaml")], cwd=_d,
+                        capture_output=True, text=True)
+    check("WP1: synthesize -o sub/c.yaml validates the file it wrote (rc 0)",
+          _r.returncode == 0 and "REJECTED" not in _r.stdout
+          and os.path.isfile(os.path.join(_d, "sub", "c.yaml")))
+
+
+class _KeyedResponder:
+    """Answers by prompt substring; Enter for everything else."""
+
+    def __init__(self, out, answers):
+        self.out, self.answers, self.n = out, answers, 0
+
+    def readline(self):
+        self.n += 1
+        if self.n > 80:
+            return ""
+        before = self.out.getvalue().rsplit("[default:", 1)[0]
+        prompt = before.rstrip("\n ").rsplit("\n", 1)[-1]
+        for key, val in self.answers.items():
+            if key in prompt:
+                return val + "\n"
+        return "\n"
+
+
+_io_out = _io.StringIO()
+_ok, _ia = _wp1(lambda: IV.run_interactive(
+    SAMPLE_TEXT, outstream=_io_out, project_fallback="p",
+    instream=_KeyedResponder(_io_out, {
+        "Secrets enabled?": "false", "Deps policy enabled?": "false",
+        "CI/CD pipelines": "no", "Shell": "zsh",
+        "Tiebreakers": "A vs B, prefer A; C vs D",
+        "Hooks to leave out": "spec_gate_commit"})))
+_icfg = IV.answers_to_config(_ia) if _ok else {}
+check("WP1 interactive: gates-off answers resolve neither security gate",
+      _ok and not ({"secrets-gate", "dependency-gate"}
+                   & set(_resolved(_icfg))))
+check("WP1 interactive: CI/CD 'no' sets cicd_opt_out, shell zsh recorded",
+      _icfg.get("project", {}).get("cicd_opt_out") is True
+      and _icfg.get("project", {}).get("shell") == "zsh")
+check("WP1 interactive: tiebreakers split on ';' only",
+      _icfg.get("principles", {}).get("tiebreakers")
+      == ["A vs B, prefer A", "C vs D"])
+check("WP1 interactive: a named hook is left out",
+      "spec-gate-commit" not in _resolved(_icfg) if _ok else False)
+
+# [D3 ruling, review rulings/F2] The leave-out prompt does not accept the
+# security gates: with both policies on, naming them changes nothing.
+_sg_out = _io.StringIO()
+_ok, _sga = _wp1(lambda: IV.run_interactive(
+    SAMPLE_TEXT, outstream=_sg_out, project_fallback="p",
+    instream=_KeyedResponder(_sg_out, {
+        "Hooks to leave out": "secrets_gate, dependency_gate"})))
+check("D3 interactive: secrets_gate/dependency_gate are unknown names to "
+      "the leave-out prompt",
+      _ok and "unknown hook name(s): secrets_gate, dependency_gate"
+      in _sg_out.getvalue())
+check("D3 interactive: naming them leaves both security gates on",
+      _ok and {"secrets-gate", "dependency-gate"}
+      <= set(_resolved(IV.answers_to_config(_sga))))
+
+
+# [fix round 2, review RR4] The secrets and deps prompts read anything but
+# true/1/yes/on as false, so a typo removed a security gate with no message.
+# They now ask again, like the CI/CD prompt.
+class _SeqResponder(_KeyedResponder):
+    """Each matching prompt takes the next of its replies; Enter after."""
+
+    def readline(self):
+        self.n += 1
+        if self.n > 80:
+            return ""
+        before = self.out.getvalue().rsplit("[default:", 1)[0]
+        prompt = before.rstrip("\n ").rsplit("\n", 1)[-1]
+        for key, vals in self.answers.items():
+            if key in prompt and vals:
+                return vals.pop(0) + "\n"
+        return "\n"
+
+
+_pp_default = IV.default_answers(IV.build_proposal(SAMPLE_TEXT,
+                                                   project_fallback="p"))
+for _pk, _pprompt, _pgate in (
+        ("secrets_enabled", "Secrets enabled?", "secrets-gate"),
+        ("deps_enabled", "Deps policy enabled?", "dependency-gate")):
+    _pp_out = _io.StringIO()
+    _ok, _ppa = _wp1(lambda: IV.run_interactive(
+        SAMPLE_TEXT, outstream=_pp_out, project_fallback="p",
+        instream=_SeqResponder(_pp_out, {_pprompt: ["flase", ""]})))
+    _pp_text = _pp_out.getvalue()
+    check(f"RR4 interactive: a typo at the {_pk} prompt is asked again, "
+          f"not read as false",
+          _ok and _pp_default[_pk] is True
+          and _pp_text.count(_pprompt) == 2
+          and "must be true or false" in _pp_text
+          and _ppa[_pk] is True
+          and _pgate in _resolved(IV.answers_to_config(_ppa)))
+    if not (_ok and _ppa.get(_pk) is True):
+        print(f"        proposed={_pp_default[_pk]} "
+              f"asked={_pp_text.count(_pprompt)} "
+              f"got={_ppa.get(_pk) if _ok else _ppa}")
+    _pp_out = _io.StringIO()
+    _ok, _ppa = _wp1(lambda: IV.run_interactive(
+        SAMPLE_TEXT, outstream=_pp_out, project_fallback="p",
+        instream=_SeqResponder(_pp_out, {_pprompt: ["flase", "no"]})))
+    check(f"RR4 interactive control: after the re-ask, 'no' at the {_pk} "
+          f"prompt still removes {_pgate}",
+          _ok and _ppa[_pk] is False
+          and _pgate not in _resolved(IV.answers_to_config(_ppa)))
+
+# [I-6(b)/I-10, review rulings/F1 and rulings/F4] No live source repeats the
+# false claim that an empty command makes a loud-TODO gate. Only an empty
+# test does (test-gate); an empty lint runs `true` in format-lint-gate. Three
+# sites survived the first pass: the retrofit debt entry (emitted into
+# .claude/debt.md), the retrofit commands rationale and the prd_heuristics
+# docstring. The spec invariant that states the claim keeps its text and
+# gains a dated correction layer instead.
+import re as _re  # noqa: E402
+_LOUD_TODO = _re.compile(r"loud(ly)?[- ]TODO|loud(ly)? with a TODO|"
+                         r"loud-failing|TODO-gate|fail-loud TODO", _re.I)
+_loud_hits = []
+for _base in ("lib", "bin", os.path.join("plugin", "commands")):
+    for _fn in sorted(os.listdir(os.path.join(ROOT, _base))):
+        _fp = os.path.join(ROOT, _base, _fn)
+        if os.path.isfile(_fp) and not _fn.endswith(".pyc"):
+            for _n, _ln in enumerate(open(_fp, encoding="utf-8",
+                                          errors="replace"), 1):
+                if _LOUD_TODO.search(_ln):
+                    _loud_hits.append(f"{_base}/{_fn}:{_n}")
+for _fn in ("README.md", "bootstrap.config.yaml"):
+    for _n, _ln in enumerate(open(os.path.join(ROOT, _fn),
+                                  encoding="utf-8"), 1):
+        if _LOUD_TODO.search(_ln):
+            _loud_hits.append(f"{_fn}:{_n}")
+check("I-6(b): no live source claims a loud-TODO gate for empty commands "
+      f"(hits: {_loud_hits})", _loud_hits == [])
+_spec_inv = [l for l in open(os.path.join(
+    ROOT, ".claude", "specs", "bootstrap-v2", "requirements.md"),
+    encoding="utf-8") if l.startswith("- **`fail-loud-on-empty-commands`**")]
+check("I-6(b): the spec's fail-loud-on-empty-commands invariant carries its "
+      "WP1 correction layer",
+      len(_spec_inv) == 1 and "[Corrected 2026-09-28, WP1.]" in _spec_inv[0])
+
+# Repair of the queue self-correct row above (r5): its positional stdin put
+# the 'true' on the telemetry prompt, so the self-correct path never ran.
+_q_out = _io.StringIO()
+_qa = IV.run_interactive(
+    SAMPLE_TEXT, outstream=_q_out, project_fallback="p",
+    instream=_KeyedResponder(_q_out, {"Queue mode": "true"}))
+check("interactive: queue without loop/goal really self-corrects",
+      "Disabling queue mode" in _q_out.getvalue()
+      and _qa["queue_mode_enabled"] is False)
 
 
 print(f"\n{passed} passed, {failed} failed")

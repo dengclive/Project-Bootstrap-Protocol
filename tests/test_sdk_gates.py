@@ -61,7 +61,10 @@ from defaults import resolve_config      # noqa: E402
 import templates                         # noqa: E402
 from sdk_gates_template import SDK_GATES  # noqa: E402
 
-FULL = """project:
+# [WP1 / D4 (a)] gates.py is emitted only for the SDK substrate; this
+# suite loads the emitted module, so its fixture requests it.
+FULL = """gate_substrate: "sdk-callable"
+project:
   name: sdkgates
   archetype: ai-agent
 autonomous_modes:
@@ -887,10 +890,61 @@ try:
     paths = {a["path"] for a in _inst.build_plan(cfgr)}
     check("retrofit: gates.py NOT in retrofit plan",
           ".claude/sdk_gates/gates.py" not in paths)
-    check("retrofit: greenfield plan still HAS gates.py (drop is "
-          "retrofit-scoped)",
+    check("retrofit: greenfield sdk-callable plan still HAS gates.py "
+          "(drop is retrofit-scoped)",
           ".claude/sdk_gates/gates.py"
           in {a["path"] for a in _inst.build_plan(cfg)})
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# ---- [WP1 / D4 (a)] gates.py is emitted ONLY for the SDK substrate ------- #
+# Owner decision 2026-09-27. Under gate_substrate "shell" (the default)
+# nothing wires or imports gates.py, so it is not emitted at all.
+_SHELL = FULL.replace('gate_substrate: "sdk-callable"\n', "", 1)
+assert "gate_substrate" not in _SHELL
+_cfg_shell, _serrs = resolve_config(load_yaml(_SHELL))
+assert not _serrs, _serrs
+import installer as _inst  # noqa: E402
+check("D4: shell (default) plan has NO gates.py",
+      ".claude/sdk_gates/gates.py"
+      not in {a["path"] for a in _inst.build_plan(_cfg_shell)})
+_cfg_explicit, _ = resolve_config(
+    load_yaml('gate_substrate: "shell"\n' + _SHELL))
+check("D4: explicit gate_substrate shell plan has NO gates.py",
+      ".claude/sdk_gates/gates.py"
+      not in {a["path"] for a in _inst.build_plan(_cfg_explicit)})
+check("D4: the module bytes do not depend on the substrate",
+      templates.TEMPLATES["sdk_gates"](_cfg_shell)
+      == templates.TEMPLATES["sdk_gates"](cfg))
+d = tempfile.mkdtemp()
+try:
+    # sdk-callable tree, gates.py rewritten by a formatter, then a shell
+    # re-apply: the stale module is KEPT (L-1), leaves the manifest, the
+    # state is reconciled, and the run is NOT reported unenforced.
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(FULL)
+    rr = subprocess.run([sys.executable, BIN, "-C", d],
+                        capture_output=True, text=True)
+    assert rr.returncode == 0, rr.stderr
+    gp = os.path.join(d, ".claude", "sdk_gates", "gates.py")
+    open(gp, "a").write("\n# reformatted\n")
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(_SHELL)
+    rr = subprocess.run([sys.executable, BIN, "-C", d],
+                        capture_output=True, text=True)
+    check("D4: shell re-apply over an edited gates.py exits 0",
+          rr.returncode == 0, rr.stderr[-600:])
+    check("D4: the edited gates.py is kept on disk (L-1)",
+          os.path.isfile(gp) and "# reformatted" in open(gp).read())
+    check("D4: ... and reported as KEEP on stderr",
+          "KEEP   .claude/sdk_gates/gates.py" in rr.stderr, rr.stderr[-600:])
+    _man = json.load(open(os.path.join(d, ".claude",
+                                       ".installer-manifest.json")))
+    check("D4: gates.py leaves the manifest on a shell re-apply",
+          not any(f["path"] == ".claude/sdk_gates/gates.py"
+                  for f in _man["files"]))
+    check("D4: state reconciled to shell",
+          json.load(open(os.path.join(d, ".claude",
+                                      ".bootstrap-state.json")))
+          ["gate_substrate"] == "shell")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

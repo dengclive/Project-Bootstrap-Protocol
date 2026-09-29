@@ -63,10 +63,12 @@ produce *decisions* (not files):
   archetype starter set; let the operator override.
 - **Phase 2 / 5** — the project's test / lint / format / typecheck / CI
   commands. These cannot be guessed; if the operator does not know them yet,
-  record empty strings and warn that the corresponding gates will fail loudly
-  until filled.
-- **Phase 6.5** — MCP servers to install and ones explicitly rejected (with
-  reasons).
+  record empty strings and say what that does until they are filled: an
+  empty test command makes
+  `test-gate` block every commit, an empty lint command means
+  `format-lint-gate` checks nothing, and no hook runs format or typecheck.
+- **Phase 6.5** — MCP servers to install, each with its `purpose` (what it
+  is for), and ones explicitly rejected (with reasons).
 
 Ask one open-ended question at a time. Use multi-select for known option sets.
 Do not batch. Show each section's resulting YAML fragment and confirm before

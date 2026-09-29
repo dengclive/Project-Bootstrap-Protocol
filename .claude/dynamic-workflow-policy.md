@@ -15,7 +15,7 @@ claim here is that this file meets the same three criteria, which is an
 argument from the stated criteria, not a citation.
 
 **Disambiguation — read this before grepping.** The `workflow:` block in
-`bootstrap.config.yaml:113` (`install_skills`, `implementer_model`,
+`bootstrap.config.yaml:116` (`install_skills`, `implementer_model`,
 `implementer_isolation`, …) is the **emitted subagent** namespace and has
 nothing to do with this document. "Dynamic workflow" here means Claude Code's
 `Workflow` tool — JS scripts calling `agent()` / `parallel()` / `pipeline()`.
@@ -177,7 +177,7 @@ cases, each blind to the others' findings.
 **Why fan-out.** A sequential reviewer inherits its own earlier framing; a
 second pass by the same agent re-reads the same file with the same priors. The
 failure this repo has actually paid for is *correlated blind spots*, not
-insufficient iterations: `docs/changelog.md:1618` (the 2.7.1 → 2.7.2 section)
+insufficient iterations: `docs/changelog.md:1915` (the 2.7.1 → 2.7.2 section)
 records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
@@ -186,7 +186,7 @@ previous stage had stated as measured fact.
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
-`docs/changelog.md:1618`; it also appears at
+`docs/changelog.md:1915`; it also appears at
 `.claude/checkpoints/checkpoint-20260806-083157-main.md:118`, which is
 gitignored (`.gitignore:11`) and therefore not citable. Cite the changelog.
 
@@ -262,7 +262,7 @@ working tree"); and fan-out agents have no unit of accounting — no `task_id`, 
 `O_CREAT|O_EXCL` sentinel, no entry in `loop_in_flight` or `goal_in_flight`.
 
 An **emitted orchestrator** would additionally change §7.2 security-critical
-hook-set membership, which `SEAM-CONTRACT-v2-0-0.md:330` makes a `seam_version`
+hook-set membership, which `SEAM-CONTRACT-v3-0-0.md:349` makes a `seam_version`
 bump trigger, and §9 has already recorded a Bootstrap-emitted runner as
 *considered-and-declined*. Proposing one is not an in-version change; it is an
 owner-side pin event reopening a settled decision.
@@ -284,12 +284,12 @@ reason — it is what keeps the golden digests meaningful.
 
 **`bin/` is in scope, not an afterthought.** `bin/bootstrap-install` and
 `bin/bootstrap-interview` are the CLI entry points the seam contract's §3.2
-table is written about (`SEAM-CONTRACT-v2-0-0.md:136-138`). A workflow reachable
+table is written about (`SEAM-CONTRACT-v3-0-0.md:153-155`). A workflow reachable
 from either is orchestration on the wire, whatever the module boundary says, and
 a rule scoped to `lib/` alone would read as covered while leaving them open.
 
 Two rows of that table are **struck through** — `bootstrap-install --force`
-(`:139`) and `retrofit-interview` (`:140`, *"NOT a permitted Tessera entry point
+(`:156`) and `retrofit-interview` (`:157`, *"NOT a permitted Tessera entry point
 at this pin"*). Do not read a strikethrough as out of scope here: it removes a
 row from *Tessera's permitted invocation set*, not from this repository's
 executable surface. §7's tripwire therefore scans **all five** `bin/` scripts
@@ -747,6 +747,6 @@ mechanism; it works only if it is read before the script is written.
 | `docs/dynamic-workflow-assessment.md` | The verdict and every measurement. Decides IF and WHERE; this decides HOW. |
 | `.claude/trust-ramp.md` | Sibling governance doc; the placement and "not protocol surface" precedent. DW-A2 binds to its ledger; **DW-G1 is the open question about its rungs.** |
 | `docs/agentic-harness-security-kb.md` | §4.7 is W-1, which DW-R1 exists to avoid re-arming. |
-| `SEAM-CONTRACT-v2-0-0.md` §8.4, §9 | The bump triggers DW-P1 avoids, and the declined-runner decision it would reopen. |
+| `SEAM-CONTRACT-v3-0-0.md` §8.4, §9 | The bump triggers DW-P1 avoids, and the declined-runner decision it would reopen. |
 | `Bootstrap-Protocol-v2-8-0.md` `:209-212`, `:423` | The not-protocol-surface exclusion, and the review-throughput justification §5 inherits. |
 | `Bootstrap-Protocol-Companion-v2-8-0.md` `:150`, `:161` | Judge-is-advisory; subagents-do-not-spawn-subagents (DW-P6). |

@@ -70,7 +70,10 @@ import types
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 
-CONFIG = """project:
+# [WP1 / D4 (a)] gates.py is emitted only for the SDK substrate; this
+# suite loads the emitted module, so its fixture requests it.
+CONFIG = """gate_substrate: "sdk-callable"
+project:
   name: "sweep"
   archetype: "ai-agent"
   shell: "bash"

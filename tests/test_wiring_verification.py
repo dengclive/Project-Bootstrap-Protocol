@@ -31,7 +31,7 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 
 from pathlib import Path                        # noqa: E402
 from installer import (                          # noqa: E402
-    EXIT_UNENFORCED, verify_wiring, _registered_commands,
+    EXIT_UNENFORCED, verify_wiring, unstartable_hooks, _registered_commands,
 )
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
@@ -58,6 +58,8 @@ principles:
   tdd_policy: required
 commands:
   test: "true"
+  lint: "true"
+  format: "true"
 """
 
 RETROFIT = """
@@ -69,6 +71,8 @@ principles:
   tdd_policy: required
 commands:
   test: "true"
+  lint: "true"
+  format: "true"
 retrofit:
   spec_strategy: forward-only
   r08_committed: true
@@ -498,6 +502,125 @@ try:
           "symlink" not in r.stdout.lower(), r.stdout[-200:])
 finally:
     shutil.rmtree(_d, ignore_errors=True)
+
+
+# =========================================================================== #
+# [WP1] A project path containing a space
+# =========================================================================== #
+# settings.json registered `$CLAUDE_PROJECT_DIR/.claude/hooks/<n>.sh` unquoted.
+# Claude Code runs a shell-form hook with `sh -c`, which field-splits the
+# expansion, so under `.../My Project` every hook ran `.../My` and exited 127 -
+# a NON-blocking error: every gate off, install rc=0. Verified live on
+# Claude Code 2.1.283 (hook_response exit_code 127 on every event).
+print("\n-- [WP1] hooks start in a project path containing a space --")
+SH = shutil.which("sh")
+
+
+def _spaced_root():
+    base = tempfile.mkdtemp()
+    root = os.path.join(base, "My Project")
+    os.makedirs(root)
+    return base, root
+
+
+def _run_like_claude_code(root, command):
+    """Shell form, the way the hooks reference describes it: `sh -c`, with
+    CLAUDE_PROJECT_DIR exported and the payload on stdin."""
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": "ls"}, "cwd": root,
+               "session_id": "wiring-probe"}
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=root)
+    return subprocess.run([SH, "-c", command], input=json.dumps(payload),
+                          capture_output=True, text=True, cwd=root, env=env,
+                          timeout=120)
+
+
+_base, _root = _spaced_root()
+try:
+    r = install(_root)
+    check("an install into a path with a space exits 0",
+          r.returncode == 0, f"rc={r.returncode} {r.stderr[-300:]}")
+    _cmds = _registered_commands(json.load(
+        open(os.path.join(_root, ".claude", "settings.json"))))
+    _dead = []
+    for _c in _cmds:
+        _p = _run_like_claude_code(_root, _c)
+        if _p.returncode in (126, 127):
+            _dead.append((_c, _p.returncode, _p.stderr.strip()[-120:]))
+    check("every registered hook STARTS under `sh -c` in that path",
+          _cmds and not _dead, str(_dead[:2]))
+finally:
+    shutil.rmtree(_base, ignore_errors=True)
+
+_UNQUOTED = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+    {"type": "command",
+     "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/secrets-gate.sh"}]}]}}
+_QUOTED = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+    {"type": "command",
+     "command": '"$CLAUDE_PROJECT_DIR"/.claude/hooks/secrets-gate.sh'}]}]}}
+
+
+def _wiring_at(root, settings):
+    """(verify_wiring problems, unstartable_hooks warnings) for `settings`."""
+    os.makedirs(os.path.join(root, ".claude", "hooks"), exist_ok=True)
+    open(os.path.join(root, *HOOK.split("/")), "w").write(
+        "#!/usr/bin/env bash\n")
+    with open(os.path.join(root, ".claude", "settings.json"), "w") as fh:
+        json.dump(settings, fh)
+    return verify_wiring(Path(root), PLAN), unstartable_hooks(Path(root))
+
+
+# [WP1, owner ruling] An unquoted placeholder in a spaced root is a WARNING at
+# exit 0, not a wiring problem at exit 3: every registration the installer
+# writes is quoted and a re-install replaces the unquoted spelling at its own
+# sites, so what is left is the operator's own registration.
+_base, _root = _spaced_root()
+try:
+    _p, _w = _wiring_at(_root, _UNQUOTED)
+    check("an UNQUOTED placeholder under a spaced root is reported",
+          len(_w) == 1 and "unquoted" in _w[0], str(_w))
+    check("... as a warning, not a verify_wiring problem (no exit 3)",
+          _p == [], str(_p))
+    _p, _w = _wiring_at(_root, _QUOTED)
+    check("the QUOTED placeholder under the same root is not",
+          _p == [] and _w == [], str((_p, _w)))
+finally:
+    shutil.rmtree(_base, ignore_errors=True)
+
+_d = tree(_UNQUOTED)
+try:
+    check("an UNQUOTED placeholder under a root with no space is not a false "
+          "alarm (an existing install in an ordinary path stays silent)",
+          unstartable_hooks(Path(_d)) == [] and wiring(_UNQUOTED) == [],
+          str(unstartable_hooks(Path(_d))))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# End to end: a registration the merge keeps (the operator's own, at a site
+# we do not emit) that cannot start in this path gets a warning: line, and the
+# install still exits 0. At a site we DO emit the unquoted spelling is ours
+# and is replaced instead.
+_base, _root = _spaced_root()
+try:
+    os.makedirs(os.path.join(_root, ".claude"))
+    _theirs = "$CLAUDE_PROJECT_DIR/.claude/hooks/cost-log.sh"
+    with open(os.path.join(_root, ".claude", "settings.json"), "w") as fh:
+        json.dump({"hooks": {"SessionStart": [{"hooks": [{
+            "type": "command", "command": _theirs}]}]}}, fh)
+    r = install(_root)
+    check("an operator's unstartable registration leaves the install at "
+          "exit 0", r.returncode == 0, f"rc={r.returncode} "
+          f"{r.stderr[-400:]}")
+    _wl = [ln for ln in r.stderr.splitlines()
+           if ln.startswith("warning: ") and "unquoted" in ln]
+    check("and names the command and the remedy on one warning: line",
+          len(_wl) == 1 and _theirs in _wl[0]
+          and '"$CLAUDE_PROJECT_DIR"' in _wl[0], r.stderr[-400:])
+    check("and keeps the operator's registration as they wrote it",
+          _theirs in _registered_commands(json.load(
+              open(os.path.join(_root, ".claude", "settings.json")))))
+finally:
+    shutil.rmtree(_base, ignore_errors=True)
 
 
 print(f"\n{passed} passed, {failed} failed")

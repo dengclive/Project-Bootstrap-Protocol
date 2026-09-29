@@ -240,10 +240,14 @@ def _merge(det: dict, parsed: dict, notices: list[str]) -> dict:
             "human ranking.")
 
     # --- secrets / deps: only the enabled flag, only if model is confident ---
+    # [WP1 fix 4] ... and only to CONFIRM a policy. Each policy is the master
+    # switch of its security gate (D3), so a false removes the gate, and the
+    # deterministic heuristics never propose one: turning a gate off is the
+    # operator's edit, not a model's.
     for key, src_key in (("secrets", "secrets_enabled"),
                           ("deps", "deps_enabled")):
         s = parsed.get(src_key) or {}
-        if "value" in s and isinstance(s["value"], bool):
+        if isinstance(s, dict) and s.get("value") is True:
             conf = _coerce_conf(s.get("confidence"))
             if conf in (H.CONF_HIGH, H.CONF_MEDIUM):
                 out[key] = json_safe_deepcopy(det[key])

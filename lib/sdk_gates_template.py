@@ -29,14 +29,56 @@ import cmdpos          # round-4: THE command-position model, one definition
 #
 # [upstream P2-3] WHEN THIS MODULE IS LIVE: only when the install resolved
 # `gate_substrate: "sdk-callable"` AND the consumer runtime calls
-# build_hooks(). On a `gate_substrate: "shell"` install the file is still
-# emitted but NOTHING references it - `grep -c sdk_gates .claude/settings.json`
-# returns 0 - so it enforces nothing. That is intended, but it was never
-# stated, and a reader reasonably assumes an emitted gate module is active.
+# build_hooks(). [WP1 / D4 (a), 2026-09-27] It is also EMITTED only then
+# (lib/installer.py build_plan): on a `gate_substrate: "shell"` install
+# nothing referenced it - `grep -c sdk_gates .claude/settings.json` returns
+# 0 - so it enforced nothing, and an adopter's formatter rewriting it made
+# every re-install exit 3.
 SDK_GATES = (
     "secrets-gate", "spec-gate-commit", "dependency-gate", "test-gate",
     "eval-gate", "tdd-gate", "format-lint-gate",
 )
+
+# [WP1] "NO TESTS COLLECTED" IS NOT A FAILING SUITE - for the runners that say
+# so with an exit code of their own. pytest documents exit 5 as "no tests were
+# collected" (every test deselected included), and `python -m unittest` exits
+# 5 on "NO TESTS RAN" since Python 3.12. Measured: pytest 9.0.2, `python3 -m
+# pytest`, `python3 -m unittest` on Python 3.14.6, and `uv run pytest` all
+# exit 5 in an empty project. The test gate read that as a red suite and
+# blocked every commit of a new project, the harness commit included.
+#
+# Exit 5 means that ONLY for those runners. mocha exits with its failure
+# count, so five failing mocha tests exit 5 (measured, mocha 10.2.0): a
+# runner-agnostic "5 = no tests" rule would pass a red suite. jest 30 and
+# vitest 4 exit 1 for "no tests found", and npm's `npm init` placeholder
+# script exits 1 (measured, npm 11.6.2) - the same code as a failure, so
+# none of them can be told apart by exit code, and they keep blocking.
+#
+# So the arm exists only when the configured command is ONE simple command
+# whose program is pytest, py.test or `python[3[.N]] -m pytest|unittest`,
+# optionally after VAR=value words and `uv run`, with plain or simply-quoted
+# arguments. Anything else - a pipeline, `&&`, make, tox, an expansion - keeps
+# today's verdict: exit 5 blocks. ONE definition, rendered into the shell
+# hook at emission and into gates.py, so the substrates cannot disagree.
+_NT_WORD = r"""[^\s;&|<>()`$\\'"#]"""        # a word character, not syntax
+# [WP1 fix 4] A program's directory never holds "=": with it, the VALUE of an
+# assignment that ends in /pytest (`PYTEST=.venv/bin/pytest npm test`) read as
+# the program, and the arm applied to whatever ran next - mocha, whose five
+# failures exit 5.
+_NT_PATH = r"""[^\s;&|<>()`$\\'"#=]"""
+NO_TESTS_RC5_RE = (
+    r"[ \t]*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=" + _NT_WORD + r"*[ \t]+)*"
+    r"(?:uv[ \t]+run[ \t]+)?"
+    r"(?:" + _NT_PATH + r"*/)?"
+    r"(?:pytest|py\.test"
+    r"|python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+(?:pytest|unittest))"
+    r"(?:[ \t]+(?:" + _NT_WORD + r"""|'[^']*'|"[^"$`\\]*")+)*"""
+    r"[ \t]*")
+NO_TESTS_NOTICE = (
+    "test-gate: the test command collected no tests (exit 5), so this "
+    "commit is allowed. Write a first test. If this project already has "
+    "tests, the test runner is not finding them.")
 
 _HEADER = '''"""Bootstrap Protocol SDK gate module (seam §9; protocol >= 2.1.0).
 
@@ -3315,6 +3357,15 @@ def _test_gate(config):
             # to debug the wrong thing.
             return _deny("Commit blocked: test command not found (exit 127): "
                          + test_cmd)
+        if rc == 5 and _NO_TESTS_RC5.fullmatch(test_cmd):
+            # [WP1] Shell parity: pytest / `python -m unittest` exit 5 is
+            # "no tests collected", allowed with a notice to the user
+            # (systemMessage) and the model (additionalContext). No
+            # permissionDecision, so the normal permission flow applies.
+            return {"systemMessage": _NO_TESTS_NOTICE,
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": _NO_TESTS_NOTICE}}
         return _deny("Commit blocked: tests failing (exit %d)." % rc)
     return test_gate
 
@@ -3950,8 +4001,15 @@ def sdk_gates_module(cfg: dict) -> str:
            r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
            r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
     )
+    no_tests_prelude = (
+        "# [WP1] Rendered from sdk_gates_template.NO_TESTS_RC5_RE and\n"
+        "# NO_TESTS_NOTICE - the definitions the shell test-gate's exit-5\n"
+        "# arm is emitted from. Do not hand-edit one copy.\n"
+        "_NO_TESTS_RC5 = re.compile(%r)\n"
+        "_NO_TESTS_NOTICE = %r\n\n" % (NO_TESTS_RC5_RE, NO_TESTS_NOTICE))
     dynamic = (
         cmdpos_prelude
+        + no_tests_prelude
         + "# The gates enabled for THIS project at emission.\n"
         "#\n"
         "# [upstream P2-2] NOT parity with the shell suite - the\n"

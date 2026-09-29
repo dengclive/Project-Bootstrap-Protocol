@@ -305,7 +305,10 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
 
     # ---- [D18] never_read_paths spellings that guard nothing -------------
     sec = cfg.get("secrets", {})
-    if isinstance(sec.get("never_read_paths"), list):
+    # Only a list of strings: the check above has already refused any other
+    # item, and normalizing one raised TypeError, a traceback, not rc=2.
+    if isinstance(sec.get("never_read_paths"), list) and all(
+            isinstance(p, str) for p in sec["never_read_paths"]):
         expanded, d18_notices = _normalize_never_read(sec["never_read_paths"])
         sec["never_read_paths"] = expanded
         notices.extend(d18_notices)
@@ -608,9 +611,92 @@ DEFAULTS = {
 }
 
 
+# List-valued keys that only reach markdown. A wrong TYPE here used to render
+# one principle per CHARACTER (a string) or crash build_plan (mcp entries that
+# are not maps). The two list keys that reach shell, secrets.never_read_paths
+# and deps.approved, are type-checked by _validate_shell_reaching.
+_MARKDOWN_LISTS = (("principles", "ranked", "string"),
+                   ("principles", "tiebreakers", "string"),
+                   ("mcp", "servers", "map"),
+                   ("mcp", "rejected", "map"))
+
+
+def _section_errors(cfg: dict) -> list[str]:
+    """A section that is not a mapping crashed resolve_config with a
+    traceback (every section, every non-mapping value). Refuse it first:
+    nothing below can run on it, so these errors cannot batch."""
+    if "_root" in cfg:
+        return ["the top level of the config must be sections such as "
+                "`project:`, not a list"]
+    return [f"{sect} must be a mapping (indented `key: value` lines, or "
+            f"{{key: value}}); got {type(cfg[sect]).__name__} "
+            f"({cfg[sect]!r})"
+            for sect in DEFAULTS
+            if sect in cfg and not isinstance(cfg[sect], dict)]
+
+
+def _markdown_list_errors(cfg: dict) -> list[str]:
+    """Refuse list shapes that crashed build_plan or rendered garbage (a
+    principle per character, a Python repr as a principle). Empty spellings
+    (null, "", an empty map, false, 0) become [], which they already meant."""
+    errs = []
+    for sect, key, kind in _MARKDOWN_LISTS:
+        val = cfg.get(sect, {}).get(key)
+        if not val:
+            if key in cfg.get(sect, {}):
+                cfg[sect][key] = []
+            continue
+        if not isinstance(val, list):
+            errs.append(f"{sect}.{key} must be a list; got "
+                        f"{type(val).__name__} ({val!r})")
+            continue
+        for i, item in enumerate(val):
+            ok = (isinstance(item, dict) if kind == "map" else
+                  item is not None and not isinstance(item, (dict, list)))
+            if not ok:
+                errs.append(f"{sect}.{key}[{i}] must be a {kind}; got "
+                            f"{type(item).__name__} ({item!r})")
+    return errs
+
+
+# [WP1 D3] The master switches for the two security gates, with the gate each
+# one switches. Since D3 a false value removes its gate, so a value that is
+# not a boolean - a typo (`flase`), a blank `enabled:`, `null`, `0`, `"no"`
+# - must be refused, not read by truthiness.
+POLICY_SWITCHES = (("secrets", "enabled", "secrets-gate"),
+                   ("deps", "enabled", "dependency-gate"))
+
+
+def policy_switch_errors(cfg: dict) -> list[tuple[tuple[str, str], str]]:
+    """((section, key), message) for each policy switch present in `cfg`
+    with a value that is not true or false. Absent keys are fine: they take
+    the default. bin/bootstrap-install adds the file and line."""
+    out = []
+    for sect, key, gate in POLICY_SWITCHES:
+        block = cfg.get(sect)
+        if isinstance(block, dict) and key in block \
+                and not isinstance(block[key], bool):
+            out.append(((sect, key),
+                        f"{sect}.{key} must be true or false; got "
+                        f"{block[key]!r}. It switches {gate} on or off, so "
+                        f"a value that is neither is refused rather than "
+                        f"read as off."))
+    return out
+
+
 def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     errors: list[str] = []
     cfg = copy.deepcopy(raw) if raw else {}
+
+    shape = _section_errors(cfg)
+    if shape:
+        return cfg, shape
+    errors.extend(_markdown_list_errors(cfg))
+    for (sect, key), msg in policy_switch_errors(cfg):
+        errors.append(msg)
+        # Fail-safe for a caller that ignores `errors` (as gate_substrate
+        # below): an unreadable switch leaves its gate ON.
+        cfg[sect][key] = True
 
     if "project" not in cfg or "name" not in cfg.get("project", {}):
         errors.append("project.name is required")
@@ -714,6 +800,15 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     hooks = [hk for hk in hooks
              if toggle_map.get(hk) is None or h.get(toggle_map[hk], True)]
 
+    # [D3] deps.enabled is the master switch for the dependency gate, the way
+    # secrets.enabled is for the secrets gate above: when it is false the
+    # gate is neither emitted nor wired, and hooks.dependency_gate: true does
+    # not bring it back. A per-hook toggle can only turn a gate further off.
+    # build_plan already keys deps.md on deps.enabled; before this, the gate
+    # was still emitted for a project that had opted out of the policy.
+    if not cfg["deps"]["enabled"]:
+        hooks = [hk for hk in hooks if hk != "dependency-gate"]
+
     # de-dupe preserving order
     seen, ordered = set(), []
     for hk in hooks:
@@ -722,7 +817,11 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
             seen.add(hk)
     cfg["_resolved_hooks"] = ordered
 
-    # ---- Warn-not-fail: empty gate commands -> loud TODO in hook --------- #
+    # ---- Warn-not-fail: empty commands -> install-time warning ----------- #
+    # The installer prints one `warning:` line per name. An empty test also
+    # renders a TODO in test-gate. An empty lint renders `true` in
+    # format-lint-gate, which checks nothing and says nothing. No hook runs
+    # format.
     cmds = cfg["commands"]
     cfg["_command_warnings"] = [
         name for name in ("test", "lint", "format")
@@ -748,6 +847,11 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     # by any template fn (verified by D2 golden test).
     if mode == "retrofit":
         cfg.setdefault("retrofit", {})
+        if not isinstance(cfg["retrofit"], dict):
+            errors.append(f"retrofit must be a mapping; got "
+                          f"{type(cfg['retrofit']).__name__} "
+                          f"({cfg['retrofit']!r})")
+            return cfg, errors
         _deep_default(cfg["retrofit"], RETROFIT_DEFAULTS)
         r = cfg["retrofit"]
 

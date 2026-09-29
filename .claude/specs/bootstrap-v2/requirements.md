@@ -2,7 +2,7 @@
 
 **Slug:** `bootstrap-v2` · **Target path in repo:** `.claude/specs/bootstrap-v2/requirements.md` · **Revision:** 3 *(rev-3, owner-confirmed 2026-07-17: decomposition R-0..R-9 ↔ IC-1..IC-7 confirmed as the implementation contract; AC-6-5 reworded to verify-existing (`effort: high` already emitted, `templates.py:769`/`:2075`); R-4 [SR-17] gitignore home decided: option (a) managed block.)*
 **review_applied:** `SESSION-ADVERSARIAL-REVIEW.md` — SR-01, SR-02, SR-04, SR-07, SR-08, SR-11, SR-12, SR-13, SR-16, SR-17 applied inline (tagged).
-**Upstream contract:** `Bootstrap-Protocol-v2-0-0.md` (Implementation Contract IC-1..IC-7), its Companion, `SEAM-CONTRACT-v2-0-0.md` **incl. its §3.3/§9 SDK-gate-module surface** (§9 entry folded 2026-07-17, runner ownership Tessera-owned; entered the wire at the seam-2.0.0 substrate re-cut 2026-07-21, `binds.bootstrap_protocol` re-pointed `2.0.0 @ 1fa5bb6` → `2.4.0 @ 251f82f`) [SR-01], `IMPLEMENTATION-GAP-ANALYSIS.md`.
+**Upstream contract:** `Bootstrap-Protocol-v2-0-0.md` (Implementation Contract IC-1..IC-7), its Companion, `SEAM-CONTRACT-v3-0-0.md` **incl. its §3.3/§9 SDK-gate-module surface** (§9 entry folded 2026-07-17, runner ownership Tessera-owned; entered the wire at the seam-2.0.0 substrate re-cut 2026-07-21, `binds.bootstrap_protocol` re-pointed `2.0.0 @ 1fa5bb6` → `2.4.0 @ 251f82f`; renamed from `SEAM-CONTRACT-v2-0-0.md` at the seam-3.0.0 WP1 re-cut 2026-09-28, which re-points the bind to `2.8.0` with its commit TODO and SUSPENDS the contract until Tessera exists as code) [SR-01], `IMPLEMENTATION-GAP-ANALYSIS.md`.
 **Baseline verified against:** live `main` tree, `PROTOCOL_VERSION = "1.9.0"`.
 
 ---
@@ -22,7 +22,7 @@ The v2.0.0 document leads the code by owner decision (2026-07-17). The live tree
 
 ## Invariants that must survive every task
 
-- **`fail-loud-on-empty-commands`** — gates generated with empty `commands.test`/`lint`/`format` emit a TODO marker that fails loud, never silently pass. Holds in both shell and SDK-callable paths.
+- **`fail-loud-on-empty-commands`** — gates generated with empty `commands.test`/`lint`/`format` emit a TODO marker that fails loud, never silently pass. Holds in both shell and SDK-callable paths. **[Corrected 2026-09-28, WP1.]** This invariant did not hold as stated, before WP1 or after it. Only an empty `commands.test` fails loudly. An empty `commands.lint` makes `format-lint-gate` run `true`, which checks nothing and prints nothing, and no hook runs `commands.format`. What holds instead is at install time: the installer prints one `warning:` line on stderr for each empty test, lint or format command. See the `[Corrected 2026-09-28, WP1]` layers on `Bootstrap-Protocol-v2-8-0.md` §6.C.
 - **`compose-do-not-fork`** — no per-project gate-exception mechanism. The only sanctioned exception is the audited security-critical hand-edit flow.
 - **Subprocess isolation** — the emitted SDK-gate module is loadable only by a *subprocess* dispatch runner, never imported into a consumer's core process (seam §2 non-import rule; Tessera AC-PROTO-001 class; locked in the seam §9).
 - **`resolve_config` invariants unchanged** — `queue ⇒ loop | goal`; `prd_tier` enum (`micro|standard|full`); archetype enum. Verify, do not modify.

@@ -143,7 +143,10 @@ _stub.HookMatcher = _StubHookMatcher
 sys.modules["claude_agent_sdk"] = _stub
 
 # ai-agent + tdd required so BOTH substrates carry all seven SDK gates.
-CONFIG = """project:
+# [WP1 / D4 (a)] gates.py is emitted only for the SDK substrate; this
+# suite loads the emitted module, so its fixture requests it.
+CONFIG = """gate_substrate: "sdk-callable"
+project:
   name: "issuefixes"
   archetype: "ai-agent"
   shell: "bash"

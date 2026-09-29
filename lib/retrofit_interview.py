@@ -16,8 +16,8 @@ decision layer).
 
 Invariants (identical contract to greenfield):
   * Proposes, never silently decides. Ambiguity becomes OPEN QUESTION.
-  * commands.test/lint/format proposed with confidence (OD-3); empty
-    answers honor the loud-TODO gate contract.
+  * commands.test/lint/format proposed with confidence (OD-3); an empty
+    answer stays empty, and the installer warns about it.
   * The emitted cfg validates via `bootstrap-install --print-config`.
   * The proposal core (build_retrofit_proposal) is a pure function of
     InventoryData; identical inventory => identical proposal => identical
@@ -83,6 +83,13 @@ ANSWER_KEYS = [
 ]
 
 _LIST_KEYS = {"principles_ranked", "legacy_allowlist"}
+_TRUE_WORDS = ("true", "1", "yes", "on")
+_FALSE_WORDS = ("false", "0", "no", "off")
+# [WP1 D3] The two answers that switch a security gate, and the gate each one
+# switches: an unreadable value is an error, not false (see the greenfield
+# interview's POLICY_ANSWER_KEYS).
+_POLICY_KEYS = {"secrets_enabled": "the secrets gate",
+                "deps_enabled": "the dependency gate"}
 _BOOL_KEYS = {
     "secrets_enabled", "deps_enabled",
     "loop_mode_opted_in", "goal_supervised_mode_opted_in",
@@ -137,7 +144,8 @@ def default_answers(proposal: dict) -> dict:
         "queue_mode_opted_in":
             p["autonomous_modes"]["queue_mode_opted_in"],
         # Commands: prefilled with the proposal if any, else empty (OD-3:
-        # empty values are HUMAN-REQUIRED — fail-loud TODO gate applies).
+        # empty values are HUMAN-REQUIRED; the installer warns about an
+        # empty test, lint or format).
         "commands_test": cmds.get("test", {}).get("value", ""),
         "commands_lint": cmds.get("lint", {}).get("value", ""),
         "commands_format": cmds.get("format", {}).get("value", ""),
@@ -283,9 +291,6 @@ def answers_to_config(ans: dict, proposal: dict) -> dict:
 
 
 def _initial_approved_list(proposal: dict) -> list[str]:
-    """For deps enabled, the initial approved list is the union of every
-    declared dep across manifests (R5.5 step 1: 'use inventory as initial
-    approved list'). Empty if deps disabled."""
     # We don't have inv reachable here; the proposal's debt fields are
     # already aggregated. For brevity and determinism we leave this empty;
     # operator populates from inventory/dependencies.md before R5.5.
@@ -332,6 +337,8 @@ def validate_config_dict(cfg: dict) -> list[str]:
 
 
 def validate_with_installer(config_path: Path) -> tuple[int, str]:
+    # [WP1] Absolute: the installer resolves a relative -c against -C.
+    config_path = config_path.resolve()
     proc = subprocess.run(
         [sys.executable, str(BIN), "-c", str(config_path),
          "-C", str(config_path.parent), "--print-config"],
@@ -518,9 +525,10 @@ def render_interview(proposal: dict, repo_root: Path) -> str:
                 f"source: {info['source']})_")
         cmd_lines.append("")
     cmd_lines += [
-        "Per OD-3 the HUMAN-REQUIRED fail-loud TODO-gate contract is "
-        "preserved: any value you clear in the ANSWERS block becomes a "
-        "loud-TODO gate at installer time.",
+        "Per OD-3 an empty command stays HUMAN-REQUIRED. An empty "
+        "test command makes `test-gate` block every commit once it enforces; "
+        "an empty lint command means `format-lint-gate` checks nothing; no "
+        "hook runs format or typecheck.",
     ]
     section("Project commands", cmd_lines)
 
@@ -597,10 +605,11 @@ def parse_interview_answers(text: str) -> dict:
             "with `bin/retrofit-interview analyze`")
 
     raw: dict[str, str] = {}
+    raw_line: dict[str, int] = {}
     list_raw: dict[str, list[str]] = {}
     body = lines[i0 + 1:i1]
     cur_list_key: str | None = None
-    for line in body:
+    for lineno, line in enumerate(body, start=i0 + 2):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -621,6 +630,7 @@ def parse_interview_answers(text: str) -> dict:
         else:
             cur_list_key = None
             raw[k] = v
+            raw_line[k] = lineno
 
     out: dict = {}
     for k in ANSWER_KEYS:
@@ -651,8 +661,16 @@ def parse_interview_answers(text: str) -> dict:
                     f"it. Restore `{k}: true` or `: false`.")
             raise ValueError(f"ANSWERS block missing key: {k}")
         val = raw[k]
+        word = val.strip().lower()
+        if k in _POLICY_KEYS and word not in _TRUE_WORDS + _FALSE_WORDS:
+            # [WP1 D3] false removes a security gate, so a typo here is
+            # refused, never read as false.
+            raise ValueError(
+                f"line {raw_line[k]}: {k}: {val!r} is not true or false. It "
+                f"switches {_POLICY_KEYS[k]}, and false removes it, so a "
+                "value that is neither is refused rather than read as false.")
         if k in _BOOL_KEYS:
-            out[k] = val.strip().lower() in ("true", "1", "yes", "on")
+            out[k] = word in _TRUE_WORDS
         else:
             out[k] = val
     return out
@@ -866,8 +884,9 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
         ans["queue_mode_opted_in"] = False
 
     o("\n--- Project commands ---\n"
-      "Per OD-3 retrofit proposes commands with confidence; empty values "
-      "trigger\nthe installer's fail-loud TODO-gate (intentional).\n")
+      "Per OD-3 retrofit proposes commands with confidence.\n"
+      "An empty test blocks commits once test-gate "
+      "enforces; an empty\nlint checks nothing.\n")
     for ck, label in (("commands_test", "test"),
                       ("commands_lint", "lint"),
                       ("commands_format", "format"),
@@ -911,9 +930,9 @@ def _finalize(answers: dict, proposal: dict, out_path: Path, *,
         return 2
 
     header = ("GENERATED BY bin/retrofit-interview — a PROPOSAL reviewed "
-              "by a human.\nEvery value here was shown with a rationale "
-              "before acceptance.\nempty commands.* are intentional per "
-              "OD-3: the installer emits loud-TODO gates.\nRe-run "
+              "by a human.\nempty commands.test/lint/format are "
+              "intentional per OD-3: the installer warns about each one."
+              "\nRe-run "
               "bin/bootstrap-install --dry-run to preview the .claude/ "
               "tree.")
     emit_warnings: list[str] = []
@@ -1025,9 +1044,16 @@ def main(argv: list[str]) -> int:
         try:
             answers = parse_interview_answers(ip.read_text())
         except ValueError as e:
-            print(f"error: {e}", file=sys.stderr)
+            print(f"error: {ip}: {e}", file=sys.stderr)
             return 2
-        proposal = json.loads(stash.read_text())
+        try:
+            proposal = json.loads(stash.read_text())
+        except (OSError, ValueError) as e:
+            print(f"error: proposal stash {stash} cannot be read: {e}",
+                  file=sys.stderr)
+            print("Re-run `bin/retrofit-interview analyze`.",
+                  file=sys.stderr)
+            return 2
         return _finalize(answers, proposal, root / args.out,
                           outstream=sys.stdout)
 

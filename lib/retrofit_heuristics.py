@@ -398,8 +398,8 @@ def _infer_pm_tool(pm: dict) -> str:
 def propose_commands(inv: dict) -> dict:
     """OD-3-approved: detect candidate commands from CI / manifest scripts /
     Makefile with HIGH/MED/LOW confidence. Operator accepts/edits in
-    ANSWERS block; if cleared, the installer's fail-loud TODO-gate
-    contract still applies (greenfield invariant preserved)."""
+    ANSWERS block; if cleared, the command stays empty and the installer
+    warns about it, as on the greenfield route."""
     proposals: dict[str, dict] = {}
     sources_found: list[str] = []
 
@@ -483,15 +483,16 @@ def propose_commands(inv: dict) -> dict:
     if not proposals:
         rationale = (
             "No project commands detected in CI workflows, manifests, or "
-            "framework presence. Per OD-3 the proposal stays empty and "
-            "the installer's fail-loud TODO-gate contract applies. "
+            "framework presence. Per OD-3 the proposal stays empty, and "
+            "the installer warns about each empty test, lint or format "
+            "command. "
             "Operator fills the ANSWERS block with the actual commands.")
         confidence = CONF_OPEN
     else:
         rationale = (
             f"Detected from: {', '.join(sources_found) or 'CI workflows'}. "
-            f"Per OD-3, retrofit proposes commands with confidence; HUMAN-"
-            f"REQUIRED TODO-gate contract preserved if operator clears any. "
+            f"Per OD-3, retrofit proposes commands with confidence; one the "
+            f"operator clears stays empty, and the installer warns about it. "
             f"Found: {', '.join(proposals.keys())}.")
         # Pick lowest confidence among proposals as overall.
         confs = [p["confidence"] for p in proposals.values()]
@@ -556,29 +557,53 @@ def propose_secrets_retrofit(inv: dict) -> dict:
     }
 
 
+# scan_languages' manifest flags that say nothing about dependencies.
+_NOT_DEPS_MANIFESTS = frozenset({"Makefile", "Dockerfile"})
+# [WP1 D3] The operator's way out, said on every deps proposal.
+_DEPS_OFF_NOTE = (
+    "Setting deps_enabled: false (deps.enabled in bootstrap.config.yaml) "
+    "turns the deps policy off and drops the dependency gate.")
+
+
 def propose_deps_retrofit(inv: dict) -> dict:
-    """Deps policy enabled with the manifests' actual contents as the
-    initial approved list (R5.5)."""
+    """Deps policy enabled (R5.5).
+
+    [WP1] Since D3, `deps_enabled: false` removes the dependency gate, so
+    this heuristic NEVER proposes false. An empty scan is not evidence of a
+    stdlib-only project: the scanner reads a few manifest shapes, and a root
+    file can include, shadow or sit beside the one that declares the
+    dependencies. Naming the shapes that are safe to call stdlib-only was
+    tried during the WP1 review and missed a case. So an
+    empty scan proposes true at CONF_LOW, a guess, and turning the gate off
+    is the operator's edit, as every deps rationale says."""
     deps = inv["dependencies"]["by_manifest"]
     has_any_deps = any(pkgs for pkgs in deps.values())
     if not has_any_deps:
+        detected = sorted(name for name, present
+                          in inv["languages"]["manifests"].items()
+                          if present and name not in _NOT_DEPS_MANIFESTS)
+        seen = (f"The scanner read no dependencies from "
+                f"{', '.join(detected)}" if detected else
+                "The scanner found no dependency manifest it recognizes")
         return {
-            "enabled": False,
-            "confidence": CONF_MEDIUM,
+            "enabled": True,
+            "confidence": CONF_LOW,
             "rationale": (
-                "No declared dependencies found in any manifest. Likely "
-                "stdlib-only project; RETROFIT.md Skip Policy allows "
-                "skipping R5.5 dep-vetting in this case. Operator "
-                "confirms."),
+                f"{seen}. That does not show that the project has none, so "
+                "the deps policy is proposed ENABLED, with an empty approved "
+                "list: the dependency gate stays on and refuses an install "
+                "until its package is added to .claude/steering/deps.md. If "
+                "the project truly has no third-party dependencies, "
+                "RETROFIT.md's Skip Policy allows skipping R5.5 dep-vetting. "
+                f"{_DEPS_OFF_NOTE}"),
         }
     return {
         "enabled": True,
         "confidence": CONF_HIGH,
         "rationale": (
             f"Detected dependencies in "
-            f"{len(deps)} manifest(s); initial approved list is the "
-            f"union of what currently exists (R5.5: 'use inventory as "
-            f"the initial approved list'). Operator curates."),
+            f"{len(deps)} manifest(s). "
+            f"{_DEPS_OFF_NOTE}"),
     }
 
 
@@ -718,8 +743,8 @@ def propose_debt_entries(inv: dict) -> list[dict]:
             "severity": "medium",
             "discovered": "retrofit R0 conventions scan",
             "plan": (
-                "add lint config; the format-lint-gate hook will fail "
-                "loudly with a TODO until commands.lint is non-empty"),
+                "add lint config and set commands.lint; until it is set, "
+                "format-lint-gate checks nothing"),
             "status": "open",
         })
     return entries
