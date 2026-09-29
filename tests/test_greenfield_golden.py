@@ -112,7 +112,7 @@ commands:
 # shell, so after WP1 no digest here covered the security-critical SDK module
 # (a one-byte change to lib/sdk_gates_template.py left every suite green,
 # measured by the WP1 review, tests/F1 and rulings/F3). This fixture restores
-# that byte pin, and pins the rest of an SDK-substrate install with it. Its
+# that byte pin for the default config's gates.py, and the rest of it. Its
 # digest is a deliberate golden ADDITION, NOT a re-baseline. build_plan does
 # not run the IC-1..IC-7 gate (main() does), so the plan is the one a granted
 # install writes.
@@ -2938,7 +2938,7 @@ EXPECTED_DIGESTS = {
         # NUMBERING: "no. 52" is used TWICE in this file for two different
         # changes (X-45 dated 2026-08-10 and X-52 dated 2026-08-12), and
         # :2807 uses the range "no. 56-61". 63 is the next free integer above
-        # 62 (tests/test_retrofit.py:2051). The duplicate is recorded rather
+        # 62 (tests/test_retrofit.py:2060). The duplicate is recorded rather
         # than renumbered, because the number is a citation handle and
         # rewriting one breaks whatever already cites it.
         #
@@ -3993,7 +3993,13 @@ EXPECTED_DIGESTS = {
         # exit-5 arm. Measured against the previous digest (ccc5eb7b...):
         # exactly one body moves, tech.md; 0 added, 0 removed, count 68. The
         # three fixtures whose test command is empty do not move.
-        "1368c5714b50e003c8cc00c4d1b89acff0e18c9e96b37dd4533c7fb1c00046f9",
+        # RE-BASELINED 2026-09-29, same exception 82 (PR #118 review, TGX-2):
+        # test-gate.sh's exit-5 arm now applies only at the top of the
+        # checkout and blocks elsewhere with its own message, and tech.md's
+        # exit-5 sentence says so. Measured against the previous digest
+        # (1368c571...): exactly two bodies move, test-gate.sh and tech.md;
+        # 0 added, 0 removed, count 68.
+        "ff2c7728066409b0e990289a609cb66b21357237d9e93adffc49367e64f165b8",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4493,8 +4499,13 @@ EXPECTED_DIGESTS = {
     # Tessera-owned, seam §9). Action count 57 = the 56-file default + gates.py.
     # Measured on this tree only: 24cd8a3 had no such fixture, so there is no
     # previous digest.
+    # RE-BASELINED 2026-09-29, same exception 82 (PR #118 review, TGX-1):
+    # NO_TESTS_RC5_RE, which gates.py carries, no longer reads an "=" as part
+    # of a program's directory. Measured against the previous digest
+    # (5ed422b1...): exactly one body moves, gates.py; test-gate.sh does not,
+    # since this fixture's test command is empty; 0 added, 0 removed, count 57.
     "sdk_callable":
-        "5ed422b13e191a0bcccc972916178dd790057e1692d2c8456df770814ed0ebb5",
+        "1a9526384b0a392d2e8af7b846b703cced9009fab25d659f579a4e92d82d2d4c",
 }
 
 EXPECTED_ACTION_COUNTS = {

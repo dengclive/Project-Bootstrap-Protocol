@@ -124,8 +124,8 @@ def _command_contract(cfg):
         test_cmd = cfg["commands"].get("test") or ""
         if test_cmd and re.fullmatch(NO_TESTS_RC5_RE, test_cmd) is not None:
             # [WP1] The same predicate that gives test-gate its exit-5 arm.
-            lines.append("A run that collects no tests (exit 5) is allowed, "
-                         "with a notice.")
+            lines.append("A run at the top of the checkout that collects "
+                         "no tests (exit 5) is allowed, with a notice.")
         if cfg.get("mode") == "retrofit":
             lines.append("During the retrofit rollout it only warns in the "
                          "weeks `.claude/hooks/rollout-schedule.md` marks "
@@ -3321,11 +3321,32 @@ _NO_TESTS_JSON = json.dumps({
     "hookSpecificOutput": {"hookEventName": "PreToolUse",
                            "additionalContext": NO_TESTS_NOTICE}})
 assert "'" not in _NO_TESTS_JSON, "the JSON is emitted inside single quotes"
+# [WP1 fix 4] Only at the top of the checkout. The command runs in the hook's
+# cwd, which is Claude Code's current directory, not CLAUDE_PROJECT_DIR: from
+# a directory with no tests (src/ in a src/ + tests/ layout) pytest collects
+# nothing and exits 5 while the suite at the root is red, and this arm let
+# that commit through. Off the top level exit 5 blocks, as before WP1, with a
+# message that says why instead of "tests failing". The top level is git's (a
+# worktree's own root), or CLAUDE_PROJECT_DIR outside git; if `cd` to it
+# fails, the comparison fails and the commit is blocked. The hook runs before
+# the command, in the session's directory, so a `cd` inside the same command
+# does not move it: the message says to change directory first.
 _TEST_GATE_RC5_ARM = (
     '    elif [ "$rc" -eq 5 ]; then\n'
     '      # [WP1] pytest / `python -m unittest` exit 5: no tests collected.\n'
-    '      # Allowed, with a notice. See lib/sdk_gates_template.py\n'
-    '      # NO_TESTS_RC5_RE for which commands get this arm and why.\n'
+    '      # Allowed, with a notice, at the top of the checkout only. See\n'
+    '      # lib/sdk_gates_template.py NO_TESTS_RC5_RE for which commands\n'
+    '      # get this arm and why.\n'
+    '      _tg_top="$(git rev-parse --show-toplevel 2>/dev/null'
+    ' || printf %s "${CLAUDE_PROJECT_DIR:-.}")"\n'
+    '      if [ "$(pwd -P)" != "$(cd -P -- "$_tg_top" 2>/dev/null'
+    ' && pwd -P)" ]; then\n'
+    '        echo "Commit blocked: the test command collected no tests'
+    ' (exit 5) in $(pwd), which is not the top of the checkout'
+    ' ($_tg_top). The hook runs in the session\'s current directory, so'
+    ' run cd to the top in a Bash call of its own, then commit." >&2;'
+    ' exit 2\n'
+    '      fi\n'
     '      log "test-gate allow: no tests collected (exit 5)"\n'
     "      printf '%s\\n' '" + _NO_TESTS_JSON + "'\n")
 

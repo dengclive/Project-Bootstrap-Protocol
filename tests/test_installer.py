@@ -2553,7 +2553,8 @@ check("I-6: tech.md does not describe a test-gate the config turned off",
 # [review rulings/F5] tech.md is where an adopter reads per-hook behaviour, so
 # it states the exit-5 allowance whenever test-gate carries the exit-5 arm
 # (the same NO_TESTS_RC5_RE predicate), and only then.
-_RC5_LINE = "A run that collects no tests (exit 5) is allowed, with a notice."
+_RC5_LINE = ("A run at the top of the checkout that collects no tests (exit 5) "
+             "is allowed, with a notice.")
 _c_py, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
                     'commands:\n  test: "pytest -q"\n')
 check("I-6: tech.md states the exit-5 allowance for a pytest test command",
@@ -2686,6 +2687,544 @@ _rc, _n = _notes_for("vitest run --passWithNoTests")
 check("vitest with --passWithNoTests draws no note", _n == [])
 _rc, _n = _notes_for("pytest -q")
 check("pytest draws no note (the gate reads its exit 5 itself)", _n == [])
+
+
+def _notes_for_cfg(cfg_text):
+    d = tempfile.mkdtemp()
+    try:
+        with open(os.path.join(d, "c.yaml"), "w") as fh:
+            fh.write(cfg_text)
+        r = subprocess.run([sys.executable, BIN, "-c", "c.yaml", "-C", d],
+                           capture_output=True, text=True)
+        return [ln for ln in r.stderr.splitlines() if "jest" in ln]
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+# [WP1 fix 4] The note says the test gate blocks every commit; with no test
+# gate installed it named a gate that is not there (PR #118 review, TGX-4).
+_rc, _n = _notes_for("npx jest --passWithNoTests=true")
+check("fix 4: --passWithNoTests=true counts as the flag (LDR-2)", _n == [])
+_rc, _n = _notes_for("npx jest --passWithNoTests=false")
+check("fix 4: --passWithNoTests=false does not count as the flag (PIN4C-4)",
+      any("jest" in n for n in _n))
+check("fix 4: with hooks.test_gate false, the jest note is not printed",
+      _notes_for_cfg('project:\n  name: x\n  archetype: service\n'
+                     'commands:\n  test: "npx jest"\n'
+                     'hooks:\n  test_gate: false\n') == [])
+
+# ---------------------------------------------------------------------------
+# [WP1 fix 4] PR #118 review. D3 made deps.enabled the master switch of the
+# dependency gate, so a config that says `false` - including one 24cd8a3's
+# retrofit heuristic wrote for any repo whose dependencies its scanner could
+# not read - loses a gate that ran. That is the ruling; doing it SILENTLY was
+# the defect (SEC-1 / UPG-1 / RF-1). And with no manifest to say which
+# registrations were ours, turning a gate off left it registered (INS-1,
+# UPG-2), or dangling at exit 3 on a manifest older than `owned_hooks`
+# (C2-1 / LEG-1).
+# ---------------------------------------------------------------------------
+print("\n-- [WP1 fix 4] a security gate an earlier install wired --")
+_F4_CFG = ('project:\n  name: x\n  archetype: service\n'
+           'commands:\n  test: "true"\n  lint: "true"\n  format: "true"\n')
+_F4_DEPS_OFF = _F4_CFG + 'deps:\n  enabled: false\n'
+_F4_BOTH_OFF = _F4_DEPS_OFF + 'secrets:\n  enabled: false\n'
+_F4_GATE = os.path.join(".claude", "hooks", "dependency-gate.sh")
+_F4_MANIFEST = os.path.join(".claude", ".installer-manifest.json")
+
+
+def _f4_run(d, cfg_text, *flags):
+    with open(os.path.join(d, "c.yaml"), "w") as fh:
+        fh.write(cfg_text)
+    r = subprocess.run([sys.executable, BIN, "-c", "c.yaml", "-C", d, *flags],
+                       capture_output=True, text=True)
+    return r.returncode, [ln for ln in r.stderr.splitlines()
+                          if ln.startswith("warning: ")]
+
+
+def _f4_registered(d, name):
+    with open(os.path.join(d, ".claude", "settings.json")) as fh:
+        st = _json.load(fh)
+    return sum(1 for grps in st.get("hooks", {}).values() for g in grps
+               for e in g.get("hooks", [])
+               if e.get("command", "").endswith(f"/{name}.sh"))
+
+
+_d = tempfile.mkdtemp()
+try:
+    _rc0, _ = _f4_run(_d, _F4_CFG)
+    _rcd, _wd = _f4_run(_d, _F4_DEPS_OFF, "--dry-run")
+    check("fix 4: --dry-run says the deps.enabled: false re-install would "
+          "remove the dependency gate",
+          _rc0 == 0 and _rcd == 0 and any(
+              "dependency-gate.sh: deps.enabled is false, so this run would "
+              "remove" in w for w in _wd))
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: the re-install removes it at rc 0, on a warning: line",
+          _rc1 == 0 and not os.path.exists(os.path.join(_d, _F4_GATE))
+          and _f4_registered(_d, "dependency-gate") == 0 and any(
+              "dependency-gate.sh: deps.enabled is false, so this run "
+              "removed" in w for w in _w1))
+    _rc2, _w2 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: the next re-install says nothing more about it",
+          _rc2 == 0 and not any("dependency-gate" in w for w in _w2))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = tempfile.mkdtemp()
+try:
+    _f4_run(_d, _F4_CFG)
+    with open(os.path.join(_d, _F4_GATE), "a") as fh:
+        fh.write("# tuned by hand\n")
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: an edited gate is kept on disk, unregistered, and said so",
+          _rc1 == 0 and os.path.exists(os.path.join(_d, _F4_GATE))
+          and _f4_registered(_d, "dependency-gate") == 0 and any(
+              "so this run no longer installs or registers the "
+              "dependency-gate" in w for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# No manifest: every fresh clone, since the manifest is gitignored.
+_d = tempfile.mkdtemp()
+try:
+    _f4_run(_d, _F4_CFG)
+    os.remove(os.path.join(_d, _F4_MANIFEST))
+    _rc1, _w1 = _f4_run(_d, _F4_BOTH_OFF)
+    check("fix 4: no manifest - both gates turned off are unregistered at "
+          "rc 0 (they stayed wired and blocking)",
+          _rc1 == 0 and _f4_registered(_d, "dependency-gate") == 0
+          and _f4_registered(_d, "secrets-gate") == 0)
+    check("fix 4: no manifest - each dropped registration is named, the "
+          "secrets gate's two included",
+          sum("a hook this config does not install" in w for w in _w1) == 3)
+    _rc2, _w2 = _f4_run(_d, _F4_BOTH_OFF)
+    check("fix 4: no manifest - a second run stays unregistered and quiet",
+          _rc2 == 0 and _f4_registered(_d, "dependency-gate") == 0
+          and not any("does not install" in w for w in _w2))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# A manifest written before `owned_hooks` existed (installers up to v2.5.0),
+# with settings.json edited since: the merge kept our registration as the
+# operator's while the stale cleanup deleted its script, and every re-install
+# exited 3 on the dangling registration.
+_d = tempfile.mkdtemp()
+try:
+    _f4_run(_d, _F4_CFG)
+    _mp = os.path.join(_d, _F4_MANIFEST)
+    with open(_mp) as fh:
+        _man = _json.load(fh)
+    for _row in _man["files"]:
+        if _row.get("path") == ".claude/settings.json":
+            _row.pop("owned_hooks", None)
+    with open(_mp, "w") as fh:
+        _json.dump(_man, fh)
+    _sp = os.path.join(_d, ".claude", "settings.json")
+    with open(_sp) as fh:
+        _st = _json.load(fh)
+    _st["hooks"].setdefault("SessionStart", []).append(
+        {"hooks": [{"type": "command", "command": "echo operator-hook"}]})
+    with open(_sp, "w") as fh:
+        _json.dump(_st, fh, indent=2)
+    _rc1, _ = _f4_run(_d, _F4_DEPS_OFF)
+    _rc2, _ = _f4_run(_d, _F4_DEPS_OFF)
+    with open(_sp) as fh:
+        _kept = "echo operator-hook" in fh.read()
+    check("fix 4: a pre-owned_hooks manifest re-installs at rc 0, twice, with "
+          "the operator's hook kept (it exited 3 on every run)",
+          (_rc1, _rc2) == (0, 0) and _kept
+          and _f4_registered(_d, "dependency-gate") == 0)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# [WP1 fix 4, re-review] More rows on the same path, each pinning a mutant
+# the re-review found surviving (M3/M04, M6, M8, M09, M10, M23, CR-1,
+# PIN-SEC-WARN, IF-1, S3/S4).
+def _f4_tree(cfg_text):
+    d = tempfile.mkdtemp()
+    _f4_run(d, cfg_text)
+    return d
+
+
+def _f4_hooks(d):
+    with open(os.path.join(d, ".claude", "settings.json")) as fh:
+        return _json.load(fh)
+
+
+_F4_DROP = "the installer's site for a hook this config does not install"
+_d = _f4_tree(_F4_CFG)
+try:
+    # An operator entry makes settings.json theirs too, so the run MERGES
+    # (reaches _merge_hooks) instead of rewriting it wholesale.
+    _st = _f4_hooks(_d)
+    _st["hooks"].setdefault("SessionStart", []).append(
+        {"hooks": [{"type": "command", "command": "echo operator-hook"}]})
+    with open(os.path.join(_d, ".claude", "settings.json"), "w") as fh:
+        _json.dump(_st, fh, indent=2)
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: with the manifest, a recorded registration is dropped "
+          "without a dropped-registration line (M3)",
+          _rc1 == 0 and _f4_registered(_d, "dependency-gate") == 0
+          and not any(_F4_DROP in w for w in _w1))
+    _rc2, _w2 = _f4_run(_d, _F4_DEPS_OFF + 'hooks:\n  cost_log: false\n')
+    check("fix 4: turning off a non-security hook with the manifest prints "
+          "neither line (M23)", _rc2 == 0 and _f4_registered(_d, "cost-log")
+          == 0 and not any("cost-log" in w for w in _w2))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = _f4_tree(_F4_CFG)
+try:
+    _rc1, _w1 = _f4_run(_d, _F4_CFG + 'secrets:\n  enabled: false\n')
+    check("fix 4: secrets.enabled false removes the secrets gate on a "
+          "warning: line (PIN-SEC-WARN)", _rc1 == 0 and any(
+              "secrets-gate.sh: secrets.enabled is false, so this run "
+              "removed" in w for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = _f4_tree(_F4_CFG)
+try:
+    _rc1, _w1 = _f4_run(_d, _F4_CFG + 'hooks:\n  dependency_gate: false\n')
+    check("fix 4: the line names the switch that was set: "
+          "hooks.dependency_gate (M10)", _rc1 == 0 and any(
+              "dependency-gate.sh: hooks.dependency_gate is false" in w
+              for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = _f4_tree('gate_substrate: "sdk-callable"\n' + _F4_CFG)
+try:
+    _rc1, _w1 = _f4_run(_d, _F4_CFG)
+    check("fix 4: an sdk-callable -> shell re-install removes gates.py with "
+          "no security-gate line (M6)", _rc1 == 0 and not os.path.exists(
+              os.path.join(_d, ".claude", "sdk_gates", "gates.py"))
+          and not any("earlier install wrote" in w for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+_d = _f4_tree(_F4_CFG)
+try:
+    os.remove(os.path.join(_d, _F4_MANIFEST))
+    _rcd, _wd = _f4_run(_d, _F4_CFG + 'hooks:\n  cost_log: false\n',
+                        "--dry-run")
+    check("fix 4: no manifest, --dry-run says it would drop (M09)",
+          _rcd == 0 and any("cost-log.sh under Stop, " + _F4_DROP
+                            + "; this run would drop" in w for w in _wd))
+    _rc1, _w1 = _f4_run(_d, _F4_CFG + 'hooks:\n  cost_log: false\n')
+    check("fix 4: no manifest, a non-security hook turned off is dropped "
+          "too, on one line (M8)", _rc1 == 0
+          and _f4_registered(_d, "cost-log") == 0
+          and sum(_F4_DROP in w for w in _w1) == 1)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# CR-1: an edited gate goes through one install (exit 3, its manifest row is
+# rewritten as skipped-local-edit with no `kind`), then its switch is turned
+# off. It was unregistered with no warning: line.
+_d = _f4_tree(_F4_CFG)
+try:
+    with open(os.path.join(_d, _F4_GATE), "a") as fh:
+        fh.write("# tuned by hand\n")
+    _rc0, _ = _f4_run(_d, _F4_CFG)
+    _rcd, _wd = _f4_run(_d, _F4_DEPS_OFF, "--dry-run")
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    _say = "so this run no longer installs or registers the dependency-gate"
+    check("fix 4: an edited gate already skipped once is named on --dry-run "
+          "and on the real run (CR-1)", _rc0 == 3 and _rcd == 0
+          and _rc1 == 0 and any(_say in w for w in _wd)
+          and any(_say in w for w in _w1)
+          and _f4_registered(_d, "dependency-gate") == 0)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# IF-1: with a manifest that records ownership, a registration at the site of
+# a hook this config does not install is the operator's when its script is
+# theirs - here their own eval-gate.sh on a service archetype.
+_F4_EVAL = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/eval-gate.sh'
+_d = _f4_tree(_F4_CFG)
+try:
+    with open(os.path.join(_d, ".claude", "hooks", "eval-gate.sh"), "w") as fh:
+        fh.write("#!/bin/sh\n# the operator's own eval gate\nexit 0\n")
+    _st = _f4_hooks(_d)
+    _st["hooks"]["PreToolUse"].append(
+        {"matcher": "Bash", "hooks": [{"type": "command",
+                                       "command": _F4_EVAL}]})
+    with open(os.path.join(_d, ".claude", "settings.json"), "w") as fh:
+        _json.dump(_st, fh, indent=2)
+    _rc1, _w1 = _f4_run(_d, _F4_CFG)
+    _rc2, _w2 = _f4_run(_d, _F4_CFG)
+    check("fix 4: an operator's own script at an installer site is kept, "
+          "twice, with a line that says so (IF-1)",
+          (_rc1, _rc2) == (0, 0) and _f4_registered(_d, "eval-gate") == 1
+          and any("so this run kept the registration." in w
+                  for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# S3 / S4 (IF1-GAP-2): the manifest records ownership, the switch is turned
+# off, then settings.json (S3), or settings.json and the gate (S4), are
+# restored from an earlier commit. The restored registration runs a missing
+# script (S3) or the installer's own copy (S4), so it is dropped, with a line.
+for _case, _restore_gate in (("S3", False), ("S4", True)):
+    _d = _f4_tree(_F4_CFG)
+    try:
+        _sp = os.path.join(_d, ".claude", "settings.json")
+        with open(_sp) as fh:
+            _saved_st = fh.read()
+        with open(os.path.join(_d, _F4_GATE)) as fh:
+            _saved_gate = fh.read()
+        _f4_run(_d, _F4_DEPS_OFF)
+        with open(_sp, "w") as fh:
+            fh.write(_saved_st)
+        if _restore_gate:
+            with open(os.path.join(_d, _F4_GATE), "w") as fh:
+                fh.write(_saved_gate)
+        _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+        _rc2, _ = _f4_run(_d, _F4_DEPS_OFF)
+        check(f"fix 4: {_case}: a restored registration is dropped at rc 0, "
+              f"on a line, and stays dropped", (_rc1, _rc2) == (0, 0)
+              and _f4_registered(_d, "dependency-gate") == 0
+              and any("dependency-gate.sh under PreToolUse (Bash), "
+                      + _F4_DROP in w for w in _w1))
+    finally:
+        shutil.rmtree(_d, ignore_errors=True)
+
+# [WP1 fix 4, iteration 3] Pins from the second re-review (KO-1, CRIT-1,
+# KO-2, MUT4B-2, MUT4B-3, MUT4B-7).
+def _f4_add_hook(d, event, matcher, command):
+    st = _f4_hooks(d)
+    grp = {"hooks": [{"type": "command", "command": command}]}
+    if matcher is not None:
+        grp["matcher"] = matcher
+    st.setdefault("hooks", {}).setdefault(event, []).append(grp)
+    with open(os.path.join(d, ".claude", "settings.json"), "w") as fh:
+        _json.dump(st, fh, indent=2)
+
+
+def _f4_own_eval(d, body=b"#!/bin/sh\n# the operator's own eval gate\nexit 0\n"):
+    with open(os.path.join(d, ".claude", "hooks", "eval-gate.sh"), "wb") as fh:
+        fh.write(body)
+    _f4_add_hook(d, "PreToolUse", "Bash", _F4_EVAL)
+
+
+# KO-1: a declined settings.json used to erase the ownership record, so the
+# run after the operator fixed it dropped their registration.
+_d = _f4_tree(_F4_CFG)
+try:
+    _f4_own_eval(d=_d)
+    _f4_run(_d, _F4_CFG)
+    _sp = os.path.join(_d, ".claude", "settings.json")
+    with open(_sp) as fh:
+        _good = fh.read()
+    with open(_sp, "w") as fh:
+        fh.write(_good.rstrip().rstrip("}") + ",}\n")
+    _rcx, _ = _f4_run(_d, _F4_CFG)
+    with open(os.path.join(_d, _F4_MANIFEST)) as fh:
+        _row = [r for r in _json.load(fh)["files"]
+                if r.get("path") == ".claude/settings.json"][0]
+    with open(_sp, "w") as fh:
+        fh.write(_good)
+    _rc1, _ = _f4_run(_d, _F4_CFG)
+    check("fix 4: after a declined settings.json is fixed, the operator's "
+          "registration is still kept (KO-1)", _rcx == 3 and _rc1 == 0
+          and _f4_registered(_d, "eval-gate") == 1)
+    check("fix 4: the declined run keeps both halves of the ownership record "
+          "(PIN4C-3)", bool(_row.get("owned_hooks"))
+          and bool(_row.get("owned_deny")))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# CRIT-1: a config that installs no hooks records owned_hooks: [], which is
+# still a record.
+_F4_ALL_OFF = (_F4_CFG + 'deps:\n  enabled: false\nsecrets:\n  enabled: false\n'
+               'hooks:\n' + "".join(
+                   f"  {k}: false\n" for k in (
+                       "spec_gate_entry", "spec_gate_commit", "test_gate",
+                       "format_lint_gate", "ci_mirror", "cost_log", "tdd_gate",
+                       "eval_gate", "drift_detector", "task_done_alarm",
+                       "decision_required_alarm")))
+_d = _f4_tree(_F4_ALL_OFF)
+try:
+    os.makedirs(os.path.join(_d, ".claude", "hooks"), exist_ok=True)
+    _f4_own_eval(d=_d)
+    _rc1, _ = _f4_run(_d, _F4_ALL_OFF)
+    _rc2, _ = _f4_run(_d, _F4_ALL_OFF)
+    check("fix 4: a config that installs no hooks keeps the operator's "
+          "registration too (CRIT-1)", (_rc1, _rc2) == (0, 0)
+          and _f4_registered(_d, "eval-gate") == 1)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# KO-2: a script that is not UTF-8 cannot be a render of ours.
+_d = _f4_tree(_F4_CFG)
+try:
+    _f4_own_eval(d=_d, body=b"#!/bin/sh\n# r\xe9sum\xe9\nexit 0\n")
+    _rc1, _ = _f4_run(_d, _F4_CFG)
+    check("fix 4: an operator's script that is not UTF-8 is kept (KO-2)",
+          _rc1 == 0 and _f4_registered(_d, "eval-gate") == 1)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# MUT4B-2: with NO ownership record the rule stays "drop": a fresh clone
+# cannot tell the operator's script from an earlier install's.
+_d = _f4_tree(_F4_CFG)
+try:
+    _f4_own_eval(d=_d)
+    os.remove(os.path.join(_d, _F4_MANIFEST))
+    _rc1, _w1 = _f4_run(_d, _F4_CFG)
+    check("fix 4: with no manifest the registration is dropped, on a line "
+          "(MUT4B-2)", _rc1 == 0 and _f4_registered(_d, "eval-gate") == 0
+          and any("eval-gate.sh under PreToolUse (Bash), " + _F4_DROP in w
+                  for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# MUT4B-3: keep_off is asked only about a registration dropped for being at
+# an off site. A hand-tuned gate this config DOES install, on a merged
+# settings.json, is registered once, not kept beside ours.
+_d = _f4_tree(_F4_CFG)
+try:
+    _f4_add_hook(_d, "SessionStart", None, "echo operator-hook")
+    with open(os.path.join(_d, ".claude", "hooks", "test-gate.sh"), "a") as fh:
+        fh.write("# tuned by hand\n")
+    _rc1, _ = _f4_run(_d, _F4_CFG)
+    check("fix 4: a hand-tuned gate on a merged settings.json stays "
+          "registered once (MUT4B-3)", _rc1 == 0
+          and _f4_registered(_d, "test-gate") == 1)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# MUT4B-7: the toggle is named with the value it has.
+_d = _f4_tree(_F4_CFG)
+try:
+    _rc1, _w1 = _f4_run(_d, _F4_CFG + 'hooks:\n  dependency_gate: null\n')
+    check("fix 4: a null toggle is named as null (MUT4B-7)", _rc1 == 0
+          and any("dependency-gate.sh: hooks.dependency_gate is null" in w
+                  for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# [WP1 fix 4, iteration 4] Pins from the third re-review (LI4C-1, PIN4C-2,
+# PIN4C-3, PIN4C-4).
+# LI4C-1: a CRLF checkout of the installer's own render is still ours, so a
+# restored registration of it is dropped, as the LF one is (S4).
+_d = _f4_tree(_F4_CFG)
+try:
+    _sp = os.path.join(_d, ".claude", "settings.json")
+    with open(_sp) as fh:
+        _saved_st = fh.read()
+    with open(os.path.join(_d, _F4_GATE), "rb") as fh:
+        _saved_gate = fh.read()
+    _f4_run(_d, _F4_DEPS_OFF)
+    with open(_sp, "w") as fh:
+        fh.write(_saved_st)
+    with open(os.path.join(_d, _F4_GATE), "wb") as fh:
+        fh.write(_saved_gate.replace(b"\n", b"\r\n"))
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: a CRLF copy of the installer's own gate is still ours: its "
+          "restored registration is dropped (LI4C-1)", _rc1 == 0
+          and _f4_registered(_d, "dependency-gate") == 0
+          and any("dependency-gate.sh under PreToolUse (Bash), " + _F4_DROP
+                  in w for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# PIN4C-2: a recorded gate that is not UTF-8 is kept, with its line, not a
+# UnicodeDecodeError traceback out of the stale-file cleanup.
+_d = _f4_tree(_F4_CFG)
+try:
+    with open(os.path.join(_d, _F4_GATE), "wb") as fh:
+        fh.write(b"#!/bin/sh\n# r\xe9sum\xe9\nexit 0\n")
+    _rc1, _w1 = _f4_run(_d, _F4_DEPS_OFF)
+    check("fix 4: a recorded gate that is not UTF-8 is kept on disk, with its "
+          "line, at rc 0 (PIN4C-2)", _rc1 == 0
+          and os.path.exists(os.path.join(_d, _F4_GATE))
+          and any("so this run no longer installs or registers the "
+                  "dependency-gate" in w for w in _w1))
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# The switch is true or false only: a mutant that read `no` as false
+# survived every suite (review PIN-1).
+_d = tempfile.mkdtemp()
+try:
+    _rcn, _ = _f4_run(_d, _F4_CFG + 'deps:\n  enabled: no\n', "--dry-run")
+    check("fix 4: deps.enabled: no is refused (exit 2), not read as false",
+          _rcn == 2)
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+# The merge rule itself: a hook the run does not emit is dropped only at the
+# exact site it would be emitted at; widened elsewhere, it is the operator's.
+from installer import _merge_hooks as _f4_merge   # noqa: E402
+_f4_cmd = '"$CLAUDE_PROJECT_DIR"/.claude/hooks/dependency-gate.sh'
+_f4_old = '$CLAUDE_PROJECT_DIR/.claude/hooks/dependency-gate.sh'
+_f4_dropped = []
+_f4_m, _ = _f4_merge({}, {"PreToolUse": [
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": _f4_cmd},
+                                  {"type": "command", "command": _f4_old}]},
+    {"matcher": "Bash|Write", "hooks": [{"type": "command",
+                                         "command": _f4_cmd}]}]},
+    [], _f4_dropped)
+check("fix 4: _merge_hooks drops an off hook at its own site, both spellings, "
+      "and keeps it at a site the operator widened",
+      _f4_m == {"PreToolUse": [{"matcher": "Bash|Write", "hooks": [
+          {"type": "command", "command": _f4_cmd}]}]}
+      and _f4_dropped == [("PreToolUse", "Bash", _f4_cmd),
+                          ("PreToolUse", "Bash", _f4_old)])
+
+# ---------------------------------------------------------------------------
+# [WP1 fix 4] Proposals never turn a security gate off (KNOWN-SEC-2, INT-1):
+# after D3 accepting one installed no gate, and the greenfield pattern matched
+# ordinary PRD prose.
+# ---------------------------------------------------------------------------
+print("\n-- [WP1 fix 4] the deps proposal is never false --")
+import prd_heuristics as _f4_h   # noqa: E402
+import llm_advisor as _f4_llm    # noqa: E402
+for _prd in ("The service has no dependency on the legacy billing system.",
+             "The modules have no dependencies between them.",
+             "A stdlib-only CLI with zero dependencies.", "A web app."):
+    _p = _f4_h.propose_deps(_prd)
+    check(f"fix 4: propose_deps({_prd[:32]!r}...) is true, and says how to "
+          f"turn the gate off", _p["enabled"] is True
+          and "drops the dependency gate" in _p["rationale"])
+import interview as _f4_iv   # noqa: E402
+_f4_det = _f4_iv._deterministic_proposal("A web app.", "x")
+for _key in ("deps_enabled", "secrets_enabled"):
+    _f4_out = _f4_llm._merge(_f4_llm.json_safe_deepcopy(_f4_det), {_key: {
+        "value": False, "confidence": "high", "rationale": "x"}}, [])
+    check(f"fix 4: a confident model {_key}: false does not turn the policy "
+          f"off", _f4_out["deps"]["enabled"] is True
+          and _f4_out["secrets"]["enabled"] is True)
+
+# ---------------------------------------------------------------------------
+# [WP1 fix 4] A repeated ANSWERS list key keeps the items under both, as its
+# warning says (LDR-1). Only block-then-block did; the other three shapes
+# dropped items, a never-read path among them.
+# ---------------------------------------------------------------------------
+print("\n-- [WP1 fix 4] a repeated ANSWERS list key --")
+import interview as _f4_iv   # noqa: E402
+_F4_RENDER = _f4_iv.render_interview(
+    _f4_iv.build_proposal("A web app that stores API keys."), "x")
+_F4_BLOCK = ("secrets_never_read_paths:\n  - .env*\n  - secrets/**\n"
+             "  - *.pem\n  - *.key\n")
+assert _F4_RENDER.count(_F4_BLOCK) == 1, "the rendered block moved"
+_F4_END = _f4_iv.ANSWERS_END
+for _shape, _first, _again, _want in (
+        ("block then inline", _F4_BLOCK, "secrets_never_read_paths: creds/**",
+         [".env*", "secrets/**", "*.pem", "*.key", "creds/**"]),
+        ("inline then block", "secrets_never_read_paths: .env*\n",
+         "secrets_never_read_paths:\n  - creds/**", [".env*", "creds/**"]),
+        ("inline then inline", "secrets_never_read_paths: .env*\n",
+         "secrets_never_read_paths: creds/**", [".env*", "creds/**"])):
+    _f4_text = _F4_RENDER.replace(_F4_BLOCK, _first).replace(
+        _F4_END, _again + "\n" + _F4_END)
+    _f4_w = []
+    _f4_got = _f4_iv.parse_interview_answers(_f4_text, _f4_w)
+    check(f"fix 4: {_shape}: the items under both are kept, as the warning "
+          f"says", _f4_got["secrets_never_read_paths"] == _want
+          and any("the items under both are kept" in w for w in _f4_w))
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

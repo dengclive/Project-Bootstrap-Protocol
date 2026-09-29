@@ -2090,7 +2090,7 @@ def retrofit_digest_full(yaml_text):
 # tests/test_greenfield_golden.py.
 # [freeze-exception no. 64, 2026-08-13, LOGGED LATE 2026-08-13] 4f4588e moved
 # BOTH digests below and added no note here, though it added one to
-# tests/test_greenfield_golden.py:2933. Comment-only, no executable change:
+# tests/test_greenfield_golden.py:2945. Comment-only, no executable change:
 # 41cc941 justified the trailing-word test as "bounded by the WORD"; measurement
 # on bare bash shows `${_tail:${#_w}:1}` is O(TAIL), the spelling is kept as a
 # real ~3x constant, and only the wrong justification moved. Counts unchanged
@@ -2348,8 +2348,14 @@ EXPECTED_RETROFIT_DIGESTS = {
     # carries that arm. Measured against the previous `agent` digest
     # (f7d2b931...): exactly one body moves, tech.md; `service` does not move.
     # Against 24cd8a3 the counts above still hold.
+    # RE-BASELINED 2026-09-29, same exception 82 (PR #118 review, TGX-2):
+    # `agent`'s test-gate.sh exit-5 arm now applies only at the top of the
+    # checkout and blocks elsewhere with its own message, and its tech.md
+    # exit-5 sentence says so. Measured against the previous `agent` digest
+    # (fc66cfb7...): exactly two bodies move, test-gate.sh and tech.md;
+    # `service` does not move.
     "service": "5c141e549e19c38467c5a25b15237be9b59c171c96862eda44d67c9e30af092a",
-    "agent": "fc66cfb7ef5fef4e8a2a58b5d3fb9a0dae9dacedbc6a9fb3d93262dfc5cffb19",
+    "agent": "1cfea49477a4bd304a6f5fce691af1b45920ce818a6c44ca2a3de1dc56e2e925",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
@@ -2475,6 +2481,26 @@ try:
           _rw.stderr[-300:])
 finally:
     shutil.rmtree(_rw_dir, ignore_errors=True)
+
+# [WP1 fix 4] The jest/vitest note says the test gate blocks every commit; a
+# retrofit rollout has warn-only weeks, so the note is not printed there
+# (review TGX-4; its retrofit half was unpinned, M12 / F7).
+_rj_text = SERVICE_RETROFIT_CFG.replace('  test: "true"', '  test: "npx jest"')
+_rj_cfg, _rj_err = cfg_from(_rj_text)
+check("fix 4(retrofit): the jest fixture installs test-gate (precondition)",
+      _rj_err == [] and "test-gate" in _rj_cfg["_resolved_hooks"],
+      str(_rj_err))
+_rj_dir = tempfile.mkdtemp()
+try:
+    with open(os.path.join(_rj_dir, "bootstrap.config.yaml"), "w") as _fh:
+        _fh.write(_rj_text)
+    _rj = subprocess.run([sys.executable, BIN_INSTALL, "-C", _rj_dir,
+                          "--dry-run"], capture_output=True, text=True)
+    check("fix 4(retrofit): no jest note on a retrofit install",
+          _rj.returncode == 0 and "jest" not in _rj.stderr,
+          _rj.stderr[-300:])
+finally:
+    shutil.rmtree(_rj_dir, ignore_errors=True)
 
 # --------------------------------------------------------------------------- #
 # [WP1 D3, review correctness/F1, fix round 2 F1/RR1] Since D3, deps_enabled

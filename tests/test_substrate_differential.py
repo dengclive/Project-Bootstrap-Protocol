@@ -5353,7 +5353,11 @@ for _c in ("npm test", "jest", "mocha", "make test", "tox", "cargo test",
            "timeout 60 pytest", "pytest -q && echo ok", "pytest -q; true",
            "pytest | tee log", "pytest $(cat args)", "pytest `cat args`",
            "pytest -q # note", "pytest-watch", "sh -c pytest",
-           "true;/usr/bin/pytest", 'pytest "$ARGS"', "poetry run pytest"):
+           "true;/usr/bin/pytest", 'pytest "$ARGS"', "poetry run pytest",
+           # [WP1 fix 4] TGX-1: an assignment's VALUE is not a program's
+           # directory; bash runs the next word (mocha: 5 failures exit 5).
+           "PYTEST=.venv/bin/pytest npm test", "TMPDIR=.cache/pytest mocha",
+           "X=a/py.test ./run_tests.sh"):
     check(f"[no-tests table] rejects {_c!r}",
           _re.fullmatch(NO_TESTS_RC5_RE, _c) is None)
 
@@ -5445,6 +5449,96 @@ try:
                                       _p1)[::2])
     check("[no-tests] POSITIVE CONTROL: the same tree blocks a red suite "
           "(exit 1)", _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
+
+    # [WP1 fix 4] TGX-2: the shell hook runs the command in Claude Code's
+    # current directory. From src/ of a src/ + tests/ layout pytest collects
+    # nothing and exits 5 while the root suite is red, so the arm holds only
+    # at the top of the checkout: git's, or CLAUDE_PROJECT_DIR outside git.
+    # (The SDK runs at CLAUDE_PROJECT_DIR, so the cwd does not reach it.)
+    _nt_src = os.path.join(_proj, "src")
+    os.makedirs(_nt_src)
+
+    def _nt_shell_at(cwd):
+        return subprocess.run(
+            [BASH, os.path.join(_proj, ".claude", "hooks", "test-gate.sh")],
+            input=json.dumps(bash("git commit -m x")), capture_output=True,
+            text=True, cwd=cwd,
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=_proj, PATH=_p5))
+
+    _nt_off = "which is not the top of the checkout"
+    _r = _nt_shell_at(_nt_src)
+    check("[no-tests] exit 5 from a subdirectory BLOCKS on the shell, saying "
+          "why (no git: the top is CLAUDE_PROJECT_DIR)",
+          _r.returncode == 2 and _r.stdout == "" and _nt_off in _r.stderr,
+          repr((_r.returncode, _r.stdout[:120], _r.stderr[-160:])))
+    subprocess.run(["git", "init", "-q", _proj], check=True)
+    _r = _nt_shell_at(_proj)
+    check("[no-tests] in a git checkout, exit 5 at its top level still "
+          "allows", _r.returncode == 0 and "collected no tests" in _r.stdout,
+          repr((_r.returncode, _r.stdout[:120])))
+    _r = _nt_shell_at(_nt_src)
+    check("[no-tests] in a git checkout, exit 5 from a subdirectory BLOCKS",
+          _r.returncode == 2 and _r.stdout == "" and _nt_off in _r.stderr,
+          repr((_r.returncode, _r.stdout[:120], _r.stderr[-160:])))
+
+    # [WP1 fix 4, re-review] The top is GIT'S, not CLAUDE_PROJECT_DIR (M14):
+    # a project installed in a subdirectory of a checkout allows at the git
+    # top level and blocks at its own directory. And the comparison is on
+    # PHYSICAL paths (TG4-2): a CLAUDE_PROJECT_DIR reached through a symlink
+    # still allows at the physical top.
+    _nt_git = os.path.join(_NT_TMP, "mono")
+    os.makedirs(_nt_git)
+    subprocess.run(["git", "init", "-q", _nt_git], check=True)
+    _nt_pkg = os.path.join(_nt_git, "pkg")
+    shutil.copytree(_proj, _nt_pkg, ignore=shutil.ignore_patterns(".git"))
+
+    def _nt_hook(cpd, cwd):
+        return subprocess.run(
+            [BASH, os.path.join(cpd, ".claude", "hooks", "test-gate.sh")],
+            input=json.dumps(bash("git commit -m x")), capture_output=True,
+            text=True, cwd=cwd,
+            env=dict(os.environ, CLAUDE_PROJECT_DIR=cpd, PATH=_p5))
+
+    _r = _nt_hook(_nt_pkg, _nt_git)
+    check("[no-tests] CLAUDE_PROJECT_DIR below the git top: exit 5 at the git "
+          "top level allows", _r.returncode == 0
+          and "collected no tests" in _r.stdout,
+          repr((_r.returncode, _r.stderr[-160:])))
+    _r = _nt_hook(_nt_pkg, _nt_pkg)
+    check("[no-tests] CLAUDE_PROJECT_DIR below the git top: exit 5 at "
+          "CLAUDE_PROJECT_DIR blocks", _r.returncode == 2
+          and _nt_off in _r.stderr, repr((_r.returncode, _r.stderr[-160:])))
+    # Outside git, so the top comes from CLAUDE_PROJECT_DIR itself and only
+    # `cd -P` makes the symlinked spelling equal the physical cwd.
+    _nt_plain = os.path.join(_NT_TMP, "plain")
+    shutil.copytree(_proj, _nt_plain, ignore=shutil.ignore_patterns(".git"))
+    _nt_link = os.path.join(_NT_TMP, "link-to-plain")
+    os.symlink(_nt_plain, _nt_link)
+    _r = _nt_hook(_nt_link, _nt_plain)
+    check("[no-tests] outside git, a CLAUDE_PROJECT_DIR reached through a "
+          "symlink allows at the physical top", _r.returncode == 0
+          and "collected no tests" in _r.stdout,
+          repr((_r.returncode, _r.stderr[-160:])))
+    # ... and so does a session whose logical cwd IS the symlink: bash keeps
+    # $PWD as the link spelling, so only the left `pwd -P` makes the two
+    # sides equal (MUT4B-4).
+    _r = subprocess.run(
+        [BASH, os.path.join(_nt_link, ".claude", "hooks", "test-gate.sh")],
+        input=json.dumps(bash("git commit -m x")), capture_output=True,
+        text=True, cwd=_nt_link,
+        env=dict(os.environ, CLAUDE_PROJECT_DIR=_nt_link, PWD=_nt_link,
+                 PATH=_p5))
+    check("[no-tests] outside git, a session in the symlinked spelling "
+          "allows too", _r.returncode == 0
+          and "collected no tests" in _r.stdout,
+          repr((_r.returncode, _r.stderr[-160:])))
+
+    # [WP1 fix 4] Pinned to exit 5 exactly: a mutant that also allowed 4 (a
+    # pytest usage error) turned only a golden red (review PIN-2 / PIN-3).
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod, bash("git commit -m x"),
+                                      _nt_fake("pytest", 4))[::2])
+    check("[no-tests] pytest exit 4 (usage error) still blocks: "
+          "shell==sdk==deny", _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
 
     _proj, _mod = _nt_tree("mocha", "mocha")
     _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod, bash("git commit -m x"),

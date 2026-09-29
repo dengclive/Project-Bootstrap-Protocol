@@ -410,6 +410,17 @@ def propose_secrets(prd_text: str) -> dict:
     }
 
 
+# [WP1 fix 4] Since D3, `deps_enabled: false` removes the dependency gate, so
+# this heuristic NEVER proposes false, as the retrofit one does not. Its
+# stdlib-only pattern matched ordinary PRD prose ("no dependency on the
+# billing system", "no dependencies between them"), and accepting the
+# proposal installed no dependency gate. Turning the gate off is the
+# operator's edit.
+_DEPS_OFF_NOTE = (
+    "Setting deps_enabled: false turns the deps policy off and drops the "
+    "dependency gate.")
+
+
 def propose_deps(prd_text: str) -> dict:
     norm = _norm(prd_text)
     stdlib_only = re.search(
@@ -417,13 +428,16 @@ def propose_deps(prd_text: str) -> dict:
         r"zero dependenc|standard library only", norm)
     if stdlib_only:
         return {
-            "enabled": False,
-            "confidence": CONF_MEDIUM,
+            "enabled": True,
+            "confidence": CONF_LOW,
             "rationale": (
-                "PRD states a stdlib-only / no-dependency posture. "
-                "Bootstrap-Protocol-v2-0-0.md Skip Policy allows skipping Phase 2.5 when the "
-                "archetype has no external deps. Proposing deps policy "
-                "DISABLED; human confirms."),
+                "The PRD contains a phrase such as 'stdlib-only' or 'no "
+                "dependencies', which does not show that the project has "
+                "none, so the deps policy is "
+                "proposed ENABLED with an empty approved-list: the gate "
+                "blocks anything not pre-approved. If the project truly "
+                "has no third-party dependencies, Bootstrap-Protocol-v2-0-0.md "
+                "Skip Policy allows skipping Phase 2.5. " + _DEPS_OFF_NOTE),
         }
     return {
         "enabled": True,
@@ -432,7 +446,8 @@ def propose_deps(prd_text: str) -> dict:
             "Dependency policy proposed ENABLED with an empty approved-list "
             "(installer default: the gate blocks anything not pre-approved). "
             "Human curates the approved list - the PRD rarely enumerates "
-            "concrete packages and the tool will not invent them."),
+            "concrete packages and the tool will not invent them. "
+            + _DEPS_OFF_NOTE),
     }
 
 

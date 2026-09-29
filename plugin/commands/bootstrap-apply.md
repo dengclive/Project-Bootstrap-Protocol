@@ -29,7 +29,9 @@ config.
    test command whose "no tests yet" the test gate cannot tell from a
    failing suite; for each hook script the run leaves alone rather than
    update, so a config change will not reach it (on a tree with no
-   installer manifest the line names `--adopt`); and when the run would
+   installer manifest the line names `--adopt`); for each security gate an
+   earlier install wired that the run would remove, because the config
+   turns it off; and when the run would
    re-create a `settings.json` that was renamed to `settings.json.disabled`
    to turn hooks off.
 
@@ -48,8 +50,8 @@ config.
    config names its file and line. Exit 0 is the only outcome
    whose enforcement was verified.) On exit 0, still surface every
    `warning:` line on stderr, verbatim: the apply repeats the dry run's,
-   and adds one for each of the operator's own hook registrations that
-   begin with an unquoted `$CLAUDE_PROJECT_DIR` in a project path that
+   and names each of the operator's own hook commands that begins
+   with an unquoted `$CLAUDE_PROJECT_DIR` in a project path that
    contains a space, tab, newline or glob character.
 
 6. Report the create/update/unchanged/skipped counts. Remind the operator

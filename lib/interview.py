@@ -69,7 +69,8 @@ HOOK_TOGGLES = (
     ("spec_gate_commit", "blocks a commit of files no active spec names"),
     ("test_gate", "runs commands.test before a commit; blocks on failure"),
     ("format_lint_gate", "runs commands.lint after a Write or Edit"),
-    ("ci_mirror", "runs commands.ci_local before a push; blocks on failure"),
+    ("ci_mirror", "runs commands.ci_local, or commands.test when that is "
+                  "empty, before a push; blocks on failure"),
     ("cost_log", "appends one line per session event to .claude/logs/"),
     ("tdd_gate", "tests-before-source gate; auto = on when tdd_policy is "
                  "required"),
@@ -845,6 +846,16 @@ def parse_interview_answers(text: str, warnings: list | None = None) -> dict:
             # one-item-per-line form: items follow on '- ' lines.
             cur_list_key = k
             list_raw.setdefault(k, [])
+        elif k in list_keys:
+            # [WP1 fix 4] An inline value joins the key's items, so a
+            # repeated key keeps the items under both, as the warning above
+            # says. Keeping only one form dropped the other's items silently:
+            # a second `secrets_never_read_paths:` line lost a never-read path.
+            # The legacy inline form is comma-separated; a tiebreaker has no
+            # legacy form and often has a comma, so it is one item.
+            cur_list_key = None
+            list_raw.setdefault(k, []).extend(
+                [v] if k == "principles_tiebreakers" else v.split(","))
         else:
             cur_list_key = None
             raw[k] = v
@@ -854,17 +865,9 @@ def parse_interview_answers(text: str, warnings: list | None = None) -> dict:
     for k in ANSWER_KEYS:
         if k in list_keys:
             if k in list_raw:
-                # canonical one-per-line form (commas inside items preserved)
+                # One-per-line items (commas inside an item preserved) and
+                # legacy inline 'key: a, b, c' items, in file order.
                 out[k] = [x.strip() for x in list_raw[k] if x.strip()]
-                continue
-            if k in raw:
-                if k == "principles_tiebreakers":
-                    # [WP1] No legacy comma form to honour, and a tiebreaker
-                    # sentence often has a comma: an inline value is ONE item.
-                    out[k] = [raw[k]] if raw[k] else []
-                    continue
-                # legacy inline 'key: a, b, c' form (back-compat)
-                out[k] = [x.strip() for x in raw[k].split(",") if x.strip()]
                 continue
             if k in _WP1_KEY_SECTIONS:
                 out[k] = _wp1_absent(k, lines)

@@ -46,7 +46,7 @@ principles:
 
 # ---- Phase 2.7: Secrets policy ---------------------------------------------
 secrets:
-  enabled: true
+  enabled: true       # true or false only; false also removes secrets-gate
   never_read_paths:
     - ".env*"
     - "secrets/**"
@@ -56,7 +56,7 @@ secrets:
 
 # ---- Phase 2.5: Dependency policy ------------------------------------------
 deps:
-  enabled: true
+  enabled: true       # true or false only; false also removes dependency-gate
   approved: []        # package names pre-approved; gate blocks anything else
 
 # ---- Phase 6: Hooks ---------------------------------------------------------
@@ -66,13 +66,13 @@ deps:
 hooks:
   spec_gate_entry: true
   spec_gate_commit: true
-  secrets_gate: true
+  secrets_gate: true        # off only: secrets.enabled false wins
   test_gate: true
   format_lint_gate: true
   ci_mirror: true
   cost_log: true
   tdd_gate: null            # null = derive from tdd_policy
-  dependency_gate: true
+  dependency_gate: true     # off only: deps.enabled false wins
   eval_gate: null           # null = derive from archetype (ai-agent only)
   drift_detector: true
   task_done_alarm: true

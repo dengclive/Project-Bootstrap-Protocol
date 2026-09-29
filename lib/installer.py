@@ -29,7 +29,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from minyaml import key_line, load_yaml, YAMLError   # stdlib-only YAML subset
-from templates import TEMPLATES, HOOK_EVENT_MAP  # all file bodies live here
+from templates import (  # all file bodies live here
+    TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS)
 from defaults import policy_switch_errors, resolve_config   # + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
@@ -793,6 +794,14 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                # hooks off (Bootstrap-Protocol-v2-8-0.md "To disable hooks",
                # RETROFIT.md R8.A A.1), which that CREATE silently undoes.
                "hooks_reenabled": None,
+               # [WP1 fix 4] Security-gate scripts an earlier install wrote
+               # that this plan drops ({"path", "removed"}); hook
+               # registrations dropped at a site no manifest recorded as ours,
+               # and ones kept there because their script is not ours
+               # ((event, matcher, command)). main() says each on stderr.
+               "dropped_security": [],
+               "dropped_registrations": [],
+               "kept_off_registrations": [],
                "backups": []}
 
     prev = _load_manifest(root)
@@ -814,7 +823,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         # overwrite/skip is wrong for it in both directions.
         if action["kind"] == "settings":
             _apply_settings_json(root, action, manifest, summary, prev_files,
-                                 bak_root, dry=dry, force=force)
+                                 bak_root, dry=dry, force=force, cfg=cfg)
             # settings.json is co-owned, so it MERGES rather than skipping and
             # never reaches the state --adopt exists to break out of.
             continue
@@ -970,10 +979,21 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             continue
         try:
             on_disk = _digest(target.read_text())
-        except OSError:
+        except (OSError, ValueError):     # unreadable, or not UTF-8: KEEP it
             on_disk = None
-        if on_disk is not None and known.get("digest") == on_disk \
-                and known.get("state") != "skipped-local-edit":
+        removed = (on_disk is not None and known.get("digest") == on_disk
+                   and known.get("state") != "skipped-local-edit")
+        # [WP1 fix 4] A security gate that ran stops running at rc 0 (D3
+        # made the policy switches the master switches, and a pre-WP1
+        # config can carry a `false` that did not turn the gate off). The
+        # REMOVE or KEEP line below is one among ~60, so main() says it too.
+        # Keyed on the path, not the row's kind: a row an install skipped
+        # (an edited or untracked gate) is written with no kind.
+        if path.startswith(".claude/hooks/") and Path(path).name.removesuffix(
+                ".sh") in SECURITY_CRITICAL_HOOKS:
+            summary["dropped_security"].append(
+                {"path": path, "removed": removed})
+        if removed:
             if not dry:
                 target.unlink()
             summary["removed"] += 1
@@ -1248,7 +1268,7 @@ def _unquoted_spellings(sites) -> set:
     Without these, a re-install over a tree with no manifest - a fresh clone,
     since the manifest is gitignored - reads every earlier registration as
     the operator's (its command no longer equals ours) and keeps it beside
-    ours, so every hook runs TWICE: measured, 16 registrations for 8 scripts.
+    ours, so every hook runs TWICE.
     Same site only (event, matcher), which is the residual `_merge_hooks`
     already accepts: a registration at exactly the site we emit is ours.
     """
@@ -1256,8 +1276,9 @@ def _unquoted_spellings(sites) -> set:
             for ev, m, c in sites if c.startswith(_QUOTED_CPD)}
 
 
-def _merge_hooks(ours: dict, theirs: dict,
-                 prev_owned: list) -> tuple[dict, list]:
+def _merge_hooks(ours: dict, theirs: dict, prev_owned: list | None,
+                 dropped: list | None = None, keep_off=None,
+                 kept_off: list | None = None) -> tuple[dict, list]:
     """Merge hook registrations by SITE identity - (event, matcher, command) -
     rather than by replacing the `hooks` key. Returns (merged, the sites this
     run contributed).
@@ -1272,12 +1293,42 @@ def _merge_hooks(ours: dict, theirs: dict,
     that widening silently. Residual, and narrow: a registration the operator
     wrote at exactly the site we emit is indistinguishable from ours and is
     still treated as ours.
+
+    [WP1 fix 4] The same residual covers a hook this run does NOT emit: a
+    registration at exactly the site we would emit it at, in either
+    spelling, is ours and is dropped. Without this, a tree whose manifest
+    records no ownership (every fresh clone, since the manifest is
+    gitignored, and every manifest older than `owned_hooks`) kept the
+    registration of a hook the config turned off - D3's policy switches
+    included - so it went on running, or dangled at exit 127 once its script
+    was removed. Each such drop the manifest did not record is appended to
+    `dropped`, so the caller can say it.
+
+    Where the manifest DOES record ownership (`prev_owned` is a list of site
+    triples, possibly empty; None means no record), a registration there that
+    it does not record is the operator's unless its script says otherwise:
+    `keep_off(command)` is true when that script is on disk and is neither
+    what this installer renders for the hook nor the copy the manifest
+    recorded, and then the registration is kept - an operator's own
+    eval-gate.sh on an archetype that never installs one, say - and appended
+    to `kept_off`. A missing script, or this config's render restored by git,
+    is still dropped.
     """
     ours_sites = _hook_sites(ours)
     prev_sites, legacy_cmds = _split_owned_hooks(prev_owned)
+    # A bare-command (pre-site) record cannot say where we put anything, so
+    # it counts as no record here, as a missing one does.
+    recorded = isinstance(prev_owned, list) and (bool(prev_sites)
+                                                 or not legacy_cmds)
     ours_cmds = {c for _, _, c in ours_sites}
+    off = {(ev, m, f"{_QUOTED_CPD}.claude/hooks/{hk}.sh")
+           for hk in HOOK_EVENT_MAP
+           if f"{_QUOTED_CPD}.claude/hooks/{hk}.sh" not in ours_cmds
+           for ev, m in [HOOK_EVENT_MAP[hk]] + HOOK_EXTRA_EVENTS.get(hk, [])}
+    off |= _unquoted_spellings(off)
+    unrecorded_off = off - prev_sites
     drop_sites = (prev_sites | {tuple(s) for s in ours_sites}
-                  | _unquoted_spellings(ours_sites))
+                  | _unquoted_spellings(ours_sites) | off)
     # A manifest written before ownership became site-keyed names a bare
     # command and cannot say where we put it. Retire one only when our
     # emission no longer carries it at all - its file is deleted this run, so
@@ -1299,9 +1350,24 @@ def _merge_hooks(ours: dict, theirs: dict,
                 kept_groups.append(grp)            # opaque; leave it alone
                 continue
             matcher = grp.get("matcher")
-            kept = [e for e in grp["hooks"]
-                    if not _is_ours_here(event, matcher, e,
-                                         drop_sites, drop_cmds)]
+            kept = []
+            for e in grp["hooks"]:
+                if not _is_ours_here(event, matcher, e,
+                                     drop_sites, drop_cmds):
+                    kept.append(e)
+                    continue
+                only_off = (_is_ours_here(event, matcher, e,
+                                          unrecorded_off, set())
+                            and not _is_ours_here(event, matcher, e,
+                                                  drop_sites - unrecorded_off,
+                                                  drop_cmds))
+                if only_off and recorded and keep_off is not None \
+                        and keep_off(e["command"]):
+                    kept.append(e)
+                    if kept_off is not None:
+                        kept_off.append((event, matcher, e["command"]))
+                elif only_off and dropped is not None:
+                    dropped.append((event, matcher, e["command"]))
             if kept:
                 kept_groups.append(dict(grp, hooks=kept))
         if kept_groups:
@@ -1322,7 +1388,10 @@ def _merge_hooks(ours: dict, theirs: dict,
 
 
 def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
-                    prev_owned_hooks: list) -> tuple[dict, list, list]:
+                    prev_owned_hooks: list | None,
+                    dropped: list | None = None,
+                    keep_off=None,
+                    kept_off: list | None = None) -> tuple[dict, list, list]:
     """Overlay the installer's contribution onto the operator's `theirs`.
     Returns (merged, deny rules ADDED by this run, hook sites contributed).
 
@@ -1354,7 +1423,7 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
     merged_hooks, owned_hooks = _merge_hooks(
         ours.get("hooks") or {},
         their_hooks if isinstance(their_hooks, dict) else {},
-        prev_owned_hooks)
+        prev_owned_hooks, dropped, keep_off, kept_off)
     if merged_hooks:
         merged["hooks"] = merged_hooks
     else:
@@ -1395,7 +1464,8 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
 
 def _apply_settings_json(root: Path, action: dict, manifest: dict,
                          summary: dict, prev_files: dict, bak_root: Path, *,
-                         dry: bool, force: bool) -> None:
+                         dry: bool, force: bool,
+                         cfg: dict | None = None) -> None:
     """Install the hook wiring WITHOUT clobbering an operator's settings.
 
     settings.json is co-owned in exactly the way the project-root .gitignore
@@ -1475,6 +1545,13 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         # cost the operator every top-level key they owned.
         if carried is not None:
             row["displaced_keys"] = carried
+        # [WP1 fix 4] The ownership record too: this run wrote nothing, so
+        # what an earlier run recorded is still true. Dropping it made the
+        # next run read the tree as having no record and drop the operator's
+        # own registrations at a site of a hook this config does not install.
+        for key in ("owned_deny", "owned_hooks"):
+            if isinstance(known, dict) and key in known:
+                row[key] = known[key]
         manifest["files"].append(row)
 
     # [round-6 F5] A symlinked settings.json has no good automatic answer, so
@@ -1561,10 +1638,41 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         _decline(why, _digest(text))
         return
 
+    def _keep_off(cmd: str) -> bool:
+        """[WP1 fix 4] Is the script this registration runs the operator's?
+        Missing: no (the registration would dangle). The body this installer
+        renders for that hook, or a copy the manifest recorded: no."""
+        rel = _resolved_hook_path(cmd)
+        if rel is None:
+            return False
+        try:
+            raw = (root / rel).read_bytes()
+        except OSError:
+            return False
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:  # never a render of ours: all are UTF-8
+            return True
+        # Newlines read the way read_text() reads them, as the manifest digest
+        # and _classify do: a CRLF checkout of our own render is still ours.
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        name = Path(rel).name.removesuffix(".sh")
+        if cfg is not None and name in HOOK_EVENT_MAP:
+            try:
+                if text == TEMPLATES["hook"](name, cfg):
+                    return False
+            except Exception:       # a hook this config cannot render
+                pass
+        rec = prev_files.get(rel)
+        return not (isinstance(rec, dict)
+                    and rec.get("digest") == _digest(text))
+
     merged, owned_deny, owned_hooks = _merge_settings(
         ours, theirs,
         (known or {}).get("owned_deny") or [],
-        (known or {}).get("owned_hooks") or [])
+        (known or {}).get("owned_hooks"),
+        summary["dropped_registrations"], _keep_off,
+        summary["kept_off_registrations"])
     new_text = json.dumps(merged, indent=2) + "\n"
 
     co_owned = {
@@ -2376,7 +2484,9 @@ def _test_command_notes(root: Path, test_cmd: str) -> list[str]:
         argv = argv[1:]
     notes = []
     prog = os.path.basename(argv[0]) if argv else ""
-    if prog in ("jest", "vitest") and "--passWithNoTests" not in argv:
+    if prog in ("jest", "vitest") and not any(
+            a in ("--passWithNoTests", "--passWithNoTests=true")
+            for a in argv):
         notes.append(
             f"commands.test runs {prog}, which exits 1 when it finds no "
             f"tests - the code a failing suite exits with - so the test gate "
@@ -2591,10 +2701,16 @@ def main(argv: list[str]) -> int:
     # [I-10] resolve_config computed these and nothing printed them, so an
     # install with empty commands said nothing. Printed before --print-config
     # and --dry-run return, so both show them.
+    # The test-command notes say the test gate blocks every commit, which
+    # holds only where _empty_command_warnings says the same of an empty
+    # test: test-gate installed, and not a retrofit (warn-only weeks).
+    gate_blocks = ("test-gate" in cfg.get("_resolved_hooks", ())
+                   and cfg.get("mode") != "retrofit")
     for msg in (_empty_command_warnings(cfg)
                 + list(cfg.get("_retrofit_warnings", ()))
-                + _test_command_notes(root,
-                                      cfg["commands"].get("test") or "")):
+                + (_test_command_notes(root,
+                                       cfg["commands"].get("test") or "")
+                   if gate_blocks else [])):
         _warn(msg)
 
     # The IC gate runs BEFORE --print-config returns too: interview.py
@@ -2706,6 +2822,46 @@ def main(argv: list[str]) -> int:
                     "kept your local edits")
             _warn(f"{path} {kept}, so this run {would} it: {embeds} Merge "
                   f"the change by hand, or {force}.")
+
+    # [WP1 fix 4] A security gate an earlier install wired, which this plan
+    # drops. rc stays 0: D3 makes the policy switch the master switch. But a
+    # config written before WP1 can carry a `false` that did not turn the
+    # gate off then (24cd8a3's retrofit heuristic proposed one for every
+    # repository whose dependencies its scanner could not read, and its
+    # greenfield one for PRD text its stdlib-only pattern matched), and a gate
+    # that ran must not stop running on a stdout REMOVE line alone.
+    for d in summary["dropped_security"]:
+        name = Path(d["path"]).name.removesuffix(".sh")
+        policy = "deps" if name == "dependency-gate" else "secrets"
+        key = name.replace("-", "_")
+        if not cfg[policy]["enabled"]:
+            why = f"{policy}.enabled is false"
+        elif not cfg["hooks"].get(key, True):
+            why = f"hooks.{key} is {json.dumps(cfg['hooks'].get(key))}"
+        else:
+            why = "this config does not install it"
+        if d["removed"]:
+            did = "would remove" if args.dry_run else "removed"
+            _warn(f"{d['path']}: {why}, so this run {did} the {name} an "
+                  f"earlier install wrote.")
+        else:
+            _warn(f"{d['path']}: {why}, so this run no longer installs or "
+                  f"registers the {name}. The file stays on disk: this run "
+                  f"could not confirm it is a copy an earlier install wrote.")
+    for event, matcher, cmd in summary["dropped_registrations"]:
+        where = f"{event} ({matcher})" if matcher else event
+        did = "would drop" if args.dry_run else "dropped"
+        _warn(f".claude/settings.json registered {cmd} under {where}, the "
+              f"installer's site for a hook this config does not install; "
+              f"this run {did} that registration.")
+    for event, matcher, cmd in summary["kept_off_registrations"]:
+        where = f"{event} ({matcher})" if matcher else event
+        did = "would keep" if args.dry_run else "kept"
+        _warn(f".claude/settings.json registers {cmd} under {where}, the "
+              f"installer's site for a hook this config does not install. Its "
+              f"script is neither the copy this config would install nor one "
+              f"the manifest records, so this run {did} the registration. "
+              f"Remove it if that hook should not run.")
 
     if args.dry_run:
         print("(dry run - no files written)")

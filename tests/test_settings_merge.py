@@ -966,8 +966,7 @@ finally:
 # re-install over a tree whose manifest is gone (a fresh clone: the manifest
 # is gitignored) has no record of which registrations were ours, and the old
 # unquoted spelling no longer equals ours - so every earlier registration was
-# kept as the operator's, beside ours, and every hook ran TWICE (measured: 16
-# registrations for 8 scripts).
+# kept as the operator's, beside ours, and every hook ran TWICE.
 print("\n-- [WP1] the unquoted spelling at our own site is ours --")
 _d = tempfile.mkdtemp()
 try:

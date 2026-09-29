@@ -337,9 +337,7 @@ def validate_config_dict(cfg: dict) -> list[str]:
 
 
 def validate_with_installer(config_path: Path) -> tuple[int, str]:
-    # [WP1] Absolute: the installer resolves a relative -c against -C, so
-    # `-o sub/c.yaml` asked it for sub/sub/c.yaml and the tool reported its
-    # own valid draft as rejected.
+    # [WP1] Absolute: the installer resolves a relative -c against -C.
     config_path = config_path.resolve()
     proc = subprocess.run(
         [sys.executable, str(BIN), "-c", str(config_path),

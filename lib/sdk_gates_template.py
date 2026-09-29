@@ -61,11 +61,16 @@ SDK_GATES = (
 # today's verdict: exit 5 blocks. ONE definition, rendered into the shell
 # hook at emission and into gates.py, so the substrates cannot disagree.
 _NT_WORD = r"""[^\s;&|<>()`$\\'"#]"""        # a word character, not syntax
+# [WP1 fix 4] A program's directory never holds "=": with it, the VALUE of an
+# assignment that ends in /pytest (`PYTEST=.venv/bin/pytest npm test`) read as
+# the program, and the arm applied to whatever ran next - mocha, whose five
+# failures exit 5.
+_NT_PATH = r"""[^\s;&|<>()`$\\'"#=]"""
 NO_TESTS_RC5_RE = (
     r"[ \t]*"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=" + _NT_WORD + r"*[ \t]+)*"
     r"(?:uv[ \t]+run[ \t]+)?"
-    r"(?:" + _NT_WORD + r"*/)?"
+    r"(?:" + _NT_PATH + r"*/)?"
     r"(?:pytest|py\.test"
     r"|python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+(?:pytest|unittest))"
     r"(?:[ \t]+(?:" + _NT_WORD + r"""|'[^']*'|"[^"$`\\]*")+)*"""

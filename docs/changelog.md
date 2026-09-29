@@ -185,6 +185,34 @@ hand-written `hooks.secrets_gate: false` or `hooks.dependency_gate: false` in
 `bootstrap.config.yaml` predates WP1 and is still honoured: it can turn its
 gate off, never on.
 
+**Upgrading a config that already says `false`.** Before WP1,
+`deps.enabled: false` left the dependency gate emitted and wired, and
+`24cd8a3`'s interviews proposed that value: the retrofit one for every
+repository whose dependencies its scanner did not find, the greenfield one for
+PRD text its stdlib-only pattern matched. Where the installer manifest
+records the gate, re-installing such a config removes a gate that ran. The
+re-install still exits 0, as D3 rules, and now prints a `warning:` line naming
+the gate and the switch; `--dry-run` prints it too. A copy of the gate that
+differs from what an earlier install wrote stays on disk, and a line of its
+own says the run no longer installs or registers it. With no manifest (a fresh
+clone), the gate's registration is dropped instead, as the next paragraph
+says.
+
+A re-install also drops a registration of a hook the config does not install
+at the exact site the installer would emit that hook, in either spelling, with
+a `warning:` line for each one no manifest recorded as the installer's. Where
+no manifest records ownership at all (a fresh clone, or a manifest written
+before `owned_hooks`), every such registration is dropped. Where one does, a
+registration it does not record is dropped only when its script is missing,
+is what this config would install, or is the copy the manifest records; any
+other script is treated as the operator's, and the run keeps the registration
+and says so. A run of this installer that declines `settings.json` keeps the
+ownership record it had; a settings row an older installer wrote on a decline
+records none. Before, a fresh clone kept both security
+gates registered and running after both switches were turned off, and a tree
+whose manifest predates `owned_hooks`, with `settings.json` edited since,
+exited 3 on every re-install on the dependency gate's dangling registration.
+
 Because `false` now removes a gate, both switches take `true` or `false`
 only. `secrets.enabled` used to be read by truthiness: a blank `enabled:`,
 `null` or `0` turned the gate off with no message, and a typo such as
@@ -205,10 +233,10 @@ no dependencies from one whose dependencies it cannot read: it reads
 the root, and skips every `requirements.txt` line that starts with `-`, such
 as a `-r` include. So the retrofit heuristic now never proposes `false`.
 Declared dependencies still propose `true` at high confidence; anything else
-proposes `true` at low confidence, with an empty approved list. Every deps
-rationale says that setting `deps_enabled: false` turns the policy off and
-drops the dependency gate. The greenfield proposal is unchanged (see "Not
-done here").
+proposes `true` at low confidence, with an empty approved list. The
+greenfield heuristic now never proposes `false` either: its stdlib-only
+pattern matched ordinary PRD prose, such as "no dependency on the billing
+system". The LLM advisor can confirm a policy but no longer turn one off.
 
 *Withdrawn in review:* a first fix still proposed `false` when a root
 manifest the scanner reads declared nothing. Review found layouts that kept
@@ -234,19 +262,27 @@ it on every install, including one with both security gates off. This is the
 `commands.test` is one simple `pytest`, `py.test` or `python -m pytest|unittest`
 command and it exits 5, `test-gate` allows the commit and prints a JSON notice
 for the operator (`systemMessage`) and the model (`additionalContext`). The
+shell hook does so only at the top of the checkout (git's top level, or
+`CLAUDE_PROJECT_DIR` outside git): it runs the command in Claude Code's
+current directory, and from `src/` pytest collected nothing while the suite at
+the root was red. Off the top level, exit 5 blocks, as before WP1, with a
+message that names the directory and the top of the checkout. The
 shell hook and `gates.py` render the arm from one definition,
 `NO_TESTS_RC5_RE` in `lib/sdk_gates_template.py`. Every other command keeps
 its verdict, exit 5 included: mocha exits 5 for five failures. jest and
 vitest without `--passWithNoTests`, and npm's placeholder test script, exit 1
-for "no tests", so they still block, and the installer prints a `warning:`
-line for each.
+for "no tests", so they still block; where `test-gate` is installed and the
+install is not a retrofit, the installer names some of these spellings on a
+`warning:` line. A `VAR=value` word whose value ends in `/pytest` is not read
+as the program.
 
 **Hook paths are quoted.** `settings.json` registers every hook as
 `"$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>.sh`. In a project path with a
 space, the unquoted form made every hook exit 127 while the install reported
 0. A re-install rewrites the old spelling at each site the installer owns,
 including in a fresh clone with no manifest. An operator's own registration
-that begins with the unquoted placeholder in such a path gets a `warning:` line;
+that begins with the unquoted placeholder in such a path is named on a
+`warning:` line;
 the exit status stays 0 (owner ruling: warn, not exit 3).
 
 **One prefix, one print site.** Every new advisory line the installer prints
@@ -260,6 +296,12 @@ on stderr starts with `warning:` and goes through `_warn()` in
   exit-3 path did, instead of calling the file your local edits;
 * one when a re-install creates `settings.json` beside a
   `settings.json.disabled` the operator renamed to turn hooks off;
+* one per security gate an earlier install wired that the run removes or no
+  longer installs, one per dropped registration of a hook the config does not
+  install that no manifest recorded, and one per such registration the run
+  keeps (the upgrade paragraph under D3);
+* a retrofit config's migration warnings, which `24cd8a3` computed and never
+  printed;
 * the unquoted-registration line above (a real install only).
 
 Lines that predate WP1 keep their own prefixes. A default install now prints
@@ -290,7 +332,7 @@ heads and Companion notes that said `gates.py` ships on every install. So
 does the `fail-loud-on-empty-commands` invariant in
 `.claude/specs/bootstrap-v2/requirements.md`.
 
-**A bad config is an error, not a traceback (g4).** The YAML subset parser
+**The config parser (g4).** The YAML subset parser
 reads inline lists and maps nested in each other, so `principles: {ranked:
 [A, B]}` is two principles, not one per character.
 
@@ -340,10 +382,12 @@ gains `prd_path` (the PRD the interview read), `shell`, `cicd_opt_out`,
 the two security gates (see D3 above). A file
 rendered before WP1 still synthesizes to the same config values (checked on
 the AC-2-3 fixture). A line the
-parser cannot use now prints a `warning:` line instead of vanishing.
+parser cannot use now prints a `warning:` line instead of vanishing. A list
+key that appears more than once keeps the items under every occurrence, in
+file order, as its warning says.
 `synthesize -o <relative path in a subdirectory>` no longer fails its own
-validation: both interviews resolve the config path before handing it to the
-installer (pre-existing bug).
+validation: the greenfield interview resolves the config path before handing
+it to the installer (pre-existing bug).
 
 **Two small additions (g6).** `tools.md` prints each MCP server's `purpose`,
 or a TODO when it has none. The `settings.json.disabled` warning is above.
@@ -358,7 +402,7 @@ not enforced by `resolve_config`.
 — `lib/defaults.py`, `lib/ic_checks.py`, `lib/installer.py`,
 `lib/interview.py`, `lib/minyaml.py`, `lib/retrofit_heuristics.py`,
 `lib/retrofit_interview.py`, `lib/sdk_gates_template.py`, `lib/templates.py`,
-`lib/prd_heuristics.py` (a docstring only), `bootstrap.config.yaml` and
+`lib/prd_heuristics.py`, `lib/llm_advisor.py`, `bootstrap.config.yaml` and
 `tests/test_installer.py` — all six moving goldens, and one new golden
 fixture. Measured on the emitted plans against `24cd8a3`, per file:
 
@@ -381,23 +425,35 @@ The new fixture is `sdk_callable` in `tests/test_greenfield_golden.py`: the
 default config plus `gate_substrate: "sdk-callable"`, 57 actions. After D4
 (a) the three shell fixtures no longer carry `gates.py`, so no digest pinned
 the security-critical SDK module, and a one-byte change to it left every
-suite green. This fixture pins `gates.py` and the rest of an SDK-substrate
-install again. Against this tree's `default` plan it adds exactly one action,
+suite green. This fixture pins `gates.py` as rendered for the default config,
+and the rest of that SDK-substrate
+install. Against this tree's `default` plan it adds exactly one action,
 `gates.py`, and moves no body. It is a golden addition, not a re-baseline.
+
+The PR #118 review's fix round re-baselined three of these digests inside the
+exception. Against `609cc3b`, `full_autonomous` and retrofit `agent` each move
+`test-gate.sh` and `tech.md` (the top-of-checkout rule and its sentence), and
+`sdk_callable` moves `gates.py` (the `VAR=value` rule); nothing is added or
+removed.
 
 **Not done here.** `ci-mirror` has no exit-5 arm, so a pytest project with no
 tests and no `ci_local` still has every push blocked. `resolve_config` still
 honours a hand-written `hooks.secrets_gate: false` or
-`hooks.dependency_gate: false`, as it did before WP1. A PRD that states a
-stdlib-only posture still gets `deps_enabled: false` proposed at medium
-confidence in the greenfield interview, and accepting it installs no
-dependency gate. The retrofit interview still renders no dependency-policy
-section. Both interactive interviews' true/false prompts, other than the
+`hooks.dependency_gate: false`, as it did before WP1. The retrofit interview
+still renders no dependency-policy section. On the shell substrate,
+exit 5 at a `CLAUDE_PROJECT_DIR` below the git top level blocks; `gates.py`
+runs at `CLAUDE_PROJECT_DIR` and allows. Where a
+re-install drops a gate's registration on a tree with no manifest, the gate's
+script stays on disk, unregistered, and `--uninstall` leaves it. A tree
+whose manifest predates `owned_hooks`, with `settings.json` edited, still
+exits 3 on every re-install once `secrets.enabled` is `false`: its
+secrets-gate registration at the old `Read|Write|Edit` matcher is not a site
+the installer emits, so it is kept and dangles (as at `24cd8a3`). Both interactive interviews' true/false prompts, other than the
 greenfield secrets and deps prompts, still read any reply but a yes word as
 `false`; none of them switches a security gate. The backlog rows for
 I-6 and I-10 are not updated in this change.
 
-Suite: **25 suites, 10,403 checks, 0 failed** (`bin/run-tests`, tree check clean).
+Suite: **25 suites, 10,458 checks, 0 failed** (`bin/run-tests`, tree check clean).
 
 ## Post-2.8.0 — the SDK pipe-to-shell rule stops restarting at every downloader (2026-09-23)
 
