@@ -438,8 +438,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # themselves false and reached origin in pushed commit messages, both caught by
 # the item's own reviews and restored before merge. Pin moved 47 -> 48 in the
 # same commit, per runbook step 10b.
+# [wp1-clean-gates-off-install closeout, 2026-09-29] WP1 of the PRD-minus-
+# security plan (PR #118, merge c642731, freeze exception 82). Graded `harmful`
+# by the same 10b rule: 609cc3b reached origin with six MAJOR defect classes
+# and false record claims, both fixed before merge, and the merged PR body says
+# the fix's fourth iteration "fixes the MINORs the third one found" while two
+# were disclosed instead. Pin moved 48 -> 49 in the same commit, per runbook
+# step 10b.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 48, f"{len(es)} entries")
+      len(es) == 49, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
