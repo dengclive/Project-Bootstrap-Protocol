@@ -5455,8 +5455,9 @@ owner approval, and are recorded here as `2.0.0 → 2.1.0` when they do.
 it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
 2.0.0 pinned by commit `1fa5bb6`; renamed and re-pointed to `2.4.0 @
 251f82f` at the seam-2.0.0 substrate re-cut; renamed again, re-pointed to
-`2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut).
-Branch `version-2-1-0`.
+`2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut;
+the TODO was filled in-version on 2026-10-03 with the WP1 merge commit
+`c642731`). Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 
