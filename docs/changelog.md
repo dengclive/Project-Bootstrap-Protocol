@@ -217,9 +217,10 @@ suite printed at exit 0 therefore reached nobody.
   RR1-EMB-8).
 - **ci-mirror** gets test-gate's exit-5 ("no tests collected") arm, for the
   command it runs, scoped to the top of the checkout (backlog Z-1).
-- **Block logging.** Every non-security exit-2 site logs a `BLOCK` line to
-  `.claude/logs/hooks.log` (critic gap G12). dependency-gate's unlogged
-  BLOCK sites are NOT changed (pivot-held).
+- **Block logging.** In the shell hooks, every block a non-security gate
+  decides logs a `BLOCK` line to `.claude/logs/hooks.log` (critic gap G12); a
+  fail-closed hook error logs `FAIL`, and the SDK substrate does not log.
+  dependency-gate's unlogged BLOCK sites are NOT changed (pivot-held).
 - **cost-log** moves from `Stop` to `SessionEnd` and records the payload's
   `reason`. A re-install drops the old `Stop` registration even with no
   manifest (`HOOK_RETIRED_SITES`).
