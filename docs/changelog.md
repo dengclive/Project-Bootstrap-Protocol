@@ -298,7 +298,7 @@ file rename, and the contract stays SUSPENDED.
 | Shared sentinel names/locations/scope (§7.4) | No | drift-detector's per-session entries under `.claude/sessions/` are `.drift-state-<sid>` (the only one at c642731; now six fields) and four that WP2 adds: `.drift-ack-<sid>` (written by `/ack-drift`), `.drift-reads-<sid>`, `.session-<sid>` (session start epoch) and `.drift-lock-<sid>` (a directory, held from the state read to its rename). drift-detector-loop-cooperation adds `.drift-coop-<sid>`, and format-lint-gate adds `.lint-unset-<sid>` (written by both substrates). None is a §7.4 sentinel. |
 | §7.2 security-critical membership | No | Membership is keyed on hook NAME; no name is added or removed. `secrets-gate` and `dependency-gate` are untouched (2026-09-27 pivot). |
 | §7.3 provenance markers / synthesize-file contract | **Fires** | A new ANSWERS key, `commands_eval`, with the WP1 section-gated absent-key rule. The seam's WP1 bullet in §7.3 (anchor `**[seam 3.0.0, WP1] The synthesize-file contract changed — a §8.4 trigger.**`) records that class as a §8.4 trigger. Provenance markers are unchanged. Recorded in-version by the operator's 2026-10-03 default. |
-| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ c642731` (#119). WP2 changes `gates.py` bytes, so once WP2 merges that commit no longer describes the shipped module. Re-pointing it needs the WP2 merge commit, which does not exist yet; it is an operator call for the WP2 closeout, as #119's fill was for WP1. Under SUSPENDED nothing asserts `binds`. |
+| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ c642731` (#119). WP2 changes `gates.py` bytes, so once WP2 merges that commit no longer describes the shipped module. Re-pointing it needs the WP2 merge commit, which does not exist yet; it is an operator call for the WP2 closeout, as #119's fill was for WP1. Under SUSPENDED nothing asserts `binds`. **[Layer 2026-10-04, the WP2 closeout.]** WP2 merged as `322b0d3` (PR #120, 2026-10-04T08:58:59Z), and the bind is re-pointed in-version to `2.8.0 @ 322b0d3` (the seam's v3.0.0 entry has the dated note). The text before this layer stays as written on its date. |
 
 §8.4's "Changes that touch only gate internals or dispatch policy do not bump
 `seam_version`" governs the remainder (the format-lint return shape, the
@@ -5670,7 +5670,8 @@ it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
 251f82f` at the seam-2.0.0 substrate re-cut; renamed again, re-pointed to
 `2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut;
 the TODO was filled in-version on 2026-10-03 with the WP1 merge commit
-`c642731`). Branch `version-2-1-0`.
+`c642731`, and re-pointed in-version on 2026-10-04 to the WP2 merge
+commit `322b0d3`). Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 

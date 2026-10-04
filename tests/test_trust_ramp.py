@@ -445,8 +445,16 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # the fix's fourth iteration "fixes the MINORs the third one found" while two
 # were disclosed instead. Pin moved 48 -> 49 in the same commit, per runbook
 # step 10b.
+# [wp2-hooks-reach-the-model closeout, 2026-10-04] WP2 of the PRD-minus-
+# security plan (PR #120, merge 322b0d3, freeze exception 83). Graded
+# `harmful` by the same 10b rule: 7211305 and ad0bab3 reached origin with
+# defects the item's own reviews confirmed (step 7's EP-1, fix round 2's eight
+# re-review MINORs), the posted PR body carried confirmed overclaims, and
+# 7211305's message says "Every non-security block is logged", which the SDK
+# substrate does not do. Pin moved 49 -> 50 in the same commit, per runbook
+# step 10b.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 49, f"{len(es)} entries")
+      len(es) == 50, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
