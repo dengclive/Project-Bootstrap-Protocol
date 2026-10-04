@@ -158,6 +158,192 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — hooks that reach the model (WP2) (2026-10-04)
+
+**No version bump** (fix, not surface; freeze exception **83**). One PR, one
+exception, one golden re-baseline (operator decisions, 2026-10-03). **Seam:
+stays at 3.0.0, SUSPENDED.** WP2's wire changes ride as dated in-version
+corrections in `SEAM-CONTRACT-v3-0-0.md` (the owner's ruling for the WP1
+bind, applied to WP2 by the operator's 2026-10-03 default), although one
+§8.4 trigger fires (the walk is below).
+
+**The root cause.** Claude Code delivers a hook's stderr at exit 0 to its debug
+log and nowhere else, for every event, synchronous or async; at exit 2 it
+delivers stderr to the model and drops stdout. Measured on Claude Code
+2.1.288 with `claude -p` probes, and stated in the hooks reference (fetched
+2026-10-03). The repository said otherwise in three places (the PRD format/lint
+bullet, upstream-bugs P2-6, and two `lib/templates.py` comments): that async
+suppressed stderr a synchronous hook would deliver. Every advisory line this
+suite printed at exit 0 therefore reached nobody.
+
+**What changed, by item.**
+- **Channels.** spec-gate-entry, format-lint-gate, drift-detector and
+  drift-detector-loop-cooperation print JSON `additionalContext`.
+  format-lint-gate reports only a FAILING lint (last 20 lines, cut at 9,000
+  bytes); with `commands.lint` empty it prints a `systemMessage` notice to the
+  operator once per session (backlog I-6(a)). task-done-alarm and
+  decision-required-alarm emit an OSC 9 `terminalSequence` (Notification
+  ignores JSON otherwise; SubagentStop `additionalContext` would cost the
+  subagent a turn). decision-required-alarm gets the matcher
+  `permission_prompt|elicitation_dialog`, so `idle_prompt` and every other
+  notification type no longer fire it; a re-install drops its old match-all
+  `Notification` site (`HOOK_RETIRED_SITES`), as it does cost-log's `Stop`
+  site (review RC-3). The three retrofit warn-only lines (spec-gate-commit,
+  test-gate, tdd-gate) move from exit-0 stderr to `PreToolUse`
+  `additionalContext` (backlog Z-10(a)).
+- **spec-gate-entry** matches its keywords case-insensitively.
+- **Runner output on a block.** test-gate (every runner), ci-mirror and
+  eval-gate send the command's merged output, cut to its last 100 lines and
+  then to at most 20,000 bytes, to stderr; `gates.py` appends the same bytes
+  to its deny reason. The reason lines were already on stderr; the runner's
+  stdout was what got dropped. The output is captured to a file, not a pipe,
+  so the gate returns when the runner exits even if a background child of
+  the runner still holds its stdout (review SC-5). Each echoed command label
+  is printed from a shell-quoted literal, so a configured command with a
+  quoted operator in it runs once, not twice (review SC-1).
+- **One block reason per tool call.** When two hooks exit 2 on the same tool
+  call, Claude Code delivers one of their reasons to the model and drops the
+  rest (measured with ci-mirror and eval-gate on one `git push`). Which hook
+  wins is not settled: the review's two verifiers disagree (eval-gate in
+  every run, or the last hook to finish). Where ci-mirror is installed,
+  eval-gate's push block for a failing or missing eval command ends with a
+  line saying ci-mirror may also block; ci-mirror's block carries no such
+  line, and the marker-fallback messages are unchanged (review LD-1,
+  RR1-EMB-8).
+- **ci-mirror** gets test-gate's exit-5 ("no tests collected") arm, for the
+  command it runs, scoped to the top of the checkout (backlog Z-1).
+- **Block logging.** Every non-security exit-2 site logs a `BLOCK` line to
+  `.claude/logs/hooks.log` (critic gap G12). dependency-gate's unlogged
+  BLOCK sites are NOT changed (pivot-held).
+- **cost-log** moves from `Stop` to `SessionEnd` and records the payload's
+  `reason`. A re-install drops the old `Stop` registration even with no
+  manifest (`HOOK_RETIRED_SITES`).
+- **drift tier 1.** All three PRD §6.E tier-1 triggers are live: tool calls,
+  minutes, and repeated reads of one file, each counted since the last
+  checkpoint (or the session start). That departs from §6.E's trigger list,
+  which measures duration from the session start file and reads over the
+  whole session. Fire-once per arming; a checkpoint re-arms. `/ack-drift`
+  also re-arms: each threshold becomes max(threshold, signal at the ack) plus
+  half the configured threshold, rounded up (PRD §6.E Acknowledgement;
+  review RC-2). Tiers 2 and 3 are still not implemented (backlog I-1).
+- **eval-gate (D9, X-36z).** New key `commands.eval`: when set, the gate runs
+  it; empty, it falls back to `.claude/.last-eval-pass`, which must now be
+  newer than every touched prompt file, and the installer prints a
+  `warning:` line for the empty key. Pushes only: a local merge is not
+  gated, because a PreToolUse hook cannot see the incoming tree; the push
+  after it evaluates the merged tree (operator decision 2026-10-04, PRD
+  :775). The shell's `@{u}` range was dead code (doubled braces in a
+  non-f-string) and is fixed. eval-gate gets a 600 s timeout on both
+  substrates. Both interviews carry a new `commands_eval` ANSWERS key.
+- **tdd-gate (build-plan blocker 5).** A write to a test file or a package
+  marker is exempt, before the retrofit warn-week arm, on both substrates.
+  Each rule is a case-sensitive glob matched against ONE path component
+  (`TDD_TEST_*` in `lib/sdk_gates_template.py`). Basenames: `test_*.*`,
+  `*_test.*`, `conftest.py`, `__init__.py`, `*_spec.rb`, `tests.rs`, and
+  `*.test.E` and `*.spec.E` where E is one of `js`, `jsx`, `ts`, `tsx`,
+  `mjs`, `cjs`, `mts`, `cts`. Any directory segment after the first:
+  `[Tt]est`, `[Tt]ests`, `__tests__`, `__mocks__`, `__snapshots__`,
+  `__fixtures__`, `testdata`, `*.Test`, `*.*Tests`. The segment directly
+  under `src/`, with at least one segment below it: a lowercase-initial
+  `*Test` source set (`androidTest`, `jvmTest`) and `testFixtures`. Still
+  gated, by design: `*.spec.json` and `*.spec.yaml` (an OpenAPI spec is
+  source), `*.test.py`, a `spec/` directory, `*_spec.py`, `testing/`, a
+  bare `test.py`, and a `*Test.java` basename outside a test directory.
+  The set also exempts some production files and still refuses some
+  test-first writes; both are open residuals (backlog Z-15, Z-16).
+
+**The timeout split, accepted and recorded.** A shell `PreToolUse` hook killed
+at its timeout fails OPEN; an Agent SDK callback that outruns its timeout
+BLOCKS. So a test or eval suite slower than 600 s is allowed by the shell hook
+and denied by `gates.py`. The operator accepted this on 2026-10-03. The
+substrate differential compares verdicts only below the bound and cannot see
+it.
+
+**Seam — the §8.4 trigger walk.** Recorded in-version in
+`SEAM-CONTRACT-v3-0-0.md` as dated appends to the §3.3 `build_hooks` and
+Coverage bullets, the §3.3 WP1 no-tests bullet, the §4.1
+`permission_denials` row, the §5 `max_turns` caveat, the §7.3 WP1
+synthesize-file bullet and the §10 v3.0.0 entry. No `seam_version` bump, no
+file rename, and the contract stays SUSPENDED.
+
+| §8.4 trigger | Fires? | Why |
+|---|---|---|
+| New automated CLI entry point, or contract-level flag (§3.2) | No | No new entry point; no flag changes. |
+| Field added/changed in §4.1 | No | `permissionDecisionReason` is unchanged in name and type; only its content gains lines (a `test-gate` or `eval-gate` reason now carries up to 100 lines, at most 20,000 bytes, of runner output). |
+| Event added/changed in the §5 table | No | The table lists `system/init`, `api_retry`, `PreCompact`. `SessionEnd` is not a row; the §5 `max_turns` caveat already names `SessionEnd`-class hooks. cost-log is shell-only and observability-tier. |
+| Shared sentinel names/locations/scope (§7.4) | No | drift-detector's per-session entries under `.claude/sessions/` are `.drift-state-<sid>` (the only one at c642731; now six fields) and four that WP2 adds: `.drift-ack-<sid>` (written by `/ack-drift`), `.drift-reads-<sid>`, `.session-<sid>` (session start epoch) and `.drift-lock-<sid>` (a directory, held from the state read to its rename). drift-detector-loop-cooperation adds `.drift-coop-<sid>`, and format-lint-gate adds `.lint-unset-<sid>` (written by both substrates). None is a §7.4 sentinel. |
+| §7.2 security-critical membership | No | Membership is keyed on hook NAME; no name is added or removed. `secrets-gate` and `dependency-gate` are untouched (2026-09-27 pivot). |
+| §7.3 provenance markers / synthesize-file contract | **Fires** | A new ANSWERS key, `commands_eval`, with the WP1 section-gated absent-key rule. The seam's WP1 bullet in §7.3 (anchor `**[seam 3.0.0, WP1] The synthesize-file contract changed — a §8.4 trigger.**`) records that class as a §8.4 trigger. Provenance markers are unchanged. Recorded in-version by the operator's 2026-10-03 default. |
+| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ c642731` (#119). WP2 changes `gates.py` bytes, so once WP2 merges that commit no longer describes the shipped module. Re-pointing it needs the WP2 merge commit, which does not exist yet; it is an operator call for the WP2 closeout, as #119's fill was for WP1. Under SUSPENDED nothing asserts `binds`. |
+
+§8.4's "Changes that touch only gate internals or dispatch policy do not bump
+`seam_version`" governs the remainder (the format-lint return shape, the
+reason content, the `RESOLVED_CONFIG["commands"]["eval"]` key), with the
+caveat that the format-lint change alters a return shape §3.3 states
+explicitly; that is why it is recorded rather than left silent. The §7.3 row
+is the exception: it fires, and rides in-version only by the operator's
+default.
+
+**What WP2 does not do.** Security issues the WP2 designs surfaced are not
+fixed, on the 2026-09-27 pivot: dependency-gate's unlogged BLOCK sites,
+secrets-gate's `shopt -s nocasematch` locale fold, the security gates'
+timeout split, and both security gates failing closed on every call under
+bash 3.2 (backlog Z-21). Also not changed: two stale comments INSIDE
+`_HOOK_HEADER` (`lib/templates.py`, "eval-gate / spec-gate-commit / tdd-gate
+declare none at all" and "eval-gate, which declares no timeout"), because
+editing the header moves every hook body and the header is pivot-held.
+Drift tiers 2 and 3 are not implemented (I-1). A Bash `touch` still
+satisfies the eval marker fallback (J-9). With `commands.ci_local` and
+`commands.test` both empty, ci-mirror still runs `true` (I-6). Also open,
+in backlog section Z: the tdd-gate exemption set's over- and
+under-exemptions (Z-15, Z-16), the three operator-wait `Notification` types
+the alarm's matcher omits (Z-17), the shell runner's inherited `pipefail`
+(Z-18), double-quoted backslash escapes in `bootstrap.config.yaml` (Z-19)
+and the one-reason-per-call asymmetry (Z-20). No `PROTOCOL_VERSION` bump,
+and the seam bind is not re-pointed.
+
+**Freeze exception 83.** One exception covers every frozen source WP2 touches
+— `bootstrap.config.yaml`, `lib/cmdpos.py`, `lib/defaults.py`,
+`lib/installer.py`, `lib/interview.py`, `lib/retrofit_interview.py`,
+`lib/sdk_gates_template.py`, `lib/templates.py` and
+`tests/test_installer.py` — and all seven moving digests: the four plan
+goldens in `tests/test_greenfield_golden.py` (default `fc19712c...`,
+full_autonomous `9abcf453...`, design_steering `ee1fbc1f...`, sdk_callable
+`92aebfd9...`), the two in `tests/test_retrofit.py` (service `6e0e78fc...`,
+agent `a3682788...`) and the AC-2-3 mini-golden in
+`tests/test_validate_only.py` (`d02fb348...`, previous `0c1c7931...`).
+`EXPECTED_TELEMETRY_BODY` does not move. Each moved digest carries a
+`[freeze-exception no. 83, 2026-10-03]` comment above it. Measured on the
+emitted plans against `c642731`, per file (re-measured 2026-10-04 on the
+WP2 tree):
+
+| Fixture | Actions | Added / removed | Bodies that move |
+|---|---|---|---|
+| default | 56 → 56 | none | `tech.md`, `settings.json`, `audio-alerts.config`, `ack-drift/SKILL.md`, `.claude/.gitignore` (gains `sessions/.lint-unset-*`), hooks `spec-gate-entry`, `spec-gate-commit`, `test-gate`, `format-lint-gate`, `cost-log`, `drift-detector`, `task-done-alarm`, `decision-required-alarm`, `ci-mirror` |
+| full_autonomous | 68 → 68 | none | the default's fourteen, plus hooks `tdd-gate`, `eval-gate`, `drift-detector-loop-cooperation`, `iteration-summary-enforcement` |
+| design_steering | 58 → 58 | none | the default's fourteen |
+| sdk_callable | 57 → 57 | none | the default's fourteen, plus `gates.py` |
+| retrofit service | 79 → 79 | none | the default's fourteen |
+| retrofit agent | 93 → 93 | none | full_autonomous's eighteen |
+
+Action order, and every action's mode and kind, are unchanged in every
+fixture. `secrets-gate.sh` and `dependency-gate.sh` move in no fixture, and
+`_HOOK_HEADER` is byte-identical to `c642731`'s. In `gates.py`,
+`_secrets_gate`, `_dependency_gate` and `_match_secret` are byte-identical,
+and `_GATE_TIMEOUTS` gains only `"eval-gate": 600.0`. The AC-2-3
+mini-golden moves by one line of the synthesized config, `  eval: ""` under
+`commands:` after `ci_local`.
+
+**Tests.** Seven new files: `tests/test_block_logging.py` (38 checks),
+`tests/test_command_embedding.py` (118), `tests/test_eval_gate.py` (237),
+`tests/test_hook_channels.py` (95), `tests/test_runner_output.py` (64),
+`tests/test_shared_plumbing.py` (65) and `tests/test_wp2_records.py`
+(45). Rows added to `test_hook_behavior`, `test_sdk_gates`,
+`test_substrate_differential`, `test_issue_fixes`, `test_installer`,
+`test_retrofit` and `test_wrapper_behavior`; digests re-baselined in
+`test_greenfield_golden`, `test_retrofit` and `test_validate_only`. Counts
+are each file's final `N passed` line, run alone on 2026-10-04.
+
 ## Post-2.8.0 — a clean gates-off install (WP1) (2026-09-28)
 
 **No version bump** (owner ruling: `PROTOCOL_VERSION` stays `2.8.0`; freeze

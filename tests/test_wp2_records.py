@@ -16,6 +16,9 @@ here, not in the next review.
     "+50% of each threshold" wording, and each must state the rule.
   - RC-6: lib/defaults.py's empty-command comment named a `true` run that
     format-lint-gate no longer emits.
+  - TD-2, TD-3, TD-4, RR-UP-1, RR-UP-2, RC-1: the tracked records (the
+    changelog's WP2 entry, the backlog's WP2 rows in section Z, and the seam
+    contract's dated WP2 appends) say what the shipped code does.
 
 Run: python3 tests/test_wp2_records.py
 """
@@ -245,120 +248,167 @@ check("RR-UP-2: it names the operator-wait types the matcher omits",
 
 
 # --------------------------------------------------------------------------- #
-# TD-2, TD-3, TD-4, RR-UP-1, RR-UP-2: the pending records file
+# TD-2, TD-3, TD-4, RR-UP-1, RR-UP-2: the tracked records
 # --------------------------------------------------------------------------- #
-# .claude/sessions/ is gitignored, so these rows run only where the WP2
-# records draft exists (the author's checkout until step 9 applies it).
-_PENDING = os.path.join(ROOT, ".claude", "sessions", "prd-minus-security",
-                        "wp2-records-pending.md")
-if not os.path.exists(_PENDING):
-    print("  SKIP  pending-records rows: wp2-records-pending.md absent")
-else:
-    import fnmatch  # noqa: E402
-    import sdk_gates_template as _sg  # noqa: E402
-    _pend = read(os.path.relpath(_PENDING, ROOT))
-    _pflat = " ".join(_pend.split())
+# These rows read the records step 9 wrote from the (gitignored) pending
+# draft: the changelog's WP2 entry and the backlog's WP2 rows in section Z.
+# Both files are tracked, so the rows run everywhere, CI included
+# (RR-UP-1 pins the c642731 test list, because CI's checkout is shallow).
+import fnmatch  # noqa: E402
+import re  # noqa: E402
+import sdk_gates_template as _sg  # noqa: E402
 
-    def _section(start, end):
-        i = _pflat.find(start)
-        return _pflat[i:_pflat.find(end, i)] if i >= 0 else ""
 
-    # TD-2: the changelog tdd-gate bullet names the shipped set exactly.
-    _tdd = _section("- **tdd-gate (build-plan blocker 5).**",
-                    "**The timeout split")
-    _js = _sg._TDD_JS_EXTS
-    _named = [g for g in _sg.TDD_TEST_BASENAMES
-              if not g.startswith(("*.test.", "*.spec."))]
-    _named += [g for g in _sg.TDD_TEST_DIRS
-               if g not in ("[Tt]est", "[Tt]ests")]
-    _named += ["[Tt]est", "[Tt]ests", "testFixtures", "*.test.E",
-               "*.spec.E"] + [f"`{e}`" for e in _js]
-    check("TD-2: the changelog tdd-gate bullet is found", bool(_tdd))
-    check("TD-2: it names every TDD_TEST_* rule",
-          all(n in _tdd for n in _named),
-          [n for n in _named if n not in _tdd])
-    check("TD-2: the JS/TS extension list in the record is the shipped one",
-          len(_js) == 8 and set(_sg.TDD_TEST_BASENAMES) >= {
-              f"*.{k}.{e}" for k in ("test", "spec") for e in _js})
-    check("TD-2: it no longer claims bare `*.test.*` / `*.spec.*` are "
-          "exempt", "`*.test.*`" not in _tdd and "`*.spec.*`" not in _tdd,
-          _tdd[:300])
-    _carve = ("*.spec.json", "*.spec.yaml", "*.test.py")
-    check("TD-2: each carve-out it names as gated IS gated by the set",
-          all(c in _tdd and not any(
-              fnmatch.fnmatchcase(c.replace("*", "qz"), g)
-              for g in _sg.TDD_TEST_BASENAMES) for c in _carve))
+def _flat(text):
+    # Table cells escape a literal `|` as `\|`; read it back as `|`.
+    return " ".join(text.replace("\\|", "|").split())
 
-    # TD-2: the seam sentinel row names every per-session entry the drift
-    # hooks write (derived from the emitted bodies).
-    import re  # noqa: E402
-    _names = set(re.findall(r'\$S/(\.(?:drift-[a-z]+|session))-\$',
-                            _t))
-    _seam = _section("| Shared sentinel names/locations/scope (§7.4) |",
-                     "| §7.2 security-critical")
-    check("TD-2: drift hooks write at least five per-session entries",
-          len(_names) >= 5, sorted(_names))
-    check("TD-2: the seam sentinel row names each of them",
-          all(f"`{n}-<sid>`" in _seam for n in _names),
-          [n for n in sorted(_names) if f"`{n}-<sid>`" not in _seam])
 
-    # RR-UP-1: every test file new since c642731 is named in the draft.
-    _old = set(subprocess.run(
-        ["git", "-C", ROOT, "ls-tree", "--name-only", "c642731", "tests/"],
-        capture_output=True, text=True).stdout.split())
-    _new = sorted(f"tests/{f}" for f in os.listdir(os.path.join(ROOT, "tests"))
-                  if f.startswith("test_") and f.endswith(".py")
-                  and f"tests/{f}" not in _old)
-    _tests = _section("**Tests.** New files:", "```")
-    check("RR-UP-1: c642731 is readable and new test files exist",
-          len(_old) > 10 and len(_new) >= 7, (len(_old), _new))
-    check("RR-UP-1: the changelog draft names every new test file",
-          all(f"`{f}`" in _tests for f in _new),
-          [f for f in _new if f"`{f}`" not in _tests])
+def _cut(flat, start, end):
+    i = flat.find(start)
+    j = flat.find(end, i + len(start)) if i >= 0 else -1
+    return flat[i:j] if 0 <= i < j else ""
 
-    # TD-3 / TD-4: each residual example is classified as the record says,
-    # by the shipped _tdd_is_test_path (its source, cut from the template;
-    # tests/test_substrate_differential.py runs the same examples through
-    # both full gates).
-    _src = read("lib/sdk_gates_template.py")
-    _m = re.search(r"\ndef _tdd_is_test_path\(rel\):\n.*?\n\n\n", _src,
-                   re.S)
-    _ns = {"fnmatch": fnmatch,
-           "_TDD_TEST_BASENAMES": _sg.TDD_TEST_BASENAMES,
-           "_TDD_TEST_DIRS": _sg.TDD_TEST_DIRS,
-           "_TDD_TEST_SOURCE_SETS": _sg.TDD_TEST_SOURCE_SETS}
-    check("TD-3/TD-4: the shipped _tdd_is_test_path is found", bool(_m))
-    if _m:
-        exec(_m.group(0), _ns)
-    _exempt = _ns.get("_tdd_is_test_path", lambda rel: None)
 
-    for _rid, _head, _end, _want in (
-            ("TD-3", "tdd-gate over-exemption (review TD-3",
-             "tdd-gate under-exemption", True),
-            ("TD-4", "tdd-gate under-exemption (review TD-4",
-             "decision-required-alarm matcher coverage", False)):
-        _row = _section(_head, _end)
-        _ex = [p for p in re.findall(r"`((?:src|lib)/[^`]+)`", _row)
-               if p != "src/core.py" and not p.endswith("/")]
-        check(f"{_rid}: the residual row is recorded with examples",
-              len(_ex) >= 7, _ex)
-        check(f"{_rid}: each example is {'exempt' if _want else 'gated'} "
-              f"under the shipped set",
-              all(_exempt(p) is _want for p in _ex),
-              [p for p in _ex if _exempt(p) is not _want])
+_cl = _cut(_flat(read("docs/changelog.md")),
+           "## Post-2.8.0 — hooks that reach the model (WP2)",
+           "## Post-2.8.0 — a clean gates-off install (WP1)")
+_bl = _flat(read("docs/deferred-backlog.md"))
+check("records: the changelog's WP2 entry is found", bool(_cl))
 
-    # RR-UP-2: the matcher residual names every unmatched operator-wait type.
-    _mrow = _section("decision-required-alarm matcher coverage",
-                     "Also pending outside")
-    check("RR-UP-2: the matcher residual row is recorded",
-          bool(_mrow) and f"`{_matcher}`" in _mrow)
-    # The sentence that names the omitted types, not the full type list.
-    _omit = _section("wait on the operator and do not fire the alarm",
-                     "Options:")
-    check("RR-UP-2: it names each operator-wait type the matcher omits",
-          bool(_omit) and all(f"`{u}`" in _omit for u in _UNMATCHED_WAITS)
-          and not any(f"`{m}`" in _omit for m in _matcher.split("|")),
-          _omit[:300])
+# TD-2: the changelog tdd-gate bullet names the shipped set exactly.
+_tdd = _cut(_cl, "- **tdd-gate (build-plan blocker 5).**",
+            "**The timeout split")
+_js = _sg._TDD_JS_EXTS
+_named = [g for g in _sg.TDD_TEST_BASENAMES
+          if not g.startswith(("*.test.", "*.spec."))]
+_named += [g for g in _sg.TDD_TEST_DIRS
+           if g not in ("[Tt]est", "[Tt]ests")]
+_named += ["[Tt]est", "[Tt]ests", "testFixtures", "*.test.E",
+           "*.spec.E"] + [f"`{e}`" for e in _js]
+check("TD-2: the changelog tdd-gate bullet is found", bool(_tdd))
+check("TD-2: it names every TDD_TEST_* rule",
+      all(n in _tdd for n in _named),
+      [n for n in _named if n not in _tdd])
+check("TD-2: the JS/TS extension list in the record is the shipped one",
+      len(_js) == 8 and set(_sg.TDD_TEST_BASENAMES) >= {
+          f"*.{k}.{e}" for k in ("test", "spec") for e in _js})
+check("TD-2: it no longer claims bare `*.test.*` / `*.spec.*` are "
+      "exempt", "`*.test.*`" not in _tdd and "`*.spec.*`" not in _tdd,
+      _tdd[:300])
+_carve = ("*.spec.json", "*.spec.yaml", "*.test.py")
+check("TD-2: each carve-out it names as gated IS gated by the set",
+      all(c in _tdd and not any(
+          fnmatch.fnmatchcase(c.replace("*", "qz"), g)
+          for g in _sg.TDD_TEST_BASENAMES) for c in _carve))
+
+# TD-2: the §8.4 walk's sentinel row names every per-session entry the
+# drift hooks write (derived from the emitted bodies).
+_names = set(re.findall(r'\$S/(\.(?:drift-[a-z]+|session))-\$', _t))
+_seam = _cut(_cl, "| Shared sentinel names/locations/scope (§7.4) |",
+             "| §7.2 security-critical")
+check("TD-2: drift hooks write at least five per-session entries",
+      len(_names) >= 5, sorted(_names))
+check("TD-2: the seam sentinel row names each of them",
+      bool(_seam) and all(f"`{n}-<sid>`" in _seam for n in _names),
+      [n for n in sorted(_names) if f"`{n}-<sid>`" not in _seam])
+
+# RR-UP-1: every test file new since c642731 is named in the entry. The
+# c642731 list is pinned here, not read with `git ls-tree c642731`: CI's
+# checkout is shallow and does not have that commit. New files are taken
+# from `git ls-files`, so an untracked local test file does not count.
+_OLD_TESTS = {
+    "test_advisor_model.py", "test_auto_run_sentinel.py",
+    "test_composition.py", "test_doc_citations.py",
+    "test_dynamic_workflow_policy.py", "test_gate_substrate.py",
+    "test_goal_evaluator_keys.py", "test_greenfield_golden.py",
+    "test_hook_behavior.py", "test_hook_tiers.py", "test_ic_gate.py",
+    "test_installer.py", "test_interview.py", "test_issue_fixes.py",
+    "test_retrofit.py", "test_root_sentinels.py", "test_sdk_gates.py",
+    "test_settings_merge.py", "test_substrate_differential.py",
+    "test_trust_ramp.py", "test_usage_limit_contract.py",
+    "test_validate_only.py", "test_wiring_verification.py",
+    "test_worktree_command_compat.py", "test_wrapper_behavior.py",
+}
+_tracked = subprocess.run(
+    ["git", "-C", ROOT, "ls-files", "tests/"],
+    capture_output=True, text=True).stdout.split()
+_new = sorted(f for f in _tracked
+              if os.path.basename(f).startswith("test_")
+              and f.endswith(".py") and f.count("/") == 1
+              and os.path.basename(f) not in _OLD_TESTS)
+_tests = _cl[_cl.find("**Tests.**"):] if "**Tests.**" in _cl else ""
+check("RR-UP-1: git lists the tests and the new test files exist",
+      len(_tracked) > 25 and len(_new) >= 7, (len(_tracked), _new))
+check("RR-UP-1: the changelog entry names every new test file",
+      bool(_tests) and all(f"`{f}`" in _tests for f in _new),
+      [f for f in _new if f"`{f}`" not in _tests])
+
+# TD-3 / TD-4: each residual example is classified as the record says,
+# by the shipped _tdd_is_test_path (its source, cut from the template;
+# tests/test_substrate_differential.py runs the same examples through
+# both full gates).
+_src = read("lib/sdk_gates_template.py")
+_m = re.search(r"\ndef _tdd_is_test_path\(rel\):\n.*?\n\n\n", _src, re.S)
+_ns = {"fnmatch": fnmatch,
+       "_TDD_TEST_BASENAMES": _sg.TDD_TEST_BASENAMES,
+       "_TDD_TEST_DIRS": _sg.TDD_TEST_DIRS,
+       "_TDD_TEST_SOURCE_SETS": _sg.TDD_TEST_SOURCE_SETS}
+check("TD-3/TD-4: the shipped _tdd_is_test_path is found", bool(_m))
+if _m:
+    exec(_m.group(0), _ns)
+_exempt = _ns.get("_tdd_is_test_path", lambda rel: None)
+
+for _rid, _head, _end, _want in (
+        ("TD-3", "| Z-15 | tdd-gate over-exemption (re-review TD-3)",
+         "| Z-16 |", True),
+        ("TD-4", "| Z-16 | tdd-gate under-exemption (re-review TD-4)",
+         "| Z-17 |", False)):
+    _row = _cut(_bl, _head, _end)
+    _ex = [p for p in re.findall(r"`((?:src|lib)/[^`]+)`", _row)
+           if p != "src/core.py" and not p.endswith("/")]
+    check(f"{_rid}: the backlog residual row is recorded with examples",
+          len(_ex) >= 7, _ex)
+    check(f"{_rid}: each example is {'exempt' if _want else 'gated'} "
+          f"under the shipped set",
+          all(_exempt(p) is _want for p in _ex),
+          [p for p in _ex if _exempt(p) is not _want])
+
+# RC-1: the §8.4 walk's §7.3 row FIRES for the new ANSWERS key, and the
+# seam's §7.3 WP1 bullet carries the dated WP2 append naming it. The key is
+# derived from both interviews' key lists.
+import interview as _iv  # noqa: E402
+import retrofit_interview as _riv  # noqa: E402
+_newkeys = [k for k in ("commands_eval",)
+            if k in _iv.ANSWER_KEYS and k in _riv.ANSWER_KEYS]
+_r73 = _cut(_cl, "| §7.3 provenance markers / synthesize-file contract |",
+            "| `binds` set")
+check("RC-1: both interviews carry the commands_eval ANSWERS key",
+      _newkeys == ["commands_eval"])
+check("RC-1: the walk's §7.3 row reads Fires and names the key",
+      _r73.startswith("| §7.3 provenance markers / synthesize-file "
+                      "contract | **Fires** |")
+      and all(f"`{k}`" in _r73 for k in _newkeys), _r73[:200])
+_seam73 = anchored_line(read("SEAM-CONTRACT-v3-0-0.md").split("\n"),
+                        "- **[seam 3.0.0, WP1] The synthesize-file contract "
+                        "changed — a §8.4 trigger.**") or ""
+_wp2 = _seam73.split("WP2 / D9 — a §8.4 trigger (§7.3)", 1)
+check("RC-1: the seam's §7.3 bullet carries the dated WP2 append",
+      len(_wp2) == 2 and all(f"`{k}`" in _wp2[1] for k in _newkeys),
+      _seam73[-300:])
+
+# RR-UP-2: the matcher residual names every unmatched operator-wait type.
+_mrow = _cut(_bl, "| Z-17 | decision-required-alarm matcher coverage",
+             "| Z-18 |")
+check("RR-UP-2: the backlog matcher residual row is recorded",
+      bool(_mrow) and f"`{_matcher}`" in _mrow)
+# The sentence that names the omitted types, not the full type list.
+_omit = _cut(_mrow, "wait on the operator and do not fire the alarm",
+             "Options:")
+check("RR-UP-2: it names each operator-wait type the matcher omits",
+      bool(_omit) and all(f"`{u}`" in _omit for u in _UNMATCHED_WAITS)
+      and not any(f"`{m}`" in _omit for m in _matcher.split("|")),
+      _omit[:300])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
