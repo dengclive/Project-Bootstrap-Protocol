@@ -284,6 +284,22 @@ deterministic installer).
   (the wrappers fail closed — they refuse rather than run). Backlog I-1/I-2
   track both; complete them (or work operator-in-the-loop, where none of
   this binds) before relying on the autonomous modes.
+  *Correction (WP2, 2026-10-03):* the drift detector now implements all
+  three tier-1 triggers — tool calls, minutes, and repeated reads of one
+  file, each counted since the last checkpoint (or the session start). Its
+  notice reaches the model once per arming, and a checkpoint re-arms it.
+  `/ack-drift` also re-arms it: each threshold becomes the larger of the
+  threshold and that signal's value at the ack, plus half the configured
+  threshold, rounded up. Tier 2, tier 3, the `.drift-tier3-*` sentinel and
+  audio dispatch are still not implemented.
+- **Claude Code shows the model one block reason per tool call.** When two
+  hooks exit 2 on the same tool call, the model receives one reason and the
+  others are dropped. With prompt changes and failing tests in one
+  `git push`, ci-mirror and eval-gate both block, and the model may see
+  only eval-gate's reason: it fixes the evals, pushes again, and only then
+  learns that CI fails. When eval-gate blocks a push because the eval
+  command failed or is missing, its message says that ci-mirror may also
+  block. The push itself stays blocked either way.
 - **Worktree isolation only isolates what follows the working directory
   (W-1, issue #29).** The gates run your configured command bare — no `cd` —
   which is what lets a plain `pytest -q` follow the `implementer` subagent

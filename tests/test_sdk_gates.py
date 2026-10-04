@@ -627,6 +627,37 @@ r = asyncio.run(gate_127({"tool_input": {"command": "git commit -m x"}},
 check("AC-7-1 test: 127 reports a missing toolchain, not a red suite",
       is_deny(r) and "test command not found (exit 127)" in deny_reason(r),
       repr(r))
+# [WP2] The deny reason carries the runner's merged output, bounded to its
+# last RUNNER_TAIL_LINES (100) lines and RUNNER_TAIL_BYTES bytes, as the
+# shell's does (byte cap and parity: tests/test_runner_output.py). It used to be discarded (`rc, _, _ = await _run(...)`), so every deny
+# was one line that said nothing of what failed.
+check("WP2: 127's reason carries the shell's own not-found line",
+      is_deny(r) and deny_reason(r).splitlines()[0]
+      == "Commit blocked: test command not found (exit 127): "
+         "definitely-not-a-real-command"
+      and "definitely-not-a-real-command" in "".join(
+          deny_reason(r).splitlines()[1:]), repr(r))
+gate_out = gates_mod._GATE_FACTORIES["test-gate"](
+    {"commands": {"test": "i=0; while [ $i -lt 300 ]; do i=$((i+1)); "
+                          "echo \"out $i\"; done; echo ERR-LAST >&2; exit 3",
+                  "lint": "", "format": ""},
+     "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+r = asyncio.run(gate_out({"tool_input": {"command": "git commit -m x"}},
+                         "tu-1", None))
+_lines = deny_reason(r).splitlines() if is_deny(r) else []
+check("WP2: the deny reason is the reason line, then the runner's last 100 "
+      "merged lines (stdout and stderr)",
+      _lines[:1] == ["Commit blocked: tests failing (exit 3)."]
+      and _lines[-1:] == ["ERR-LAST"] and _lines[1:2] == ["out 202"]
+      and len(_lines) == 101, repr(_lines[:3] + _lines[-2:]))
+gate_quiet = gates_mod._GATE_FACTORIES["test-gate"](
+    {"commands": {"test": "exit 3", "lint": "", "format": ""},
+     "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+r = asyncio.run(gate_quiet({"tool_input": {"command": "git commit -m x"}},
+                           "tu-1", None))
+check("WP2: a runner that prints nothing leaves the reason one line",
+      is_deny(r) and deny_reason(r) == "Commit blocked: tests failing "
+      "(exit 3).", repr(r))
 
 # ---- AC-7-2: empty commands.test still fails loud ------------------------ #
 cfg_empty = dict(gates_mod.RESOLVED_CONFIG)
@@ -646,21 +677,77 @@ check("AC-7-2: empty commands.test denies with the TODO reason",
 # working tree with no file-type filter, reformatting files the agent never
 # touched on every edit. A failing FORMAT command must therefore produce
 # nothing; a failing LINT command produces the message.
+# [WP2] lint is "true" here: an EMPTY lint now answers with the I-6(a)
+# notice, which would hide what this row is about.
+_fl_mark = os.path.join(tempfile.mkdtemp(), "formatter-ran")
 gate = gates_mod._GATE_FACTORIES["format-lint-gate"](
-    {"commands": {"format": "false", "lint": ""},
+    {"commands": {"format": f"touch {_fl_mark}", "lint": "true"},
      "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
 r = asyncio.run(gate({"tool_input": {}}, "tu-1", None))
 check("format-lint: a mutating formatter is never invoked (P2-6)",
-      "hookSpecificOutput" not in r and not r.get("systemMessage"), repr(r))
-# A lint command that PRINTS is what produces a message - the shell body is
-# `( lint ) 2>&1 | tail -20 >&2`, so a silent failure relays nothing either.
+      r == {} and not os.path.exists(_fl_mark), repr(r))
+shutil.rmtree(os.path.dirname(_fl_mark), ignore_errors=True)
+# [WP2 channels] A FAILING lint reaches the MODEL (PostToolUse
+# additionalContext), not the user (systemMessage), and never as a
+# permissionDecision. Shell parity: tests/test_substrate_differential.py.
 gate = gates_mod._GATE_FACTORIES["format-lint-gate"](
     {"commands": {"format": "", "lint": "echo lint-problem; false"},
      "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
 r = asyncio.run(gate({"tool_input": {}}, "tu-1", None))
-check("format-lint: lint output -> systemMessage, never a deny",
-      "hookSpecificOutput" not in r
-      and "lint-problem" in (r.get("systemMessage") or ""), repr(r))
+_h = r.get("hookSpecificOutput") or {}
+check("format-lint: failing lint -> PostToolUse additionalContext, never a "
+      "deny, no systemMessage",
+      _h.get("hookEventName") == "PostToolUse"
+      and "permissionDecision" not in _h and "systemMessage" not in r
+      and "lint-problem" in (_h.get("additionalContext") or "")
+      and "failed with exit 1" in (_h.get("additionalContext") or ""),
+      repr(r))
+gate = gates_mod._GATE_FACTORIES["format-lint-gate"](
+    {"commands": {"format": "", "lint": "echo All checks passed!"},
+     "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+r = asyncio.run(gate({"tool_input": {}}, "tu-1", None))
+check("format-lint: a passing lint says nothing", r == {}, repr(r))
+# [WP2 I-6(a)] An empty (or blank) lint says so, to the user only.
+# [WP2 re-review RS-3] Once per session: each lint below runs under its own
+# session id, and a second call in the same session says nothing.
+for _lint in ("", "   "):
+    gate = gates_mod._GATE_FACTORIES["format-lint-gate"](
+        {"commands": {"format": "", "lint": _lint},
+         "secrets": {"never_read_paths": []}, "deps": {"approved": []}})
+    _sid = "sg-lint-" + str(len(_lint))
+    r = asyncio.run(gate({"session_id": _sid, "tool_input": {}}, "tu-1",
+                         None))
+    check(f"format-lint: lint {_lint!r} -> the I-6(a) systemMessage only",
+          r == {"systemMessage": gates_mod._LINT_UNSET_NOTICE}, repr(r))
+    r = asyncio.run(gate({"session_id": _sid, "tool_input": {}}, "tu-2",
+                         None))
+    check(f"format-lint: lint {_lint!r}, same session again -> {{}} (RS-3)",
+          r == {}, repr(r))
+_mk = os.path.join(proj, ".claude", "sessions", ".lint-unset-sg-lint-0")
+check("format-lint: the SDK marker is the shell's file name",
+      os.path.isfile(_mk) and not os.path.islink(_mk))
+_sdir = os.path.join(proj, ".claude", "sessions")
+os.makedirs(_sdir, exist_ok=True)
+for _n, _days in ((".lint-unset-sg-old", 9), (".lint-unset-sg-new", 1)):
+    _p = os.path.join(_sdir, _n)
+    open(_p, "w").close()
+    os.utime(_p, (time.time() - _days * 86400,) * 2)
+_dflt = os.path.join(_sdir, ".lint-unset-default")
+if os.path.exists(_dflt):
+    os.remove(_dflt)
+_keep_sid = os.environ.pop("CLAUDE_SESSION_ID", None)
+r = asyncio.run(gate({"session_id": "../sg-x", "tool_input": {}}, "tu-3",
+                     None))
+if _keep_sid is not None:
+    os.environ["CLAUDE_SESSION_ID"] = _keep_sid
+check("format-lint: an unsafe session id uses the 'default' marker",
+      r == {"systemMessage": gates_mod._LINT_UNSET_NOTICE}
+      and os.path.isfile(_dflt)
+      and not any("sg-x" in n for n in os.listdir(_sdir)), repr(r))
+check("format-lint: writing a marker purges markers older than 7 days only",
+      not os.path.exists(os.path.join(_sdir, ".lint-unset-sg-old"))
+      and os.path.exists(os.path.join(_sdir, ".lint-unset-sg-new")),
+      sorted(os.listdir(_sdir)))
 
 # ---- Code-review fix regressions ---------------------------------------- #
 # tdd-gate: ABSOLUTE file_path (what Claude Code actually sends) must be

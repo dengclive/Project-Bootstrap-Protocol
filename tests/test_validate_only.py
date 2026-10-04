@@ -79,6 +79,14 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 # digest: de6d5086e0a5366ce0261d21ed9e52b9a84f5a8ceffb8be81752430f570a1089;
 # an intermediate WP1 digest, ce688bb3..., carried the unscoped header
 # "empty commands.* are intentional: the installer warns about each one".
+#
+# [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model.
+# RE-BASELINED again, same discipline. Exactly one line of the synthesized
+# config moves: `  eval: ""` inside the `commands:` block, after `ci_local`,
+# because the interview now carries `commands_eval` (WP2 / D9) and an empty
+# answer falls back to the eval-gate marker. VERIFIED: deleting that one line
+# from the new output reproduces the previous digest bit-for-bit. Previous
+# digest: 0c1c7931d29f281bba042c163e18e1e65525b59cfaa22ed9ce598302951c3178.
 def _run(args, cwd):
     return subprocess.run([sys.executable, BIN] + args, cwd=cwd,
                           capture_output=True, text=True)
@@ -166,7 +174,7 @@ finally:
 # unaffected (the flag branch has no side effects).
 # --------------------------------------------------------------------------- #
 EXPECTED_NOFLAG_SHA256 = \
-    "0c1c7931d29f281bba042c163e18e1e65525b59cfaa22ed9ce598302951c3178"
+    "d02fb348ea438b2f26e1111a4108218c3643147ee7979151a6ec35dc17efd0d2"
 
 d = tempfile.mkdtemp()
 try:

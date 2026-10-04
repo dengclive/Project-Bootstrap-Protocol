@@ -56,6 +56,7 @@ because a suite that declined to run has not passed. See `_skip` below.
 
 Run: python3 tests/test_wrapper_behavior.py
 """
+import json
 import os
 import shutil
 import subprocess
@@ -368,9 +369,21 @@ check("stop_hook_active re-entry -> allows (the loop bound)", rc == 0,
 rc, _, err = hook("iteration-summary-enforcement", STOP_RE, path=PATH_NOPARSER)
 check("no parser + stop_hook_active -> allows, never an unbounded stop-loop",
       rc == 0, f"rc={rc} {err[:200]}")
-rc, _, err = hook("iteration-summary-enforcement", STOP, path=PATH_NOPARSER)
+rc, out, err = hook("iteration-summary-enforcement", STOP,
+                    path=PATH_NOPARSER)
 check("no parser -> degrades to advisory rather than blocking unboundedly",
       rc == 0, f"rc={rc} {err[:200]}")
+# [WP2 channels] The degrade notice is a systemMessage on stdout, for the
+# user: exit-0 stderr reaches only the debug log, and Stop additionalContext
+# would continue the turn. No jq or python3 is needed to write it.
+try:
+    _dg = json.loads(out)
+except ValueError:
+    _dg = None
+check("no-parser degrade is ONE systemMessage on stdout, nothing for the "
+      "model", isinstance(_dg, dict) and list(_dg) == ["systemMessage"],
+      repr(out[:300]))
+err = (_dg or {}).get("systemMessage", "") + err
 # Anchored on the DEGRADE wording, not on "no JSON parser": the defective
 # version printed the shared header's "BLOCKED (fail-closed): no JSON parser
 # available" from inside the swallowed subshell, so that substring was present
@@ -378,7 +391,8 @@ check("no parser -> degrades to advisory rather than blocking unboundedly",
 check("no-parser degrade names the unbounded-block risk it is avoiding",
       "Degrading to advisory" in err and "cannot be bounded" in err, err[:300])
 check("no-parser degrade does not emit a spurious BLOCKED line",
-      "BLOCKED (fail-closed)" not in err, err[:300])
+      "BLOCKED (fail-closed)" not in err and "BLOCKED" not in out,
+      err[:300])
 clear_sentinels()
 
 
@@ -388,31 +402,34 @@ print("\n== F3: the tier-3 cooperation point must fire in a SINGLE mode ==")
 # both modes at once. A task is in exactly one mode -- the wrappers enforce
 # that -- so the cooperation point could never fire in normal operation.
 POST = '{"session_id":"s1","hook_event_name":"PostToolUse","tool_name":"Edit"}'
+# [WP2 channels] The instruction is PostToolUse additionalContext on STDOUT
+# now (exit-0 stderr reaches only the debug log). Every hook() call below
+# binds STDOUT to `err`, the quiet rows included.
 COOP = "tier3-in-loop"
 
 clear_sentinels()
 open(os.path.join(SESSIONS, ".loop-active-T-100"), "w").close()
 open(os.path.join(SESSIONS, ".drift-tier3-T-100"), "w").close()
-rc, _, err = hook("drift-detector-loop-cooperation", POST)
+rc, err, _ = hook("drift-detector-loop-cooperation", POST)
 check("LOOP mode + tier-3 sentinel -> cooperation fires", COOP in err,
       f"rc={rc} {err[:160]}")
 
 clear_sentinels()
 open(os.path.join(SESSIONS, ".goal-active-T-100"), "w").close()
 open(os.path.join(SESSIONS, ".drift-tier3-T-100"), "w").close()
-rc, _, err = hook("drift-detector-loop-cooperation", POST)
+rc, err, _ = hook("drift-detector-loop-cooperation", POST)
 check("GOAL mode + tier-3 sentinel -> cooperation fires", COOP in err,
       f"rc={rc} {err[:160]}")
 
 clear_sentinels()
 open(os.path.join(SESSIONS, ".drift-tier3-T-100"), "w").close()
-rc, _, err = hook("drift-detector-loop-cooperation", POST)
+rc, err, _ = hook("drift-detector-loop-cooperation", POST)
 check("tier-3 sentinel but NO active mode -> stays quiet", COOP not in err,
       f"rc={rc} {err[:160]}")
 
 clear_sentinels()
 open(os.path.join(SESSIONS, ".loop-active-T-100"), "w").close()
-rc, _, err = hook("drift-detector-loop-cooperation", POST)
+rc, err, _ = hook("drift-detector-loop-cooperation", POST)
 check("loop mode but no tier-3 sentinel -> stays quiet", COOP not in err,
       f"rc={rc} {err[:160]}")
 check("cooperation hook is advisory: never blocks", rc == 0, f"rc={rc}")

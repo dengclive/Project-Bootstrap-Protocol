@@ -25,6 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -214,7 +215,7 @@ check("drift-detector: injected command does NOT execute",
       not os.path.exists(marker),
       "marker created -- arbitrary command execution")
 check("drift-detector: garbage state recovers to a valid counter",
-      open(state, encoding="utf-8").read().strip() == "1",
+      open(state, encoding="utf-8").read().split()[0] == "1",
       open(state, encoding="utf-8").read())
 
 for payload in ("$(touch %s)" % marker, "1; touch " + marker, "-5", "",
@@ -230,7 +231,7 @@ with open(state, "w", encoding="utf-8") as fh:
     fh.write("41")
 run("drift-detector", pre("Read"))
 check("drift-detector: valid counter still increments",
-      open(state, encoding="utf-8").read().strip() == "42",
+      open(state, encoding="utf-8").read().split()[0] == "42",
       open(state, encoding="utf-8").read())
 
 
@@ -1250,6 +1251,181 @@ for test_cmd, needle, absent in (
           f"rc={p.returncode} err={p.stderr.strip()[-200:]!r}")
 
 
+print("\n== [WP2] test-gate and ci-mirror: the runner's output reaches the model ==")
+
+# Claude Code drops a PreToolUse hook's STDOUT at exit 2 and delivers its
+# STDERR to the model (measured, 2.1.288). `( cmd ) || rc=$?` left every
+# runner that reports on stdout - npm test, jest, mocha, make, ruff - saying
+# only "tests failing (exit 1)". Behavioural: run the gate, read the streams.
+_br_runner = os.path.join(TMP, "br-runner.sh")
+with open(_br_runner, "w", encoding="utf-8") as fh:
+    fh.write('i=0; while [ $i -lt 300 ]; do i=$((i+1)); echo "out $i"; done\n'
+             'echo RUNNER-STDOUT-LAST\necho RUNNER-STDERR >&2\nexit 3\n')
+_br_pass = os.path.join(TMP, "br-pass.sh")
+with open(_br_pass, "w", encoding="utf-8") as fh:
+    fh.write('echo \'{"numFailedTests":0}\'\nexit 0\n')
+
+
+def _br_install(label, repl):
+    """Install CONFIG with each (old, new) in `repl` applied; return proj."""
+    proj = os.path.join(TMP, label)
+    os.makedirs(proj, exist_ok=True)
+    cfgp = os.path.join(TMP, label + ".yaml")
+    text = CONFIG
+    for old, new in repl:
+        text = text.replace(old, new)
+    with open(cfgp, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    rr = subprocess.run([sys.executable, INSTALL, "-c", cfgp, "-C", proj],
+                        capture_output=True, text=True)
+    check(f"[WP2] {label} installs", rr.returncode == 0,
+          (rr.stdout + rr.stderr)[-300:])
+    return proj
+
+
+def _br_hook(proj, hook, cmd, cwd=None, path=None):
+    e = dict(os.environ, CLAUDE_PROJECT_DIR=proj)
+    if path:
+        e["PATH"] = path
+    return subprocess.run([BASH, os.path.join(proj, ".claude", "hooks",
+                                              hook + ".sh")],
+                          input=json.dumps(pre("Bash", command=cmd)),
+                          capture_output=True, text=True, env=e,
+                          cwd=cwd or proj)
+
+
+for hook, cmd, key, runner, want_rc, needle in (
+        ("test-gate", "git commit -m x", "test", _br_runner, 2,
+         "Commit blocked: tests failing (exit 3)."),
+        ("ci-mirror", "git push origin main", "ci_local", _br_runner, 2,
+         "Push blocked: CI mirror failed."),
+        ("test-gate", "git commit -m x", "test", _br_pass, 0, None),
+        ("ci-mirror", "git push origin main", "ci_local", _br_pass, 0, None)):
+    br_proj = _br_install(f"br-{hook}-{want_rc}",
+                          [(f'{key}: "true"', f'{key}: "sh {runner}"')])
+    p = _br_hook(br_proj, hook, cmd)
+    check(f"[WP2 {hook}] rc={want_rc}: hook STDOUT is empty (dropped at "
+          "exit 2, parsed as hook JSON at exit 0)",
+          p.returncode == want_rc and p.stdout == "",
+          f"rc={p.returncode} out={p.stdout[:120]!r}")
+    if needle is None:
+        continue
+    lines = p.stderr.splitlines()
+    check(f"[WP2 {hook}] the runner's stdout AND stderr reach stderr, in "
+          "order, before the reason line",
+          "RUNNER-STDOUT-LAST" in lines and "RUNNER-STDERR" in lines
+          and needle in lines
+          and lines.index("RUNNER-STDOUT-LAST") < lines.index("RUNNER-STDERR")
+          < lines.index(needle), repr(lines[-4:]))
+    check(f"[WP2 {hook}] the runner's output is bounded to its last 100 "
+          "lines (Claude Code does not cap exit-2 stderr)",
+          "out 202" not in lines and "out 203" in lines, repr(lines[:3]))
+
+
+print("\n== [WP2 Z-1] ci-mirror: no tests collected ==")
+
+# test-gate allows pytest's exit 5 ("no tests collected") at the top of the
+# checkout since WP1; ci-mirror runs commands.ci_local, else commands.test,
+# and blocked every push of a new pytest project on that same exit 5. The
+# arm is scoped as test-gate's is: NO_TESTS_RC5_RE on the command that runs,
+# and the top of the checkout. The runners are FAKES on PATH.
+import re  # noqa: E402
+from sdk_gates_template import NO_TESTS_RC5_RE  # noqa: E402  (scope pin)
+
+
+def _ci_fake(name, rc):
+    d = os.path.join(TMP, f"ci-bin-{name}-{rc}")
+    os.makedirs(d, exist_ok=True)
+    f = os.path.join(d, name)
+    with open(f, "w", encoding="utf-8") as fh:
+        fh.write(f"#!/bin/sh\necho 'fake {name}: exiting {rc}'\nexit {rc}\n")
+    os.chmod(f, 0o755)
+    return d + os.pathsep + os.environ.get("PATH", "")
+
+
+_CI_PUSH = "git push origin main"
+_ci_off = "which is not the top of the checkout"
+# ci_local empty, so ci-mirror runs commands.test (Z-1's reported shape).
+_ci_proj = _br_install("ci-nt-fallback", [('test: "true"', 'test: "pytest -q"'),
+                                          ('ci_local: "true"', 'ci_local: ""')])
+_r = _br_hook(_ci_proj, "ci-mirror", _CI_PUSH, path=_ci_fake("pytest", 5))
+try:
+    _ci_json = json.loads(_r.stdout)
+except ValueError:
+    _ci_json = None
+_ci_ctx = ((_ci_json or {}).get("hookSpecificOutput") or {})
+check("[WP2 Z-1] ci_local empty, test pytest, exit 5 at the top: the push "
+      "is ALLOWED, and stdout is ONLY the notice JSON",
+      _r.returncode == 0 and _ci_json is not None
+      and "collected no tests (exit 5)" in _ci_json.get("systemMessage", "")
+      and _ci_ctx.get("hookEventName") == "PreToolUse"
+      and _ci_ctx.get("additionalContext") == _ci_json.get("systemMessage")
+      and "push is allowed" in _ci_ctx.get("additionalContext", "")
+      and "permissionDecision" not in _ci_ctx,
+      repr((_r.returncode, _r.stdout[:200], _r.stderr[-160:])))
+check("[WP2 Z-1] ... and the runner's own line went to stderr",
+      "fake pytest: exiting 5" in _r.stderr, repr(_r.stderr[-160:]))
+_ci_src = os.path.join(_ci_proj, "src")
+os.makedirs(_ci_src, exist_ok=True)
+_r = _br_hook(_ci_proj, "ci-mirror", _CI_PUSH, cwd=_ci_src,
+              path=_ci_fake("pytest", 5))
+check("[WP2 Z-1] exit 5 from a subdirectory BLOCKS the push, saying why",
+      _r.returncode == 2 and _r.stdout == "" and _ci_off in _r.stderr
+      and "Push blocked" in _r.stderr and "then push." in _r.stderr,
+      repr((_r.returncode, _r.stdout[:120], _r.stderr[-200:])))
+subprocess.run(["git", "init", "-q", _ci_proj], check=True)
+_r = _br_hook(_ci_proj, "ci-mirror", _CI_PUSH, path=_ci_fake("pytest", 5))
+check("[WP2 Z-1] in a git checkout, exit 5 at its top level allows",
+      _r.returncode == 0 and "collected no tests" in _r.stdout,
+      repr((_r.returncode, _r.stdout[:120], _r.stderr[-160:])))
+_r = _br_hook(_ci_proj, "ci-mirror", _CI_PUSH, cwd=_ci_src,
+              path=_ci_fake("pytest", 5))
+check("[WP2 Z-1] in a git checkout, exit 5 from a subdirectory BLOCKS",
+      _r.returncode == 2 and _r.stdout == "" and _ci_off in _r.stderr,
+      repr((_r.returncode, _r.stderr[-160:])))
+for _rc in (1, 4):
+    _r = _br_hook(_ci_proj, "ci-mirror", _CI_PUSH, path=_ci_fake("pytest", _rc))
+    check(f"[WP2 Z-1] POSITIVE CONTROL: pytest exit {_rc} still blocks the "
+          "push", _r.returncode == 2 and _r.stdout == ""
+          and "Push blocked: CI mirror failed." in _r.stderr,
+          repr((_r.returncode, _r.stderr[-160:])))
+_r = _br_hook(_ci_proj, "ci-mirror", "git commit -m x",
+              path=_ci_fake("pytest", 5))
+check("[WP2 Z-1] a non-push command runs nothing and says nothing",
+      _r.returncode == 0 and _r.stdout == "", repr((_r.returncode,
+                                                   _r.stdout[:120])))
+# An explicit ci_local pytest gets the arm too: the scope is the command
+# that RUNS, not where it came from. `python3.99`, not `python3`: a fake
+# python3 on PATH would also answer the hook's own payload parser.
+_ci_proj2 = _br_install("ci-nt-explicit",
+                        [('ci_local: "true"', 'ci_local: "python3.99 -m pytest"')])
+_r = _br_hook(_ci_proj2, "ci-mirror", _CI_PUSH, path=_ci_fake("python3.99", 5))
+check("[WP2 Z-1] ci_local `python3.99 -m pytest`, exit 5 at the top: allowed",
+      _r.returncode == 0 and "collected no tests" in _r.stdout,
+      repr((_r.returncode, _r.stdout[:120], _r.stderr[-160:])))
+# Out of scope: mocha exits with its failure count, so 5 = five failures.
+# And ci_local wins over a pytest test command.
+for _lbl, _repl, _fake in (
+        ("ci-nt-mocha", [('ci_local: "true"', 'ci_local: "mocha"')],
+         ("mocha", 5)),
+        ("ci-nt-ci-wins", [('test: "true"', 'test: "pytest -q"'),
+                           ('ci_local: "true"', 'ci_local: "make ci"')],
+         ("make", 5))):
+    _p = _br_install(_lbl, _repl)
+    _r = _br_hook(_p, "ci-mirror", _CI_PUSH, path=_ci_fake(*_fake))
+    check(f"[WP2 Z-1] {_lbl}: exit 5 from a command NOT in the table "
+          "still blocks the push",
+          _r.returncode == 2 and _r.stdout == ""
+          and "Push blocked: CI mirror failed." in _r.stderr,
+          repr((_r.returncode, _r.stdout[:120], _r.stderr[-160:])))
+check("[WP2 Z-1] scope pin: the table accepts the commands the allow rows "
+      "use and rejects the block rows'",
+      all(re.fullmatch(NO_TESTS_RC5_RE, c) for c in ("pytest -q",
+                                                     "python3.99 -m pytest"))
+      and not any(re.fullmatch(NO_TESTS_RC5_RE, c)
+                  for c in ("mocha", "make ci")))
+
+
 print("\n== P2-6: format-lint-gate must never mutate the tree ==")
 
 # [lens B finding 11] THIS REPLACES A TEST THAT COULD NOT FAIL. What stood
@@ -1318,15 +1494,731 @@ check("a path-hostile session id cannot escape the sessions dir",
       not os.path.exists(os.path.join(TMP, "etc")), "traversal succeeded")
 
 
+print("\n== [WP2 drift-tier1] re-arm, three triggers, fire once, purge ==")
+
+# The emitted detector was a bare counter: it never reset, fired on every
+# call past the threshold, ignored checkpoints and acks, never applied the
+# duration or file-read thresholds, wrote no session start file, purged
+# nothing, and wrote its notice to exit-0 stderr, which reaches nobody.
+
+
+def _drift(sid, tool="Bash", **ti):
+    return run("drift-detector", {"session_id": sid, "tool_name": tool,
+                                  "tool_input": ti or {"command": "ls"}})
+
+
+def _dstate(sid):
+    with open(os.path.join(sessions, ".drift-state-" + sid),
+              encoding="utf-8") as fh:
+        return fh.read().split()
+
+
+def _dctx(out):
+    """The additionalContext of a notice, or None when out is not one.
+
+    A broken encoder must report FAIL, not crash the suite."""
+    try:
+        j = json.loads(out)
+        h = j["hookSpecificOutput"]
+        if h["hookEventName"] != "PostToolUse":
+            return None
+        return h["additionalContext"]
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def _fires(outs):
+    return [i + 1 for i, o in enumerate(outs) if o.strip()]
+
+
+def _put(name, text, age_days=0):
+    p = os.path.join(sessions, name)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    if age_days:
+        t = time.time() - age_days * 86400
+        os.utime(p, (t, t))
+    return p
+
+
+_DT = 50  # the fixture's default drift_tool_call_threshold
+_outs = [_drift("dt-a")[1] for _ in range(_DT + 3)]
+check("drift: the tool-count notice fires exactly once, at the threshold",
+      _fires(_outs) == [_DT], _fires(_outs))
+_ctx = _dctx(_outs[_DT - 1])
+check("drift: the notice is PostToolUse additionalContext JSON",
+      _ctx is not None and _ctx.startswith("Drift signals:")
+      and "50 tool calls" in _ctx and "/ack-drift" in _ctx,
+      _outs[_DT - 1][:300])
+check("drift: a session start file is written",
+      os.path.exists(os.path.join(sessions, ".session-dt-a")))
+
+# An ack sets the threshold to max(threshold, count at the ack) + half the
+# configured threshold (PRD 6.E Acknowledgement, operator decision
+# 2026-10-03), NOT a full reset: the counter keeps running, so the next
+# notice comes 25 calls later, not 50.
+_ack = _put(".drift-ack-dt-a", "1")
+_, _o, _ = _drift("dt-a")                       # call 54 consumes the ack
+check("drift: an ack is consumed and suppresses the notice",
+      not os.path.exists(_ack) and not _o.strip(), _o[:200])
+check("drift: an ack keeps the counter and raises the threshold by 50%",
+      _dstate("dt-a")[0] == "54" and _dstate("dt-a")[1] == "0"
+      and _dstate("dt-a")[3] == str(54 + _DT // 2), _dstate("dt-a"))
+_outs = [_drift("dt-a")[1] for _ in range(30)]  # calls 55..84
+check("drift: after an ack the notice re-fires once, at +50%",
+      [54 + i for i in _fires(_outs)] == [54 + _DT // 2], _fires(_outs))
+
+# A checkpoint is a full re-arm: counters zeroed, thresholds restored.
+_drift("dt-a", "Write",
+       file_path=os.path.join(sessions, "2026-10-03T1200Z-checkpoint.md"),
+       content="x")
+check("drift: a checkpoint Write resets the counter and the thresholds",
+      _dstate("dt-a")[:2] == ["0", "0"] and _dstate("dt-a")[3] == str(_DT),
+      _dstate("dt-a"))
+_outs = [_drift("dt-a")[1] for _ in range(_DT)]
+check("drift: after a checkpoint the notice fires again at the threshold",
+      _fires(_outs) == [_DT], _fires(_outs))
+_drift("dt-a", "Write", file_path=".claude/sessions/x-checkpoint.md",
+       content="x")
+check("drift: a relative checkpoint path also resets",
+      _dstate("dt-a")[:2] == ["0", "0"], _dstate("dt-a"))
+_drift("dt-a", "Write", file_path=os.path.join(sessions, "notes.md"),
+       content="x")
+check("drift: a Write to another sessions file does not reset",
+      _dstate("dt-a")[0] == "1", _dstate("dt-a"))
+# A stale ack seen on the checkpoint call is consumed, and the checkpoint
+# wins: it must not raise the thresholds of the new arming.
+_put(".drift-ack-dt-a", "1")
+_drift("dt-a", "Write", file_path=".claude/sessions/y-checkpoint.md",
+       content="x")
+check("drift: a checkpoint consumes a stale ack and keeps the thresholds",
+      not os.path.exists(os.path.join(sessions, ".drift-ack-dt-a"))
+      and _dstate("dt-a")[3:] == [str(_DT), "120", "3"], _dstate("dt-a"))
+
+# A symlinked ack loses only the link; its target survives.
+_tgt = os.path.join(TMP, "ack-target")
+with open(_tgt, "w", encoding="utf-8") as fh:
+    fh.write("keep")
+os.symlink(_tgt, os.path.join(sessions, ".drift-ack-dt-l"))
+_drift("dt-l")
+check("drift: a symlinked ack is removed without touching its target",
+      not os.path.lexists(os.path.join(sessions, ".drift-ack-dt-l"))
+      and os.path.exists(_tgt))
+os.symlink(os.path.join(TMP, "no-such-target"),
+           os.path.join(sessions, ".drift-ack-dt-l"))
+_drift("dt-l")
+check("drift: a dangling ack symlink still counts as an ack and is consumed",
+      not os.path.lexists(os.path.join(sessions, ".drift-ack-dt-l"))
+      and _dstate("dt-l")[3] != str(_DT), _dstate("dt-l"))
+
+# Duration: measured from the session start file (or the last checkpoint).
+_t = int(time.time()) - 121 * 60
+_drift("dt-d")
+_put(".session-dt-d", f"{_t}\n")
+_put(".drift-state-dt-d", f"1 0 {_t}\n")
+_, _o, _ = _drift("dt-d")
+check("drift: the duration trigger fires past 120 minutes",
+      "121 minutes" in (_dctx(_o) or ""), _o[:300])
+_put(".drift-ack-dt-d", "1")
+_drift("dt-d")
+check("drift: an ack raises the duration threshold by 50%",
+      _dstate("dt-d")[4] == str(121 + 60), _dstate("dt-d"))
+
+# Repeated reads: the same file Read MORE than 3 times fires on the 4th.
+_rp = os.path.join(PROJ, 'q"x\\y\tz.md')
+_ro = [_drift("dt-r", "Read", file_path=_rp)[1] for _ in range(4)]
+check("drift: the same file Read 4 times (threshold 3) fires on the 4th",
+      _fires(_ro) == [4], _fires(_ro))
+check("drift: a hostile Read path still yields valid JSON",
+      _rp in (_dctx(_ro[3]) or ""), _ro[3][:300])
+_put(".drift-ack-dt-r", "1")
+_drift("dt-r", "Read", file_path=_rp)
+check("drift: an ack raises the read threshold above the reads so far",
+      _dstate("dt-r")[5] == str(5 + 2), _dstate("dt-r"))
+
+# Purge: a new session removes week-old drift state and keeps fresh state.
+_stale = (".drift-state-zz", ".session-zz", ".drift-reads-zz",
+          ".drift-ack-zz")
+for _n in _stale:
+    _put(_n, "1", age_days=8)
+_keep = _put(".decision-pending-zz", "", age_days=8)
+_drift("dt-new")
+check("drift: a new session purges week-old drift state",
+      not any(os.path.exists(os.path.join(sessions, _n)) for _n in _stale)
+      and os.path.exists(os.path.join(sessions, ".drift-state-dt-a")),
+      sorted(os.listdir(sessions)))
+check("drift: the purge leaves another hook's state alone",
+      os.path.exists(_keep))
+
+# Untrusted state: nothing executes, nothing wraps, nothing lowers.
+for _n in (".drift-state-dt-x", ".session-dt-x"):
+    _put(_n, f"PATH[$(touch {marker})] PATH[$(touch {marker})] 1 "
+             f"PATH[$(touch {marker})] 1 1")
+_drift("dt-x")
+check("drift: hostile state and session files execute nothing",
+      not os.path.exists(marker))
+_put(".drift-state-dt-big", "9999999999999 0 0\n")
+_, _o, _ = _drift("dt-big")
+check("drift: an over-long counter is rejected, not wrapped",
+      _dstate("dt-big")[0] == "1", _dstate("dt-big"))
+check("drift: a baseline before the session start is clamped (no notice)",
+      not _o.strip() and int(_dstate("dt-big")[2]) > 0,
+      (_o, _dstate("dt-big")))
+_drift("dt-low")
+_put(".drift-state-dt-low", "1 0 0 1 1 1\n")
+_, _o, _ = _drift("dt-low")
+check("drift: a stored threshold below the configured one is ignored",
+      not _o.strip() and _dstate("dt-low")[3:] == [str(_DT), "120", "3"],
+      (_o, _dstate("dt-low")))
+
+# [WP2 review TP-2] A checkpoint clears the repeated-read list ("since the
+# last checkpoint"): one Read after it is one Read, not the fourth.
+for _ in range(3):
+    _drift("dt-cr", "Read", file_path="a.md")
+_drift("dt-cr", "Write", file_path=".claude/sessions/x-checkpoint.md",
+       content="x")
+_, _o, _ = _drift("dt-cr", "Read", file_path="a.md")
+check("drift: a checkpoint clears the repeated-read list",
+      not _o.strip(), _o[:200])
+
+# [WP2 review TP-3] The read counter matches WHOLE lines: a path that
+# contains the target path is a different file.
+for _p in ("src/a.py.orig", "y/src/a.py", "x/src/a.py"):
+    _drift("dt-wl", "Read", file_path=_p)
+_, _o, _ = _drift("dt-wl", "Read", file_path="src/a.py")
+check("drift: the read counter does not count superstring paths",
+      not _o.strip(), _o[:200])
+
+# [WP2 review TP-6] Only a checkpoint under .claude/sessions/ is one.
+for _ in range(3):
+    _drift("dt-cs")
+_drift("dt-cs", "Write", file_path="docs/x-checkpoint.md", content="x")
+check("drift: a -checkpoint.md Write outside .claude/sessions does not reset",
+      _dstate("dt-cs")[0] == "4", _dstate("dt-cs"))
+
+# [WP2 review PIV-3] The hook writes only its own regular files: a planted
+# symlink at the reads list or the session start file loses only the link.
+_vic = os.path.join(TMP, "drift-victim")
+
+
+def _victim(text):
+    with open(_vic, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def _link(name, target):
+    p = os.path.join(sessions, name)
+    if os.path.lexists(p):
+        os.remove(p)
+    os.symlink(target, p)
+    return p
+
+
+_victim("hello\n")
+_lp = _link(".drift-reads-dt-sy", _vic)
+_drift("dt-sy", "Read", file_path="x")
+check("drift: a Read does not append through a symlinked reads list",
+      open(_vic, encoding="utf-8").read() == "hello\n"
+      and not os.path.islink(_lp), sorted(os.listdir(sessions))[:5])
+_victim("0123456789")
+_link(".drift-reads-dt-sy", _vic)
+_drift("dt-sy", "Write", file_path=".claude/sessions/x-checkpoint.md",
+       content="x")
+check("drift: a checkpoint does not truncate a symlinked reads list's target",
+      open(_vic, encoding="utf-8").read() == "0123456789")
+os.remove(_vic)
+_lp = _link(".session-dt-sz", _vic)
+_drift("dt-sz")
+check("drift: the session start file is not written through a symlink",
+      not os.path.exists(_vic) and not os.path.islink(_lp))
+
+# [WP2 review PIV-2] Parallel tool calls run the hook concurrently. Without
+# a lock, a call that read the state before another consumed the ack renamed
+# last: the ack was lost (fired stayed set) and increments were lost. With
+# the lock every trial ends at exactly 60 + _K calls with the ack applied.
+# [WP2 re-review TD-1] Each call runs on its own thread, so each child is
+# reaped as soon as it exits, as Claude Code (Node) reaps its hooks. Waiting
+# on the children one by one left an exited holder a zombie, which passes
+# `kill -0`, so the dead-holder branch never ran for a holder that had just
+# released its lock.
+_K, _bad = 10, []
+
+
+def _cc_call(sid, j, rcs):
+    rcs[j] = subprocess.run(
+        [BASH, os.path.join(HOOKS, "drift-detector.sh")],
+        input=json.dumps({"session_id": sid,
+                          "tool_name": "Read" if j % 2 else "Bash",
+                          "tool_input": {"file_path": "f"} if j % 2
+                          else {"command": "ls"}}),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True,
+        env=dict(os.environ, CLAUDE_PROJECT_DIR=PROJ)).returncode
+
+
+for _t in range(30):
+    _sid = f"dt-cc{_t}"
+    _now = int(time.time())
+    _put(".session-" + _sid, f"{_now}\n")
+    _put(".drift-state-" + _sid, f"60 {_now} {_now} 50 120 3\n")
+    _put(".drift-ack-" + _sid, "")
+    _rcs = [None] * _K
+    _ths = [threading.Thread(target=_cc_call, args=(_sid, _j, _rcs))
+            for _j in range(_K)]
+    for _th in _ths:
+        _th.start()
+    for _th in _ths:
+        _th.join()
+    _st = _dstate(_sid)
+    if _rcs != [0] * _K or _st[0] != str(60 + _K) or _st[1] != "0":
+        _bad.append((_t, _rcs, _st))
+check("drift: concurrent calls lose neither the ack nor an increment",
+      not _bad, _bad[:3])
+check("drift: the state lock is released after each call",
+      not any(n.startswith(".drift-lock-") for n in os.listdir(sessions)),
+      [n for n in os.listdir(sessions) if n.startswith(".drift-lock-")])
+
+# A lock left by a holder that died (killed at its hook timeout) is broken
+# at once; a lock held by a live process is waited on, then the advisory
+# hook proceeds unlocked rather than stalling the tool call.
+_dead = subprocess.Popen(["true"])
+_dead.wait()
+# [WP2 re-review C2] The live holder's pid file is well-formed, and is
+# re-stamped with the current epoch every 0.2 s (atomically, as the hook
+# writes its own), so the age arm never fires: a pid-only file is now
+# malformed and broken at once (the dt-w2 row below).
+_restamp = threading.Event()
+
+
+def _keep_fresh(ld):
+    while not _restamp.is_set():
+        try:
+            with open(os.path.join(ld, "pid.t"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(f"{os.getpid()} {int(time.time())}\n")
+            os.replace(os.path.join(ld, "pid.t"), os.path.join(ld, "pid"))
+        except OSError:
+            pass
+        time.sleep(0.2)
+
+
+for _sid, _pid in (("dt-sl", _dead.pid), ("dt-ll", os.getpid())):
+    _ld = os.path.join(sessions, ".drift-lock-" + _sid)
+    os.makedirs(_ld)
+    with open(os.path.join(_ld, "pid"), "w", encoding="utf-8") as fh:
+        fh.write(f"{_pid} {int(time.time())}\n")
+    _kf = None
+    if _sid == "dt-ll":
+        _restamp.clear()
+        _kf = threading.Thread(target=_keep_fresh, args=(_ld,))
+        _kf.start()
+    _t0 = time.time()
+    _rc = _drift(_sid)[0]
+    _dt = time.time() - _t0
+    if _kf is not None:
+        _restamp.set()
+        _kf.join()
+    if _sid == "dt-sl":
+        check("drift: a dead holder's lock is broken without waiting",
+              _rc == 0 and _dstate(_sid)[0] == "1" and _dt < 1.5
+              and not os.path.lexists(_ld), (_rc, round(_dt, 2)))
+    else:
+        check("drift: a live holder's lock is waited on, then the hook "
+              "proceeds", _rc == 0 and _dstate(_sid)[0] == "1"
+              and 1.5 < _dt < 10 and os.path.isdir(_ld),
+              (_rc, round(_dt, 2)))
+        shutil.rmtree(_ld)
+
+# [WP2 re-review TD-1] A holder that has exited but is not yet reaped is a
+# zombie, and a zombie passes `kill -0`; so does a live process that reused
+# a dead holder's pid. The holder's epoch frees such a lock: the zombie
+# below is made on purpose (never waited on until the row ends) and checked
+# to still be one afterwards, so the row cannot pass by a reap.
+if os.path.isdir("/proc/self"):
+    def _pstate(pid):
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+                return fh.read().rsplit(")", 1)[1].split()[0]
+        except (OSError, IndexError):
+            return ""
+
+    _z = subprocess.Popen(["true"])
+    for _ in range(500):
+        if _pstate(_z.pid) == "Z":
+            break
+        time.sleep(0.01)
+    _ld = os.path.join(sessions, ".drift-lock-dt-zb")
+    os.makedirs(_ld)
+    with open(os.path.join(_ld, "pid"), "w", encoding="utf-8") as fh:
+        fh.write(f"{_z.pid} {int(time.time()) - 30}\n")
+    _t0 = time.time()
+    _rc = _drift("dt-zb")[0]
+    _dt = time.time() - _t0
+    _zs = _pstate(_z.pid)
+    _z.wait()
+    check("drift: a zombie holder's lock is broken by its age, without "
+          "waiting", _zs == "Z" and _rc == 0 and _dstate("dt-zb")[0] == "1"
+          and _dt < 1.5 and not os.path.lexists(_ld),
+          (_zs, _rc, round(_dt, 2)))
+else:
+    print("  SKIP  drift: zombie holder row (no /proc on this platform)")
+
+# The age bound is 2 clock seconds, so a lock just taken by a live holder is
+# waited on for at least 1 s, and the wait outlasts the bound: the lock is
+# broken and the update made under it, with no "lock wait expired".
+_ld = os.path.join(sessions, ".drift-lock-dt-ag")
+os.makedirs(_ld)
+with open(os.path.join(_ld, "pid"), "w", encoding="utf-8") as fh:
+    fh.write(f"{os.getpid()} {int(time.time())}\n")
+_lg = os.path.join(PROJ, ".claude", "logs", "hooks.log")
+_lg0 = os.path.getsize(_lg) if os.path.exists(_lg) else 0
+_t0 = time.time()
+_rc = _drift("dt-ag")[0]
+_dt = time.time() - _t0
+with open(_lg, encoding="utf-8", errors="replace") as fh:
+    fh.seek(_lg0)
+    _lgn = fh.read()
+check("drift: a live holder's fresh lock is waited on, then broken by age "
+      "inside the wait", _rc == 0 and _dstate("dt-ag")[0] == "1"
+      and 0.9 < _dt < 2.9 and not os.path.lexists(_ld)
+      and "lock wait expired" not in _lgn, (_rc, round(_dt, 2), _lgn[-300:]))
+
+# [WP2 re-review C1] A holder that stalls past 2 s inside its critical
+# section has its lock broken while it still runs. It must neither rename
+# its stale state over the updates made meanwhile nor remove its
+# successor's lock. The stall is a `grep` wrapper on PATH that sleeps 3 s
+# the first time it is asked to count reads (-cxF) after a flag file is
+# made, and consumes the flag, so exactly one call per flag stalls.
+_SLOW = os.path.join(TMP, "slow-grep")
+os.makedirs(_SLOW, exist_ok=True)
+_FLAG = os.path.join(TMP, "slow.flag")
+with open(os.path.join(_SLOW, "grep"), "w", encoding="utf-8") as fh:
+    fh.write("#!%s\ncase \" $* \" in *\" -cxF \"*)\n"
+             "  if rm \"%s\" 2>/dev/null; then sleep 3; fi ;;\nesac\n"
+             "exec %s \"$@\"\n" % (BASH, _FLAG, shutil.which("grep")))
+os.chmod(os.path.join(_SLOW, "grep"), 0o755)
+_SENV = dict(os.environ, CLAUDE_PROJECT_DIR=PROJ,
+             PATH=_SLOW + os.pathsep + os.environ.get("PATH", ""))
+
+
+def _spawn(sid, tool):
+    p = subprocess.Popen(
+        [BASH, os.path.join(HOOKS, "drift-detector.sh")],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL, env=_SENV)
+    p.stdin.write(json.dumps({"session_id": sid, "tool_name": tool,
+                              "tool_input": {"file_path": "f"}
+                              if tool == "Read" else {"command": "ls"}})
+                  .encode())
+    p.stdin.close()
+    return p
+
+
+def _slow_read(sid):
+    open(_FLAG, "w").close()
+    return _spawn(sid, "Read")
+
+
+# (a) Six fast calls arrive while the first stalls: all six land, and only
+# the stalled call's own update is dropped (it was 9 of 12 lost before).
+_drift("dt-c1a")
+_a = _slow_read("dt-c1a")
+time.sleep(0.2)
+_fast = []
+for _ in range(6):
+    _fast.append(_spawn("dt-c1a", "Bash"))
+    time.sleep(0.3)
+for _p in [_a] + _fast:
+    _p.wait()
+with open(_lg, encoding="utf-8", errors="replace") as fh:
+    fh.seek(_lg0)
+    _lgn = fh.read()
+check("drift: a holder stalled past its lock drops only its own update "
+      "(C1)", _dstate("dt-c1a")[0] == "7"
+      and "lost its lock while stalled" in _lgn
+      and not os.path.lexists(os.path.join(sessions, ".drift-lock-dt-c1a")),
+      (_dstate("dt-c1a"), _lgn[-400:]))
+
+# (b) A stalls, B breaks A's lock and stalls too: when A finishes, B's lock
+# is still B's, and the ack A consumed is put back for a later call.
+_drift("dt-c1b")
+_put(".drift-ack-dt-c1b", "")
+_ld = os.path.join(sessions, ".drift-lock-dt-c1b")
+_lg0 = os.path.getsize(_lg)
+_a = _slow_read("dt-c1b")
+time.sleep(0.3)
+_b = _slow_read("dt-c1b")
+_a.wait()
+try:
+    with open(os.path.join(_ld, "pid"), encoding="utf-8") as fh:
+        _held = fh.read().split()[:1]
+except OSError:
+    _held = []
+_b_running = _b.poll() is None
+_b.wait()
+check("drift: a holder whose lock was broken leaves its successor's lock "
+      "alone (C1)", _b_running and _held == [str(_b.pid)]
+      and _dstate("dt-c1b")[0] == "2" and not os.path.lexists(_ld),
+      (_b_running, _held, _b.pid, _dstate("dt-c1b")))
+check("drift: an ack consumed by a holder that lost its lock is put back "
+      "(C1)", os.path.isfile(os.path.join(sessions, ".drift-ack-dt-c1b")))
+# [WP2 re-review RR3-3] The dropped call (A) neither appends its Read path
+# nor logs an n= line: B's path is the only line, and B's is the only n=
+# line after A and B start. Before, A's path was appended too and A logged
+# "n=2" right after its drop line.
+with open(_lg, encoding="utf-8", errors="replace") as fh:
+    fh.seek(_lg0)
+    _lgn = fh.read()
+try:
+    with open(os.path.join(sessions, ".drift-reads-dt-c1b"),
+              encoding="utf-8") as fh:
+        _rl = fh.read().splitlines()
+except OSError:
+    _rl = None
+check("drift: a dropped call leaves the reads file and the n= log alone "
+      "(RR3-3)", _rl == ["f"] and "lost its lock while stalled" in _lgn
+      and _lgn.count("drift-detector n=") == 1, (_rl, _lgn[-500:]))
+
+# (c) A stalled holder is killed (SIGTERM, as at a hook timeout) after its
+# lock has passed to another: its EXIT-trap _unlock leaves that lock alone.
+# The successor is modelled by rewriting the pid file to another token.
+_ld = os.path.join(sessions, ".drift-lock-dt-c1c")
+_a = _slow_read("dt-c1c")
+for _ in range(100):
+    if os.path.isfile(os.path.join(_ld, "pid")):
+        break
+    time.sleep(0.02)
+_other = f"{_dead.pid} {int(time.time())}\n"
+with open(os.path.join(_ld, "pid.t"), "w", encoding="utf-8") as fh:
+    fh.write(_other)
+os.replace(os.path.join(_ld, "pid.t"), os.path.join(_ld, "pid"))
+time.sleep(0.2)
+_a.terminate()
+_a.wait()
+try:
+    with open(os.path.join(_ld, "pid"), encoding="utf-8") as fh:
+        _held = fh.read()
+except OSError:
+    _held = None
+check("drift: a holder killed after losing its lock does not remove its "
+      "successor's lock (C1)", _held == _other, repr(_held))
+if os.path.lexists(_ld):
+    shutil.rmtree(_ld)
+
+# [WP2 re-review RR3-1] (d) A holder that stalls between its mkdir and its
+# pid write has a lock with no pid file, which a waiter breaks after about
+# 1 s and takes. The stalled holder used to `mv -f` its token over the
+# successor's, keep its own update, and remove the successor's lock on
+# exit, so the SUCCESSOR's update was lost (final n=2, not 3). The stall is
+# staged, not timed: `ln` and `mv` wrappers block on a FIFO when asked to
+# create a lock's pid file (once per flag), and a `grep` wrapper holds the
+# successor inside its critical section on a second FIFO. A is released
+# only once B holds the lock and is parked, and B only after A has acted.
+def _fifo_write(path):
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        os.write(fd, b"go\n")
+    finally:
+        os.close(fd)
+    return True
+
+
+def _wait_path(path, secs=10):
+    _end = time.time() + secs
+    while time.time() < _end:
+        if os.path.exists(path):
+            return True
+        time.sleep(0.02)
+    return False
+
+
+if hasattr(os, "mkfifo"):
+    _STL = os.path.join(TMP, "stall-ln")
+    os.makedirs(_STL, exist_ok=True)
+    for _nm in ("ln", "mv"):
+        with open(os.path.join(_STL, _nm), "w", encoding="utf-8") as fh:
+            fh.write("#!%s\nif [ -n \"${STALLFIFO:-}\" ]; then\n"
+                     "  for _a; do :; done\n"
+                     "  case \"$_a\" in */.drift-lock-*/pid)\n"
+                     "    if rm \"$STALLFIFO.once\" 2>/dev/null; then\n"
+                     "      : >\"$STALLFIFO.waiting\"; read -r _ <\"$STALLFIFO\"\n"
+                     "    fi ;;\n  esac\nfi\nexec %s \"$@\"\n"
+                     % (BASH, shutil.which(_nm)))
+    with open(os.path.join(_STL, "grep"), "w", encoding="utf-8") as fh:
+        fh.write("#!%s\ncase \" $* \" in *\" -cxF \"*)\n"
+                 "  if [ -n \"${GREPFIFO:-}\" ]; then\n"
+                 "    : >\"$GREPFIFO.waiting\"; read -r _ <\"$GREPFIFO\"\n"
+                 "  fi ;;\nesac\nexec %s \"$@\"\n"
+                 % (BASH, shutil.which("grep")))
+    for _nm in ("ln", "mv", "grep"):
+        os.chmod(os.path.join(_STL, _nm), 0o755)
+    _f1 = os.path.join(TMP, "stall-a")
+    _f2 = os.path.join(TMP, "stall-b")
+    os.mkfifo(_f1)
+    os.mkfifo(_f2)
+    open(_f1 + ".once", "w").close()
+    _XENV = dict(os.environ, CLAUDE_PROJECT_DIR=PROJ,
+                 PATH=_STL + os.pathsep + os.environ.get("PATH", ""))
+
+    def _xspawn(tool, **extra):
+        p = subprocess.Popen(
+            [BASH, os.path.join(HOOKS, "drift-detector.sh")],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=dict(_XENV, **extra))
+        p.stdin.write(json.dumps({"session_id": "dt-c1d", "tool_name": tool,
+                                  "tool_input": {"file_path": "f"}
+                                  if tool == "Read" else {"command": "ls"}})
+                      .encode())
+        p.stdin.close()
+        return p
+
+    def _held_by():
+        try:
+            with open(os.path.join(_ld, "pid"), encoding="utf-8") as fh:
+                return fh.read().split()[:1]
+        except OSError:
+            return []
+
+    _ld = os.path.join(sessions, ".drift-lock-dt-c1d")
+    _drift("dt-c1d")                                       # n=1
+    _lg0 = os.path.getsize(_lg)
+    _a = _xspawn("Bash", STALLFIFO=_f1)
+    _a_parked = _wait_path(_f1 + ".waiting")
+    _b = _xspawn("Read", GREPFIFO=_f2)
+    _b_parked = _wait_path(_f2 + ".waiting")
+    _held_b = _held_by()
+    _a_woke = _fifo_write(_f1)
+    # A has acted once its temp pid file is gone (it removes it whether
+    # its link succeeds or fails); B is still parked meanwhile.
+    _pa = os.path.join(_ld, "pid.%d" % _a.pid)
+    _end = time.time() + 2
+    while time.time() < _end and _a.poll() is None and os.path.exists(_pa):
+        time.sleep(0.02)
+    time.sleep(0.2)
+    _held_after = _held_by()
+    _b_woke = _fifo_write(_f2)
+    for _p in (_a, _b):
+        try:
+            _p.wait(30)
+        except subprocess.TimeoutExpired:
+            _p.kill()
+            _p.wait()
+    with open(_lg, encoding="utf-8", errors="replace") as fh:
+        fh.seek(_lg0)
+        _lgn = fh.read()
+    check("drift: a holder stalled before its pid write does not take its "
+          "successor's lock (RR3-1)", _a_parked and _b_parked and _a_woke
+          and _b_woke and _held_b == [str(_b.pid)]
+          and _held_after == [str(_b.pid)],
+          (_a_parked, _b_parked, _held_b, _held_after, _b.pid))
+    check("drift: the successor's update and the stalled holder's both land "
+          "(RR3-1)", _dstate("dt-c1d")[0] == "3"
+          and "lost its lock" not in _lgn and not os.path.lexists(_ld),
+          (_dstate("dt-c1d"), _lgn[-400:]))
+else:
+    print("  SKIP  drift: staged pid-write stall row (no mkfifo)")
+
+# [WP2 re-review C2] A lock must not wedge: each lock below used to cost
+# every call the full 3 s wait, forever. Each is now broken at the first
+# call (a pid-less one within about 1 s), and the update is made locked.
+_now = int(time.time())
+_wedge = (("dt-w1", "junk\n", True, 1.5),          # malformed, future mtime
+          ("dt-w2", f"{os.getpid()}\n", False, 1.5),  # no epoch
+          ("dt-w3", f"{os.getpid()} {_now + 3600}\n", False, 1.5),  # future
+          ("dt-w4", None, True, 2.9),              # no pid file, future
+          ("dt-w5", f"{os.getpid()}  {_now}\n", False, 1.5))  # 2 spaces
+for _sid, _pidtxt, _future, _lim in _wedge:
+    _ld = os.path.join(sessions, ".drift-lock-" + _sid)
+    os.makedirs(_ld)
+    if _pidtxt is not None:
+        with open(os.path.join(_ld, "pid"), "w", encoding="utf-8") as fh:
+            fh.write(_pidtxt)
+    if _future:
+        os.utime(_ld, (_now + 10 ** 6,) * 2)
+    _lg0 = os.path.getsize(_lg)
+    _t0 = time.time()
+    _rc = _drift(_sid)[0]
+    _dt = time.time() - _t0
+    with open(_lg, encoding="utf-8", errors="replace") as fh:
+        fh.seek(_lg0)
+        _lgn = fh.read()
+    check(f"drift: a wedged lock ({_sid}) is broken at the first call (C2)",
+          _rc == 0 and _dstate(_sid)[0] == "1" and _dt < _lim
+          and not os.path.lexists(_ld) and "lock wait expired" not in _lgn,
+          (_rc, round(_dt, 2), _lgn[-300:]))
+# A lock rm -rf cannot remove (a read-only subdirectory) is moved aside.
+if os.geteuid() != 0:
+    _ld = os.path.join(sessions, ".drift-lock-dt-w6")
+    os.makedirs(os.path.join(_ld, "k", "x"))
+    with open(os.path.join(_ld, "pid"), "w", encoding="utf-8") as fh:
+        fh.write("junk\n")
+    os.chmod(os.path.join(_ld, "k"), 0o555)
+    _t0 = time.time()
+    _rc = _drift("dt-w6")[0]
+    _dt = time.time() - _t0
+    _aside = [n for n in os.listdir(sessions)
+              if n.startswith(".drift-lock-dt-w6.stale.")]
+    check("drift: a lock rm -rf cannot remove is moved aside (C2)",
+          _rc == 0 and _dstate("dt-w6")[0] == "1" and _dt < 1.5
+          and not os.path.lexists(_ld) and len(_aside) == 1,
+          (_rc, round(_dt, 2), _aside))
+    for _n in _aside:
+        os.chmod(os.path.join(sessions, _n, "k"), 0o755)
+        shutil.rmtree(os.path.join(sessions, _n))
+else:
+    print("  SKIP  drift: read-only lock row (running as root)")
+
+# [WP2 re-review RR4-2] On a filesystem with no hard links every `ln`
+# fails. The call used to leave its own pid-less lock behind and wait on
+# it, so every call cost about 3 s and still ran unlocked. Now a call whose
+# `ln` failed with no pid file present and its temp file still there
+# removes its own lock and proceeds unlocked at once, logged. Staged with
+# an `ln` that always fails.
+_NOLN = os.path.join(TMP, "noln")
+os.makedirs(_NOLN, exist_ok=True)
+with open(os.path.join(_NOLN, "ln"), "w", encoding="utf-8") as fh:
+    fh.write("#!%s\nexit 1\n" % BASH)
+os.chmod(os.path.join(_NOLN, "ln"), 0o755)
+_nlp = _NOLN + os.pathsep + os.environ.get("PATH", "")
+_lg0 = os.path.getsize(_lg)
+_nlr = []
+for _k in range(3):
+    _t0 = time.time()
+    _rc = run("drift-detector", {"session_id": "dt-nl", "tool_name": "Bash",
+                                 "tool_input": {"command": "ls"}},
+              path=_nlp)[0]
+    _nlr.append((_rc, round(time.time() - _t0, 2)))
+with open(_lg, encoding="utf-8", errors="replace") as fh:
+    fh.seek(_lg0)
+    _lgn = fh.read()
+check("drift: with no hard links a call proceeds unlocked at once (RR4-2)",
+      all(r == 0 and d < 1.5 for r, d in _nlr)
+      and _dstate("dt-nl")[0] == "3"
+      and not os.path.lexists(os.path.join(sessions, ".drift-lock-dt-nl"))
+      and _lgn.count("cannot hard-link its lock's pid file") == 3
+      and "lock wait expired" not in _lgn, (_nlr, _lgn[-400:]))
+
+
 print("\n== P2-8: spec-gate-entry is reachable ==")
 
-rc, _, err = run("spec-gate-entry", {"prompt": "please write the parser"})
-check("spec-gate-entry actually fires with no active spec",
-      "No active spec" in err, err[:200])
+# [WP2 channels] The notice is UserPromptSubmit additionalContext on stdout;
+# on stderr at exit 0 it reached Claude Code's debug log only.
+rc, out, err = run("spec-gate-entry", {"prompt": "please write the parser"})
+try:
+    _sge = json.loads(out)["hookSpecificOutput"]
+except (ValueError, KeyError, TypeError):
+    _sge = {}
+check("spec-gate-entry actually fires with no active spec (to the model)",
+      rc == 0 and _sge.get("hookEventName") == "UserPromptSubmit"
+      and "No active spec" in (_sge.get("additionalContext") or "")
+      and err == "", repr((rc, out[:200], err[:200])))
 os.makedirs(os.path.join(PROJ, ".claude", "specs", "s1"), exist_ok=True)
-rc, _, err = run("spec-gate-entry", {"prompt": "please write the parser"})
+rc, out, err = run("spec-gate-entry", {"prompt": "please write the parser"})
 check("spec-gate-entry goes quiet once a spec exists",
-      "No active spec" not in err, err[:200])
+      rc == 0 and out == "" and "No active spec" not in err,
+      repr((rc, out[:200], err[:200])))
 
 print("\n== X-54b: the candidate loop STOPS EARLY on a head-bearing command ==")
 
