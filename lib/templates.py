@@ -3684,25 +3684,45 @@ def _user_cmd(cmd, indent, root=False):
 
 def _runner_run(cmd, indent, hook, root=False):
     """[WP2 review SC-4, SC-5, SDK-P6] The lines that run a blocking gate's
-    configured command and send its merged output to stderr, from `_rout=`
-    to the cleanup. Every line after the first takes `indent`.
+    configured command and send its merged output to stderr, from the stale
+    sweep to the cleanup. Every line after the first takes `indent`.
 
     The output goes to a FILE, not a pipe. `( cmd ) 2>&1 | tail` made the
     hook wait for EOF on the pipe, so a background child that kept the
     runner's stdout open (`server & ...; exit 1`) held the hook until the
     child exited, and a shell hook killed at its timeout fails OPEN. Now the
-    hook goes on when the runner exits. The file is removed once read; a
-    hook killed mid-run leaves it behind.
+    hook goes on when the runner exits. The file is removed once read.
+
+    [WP2 re-review B-1] A hook killed mid-run (at its Claude Code timeout,
+    or by any signal; SIGKILL cannot be trapped) leaves its file behind, and
+    an orphaned runner may keep writing to it. So each run first deletes
+    this hook's own `<hook>.out.*` regular files in .claude/logs that were
+    last written more than (the hook's TIMEOUTS bound, in whole minutes
+    rounded up) + 1 minutes ago. A live run of the same hook is younger
+    than its bound, so a concurrent run's file is never taken, and the
+    files left behind are bounded by what the last bound's window can
+    hold. The sweep is best-effort (`find` missing or failing is ignored)
+    and never feeds the verdict. A file left in a temp directory (below)
+    is left to the OS's temp cleanup.
 
     [WP2 re-review RR1-EMB-1, RR1-EMB-2] `mktemp` creates the file: a fresh
     random name, created exclusively, so a symlink planted in
     .claude/logs is never opened through. It is made in .claude/logs
-    (gitignored) when that works, else in `${TMPDIR:-/tmp}`. When neither
-    works, the command runs anyway with its output discarded, and
-    RUNNER_NO_CAPTURE_NOTE goes to stderr: the verdict is the runner's exit
-    status, never a failed redirection read as "tests failing (exit 1)".
-    The output is discarded, not sent to stderr, because stderr is a pipe,
-    the thing SC-5 removed. The SDK's _run_tail falls back the same way.
+    (gitignored) when that works, else in `${TMPDIR:-/tmp}`, else in /tmp
+    ([WP2 re-review B-2]: a set but missing or unwritable TMPDIR still
+    captures). When none works, the command runs anyway with its output
+    discarded, and RUNNER_NO_CAPTURE_NOTE goes to stderr: the verdict is
+    the runner's exit status, never a failed redirection read as "tests
+    failing (exit 1)". The output is discarded, not sent to stderr, because
+    stderr is a pipe, the thing SC-5 removed.
+
+    The SDK's _run_tail never uses .claude/logs: tempfile.TemporaryFile
+    searches TMPDIR, TEMP, TMP, then /tmp, /var/tmp, /usr/tmp and the
+    current directory, skipping any that is unusable, and its file has no
+    name to leave behind. The two capture whenever .claude/logs, TMPDIR or
+    /tmp is usable; only when all three are not do they differ (the SDK may
+    still find TEMP, TMP, /var/tmp or the current directory). The verdict
+    is the runner's exit status on both either way.
 
     Then the last RUNNER_TAIL_LINES lines, and of those the last
     RUNNER_TAIL_BYTES bytes, go to stderr: a line count alone let one long
@@ -3714,9 +3734,19 @@ def _runner_run(cmd, indent, hook, root=False):
     trap."""
     tpl = hook + ".out.XXXXXX"
     i2 = indent + "  "
-    return (f"_rout=\"$(mktemp \"${{CLAUDE_PROJECT_DIR:-.}}/.claude/logs/"
-            f"{tpl}\" 2>/dev/null)\" \\\n"
+    # Every caller passes a hook TIMEOUTS bounds (test-gate, ci-mirror or
+    # eval-gate), the installer's parse probe in defaults.py included. The
+    # largest bound is only a fallback for a name TIMEOUTS lacks.
+    stale_min = -(-TIMEOUTS.get(hook, max(TIMEOUTS.values())) // 60) + 1
+    return (f"find \"${{CLAUDE_PROJECT_DIR:-.}}/.claude/logs\" -maxdepth 1"
+            f" -type f -name '{hook}.out.*' -mmin +{stale_min}"
+            " -exec rm -f -- {} + 2>/dev/null || :\n"
+            f"{indent}_rout=\"$(mktemp"
+            f" \"${{CLAUDE_PROJECT_DIR:-.}}/.claude/logs/{tpl}\""
+            " 2>/dev/null)\" \\\n"
             f"{indent}  || _rout=\"$(mktemp \"${{TMPDIR:-/tmp}}/{tpl}\""
+            " 2>/dev/null)\" \\\n"
+            f"{indent}  || _rout=\"$(mktemp \"/tmp/{tpl}\""
             " 2>/dev/null)\" \\\n"
             f"{indent}  || _rout=\"\"\n"
             f"{indent}rc=0\n"
@@ -4998,25 +5028,48 @@ log "format-lint-gate ran rc=$_lrc (lint only; formatting is never applied here)
             # id is read and sanitized as drift-detector reads it. The marker
             # is agent-writable, so a symlink there is removed, never written
             # through. With no working JSON parser the id falls back to
-            # CLAUDE_SESSION_ID, then "default". Markers older than 7 days
-            # are purged when a new one is written. The SDK twin keeps the
+            # CLAUDE_SESSION_ID, then "default". The SDK twin keeps the
             # same marker (sdk_gates_template._lint_unset_shown).
+            # [WP2 re-review C3] Claude Code does not export
+            # CLAUDE_SESSION_ID, so with no parser every session keyed on
+            # .lint-unset-default and the notice fired once per PROJECT.
+            # So, with no parser, the id is read from the raw payload: the
+            # FIRST `"session_id":"..."` whose value is one or more of
+            # [A-Za-z0-9._-], optionally followed by escaped newlines (which
+            # a parser's `$( )` would strip, C4). A bash regex, so no binary
+            # is needed; the leftmost match is taken, and an escaped quote
+            # inside a string cannot open one. Any other value falls back
+            # as before. Two known gaps in the marker NAME only (the notice
+            # still shows once): a non-string session_id is printed by the
+            # shell's parser (123 keys .lint-unset-123) but falls back on
+            # the SDK; and [WP2 re-review RR3-4] with no parser, an id the
+            # regex rejects ("a/b") falls back to CLAUDE_SESSION_ID in the
+            # shell, where a parser and the SDK key it "default".
+            # Markers older than 7 days (-mtime +7) are purged
+            # on EVERY call, before the marker is checked, so a stale
+            # marker - .lint-unset-default above all - expires instead of
+            # silencing every later session.
             run = ('''_sid=""
 if have_jq || have_py; then
   _sid="$(jget '.session_id' 2>/dev/null)" || _sid=""
+else
+  _re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9._-]+)(\\\\n)*"'
+  if [[ "$INPUT" =~ $_re ]]; then _sid="${BASH_REMATCH[1]}"; fi
 fi
 [ -n "$_sid" ] || _sid="${CLAUDE_SESSION_ID:-default}"
 case "$_sid" in *[!A-Za-z0-9._-]*) _sid="default" ;; esac
 _S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
 _M="$_S/.lint-unset-$_sid"
+if [ -d "$_S" ]; then
+  find "$_S" -maxdepth 1 -type f -name '.lint-unset-*' -mtime +7 \\
+    -exec rm -f {} + 2>/dev/null || true
+fi
 if [ -L "$_M" ]; then rm -f "$_M" 2>/dev/null || true; fi
 if [ -e "$_M" ] && [ ! -L "$_M" ]; then
   log "format-lint-gate: commands.lint is empty; nothing ran (notice shown earlier this session)"
 else
   mkdir -p "$_S" 2>/dev/null || true
   if [ ! -L "$_M" ]; then { : >"$_M"; } 2>/dev/null || true; fi
-  find "$_S" -maxdepth 1 -type f -name '.lint-unset-*' -mtime +7 \\
-    -exec rm -f {} + 2>/dev/null || true
   printf '%s\\n' \'''' + _LINT_UNSET_JSON + '''\'
   log "format-lint-gate: commands.lint is empty; nothing ran"
 fi
@@ -7074,7 +7127,7 @@ FP="$(jget '.tool_input.file_path')"
 # state before another consumed the ack renamed last and dropped the ack.
 # So the read-modify-write below runs under a lock. It is a mkdir lock, not
 # flock(1), because macOS ships no flock. The holder writes "<pid> <epoch>"
-# into it, the epoch read when the lock was taken. A lock is stale, and is
+# into it, the epoch read before its mkdir. A lock is stale, and is
 # broken, when its holder is dead (killed at its timeout), when it was taken
 # 2 or more clock seconds ago, or when the directory is older than a minute.
 # [WP2 re-review TD-1] The age arm is what frees a lock whose holder is a
@@ -7082,47 +7135,123 @@ FP="$(jget '.tool_input.file_path')"
 # `kill -0`, as does an unrelated process that reused the pid, so liveness
 # alone kept such a lock until its minute was up and every waiter meanwhile
 # gave up and ran unlocked. The lock is held only from the state read to
-# its rename, so 2 s is far past a live holder; a holder that slow loses its
-# lock, and at worst one update. The pid file is re-read before the lock is
-# broken, because a holder that released and exited in between leaves the
-# lock to the next holder. Breaking is not atomic: two waiters that both
-# judge one stale lock stale can both proceed, once.
+# its rename, so 2 s is far past a live holder. The pid file is re-read
+# before the lock is broken, because a holder that released and exited in
+# between leaves the lock to the next holder. Breaking is not atomic: two
+# waiters that both judge one stale lock stale can both proceed, once.
+# [WP2 re-review C1] A holder that stalls past 2 s (load, suspend, SIGSTOP)
+# is still running when its lock is broken. It used to rename its stale
+# state over every update made meanwhile, and its _unlock removed the
+# SUCCESSOR's lock, so a third call could hold the lock beside the second.
+# Now its "<pid> <epoch>" token is the lock's identity: _unlock removes the
+# lock only while $L/pid still holds this holder's token, and the holder
+# re-reads the token before its rename. A holder that lost its lock drops
+# its own update (an ack it consumed is put back) and leaves the
+# successor's lock and state alone. The re-read and the rename are two
+# commands, so a holder that stalls BETWEEN them still renames over the
+# updates made meanwhile; the window is those two commands, not the whole
+# critical section.
+# [WP2 re-review C2] A lock must not wedge. The pid file is written to a
+# temp name and hard-linked in, so a pid file that exists is complete; one
+# that is not "<uint> <uint>" is stale, as is a stored epoch more than 2 s in
+# the future (the clock stepped back). A lock with NO pid file is stale
+# after 20 consecutive waits (1 s or more) see none: a holder writes it at
+# once after its mkdir. The minute-old directory arm stays as a backstop. A
+# lock that `rm -rf` cannot remove (a read-only subdirectory) is moved
+# aside to .drift-lock-<sid>.stale.<pid>, which the week-old purge removes
+# when it can.
+# [WP2 re-review RR3-1] The no-pid arm can break the lock of a holder that
+# stalled between its mkdir and its pid write. So the holder takes its
+# token BEFORE the mkdir and creates the pid file only if it is absent:
+# `ln` without -f, which is atomic in POSIX and behaves the same on GNU,
+# BSD and busybox. [WP2 re-review RR4-3] The `ln` is itself a fork, so the
+# only fork between the mkdir and the pid file is the `ln`; an `ln` that
+# runs after its lock was broken fails, because its source is gone.
+# `mv -f` replaced a successor's token with the stalled holder's, so the
+# stalled holder kept its update and its _unlock removed the live
+# successor's lock. If the `ln` fails and a pid file is there, the lock is
+# someone else's: the call removes its temp file and waits on that lock as
+# on any other. [WP2 re-review RR4-2] If the `ln` fails, no pid file is
+# there and the temp file is, the filesystem has no hard links: the call
+# removes its own lock and proceeds unlocked at once, logged.
+# [WP2 re-review RR4-1] _unlock's compare and its remove are two commands
+# too. A holder that stalls between them keeps its own update (its rename
+# already landed) and then removes its successor's lock; the successor's
+# re-read finds no token, so the SUCCESSOR drops its update, and a third
+# call can hold the lock beside it. The lock is best-effort under
+# multi-second stalls: an update can be lost or misattributed.
 # After 60 waits of 0.05 s (3 s or more) the hook proceeds UNLOCKED: it is
 # advisory, and a lost update is cheaper than a stalled tool call. The wait
 # outlasts the 2 s age bound, so a stale lock with an epoch is broken
 # before it runs out.
-_lk=0
-_unlock(){{ if [ "$_lk" = 1 ]; then rm -rf "$L" 2>/dev/null || true; _lk=0; fi; }}
+_lk=0; _tok=""; _np=0; _kept=""; _nl=0
+_unlock(){{ if [ "$_lk" = 1 ]; then
+  if [ "$(rd "$L/pid")" = "$_tok" ]; then rm -rf "$L" 2>/dev/null || true; fi
+  _lk=0; fi; }}
 trap '_unlock' EXIT
 _i=0
 while [ "$_i" -lt 60 ]; do
+  _tok="$$ $(date +%s)"
   if mkdir "$L" 2>/dev/null; then
-    _lk=1; printf '%s %s\\n' "$$" "$(date +%s)" >"$L/pid" 2>/dev/null || true
-    break
+    if {{ printf '%s\\n' "$_tok" >"$L/pid.$$" && ln "$L/pid.$$" "$L/pid"; }} \\
+         2>/dev/null; then
+      rm -f "$L/pid.$$" 2>/dev/null || true; _lk=1; break
+    fi
+    # [WP2 re-review RR4-2] No pid file, yet this call's temp file is
+    # still in the lock: the `ln` itself failed, as it does on a filesystem
+    # with no hard links. Waiting cannot help, so the call removes its own
+    # lock and proceeds unlocked at once.
+    if [ ! -e "$L/pid" ] && [ ! -L "$L/pid" ] && [ -e "$L/pid.$$" ]; then
+      rm -rf "$L" 2>/dev/null || true; _nl=1; break
+    fi
+    # [WP2 re-review RR3-1] The pid file was already there, or the lock
+    # was gone: the lock was broken and taken while this call stalled. Not
+    # ours, so wait for it like any other holder's.
+    rm -f "$L/pid.$$" 2>/dev/null || true
+    _np=0; _i=$((_i + 1)); sleep 0.05 2>/dev/null || true; continue
   fi
   # A lock that vanished between the mkdir and here was released: retry at
   # once. Removing it instead would remove the NEXT holder's fresh lock.
-  if [ ! -e "$L" ] && [ ! -L "$L" ]; then _i=$((_i + 1)); continue; fi
+  if [ ! -e "$L" ] && [ ! -L "$L" ]; then _np=0; _i=$((_i + 1)); continue; fi
   _r="$(rd "$L/pid")"; _o="${{_r%% *}}"; _t=""
   case "$_r" in *" "*) _t="${{_r#* }}" ;; esac
   # Only a link or a regular file is broken on sight: "not a directory" is
   # also true of a lock released a moment ago, and the next holder's is one.
   # The age test compares with `[ -le ]`, never $(( )): a stored epoch with
   # a leading zero would be read as octal there.
-  if [ -L "$L" ] || [ -f "$L" ] \\
-     || {{ uint "$_o" \\
-           && {{ ! kill -0 "$_o" 2>/dev/null \\
-                || {{ uint "$_t" && _n="$(date +%s)" && uint "$_n" \\
-                     && [ "$_t" -le "$((_n - 2))" ]; }}; }} \\
-           && [ "$(rd "$L/pid")" = "$_r" ]; }} \\
-     || [ -n "$(find "$L" -maxdepth 0 -mmin +1 2>/dev/null || true)" ]; then
-    rm -rf "$L" 2>/dev/null || true
+  _st=0
+  if [ -L "$L" ] || [ -f "$L" ]; then
+    _st=1
+  elif [ -e "$L/pid" ] || [ -L "$L/pid" ]; then
+    _np=0
+    if ! uint "$_o" || ! uint "$_t" || ! kill -0 "$_o" 2>/dev/null; then
+      _st=1
+    else
+      _n="$(date +%s)"
+      if uint "$_n" && {{ [ "$_t" -le "$((_n - 2))" ] \\
+                         || [ "$_t" -gt "$((_n + 2))" ]; }}; then _st=1; fi
+    fi
+    if [ "$_st" = 1 ] && [ "$(rd "$L/pid")" != "$_r" ]; then _st=0; fi
+  else
+    _np=$((_np + 1)); [ "$_np" -lt 20 ] || _st=1
+  fi
+  if [ "$_st" = 0 ] \\
+     && [ -n "$(find "$L" -maxdepth 0 -mmin +1 2>/dev/null || true)" ]; then
+    _st=1
+  fi
+  if [ "$_st" = 1 ]; then
+    _np=0
+    rm -rf "$L" 2>/dev/null || mv -f "$L" "$L.stale.$$" 2>/dev/null || true
   else
     sleep 0.05 2>/dev/null || true
   fi
   _i=$((_i + 1))
 done
-[ "$_lk" = 1 ] || log "drift-detector lock wait expired; proceeding unlocked"
+if [ "$_nl" = 1 ]; then
+  log "drift-detector cannot hard-link its lock's pid file; proceeding unlocked"
+elif [ "$_lk" != 1 ]; then
+  log "drift-detector lock wait expired; proceeding unlocked"
+fi
 start="$(rd "$SS")"; uint "$start" || start="$now"
 n=0; fired=0; base="$start"; ctc={tc}; cdm={dm}; cfr={fr}
 read -r _a _b _c _d _e _f _rest < <(rd "$ST"; echo) || true
@@ -7136,15 +7265,20 @@ uint "${{_f:-}}" && [ "$_f" -gt {fr} ] && cfr="$_f"
 # Clamp: a baseline before the session start is not one this hook wrote.
 [ "$base" -lt "$start" ] && base="$start"
 n=$((n + 1))
+# [WP2 re-review RR3-3] This call's Read path is counted below as if it
+# were already in $SR, but it is appended (and a checkpoint removes $SR)
+# only where the state update is kept, so a dropped call changes neither.
+_rp=""
 if [ "$TOOL" = "Read" ] && [ -n "$FP" ]; then
   if [ -L "$SR" ]; then rm -f "$SR"; fi
   # A path with a newline would split into two lines: not counted.
-  case "$FP" in *$'\\n'*) ;; *) printf '%s\\n' "$FP" >>"$SR" ;; esac
+  case "$FP" in *$'\\n'*) ;; *) _rp="$FP" ;; esac
 fi
 rearm=""
 # The ack is consumed on every call it is seen, so a stale ack cannot raise
 # the thresholds of a later arming.
-if [ -e "$SA" ] || [ -L "$SA" ]; then rm -f "$SA"; rearm="ack"; fi
+_ack=0
+if [ -e "$SA" ] || [ -L "$SA" ]; then rm -f "$SA"; rearm="ack"; _ack=1; fi
 # A Write to a checkpoint file IS the checkpoint, and it outranks an ack.
 if [ "$TOOL" = "Write" ]; then
   case "$FP" in *.claude/sessions/*-checkpoint.md) rearm="checkpoint" ;; esac
@@ -7152,10 +7286,11 @@ fi
 el=0
 if [ "$now" -ge "$base" ]; then el=$(( (now - base) / 60 )); fi
 if [ "$rearm" = "checkpoint" ]; then
-  n=0; fired=0; base="$now"; el=0; ctc={tc}; cdm={dm}; cfr={fr}; rm -f "$SR"
+  n=0; fired=0; base="$now"; el=0; ctc={tc}; cdm={dm}; cfr={fr}
 elif [ "$rearm" = "ack" ]; then
-  mx="$(awk '{{c[$0]++}} END {{m=0; for (k in c) if (c[k] > m) m = c[k]; print m}}' \\
-        "$SR" 2>/dev/null || true)"
+  mx="$({{ cat "$SR" 2>/dev/null; [ -z "$_rp" ] || printf '%s\\n' "$_rp"; }} \\
+        | awk '{{c[$0]++}} END {{m=0; for (k in c) if (c[k] > m) m = c[k]; print m}}' \\
+        2>/dev/null || true)"
   uint "$mx" || mx=0
   fired=0
   if [ "$n" -gt "$ctc" ]; then ctc="$n"; fi
@@ -7171,9 +7306,11 @@ if [ "$fired" = 0 ]; then
   if [ "$el" -ge "$cdm" ]; then
     why="$why $el minutes since the session start or last checkpoint (threshold $cdm);"
   fi
-  if [ "$TOOL" = "Read" ] && [ -n "$FP" ]; then
-    c="$(grep -cxF -e "$FP" "$SR" 2>/dev/null || true)"
-    if uint "$c" && [ "$c" -gt "$cfr" ]; then
+  if [ -n "$_rp" ]; then
+    c="$(grep -cxF -e "$_rp" "$SR" 2>/dev/null || true)"
+    uint "$c" || c=0
+    c=$((c + 1))
+    if [ "$c" -gt "$cfr" ]; then
       why="$why $FP read $c times (more than $cfr);"
     fi
   fi
@@ -7184,8 +7321,23 @@ if [ -n "$why" ]; then
   note="Drift signals:$why Consider /checkpoint and /clear when convenient, or /ack-drift to dismiss."
 fi
 rm -f "$ST.tmp.$$"
-printf '%s %s %s %s %s %s\\n' "$n" "$fired" "$base" "$ctc" "$cdm" "$cfr" \\
-  >"$ST.tmp.$$" && mv -f "$ST.tmp.$$" "$ST"
+# [WP2 re-review C1] A holder whose lock was broken while it stalled drops
+# its update rather than rename stale state over its successor's.
+if [ "$_lk" = 1 ] && [ "$(rd "$L/pid")" != "$_tok" ]; then
+  _lk=0; note=""
+  if [ "$_ack" = 1 ]; then ( set -C; : >"$SA" ) 2>/dev/null || true; fi
+  log "drift-detector lost its lock while stalled; this call's update dropped"
+else
+  printf '%s %s %s %s %s %s\\n' "$n" "$fired" "$base" "$ctc" "$cdm" "$cfr" \\
+    >"$ST.tmp.$$" && mv -f "$ST.tmp.$$" "$ST"
+  if [ "$rearm" = "checkpoint" ]; then
+    rm -f "$SR"
+  elif [ -n "$_rp" ]; then
+    if [ -L "$SR" ]; then rm -f "$SR"; fi
+    printf '%s\\n' "$_rp" >>"$SR"
+  fi
+  _kept=1
+fi
 _unlock
 ''' + _SHELL_JSON_STR + f'''if [ -n "$note" ]; then
   # Channel: PostToolUse additionalContext reaches the MODEL; exit-0 stderr
@@ -7195,7 +7347,11 @@ _unlock
   printf '{{"hookSpecificOutput":{{"hookEventName":"PostToolUse","additionalContext":%s}}}}\\n' \\
     "$(_json_str "$note" 2000)"
 fi
-log "drift-detector n=$n fired=$fired rearm=${{rearm:-none}} th=$ctc/${{cdm}}m/$cfr"
+# A dropped call logged its drop above; an n= line would report an
+# increment that never landed.
+if [ -n "${{_kept:-}}" ]; then
+  log "drift-detector n=$n fired=$fired rearm=${{rearm:-none}} th=$ctc/${{cdm}}m/$cfr"
+fi
 exit 0
 '''
 

@@ -17,6 +17,10 @@ substrates where the gate exists on both:
     the runner's stdout open held the hook until the child exited, and a
     shell hook killed at its timeout fails OPEN. It now goes to a file
     under .claude/logs, removed after the tail is read.
+  * B-1: a hook killed mid-run leaves that file behind; a later run of the
+    same hook deletes its files older than the hook's bound.
+  * B-2: with .claude/logs unusable, a set but bad TMPDIR still captures
+    through /tmp, as the SDK's tempfile does.
   * LD-1: Claude Code delivers one exit-2 reason per tool call, so when
     ci-mirror and eval-gate both block a push the model sees one of them.
     eval-gate's failure message says that other push gates may block too.
@@ -337,6 +341,51 @@ try:
     check("no capture file is left after a pass or a failure",
           logs_clean(d) == [], repr(logs_clean(d)))
 
+    # ---- B-1: a killed hook's file is swept by a later run -------------- #
+    # Measured before the fix: a hook killed mid-run (SIGTERM or SIGKILL,
+    # to the pid or the group) left .claude/logs/<hook>.out.XXXXXX holding
+    # the runner's uncapped output, and no later run removed it.
+    print("== B-1: a killed hook's capture file is swept ==")
+    logs_dir = os.path.join(d, ".claude", "logs")
+    payload = json.dumps({"session_id": "s", "hook_event_name":
+                          "PreToolUse", "tool_name": "Bash", "tool_input":
+                          {"command": "git commit -m x"}}).encode()
+    runner(d, "echo started; sleep 3; echo F; exit 1\n")
+    p = subprocess.Popen(["bash", os.path.join(d, ".claude", "hooks",
+                                               "test-gate.sh")],
+                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, cwd=d,
+                         env=dict(os.environ, CLAUDE_PROJECT_DIR=d),
+                         start_new_session=True)
+    p.stdin.write(payload)
+    p.stdin.close()
+    time.sleep(1)
+    os.killpg(p.pid, 9)
+    p.wait()
+    killed = logs_clean(d)
+    check("test-gate shell: SIGKILL mid-run leaves its capture file (the "
+          "case the sweep is for)", len(killed) == 1, repr(killed))
+    # Aged past test-gate's bound (600 s, so 11 minutes), it is swept; a
+    # fresh one (a concurrent run's) and another hook's are kept.
+    stale = time.time() - 12 * 60
+    for n in killed:
+        os.utime(os.path.join(logs_dir, n), (stale, stale))
+    fresh = os.path.join(logs_dir, "test-gate.out.FRESH1")
+    other = os.path.join(logs_dir, "ci-mirror.out.OTHER1")
+    for f, t in ((fresh, time.time() - 9 * 60), (other, stale)):
+        open(f, "w").close()
+        os.utime(f, (t, t))
+    runner(d, "echo fine; exit 0\n")
+    rc, _, err, _ = shell(d, "test-gate", "git commit -m x")
+    left = sorted(logs_clean(d))
+    check("test-gate shell: the next run sweeps the stale file, keeps a "
+          "9-minute-old one and ci-mirror's", rc == 0
+          and left == ["ci-mirror.out.OTHER1", "test-gate.out.FRESH1"],
+          repr((rc, left, err[-200:])))
+    for f in (fresh, other):
+        if os.path.lexists(f):
+            os.remove(f)
+
     # ---- RR1-EMB-1: no capture file in .claude/logs --------------------- #
     # Measured before the fix: with .claude/logs unwritable, a regular file
     # or a dangling symlink, the redirection failed before the runner ran,
@@ -391,10 +440,52 @@ try:
         finally:
             _restore_logs()
 
+    # ---- B-2: a set but bad TMPDIR falls back to /tmp, as the SDK does -- #
+    # Measured before the fix: with .claude/logs a regular file and TMPDIR
+    # missing or unwritable, all three shell gates printed the no-capture
+    # note and dropped the runner's output, while the SDK's tempfile
+    # skipped the bad TMPDIR, used /tmp and showed it.
+    print("== B-2: a bad TMPDIR still captures, through /tmp ==")
+    _break("a regular file")
+    try:
+        runner(d, "echo B2-OUT; exit 1\n")
+        for bad in (os.path.join(scratch, "no-such-dir"), "/proc"):
+            benv = dict(os.environ, TMPDIR=bad)
+            for hook, cmd, last, fname in GATES:
+                rc, out, err, _ = shell(d, hook, cmd, benv)
+                check(f"{hook} shell, .claude/logs a regular file, TMPDIR="
+                      f"{bad}: the output is captured",
+                      rc == 2 and (b"B2-OUT\n" + last.encode()) in err
+                      and NOTE.encode() not in err, repr((rc, err[-300:])))
+                if fname:
+                    old_t = os.environ.get("TMPDIR")
+                    os.environ["TMPDIR"] = bad
+                    tempfile.tempdir = None
+                    try:
+                        r, _ = sdk(d, fname, cmd)
+                    finally:
+                        if old_t is None:
+                            del os.environ["TMPDIR"]
+                        else:
+                            os.environ["TMPDIR"] = old_t
+                        tempfile.tempdir = None
+                    check(f"{fname} SDK, TMPDIR={bad}: the same output",
+                          reason(r) == last + "\nB2-OUT", repr(r))
+    finally:
+        _restore_logs()
+
     if not root:
-        # Neither place can hold the file: the runner still runs.
+        # No place can hold the file: the runner still runs. mktemp is
+        # made to fail outright (a shim first on PATH), because /tmp, the
+        # last arm, cannot be made unwritable without root.
         os.chmod(logs, 0o555)
-        nenv = dict(os.environ, TMPDIR=os.path.join(scratch, "no-such-dir"))
+        shim = os.path.join(scratch, "no-mktemp")
+        os.makedirs(shim, exist_ok=True)
+        with open(os.path.join(shim, "mktemp"), "w") as fh:
+            fh.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(shim, "mktemp"), 0o755)
+        nenv = dict(os.environ, TMPDIR=os.path.join(scratch, "no-such-dir"),
+                    PATH=shim + os.pathsep + os.environ.get("PATH", ""))
         try:
             runner(d, "echo fine; exit 0\n")
             for hook, cmd, _, _f in GATES:

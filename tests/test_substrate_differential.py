@@ -1414,7 +1414,7 @@ def _ev_differential(cmd, want, label):
     _e = dict(os.environ, CLAUDE_PROJECT_DIR=_EV)
     _p = subprocess.run([BASH, os.path.join(HOOKS, "eval-gate.sh")],
                         input=json.dumps(bash(cmd)), capture_output=True,
-                        text=True, env=_e, cwd=_EV)
+                        text=True, errors="replace", env=_e, cwd=_EV)
     _sh = {2: "deny", 0: "allow"}.get(_p.returncode,
                                        f"rc={_p.returncode}:{_p.stderr[:120]}")
     _prev = os.environ.get("CLAUDE_PROJECT_DIR")
@@ -1497,6 +1497,55 @@ _ev_differential("git push", "deny",
                  "than the merge")
 os.utime(_EV_MARK, (time.time() + 60,) * 2)
 _ev_differential("git push", "allow", "same push, marker refreshed")
+os.remove(_EV_MARK)
+# [PR #120 step 7, EP-1] A prompt name that is not valid UTF-8 (a raw 0xE9
+# byte): the SDK decoded git's output with errors="replace", the name
+# became U+FFFD and named no file, so a stale marker passed (shell=deny,
+# SDK=allow at ad0bab3). The verdicts AND the messages must match.
+_ev_git("push", "-q")
+_EV_RAW = os.path.join(os.fsencode(_EV), b"prompts", b"sys\xe9.txt")
+with open(_EV_RAW, "wb") as _fh:
+    _fh.write(b"p\n")
+_ev_git("add", "-A")
+_ev_git("commit", "-qm", "latin-1 prompt name")
+open(_EV_MARK, "w").close()
+os.utime(_EV_MARK, (1_700_000_010,) * 2)
+os.utime(_EV_RAW, (1_700_000_020,) * 2)
+
+
+def _ev_messages(cmd):
+    """(shell rc, shell's last stderr line, SDK deny reason's first line);
+    undecodable bytes become U+FFFD on both sides."""
+    _p = subprocess.run([BASH, os.path.join(HOOKS, "eval-gate.sh")],
+                        input=json.dumps(bash(cmd)), capture_output=True,
+                        text=True, errors="replace",
+                        env=dict(os.environ, CLAUDE_PROJECT_DIR=_EV),
+                        cwd=_EV)
+    _prev = os.environ.get("CLAUDE_PROJECT_DIR")
+    os.environ["CLAUDE_PROJECT_DIR"] = _EV
+    try:
+        _res = asyncio.run(gates_mod._GATE_FACTORIES["eval-gate"](
+            gates_mod.RESOLVED_CONFIG)(bash(cmd), "tu-1", None))
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = _prev
+    _why = ((_res or {}).get("hookSpecificOutput") or {}).get(
+        "permissionDecisionReason", "")
+    return (_p.returncode, _p.stderr.rstrip("\n").split("\n")[-1],
+            _why.split("\n")[0])
+
+
+_ev_differential("git push", "deny",
+                 "stale marker, prompt name with a raw 0xE9 byte (EP-1: "
+                 "SDK=allow at ad0bab3)")
+_ev_msg = ("Eval gate: prompts/sys\ufffd.txt changed after the last eval "
+           "pass; run evals again before pushing.")
+_ev_rc, _ev_sh, _ev_sd = _ev_messages("git push")
+check("[eval-gate] raw 0xE9 name: shell and SDK deny with the same message",
+      _ev_rc == 2 and _ev_sh == _ev_sd == _ev_msg,
+      repr((_ev_rc, _ev_sh, _ev_sd)))
+os.utime(_EV_MARK, (1_700_000_030,) * 2)
+_ev_differential("git push", "allow",
+                 "fresh marker, prompt name with a raw 0xE9 byte")
 os.remove(_EV_MARK)
 
 # --------------------------------------------------------------------------- #
@@ -5874,13 +5923,15 @@ def _fl_clear(proj):
             os.remove(os.path.join(d, n))
 
 
-def _fl_shell(proj, sid):
+def _fl_shell(proj, sid, path=None):
+    env = dict(os.environ, CLAUDE_PROJECT_DIR=proj, CLAUDE_SESSION_ID="")
+    if path:
+        env["PATH"] = path
     p = subprocess.run(
         [BASH, os.path.join(proj, ".claude", "hooks", "format-lint-gate.sh")],
         input=json.dumps({"session_id": sid, "tool_name": "Edit",
                           "tool_input": {"file_path": "x"}}).encode(),
-        capture_output=True,
-        env=dict(os.environ, CLAUDE_PROJECT_DIR=proj, CLAUDE_SESSION_ID=""))
+        capture_output=True, env=env)
     o = p.stdout.decode("utf-8", "replace")
     try:
         return p.returncode, p.stderr, (json.loads(o) if o.strip() else {})
@@ -6012,6 +6063,55 @@ try:
     check("[lint] RS-3: a symlinked marker: shell == sdk (notice shown, "
           "link replaced, target untouched)",
           _res == [(_N, "keep\n", True)] * 2, repr(_res)[:600])
+    # [WP2 re-review C4] The shell's `$( )` strips trailing newlines from
+    # the payload's id before the character check; the SDK strips them too,
+    # so both key the same marker. A lone newline is no id on either.
+    _res = []
+    for _sid, _want in (("c4a\n", ".lint-unset-c4a"),
+                        ("c4b\n\n", ".lint-unset-c4b"),
+                        ("\n", ".lint-unset-default")):
+        _row = []
+        for _who in ("sh", "sd"):
+            _fl_clear(_p)
+            _o = (_fl_shell(_p, _sid)[2] if _who == "sh"
+                  else _fl_sdk(_p, _g, _sid))
+            _row.append((_o, sorted(n for n in os.listdir(_sdd)
+                                    if n.startswith(".lint-unset-"))))
+        _res.append((_sid, _row, _row == [(_N, [_want])] * 2))
+    check("[lint] C4: an id with trailing newlines keys one marker, "
+          "shell == sdk", all(x[2] for x in _res), repr(_res)[:600])
+    # [WP2 re-review C3] With no JSON parser the shell reads the id from
+    # the raw payload, so it agrees with the SDK session by session; and a
+    # marker over 7 days old is purged on every call on both substrates,
+    # so a stale one expires.
+    _np = os.path.join(_FL_TMP, "noparser")
+    os.makedirs(_np, exist_ok=True)
+    for _b in ("bash", "cat", "date", "mkdir", "dirname", "rm", "sed", "tr",
+               "find", "head", "tail", "env", "sh", "touch", "mv", "grep"):
+        _w = shutil.which(_b)
+        if _w and not os.path.lexists(os.path.join(_np, _b)):
+            os.symlink(_w, os.path.join(_np, _b))
+    _fl_clear(_p)
+    _sh = [_fl_shell(_p, s, path=_np)[2] for s in ("c3-a", "c3-a", "c3-b")]
+    _fl_clear(_p)
+    _sd = [_fl_sdk(_p, _g, s) for s in ("c3-a", "c3-a", "c3-b")]
+    check("[lint] C3: no parser, no CLAUDE_SESSION_ID: shell == sdk == "
+          "[notice, {}, notice]", _sh == _sd == [_N, {}, _N],
+          repr((_sh, _sd))[:600])
+    _res = []
+    for _who in ("sh", "shnp", "sd"):
+        _fl_clear(_p)
+        _old = os.path.join(_sdd, ".lint-unset-c3-old")
+        for _mk in (_old, os.path.join(_sdd, ".lint-unset-c3-cur")):
+            open(_mk, "w").close()
+        os.utime(_old, (time.time() - 9 * 86400,) * 2)
+        _o = (_fl_sdk(_p, _g, "c3-cur") if _who == "sd"
+              else _fl_shell(_p, "c3-cur",
+                             path=_np if _who == "shnp" else None)[2])
+        _res.append((_o, os.path.exists(_old)))
+    check("[lint] C3: a call that shows nothing still purges a marker over "
+          "7 days old, shell == sdk", _res == [({}, False)] * 3,
+          repr(_res)[:600])
 finally:
     shutil.rmtree(_FL_TMP, ignore_errors=True)
 

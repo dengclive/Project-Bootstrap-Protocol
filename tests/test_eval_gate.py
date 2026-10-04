@@ -135,7 +135,8 @@ def commit_file(d, rel, msg):
 
 def _log(d):
     try:
-        return open(os.path.join(d, ".claude", "logs", "hooks.log")).read()
+        return open(os.path.join(d, ".claude", "logs", "hooks.log"),
+                    errors="replace").read()
     except OSError:
         return ""
 
@@ -150,7 +151,7 @@ def shell(d, command="git push", cwd=None):
     r = subprocess.run(["bash", os.path.join(d, ".claude", "hooks",
                                              "eval-gate.sh")],
                        input=payload, capture_output=True, text=True,
-                       cwd=cwd or d,
+                       errors="replace", cwd=cwd or d,
                        env=dict(os.environ, CLAUDE_PROJECT_DIR=d))
     return r.returncode, r.stdout, r.stderr, _log(d)[before:]
 
@@ -420,6 +421,66 @@ try:
              "Eval gate: %s changed after the last eval pass; run evals "
              "again before pushing." % rel, "eval pass older than " + rel)
         _git(d, "push", "-q")
+    # [PR #120 step 7, EP-1] A name that is not valid UTF-8 (a raw 0xE9
+    # byte). The SDK decoded git's output with errors="replace", so the
+    # name became U+FFFD, named no file, and a stale marker passed while
+    # the shell denied. Both now deny, and both show the byte as U+FFFD.
+    # [RR3-6] A filesystem that refuses names that are not valid UTF-8
+    # (APFS and HFS+ raise EILSEQ) skips these two rows, visibly.
+    raw = os.path.join(os.fsencode(d), b"prompts", b"sys\xe9.txt")
+    try:
+        with open(raw, "wb") as fh:
+            fh.write(b"p\n")
+    except OSError as e:
+        raw = None
+        check("SKIPPED: raw 0xE9 prompt-name rows (filesystem rejects "
+              "non-UTF-8 names: %s)" % e, True)
+    if raw is not None:
+        _git(d, "add", "-A")
+        _git(d, "commit", "-qm", "latin-1 prompt name")
+        open(os.path.join(d, mark), "w").write("ok\n")
+        set_mtime(d, mark, STALE)
+        os.utime(raw, (STALE + 10, STALE + 10))
+        both(d, "git push", "stale marker, prompt name with a raw 0xE9 byte",
+             2, "Eval gate: prompts/sys\ufffd.txt changed after the last "
+             "eval pass; run evals again before pushing.")
+        set_mtime(d, mark, STALE + 20)
+        both(d, "git push", "fresh marker, prompt name with a raw 0xE9 byte",
+             0, None)
+finally:
+    shutil.rmtree(scratch, ignore_errors=True)
+
+# [PR #120 step 7, M-2] The PROJECT directory's name is not valid UTF-8 (a
+# tree moved or cloned there after install; the installer cannot print such
+# a target). `git rev-parse --show-toplevel` must be decoded with
+# os.fsdecode too: decoded with errors="replace", the top named no
+# directory, every `top / f` named no file, and a stale marker passed on the
+# SDK while the shell denied.
+scratch, d0, _ = fresh_project("")
+try:
+    d = os.fsdecode(os.path.join(os.fsencode(scratch), b"proj\xe9"))
+    try:
+        os.rename(d0, d)
+    except OSError as e:
+        # [RR3-6] As above: a filesystem that refuses the name skips the
+        # rows, visibly, instead of aborting the rest of the file.
+        d = None
+        check("SKIPPED: raw 0xE9 project-directory rows (filesystem "
+              "rejects non-UTF-8 names: %s)" % e, True)
+    if d is not None:
+        mark = os.path.join(".claude", ".last-eval-pass")
+        commit_file(d, "prompts/sys.txt",
+                    "prompt in a non-UTF-8 project dir")
+        open(os.path.join(d, mark), "w").write("ok\n")
+        set_mtime(d, mark, STALE)
+        set_mtime(d, "prompts/sys.txt", STALE + 10)
+        both(d, "git push", "stale marker, project directory name with a raw "
+             "0xE9 byte", 2,
+             "Eval gate: prompts/sys.txt changed after the last eval pass; "
+             "run evals again before pushing.")
+        set_mtime(d, mark, STALE + 20)
+        both(d, "git push", "fresh marker, project directory name with a raw "
+             "0xE9 byte", 0, None)
 finally:
     shutil.rmtree(scratch, ignore_errors=True)
 

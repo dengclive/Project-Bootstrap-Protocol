@@ -353,13 +353,47 @@ try:
           and os.path.isfile(os.path.join(_SD, ".lint-unset-default"))
           and not any("rs-x" in n for n in os.listdir(_SD)),
           sorted(os.listdir(_SD)))
+    # [WP2 re-review C3] With no parser the id is read from the raw payload,
+    # so the payload's id wins over CLAUDE_SESSION_ID here too; the env var
+    # keys the marker only when the payload has no usable id.
     _r = [_post("rs-np", path=_NOPARSER, env={"CLAUDE_SESSION_ID": "rs-env"})
           for _ in range(2)]
-    check("no parser: the marker is keyed on CLAUDE_SESSION_ID, once",
+    check("no parser: the marker is keyed on the payload's session_id, once",
           _obj(_r[0][1]) == {"systemMessage": LINT_UNSET_NOTICE}
           and _r[1][1] == "" and all(x[0] == 0 and x[2] == "" for x in _r)
+          and os.path.isfile(os.path.join(_SD, ".lint-unset-rs-np"))
+          and not os.path.exists(os.path.join(_SD, ".lint-unset-rs-env")),
+          repr(_r)[:400])
+    _r = [_post("../x", path=_NOPARSER, env={"CLAUDE_SESSION_ID": "rs-env"})
+          for _ in range(2)]
+    check("no parser, unusable payload id: keyed on CLAUDE_SESSION_ID, once",
+          _obj(_r[0][1]) == {"systemMessage": LINT_UNSET_NOTICE}
+          and _r[1][1] == ""
           and os.path.isfile(os.path.join(_SD, ".lint-unset-rs-env")),
           repr(_r)[:400])
+    # Claude Code does not export CLAUDE_SESSION_ID: every session used to
+    # key on .lint-unset-default, so the notice fired once per PROJECT.
+    _lint_marks(P_EMPTY)
+    _r = [_post(s, path=_NOPARSER) for s in ("rs-sa", "rs-sa", "rs-sb")]
+    check("no parser, no CLAUDE_SESSION_ID: once per session, not once per "
+          "project (C3)", [_obj(x[1]) for x in _r] ==
+          [{"systemMessage": LINT_UNSET_NOTICE}, None,
+           {"systemMessage": LINT_UNSET_NOTICE}]
+          and not os.path.exists(os.path.join(_SD, ".lint-unset-default")),
+          (repr(_r)[:300], sorted(os.listdir(_SD))))
+    # The purge runs on every call, so a stale marker - the default one
+    # above all - expires instead of silencing every later session.
+    for _path in (None, _NOPARSER):
+        _lint_marks(P_EMPTY)
+        _p = os.path.join(_SD, ".lint-unset-default")
+        open(_p, "w").close()
+        os.utime(_p, (time.time() - 9 * 86400,) * 2)
+        rc, out, err = _post("../rs-d", path=_path)
+        check("a stale .lint-unset-default expires: the notice shows again "
+              f"(C3{', no parser' if _path else ''})", rc == 0
+              and _obj(out) == {"systemMessage": LINT_UNSET_NOTICE}
+              and time.time() - os.path.getmtime(_p) < 3600,
+              repr((rc, out[:200], err[:200])))
     for _n, _days in ((".lint-unset-rs-old", 9), (".lint-unset-rs-new", 1)):
         _p = os.path.join(_SD, _n)
         open(_p, "w").close()
@@ -375,6 +409,12 @@ try:
           not os.path.exists(os.path.join(_SD, ".lint-unset-rs-old"))
           and os.path.exists(os.path.join(_SD, ".lint-unset-rs-new")),
           sorted(os.listdir(_SD)))
+    _p = os.path.join(_SD, ".lint-unset-rs-old")
+    open(_p, "w").close()
+    os.utime(_p, (time.time() - 9 * 86400,) * 2)
+    rc, out, _ = _post("rs-c")
+    check("a call that shows nothing still purges (C3)", rc == 0
+          and out == "" and not os.path.exists(_p), sorted(os.listdir(_SD)))
 
     # ----------------------------------------------------------------------- #
     print("\n== drift-detector-loop-cooperation: once per tier-3 sentinel ==")

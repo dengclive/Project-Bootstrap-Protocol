@@ -181,10 +181,11 @@ suite printed at exit 0 therefore reached nobody.
   drift-detector-loop-cooperation print JSON `additionalContext`.
   format-lint-gate reports only a FAILING lint (last 20 lines, cut at 9,000
   bytes); with `commands.lint` empty it prints a `systemMessage` notice to the
-  operator once per session (backlog I-6(a)). task-done-alarm and
-  decision-required-alarm emit an OSC 9 `terminalSequence` (Notification
-  ignores JSON otherwise; SubagentStop `additionalContext` would cost the
-  subagent a turn). decision-required-alarm gets the matcher
+  operator once per session (backlog I-6(a)), with no JSON parser too: the
+  shell then reads the session id from the raw payload (review C3).
+  task-done-alarm and decision-required-alarm emit an OSC 9 `terminalSequence`
+  (Notification ignores JSON otherwise; SubagentStop `additionalContext` would
+  cost the subagent a turn). decision-required-alarm gets the matcher
   `permission_prompt|elicitation_dialog`, so `idle_prompt` and every other
   notification type no longer fire it; a re-install drops its old match-all
   `Notification` site (`HOOK_RETIRED_SITES`), as it does cost-log's `Stop`
@@ -197,10 +198,14 @@ suite printed at exit 0 therefore reached nobody.
   then to at most 20,000 bytes, to stderr; `gates.py` appends the same bytes
   to its deny reason. The reason lines were already on stderr; the runner's
   stdout was what got dropped. The output is captured to a file, not a pipe,
-  so the gate returns when the runner exits even if a background child of
-  the runner still holds its stdout (review SC-5). Each echoed command label
-  is printed from a shell-quoted literal, so a configured command with a
-  quoted operator in it runs once, not twice (review SC-1).
+  so the gate returns when the runner exits even if a background child of the
+  runner still holds its stdout (review SC-5). A hook killed mid-run leaves
+  that file in `.claude/logs`; the next run of the same hook deletes its own
+  such files older than the hook's timeout plus a minute (review B-1). With
+  `.claude/logs` unusable the file goes to `$TMPDIR`, then `/tmp`, so a bad
+  `TMPDIR` still captures, as `gates.py` does (review B-2). Each echoed
+  command label is printed from a shell-quoted literal, so a configured
+  command with a quoted operator in it runs once, not twice (review SC-1).
 - **One block reason per tool call.** When two hooks exit 2 on the same tool
   call, Claude Code delivers one of their reasons to the model and drops the
   rest (measured with ci-mirror and eval-gate on one `git push`). Which hook
@@ -221,11 +226,18 @@ suite printed at exit 0 therefore reached nobody.
 - **drift tier 1.** All three PRD §6.E tier-1 triggers are live: tool calls,
   minutes, and repeated reads of one file, each counted since the last
   checkpoint (or the session start). That departs from §6.E's trigger list,
-  which measures duration from the session start file and reads over the
-  whole session. Fire-once per arming; a checkpoint re-arms. `/ack-drift`
-  also re-arms: each threshold becomes max(threshold, signal at the ack) plus
-  half the configured threshold, rounded up (PRD §6.E Acknowledgement;
-  review RC-2). Tiers 2 and 3 are still not implemented (backlog I-1).
+  which measures duration from the session start file and reads over the whole
+  session. Fire-once per arming; a checkpoint re-arms. `/ack-drift` also
+  re-arms: each threshold becomes max(threshold, signal at the ack) plus half
+  the configured threshold, rounded up (PRD §6.E Acknowledgement; review
+  RC-2). Concurrent calls update the state under a per-session lock. A holder
+  that stalls past the lock's 2 clock-second age bound loses it, and the lock
+  is best-effort: a stall at the wrong moment can still lose or misattribute
+  an update, the stalled holder's or its successor's (backlog Z-22). A
+  malformed or stale lock is broken rather than waited on to the bound
+  (review C1, C2), and on a filesystem with no hard links each call runs
+  unlocked at once, logged (RR4-2). Tiers 2 and 3 are still not implemented
+  (backlog I-1).
 - **eval-gate (D9, X-36z).** New key `commands.eval`: when set, the gate runs
   it; empty, it falls back to `.claude/.last-eval-pass`, which must now be
   newer than every touched prompt file, and the installer prints a
@@ -251,6 +263,17 @@ suite printed at exit 0 therefore reached nobody.
   bare `test.py`, and a `*Test.java` basename outside a test directory.
   The set also exempts some production files and still refuses some
   test-first writes; both are open residuals (backlog Z-15, Z-16).
+
+**Upgrading a tree with no installer manifest.** The manifest is gitignored,
+so a fresh clone has none. On such a tree a re-install updates
+`settings.json` but keeps the old hook bodies, with a `SKIP` line and a
+`warning:` line for each, so the new wiring runs the old scripts; a second
+plain re-install skips them again. If those files are an earlier install's,
+not your edits, run `bootstrap-install --adopt` first, then re-install
+without `--adopt` to bring them up to date (review CR-1). That sequence
+overwrites a hook you edited by hand and keeps no backup, so merge such a
+file by hand, or re-install with `--force`, which saves each file it
+overwrites to `.claude/.installer-backups/` first.
 
 **The timeout split, accepted and recorded.** A shell `PreToolUse` hook killed
 at its timeout fails OPEN; an Agent SDK callback that outruns its timeout
@@ -298,8 +321,11 @@ satisfies the eval marker fallback (J-9). With `commands.ci_local` and
 in backlog section Z: the tdd-gate exemption set's over- and
 under-exemptions (Z-15, Z-16), the three operator-wait `Notification` types
 the alarm's matcher omits (Z-17), the shell runner's inherited `pipefail`
-(Z-18), double-quoted backslash escapes in `bootstrap.config.yaml` (Z-19)
-and the one-reason-per-call asymmetry (Z-20). No `PROTOCOL_VERSION` bump,
+(Z-18), double-quoted backslash escapes in `bootstrap.config.yaml` (Z-19),
+the one-reason-per-call asymmetry (Z-20) and drift's state lock, which is
+best-effort under multi-second stalls during parallel tool calls (Z-22:
+races C1, RR3-1 and RR4-1, and the unlocked fallback without hard links,
+RR4-2). No `PROTOCOL_VERSION` bump,
 and the seam bind is not re-pointed.
 
 **Freeze exception 83.** One exception covers every frozen source WP2 touches
@@ -307,10 +333,10 @@ and the seam bind is not re-pointed.
 `lib/installer.py`, `lib/interview.py`, `lib/retrofit_interview.py`,
 `lib/sdk_gates_template.py`, `lib/templates.py` and
 `tests/test_installer.py` — and all seven moving digests: the four plan
-goldens in `tests/test_greenfield_golden.py` (default `fc19712c...`,
-full_autonomous `9abcf453...`, design_steering `ee1fbc1f...`, sdk_callable
-`92aebfd9...`), the two in `tests/test_retrofit.py` (service `6e0e78fc...`,
-agent `a3682788...`) and the AC-2-3 mini-golden in
+goldens in `tests/test_greenfield_golden.py` (default `2d5b895e...`,
+full_autonomous `af60c15b...`, design_steering `4091f7f9...`, sdk_callable
+`ed9f02cb...`), the two in `tests/test_retrofit.py` (service `8107a26e...`,
+agent `1826b9fa...`) and the AC-2-3 mini-golden in
 `tests/test_validate_only.py` (`d02fb348...`, previous `0c1c7931...`).
 `EXPECTED_TELEMETRY_BODY` does not move. Each moved digest carries a
 `[freeze-exception no. 83, 2026-10-03]` comment above it. Measured on the
@@ -335,8 +361,8 @@ mini-golden moves by one line of the synthesized config, `  eval: ""` under
 `commands:` after `ci_local`.
 
 **Tests.** Seven new files: `tests/test_block_logging.py` (38 checks),
-`tests/test_command_embedding.py` (118), `tests/test_eval_gate.py` (237),
-`tests/test_hook_channels.py` (95), `tests/test_runner_output.py` (64),
+`tests/test_command_embedding.py` (142), `tests/test_eval_gate.py` (245),
+`tests/test_hook_channels.py` (100), `tests/test_runner_output.py` (76),
 `tests/test_shared_plumbing.py` (65) and `tests/test_wp2_records.py`
 (45). Rows added to `test_hook_behavior`, `test_sdk_gates`,
 `test_substrate_differential`, `test_issue_fixes`, `test_installer`,

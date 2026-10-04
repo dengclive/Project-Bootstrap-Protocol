@@ -429,6 +429,160 @@ try:
 finally:
     shutil.rmtree(scratch, ignore_errors=True)
 
+# [WP2 re-review bash-n B-1, B-2, B-3] Which bash answers, and where.
+#  B-1: a `bash` that cannot start (the WSL launcher with no distribution
+#       installed) exited 1, which was read as the USER's syntax error, so
+#       every command was refused. Now a control `:` is parsed first; a bash
+#       that fails it counts as no bash, as a missing one always did.
+#  B-2: every key was probed inside format-lint-gate's `$( )` line too.
+#       Bash 3.2 misreads a quote or paren in a comment there, so a test
+#       command with `# off :-(` was refused although test-gate parses it.
+#       Each key is now probed with the text ITS hooks emit.
+#  B-3: the quote scan ran first and counts a quote inside a `# comment`;
+#       it now runs only where bash cannot.
+print("\n== bash-n B-1, B-2, B-3: which bash answers, and where ==")
+_REAL_BASH = shutil.which("bash")
+_stubs = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
+_WSL = os.path.join(_stubs, "wsl")
+_B32 = os.path.join(_stubs, "b32")
+_NONE = os.path.join(_stubs, "none")
+for _d in (_WSL, _B32, _NONE):
+    os.makedirs(_d)
+with open(os.path.join(_WSL, "bash"), "w") as fh:
+    fh.write("#!/bin/sh\necho 'Windows Subsystem for Linux has no installed"
+             " distributions.' >&2\nexit 1\n")
+# Bash 3.2's shape, measured on docker bash:3.2 (3.2.57): under -n it does
+# not parse inside `$( )`, but a `'`, `"`, backtick or `(` in a comment in
+# there throws its quote matching off ("unexpected EOF while looking for
+# matching"). Everything else goes to the real bash.
+with open(os.path.join(_B32, "bash"), "w") as fh:
+    fh.write(f"""#!{sys.executable}
+import re, subprocess, sys
+text = sys.stdin.read()
+CAP = re.compile(r'\\$\\( \\(\\n.*?\\| tail -n \\d+ \\)"', re.S)
+for m in CAP.finditer(text):
+    if re.search(r"(?m)#[^\\n]*['\\"`(]", m.group(0)):
+        sys.stderr.write("bash: line 3: unexpected EOF while looking for "
+                         "matching `\\"'\\n")
+        sys.exit(2)
+text = CAP.sub('$(:)"', text)
+sys.exit(subprocess.run([{_REAL_BASH!r}] + sys.argv[1:], input=text,
+                        text=True).returncode)
+""")
+for _d in (_WSL, _B32):
+    os.chmod(os.path.join(_d, "bash"), 0o755)
+_PATH0 = os.environ["PATH"]
+
+
+class _OnPath:
+    """PATH with `d` first, or PATH = `d` alone for _NONE, or unchanged for
+    None, for the duration of a `with` block."""
+    def __init__(self, d):
+        self.d = d
+
+    def __enter__(self):
+        if self.d is not None:
+            os.environ["PATH"] = (self.d if self.d == _NONE
+                                  else self.d + os.pathsep + _PATH0)
+
+    def __exit__(self, *exc):
+        os.environ["PATH"] = _PATH0
+
+
+def _errs_under(path_dir, cmds):
+    """resolve_config's commands.* errors under _OnPath(path_dir), by key."""
+    with _OnPath(path_dir):
+        _, errs = defaults.resolve_config({
+            "project": {"name": "v", "archetype": "ai-agent"},
+            "commands": cmds})
+    return {e.split(" ", 1)[0]: e for e in errs
+            if e.startswith("commands.")}
+
+
+ALL6 = ("test", "lint", "format", "typecheck", "ci_local", "eval")
+try:
+    # B-1
+    by = _errs_under(_WSL, {k: "pytest -q" for k in ALL6})
+    check("B-1: a bash that cannot start refuses no plain command",
+          by == {}, repr(by)[:400])
+    with _OnPath(_WSL):
+        res = defaults._shell_parse_error("true &&", "test")
+    check("B-1: ... and is no bash at all to the parse check",
+          res is defaults._NO_BASH, repr(res))
+    by = _errs_under(_WSL, {"test": "echo 'oops"})
+    check("B-1: with that bash, the quote scan still refuses an open quote",
+          "unbalanced quote" in by.get("commands.test", ""), repr(by))
+    by = _errs_under(_NONE, {"test": "echo 'oops", "lint": "pytest -q"})
+    check("B-1 control: with no bash on PATH, the quote scan decides",
+          set(by) == {"commands.test"}
+          and "unbalanced quote" in by["commands.test"], repr(by))
+    r = subprocess.run(
+        [sys.executable, BIN, "-c", "/dev/stdin", "--print-config"],
+        input="project:\n  name: p\n  archetype: cli\ncommands:\n"
+              "  test: 'pytest -q'\n",
+        capture_output=True, text=True,
+        env=dict(os.environ, PATH=_WSL + os.pathsep + _PATH0))
+    check("B-1: the installer accepts commands.test with that bash first "
+          "on PATH", r.returncode == 0, repr((r.returncode,
+                                              r.stderr[-400:])))
+
+    # B-2
+    COMMENTED = "pytest -q  # e2e off for now :-("
+    by = _errs_under(_B32, {k: COMMENTED for k in ALL6})
+    check("B-2: on bash 3.2, a comment with `(` is refused for lint only",
+          set(by) == {"commands.lint"}, repr(by)[:600])
+    check("B-2: ... and lint's reason names format-lint-gate",
+          "format-lint-gate" in by.get("commands.lint", "")
+          and "Bash call" not in by.get("commands.lint", ""), repr(by))
+    by = _errs_under(_B32, {"lint": "true &&", "test": "true &&"})
+    check("B-2: on bash 3.2, an incomplete lint is still refused (its "
+          "subshell is probed outside `$( )` too)",
+          set(by) == {"commands.lint", "commands.test"}, repr(by)[:600])
+    for value in ("pytest # it's", "pytest # `", "pytest # $("):
+        by = _errs_under(_B32, {"test": value, "ci_local": value,
+                                "eval": value})
+        check(f"B-2: on bash 3.2, {value!r} is accepted for test, ci_local, "
+              f"eval", by == {}, repr(by)[:400])
+    # Each key's reason names its own hook, or none.
+    by = _errs_under(None,
+                     {k: "true &&" for k in ALL6})
+    for key, hook in (("test", "test-gate"), ("ci_local", "ci-mirror"),
+                      ("eval", "eval-gate"),
+                      ("lint", "format-lint-gate")):
+        others = {"test-gate", "ci-mirror", "eval-gate",
+                  "format-lint-gate"} - {hook}
+        if key == "test":
+            others -= {"ci-mirror"}   # it runs test when ci_local is empty
+        m = by.get(f"commands.{key}", "")
+        check(f"B-2: commands.{key}'s reason names {hook} and no other gate",
+              hook in m and not any(o in m for o in others), m)
+    for key in ("format", "typecheck"):
+        m = by.get(f"commands.{key}", "")
+        check(f"B-2: commands.{key} is refused and its reason names no hook",
+              m and "hook" not in m and "tech.md" in m, m)
+
+    # B-3
+    for value in ("pytest -q  # don't run slow", 'pytest -q  # the "slow',
+                  "pytest -q  # path\\"):
+        by = _errs_under(None,
+                         {k: value for k in ALL6})
+        check(f"B-3: {value!r} parses where bash runs, so it is accepted",
+              by == {}, repr(by)[:400])
+    by = _errs_under(_NONE, {"test": "pytest -q  # don't run slow"})
+    check("B-3 control: with no bash, the quote scan still refuses it",
+          "unbalanced quote" in by.get("commands.test", ""), repr(by))
+    for value, want in (("echo 'oops", "not a complete shell command"),
+                        ('ruff check "', "not a complete shell command"),
+                        ("make ci \\", "ends in a backslash")):
+        by = _errs_under(None,
+                         {k: value for k in ALL6})
+        check(f"B-3: {value!r} is still refused for every key ({want})",
+              set(by) == {f"commands.{k}" for k in ALL6}
+              and all(want in m for m in by.values()), repr(by)[:600])
+finally:
+    os.environ["PATH"] = _PATH0
+    shutil.rmtree(_stubs, ignore_errors=True)
+
 # [WP2 re-review RR1-EMB-4] The docstring said the shell runs the command
 # "the way the SDK twin does (`/bin/sh -c`, no `-u`)". It does not: the
 # subshell inherits pipefail and the hook's functions. The claim is gone.

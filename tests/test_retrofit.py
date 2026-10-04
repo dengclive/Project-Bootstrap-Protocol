@@ -2477,8 +2477,37 @@ EXPECTED_RETROFIT_DIGESTS = {
     # unchanged at 79 / 93; 14 / 18 bodies move (service / agent). `service`
     # moves the greenfield default's 14; `agent` adds tdd-gate, eval-gate,
     # drift-detector-loop-cooperation and iteration-summary-enforcement.
-    "service": "6e0e78fc5715b2c83f9fb791a00f7d6239c779dba1fb578bffef120e1131160b",
-    "agent": "a3682788030d97fd18b6b3699165514ff3a798c994f3955d20905682a4d84f43",
+    # RE-BASELINED 2026-10-04, same exception 83, once over the whole PR #120
+    # step-7 tree (runner B-1, B-2; drift-lint C1, C2). test-gate.sh and
+    # ci-mirror.sh delete their own stale `<hook>.out.*` capture files and try
+    # /tmp when a set TMPDIR cannot hold one; drift-detector.sh releases or
+    # renames under its lock only while the lock holds its own token, and
+    # breaks a malformed, future-dated or pid-less lock. Measured on the
+    # emitted plans, per file. Against the PR head ad0bab3 (6e0e78fc... /
+    # a3682788...): 3 bodies move in each, test-gate.sh, drift-detector.sh and
+    # ci-mirror.sh; format-lint-gate.sh does not, because neither fixture
+    # leaves lint empty. Against c642731: the 14 / 18 bodies listed above, no
+    # more. Both: 0 added, 0 removed, order, modes and kinds unchanged, counts
+    # 79 / 93.
+    # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+    # 4, RR3-1 and RR3-3): drift-detector.sh takes its lock token before
+    # its mkdir and creates its pid file with `ln`, never over a
+    # successor's; a call that lost its lock no longer appends its Read
+    # path, removes the reads file or logs an n= line. Measured on the
+    # emitted plans against the previous digests (612c224a... /
+    # 71b85a02...): exactly one body moves in each, drift-detector.sh; 0
+    # added, 0 removed, order, modes and kinds unchanged, counts 79 / 93.
+    # Against ad0bab3 and c642731 the sets above still hold.
+    # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+    # 5, RR4-1, RR4-2 and RR4-3): drift-detector.sh removes its own lock
+    # and proceeds unlocked at once when its `ln` fails with no pid file
+    # (no hard links), and its comments disclose the unlock's
+    # compare-then-remove window. Measured on the emitted plans against
+    # the previous digests (6a545f58... / 92b3ee4e...): exactly one body
+    # moves in each, drift-detector.sh; 0 added, 0 removed, order, modes
+    # and kinds unchanged, counts 79 / 93.
+    "service": "8107a26ea35414cae6f46e0f80c0144e80c7f62c74771eee67fc8eb300643477",
+    "agent": "1826b9fa8f7c042e4b8bda8d53c0138298e0dbe7a22e46b09a8ecd89a782a69e",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

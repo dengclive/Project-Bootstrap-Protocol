@@ -3459,7 +3459,38 @@ EXPECTED_DIGESTS = {
         # spec-gate-entry, spec-gate-commit, test-gate, format-lint-gate,
         # cost-log, drift-detector, task-done-alarm, decision-required-alarm,
         # ci-mirror).
-        "fc19712c6001de6788957410eff92a11ed8635a4e912e050314d9d705ed0d9aa",
+        # RE-BASELINED 2026-10-04, same exception 83, once over the whole PR
+        # #120 step-7 tree (runner B-1, B-2; drift-lint C1-C4; EP-1; I-1).
+        # test-gate.sh and ci-mirror.sh delete their own stale `<hook>.out.*`
+        # capture files and try /tmp when a set TMPDIR cannot hold one.
+        # drift-detector.sh releases or renames under its lock only while the
+        # lock holds its own token, and breaks a malformed, future-dated or
+        # pid-less lock. With lint empty and no JSON parser,
+        # format-lint-gate.sh reads the session id from the raw payload, and it
+        # purges week-old markers on every call.
+        # Measured on the emitted plans, per file. Against the PR head ad0bab3
+        # (fc19712c...): 4 bodies move, test-gate.sh, format-lint-gate.sh,
+        # drift-detector.sh and ci-mirror.sh. Against c642731: the 14 bodies
+        # listed above, no more. Both: 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 56.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 4, RR3-1 and RR3-3): drift-detector.sh takes its lock token before
+        # its mkdir and creates its pid file with `ln`, never over a
+        # successor's; a call that lost its lock no longer appends its Read
+        # path, removes the reads file or logs an n= line. Measured on the
+        # emitted plans against the previous digest (8b2ccad8...): exactly one
+        # body moves, drift-detector.sh; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 56. Against ad0bab3 and c642731 the
+        # sets above still hold.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 5, RR4-1, RR4-2 and RR4-3): drift-detector.sh removes its own lock
+        # and proceeds unlocked at once when its `ln` fails with no pid file
+        # (no hard links), and its comments disclose the unlock's
+        # compare-then-remove window. Measured on the emitted plans against
+        # the previous digest (e6e3d9d1...): exactly one body moves,
+        # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 56.
+        "2d5b895e88ae484ca0177ecfffb904c5c605b8a8e2d7057e22b857fbecffb44e",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4034,7 +4065,38 @@ EXPECTED_DIGESTS = {
         # eval-gate (D9, X-36z), drift-detector-loop-cooperation
         # (additionalContext, fire-once) and iteration-summary-enforcement
         # (systemMessage degrade, BLOCK log line), which this fixture emits.
-        "9abcf4533324c708867b49137fb83d4956461d58d2718be3c24732b129159546",
+        # RE-BASELINED 2026-10-04, same exception 83, once over the whole PR
+        # #120 step-7 tree (runner B-1, B-2; drift-lint C1-C4; EP-1; I-1).
+        # test-gate.sh and ci-mirror.sh delete their own stale `<hook>.out.*`
+        # capture files and try /tmp when a set TMPDIR cannot hold one.
+        # drift-detector.sh releases or renames under its lock only while the
+        # lock holds its own token, and breaks a malformed, future-dated or
+        # pid-less lock. With lint empty and no JSON parser,
+        # format-lint-gate.sh reads the session id from the raw payload, and it
+        # purges week-old markers on every call.
+        # Measured on the emitted plans, per file. Against the PR head ad0bab3
+        # (9abcf453...): 3 bodies move, test-gate.sh, drift-detector.sh and
+        # ci-mirror.sh; format-lint-gate.sh does not, because this fixture sets
+        # lint. Against c642731: the 18 bodies listed above, no more. Both: 0
+        # added, 0 removed, order, modes and kinds unchanged, count 68.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 4, RR3-1 and RR3-3): drift-detector.sh takes its lock token before
+        # its mkdir and creates its pid file with `ln`, never over a
+        # successor's; a call that lost its lock no longer appends its Read
+        # path, removes the reads file or logs an n= line. Measured on the
+        # emitted plans against the previous digest (f7907de3...): exactly one
+        # body moves, drift-detector.sh; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 68. Against ad0bab3 and c642731 the
+        # sets above still hold.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 5, RR4-1, RR4-2 and RR4-3): drift-detector.sh removes its own lock
+        # and proceeds unlocked at once when its `ln` fails with no pid file
+        # (no hard links), and its comments disclose the unlock's
+        # compare-then-remove window. Measured on the emitted plans against
+        # the previous digest (871d0e59...): exactly one body moves,
+        # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 68.
+        "af60c15b1803938f8d305229e763ae861b3ae6fb162b73d5f23c717b2ef5c99d",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4534,7 +4596,38 @@ EXPECTED_DIGESTS = {
         # 0 removed, order unchanged, action count 58 -> 58; the default
         # fixture's 14 bodies move. The three frozen design-steering artifacts
         # do not move.
-        "ee1fbc1fead7b299a2a93196301ec79e676808bc85f47606af154ff7a11ce668",
+        # RE-BASELINED 2026-10-04, same exception 83, once over the whole PR
+        # #120 step-7 tree (runner B-1, B-2; drift-lint C1-C4; EP-1; I-1).
+        # test-gate.sh and ci-mirror.sh delete their own stale `<hook>.out.*`
+        # capture files and try /tmp when a set TMPDIR cannot hold one.
+        # drift-detector.sh releases or renames under its lock only while the
+        # lock holds its own token, and breaks a malformed, future-dated or
+        # pid-less lock. With lint empty and no JSON parser,
+        # format-lint-gate.sh reads the session id from the raw payload, and it
+        # purges week-old markers on every call.
+        # Measured on the emitted plans, per file. Against the PR head ad0bab3
+        # (ee1fbc1f...): 4 bodies move, test-gate.sh, format-lint-gate.sh,
+        # drift-detector.sh and ci-mirror.sh. Against c642731: the default
+        # fixture's 14 bodies, no more. Both: 0 added, 0 removed, order, modes
+        # and kinds unchanged, count 58.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 4, RR3-1 and RR3-3): drift-detector.sh takes its lock token before
+        # its mkdir and creates its pid file with `ln`, never over a
+        # successor's; a call that lost its lock no longer appends its Read
+        # path, removes the reads file or logs an n= line. Measured on the
+        # emitted plans against the previous digest (8ef0a70b...): exactly one
+        # body moves, drift-detector.sh; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 58. Against ad0bab3 and c642731 the
+        # sets above still hold.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 5, RR4-1, RR4-2 and RR4-3): drift-detector.sh removes its own lock
+        # and proceeds unlocked at once when its `ln` fails with no pid file
+        # (no hard links), and its comments disclose the unlock's
+        # compare-then-remove window. Measured on the emitted plans against
+        # the previous digest (6e987e88...): exactly one body moves,
+        # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 58.
+        "4091f7f9cb7f3f389883f725e866044294f9362f84bcdeb852801c071d46bd1c",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -4573,7 +4666,43 @@ EXPECTED_DIGESTS = {
         # new helpers, imports and prelude constants they use, and
         # `_GATE_TIMEOUTS` gaining eval-gate (600 s). The secrets and
         # dependency gates' functions and timeouts do not move.
-        "92aebfd9105b6ff36762a8c9861a0db1d31df244b1d60ad6c522017fa3522bb9",
+        # RE-BASELINED 2026-10-04, same exception 83, once over the whole PR
+        # #120 step-7 tree (runner B-1, B-2; drift-lint C1-C4; EP-1; I-1).
+        # test-gate.sh and ci-mirror.sh delete their own stale `<hook>.out.*`
+        # capture files and try /tmp when a set TMPDIR cannot hold one.
+        # drift-detector.sh releases or renames under its lock only while the
+        # lock holds its own token, and breaks a malformed, future-dated or
+        # pid-less lock. With lint empty and no JSON parser,
+        # format-lint-gate.sh reads the session id from the raw payload, and it
+        # purges week-old markers on every call.
+        # gates.py's eval gate decodes git's output with os.fsdecode (EP-1), so
+        # a prompt name or project directory that is not valid UTF-8 still
+        # names its file; its lint gate strips trailing newlines from the
+        # payload's session id (C4) and purges week-old markers on every call
+        # (C3); and the dead `_git_ok` is gone (I-1).
+        # Measured on the emitted plans, per file. Against the PR head ad0bab3
+        # (92aebfd9...): 5 bodies move, test-gate.sh, format-lint-gate.sh,
+        # drift-detector.sh, ci-mirror.sh and gates.py. Against c642731: the
+        # default fixture's 14 bodies plus gates.py, no more. Both: 0 added, 0
+        # removed, order, modes and kinds unchanged, count 57.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 4, RR3-1 and RR3-3): drift-detector.sh takes its lock token before
+        # its mkdir and creates its pid file with `ln`, never over a
+        # successor's; a call that lost its lock no longer appends its Read
+        # path, removes the reads file or logs an n= line. Measured on the
+        # emitted plans against the previous digest (6e481f8d...): exactly one
+        # body moves, drift-detector.sh; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 57. Against ad0bab3 and c642731 the
+        # sets above still hold.
+        # RE-BASELINED again 2026-10-04, same exception 83 (PR #120 fix round
+        # 5, RR4-1, RR4-2 and RR4-3): drift-detector.sh removes its own lock
+        # and proceeds unlocked at once when its `ln` fails with no pid file
+        # (no hard links), and its comments disclose the unlock's
+        # compare-then-remove window. Measured on the emitted plans against
+        # the previous digest (3f597fa4...): exactly one body moves,
+        # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 57.
+        "ed9f02cbaccec9b6161ba480e1441f9041048758d5c3d3dbd001119a318f2848",
 }
 
 EXPECTED_ACTION_COUNTS = {

@@ -3503,12 +3503,27 @@ def _test_gate(config):
 _PROMPT_PATH = re.compile(r"[Pp]rompt|(?:^|/)prompts/")
 
 
-async def _git_ok(args, proj):
+async def _git_fs(args, proj):
+    """[PR #120 step 7, EP-1] (rc, stdout) of `git <args>` run in proj;
+    stdout is decoded with os.fsdecode, so a name that is not valid UTF-8
+    still names its file. _run's errors="replace" turned such a name into
+    U+FFFD, `top / f` named no file, and a stale marker passed here while
+    the shell denied."""
     try:
-        rc, out, _ = await _run(["git"] + args, cwd=proj, shell=False)
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=str(proj),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await proc.communicate()
+        return proc.returncode, os.fsdecode(out or b"")
     except OSError:
-        rc, out = 1, ""        # mirrors shell `2>/dev/null`
-    return rc, out
+        return 1, ""           # mirrors shell `2>/dev/null`
+
+
+def _shown(name):
+    """A path from _git_fs as text that can be shown (lone surrogates from
+    an undecodable byte become U+FFFD)."""
+    return os.fsencode(name).decode("utf-8", errors="replace")
 
 
 async def _eval_names(args, proj):
@@ -3516,7 +3531,7 @@ async def _eval_names(args, proj):
     NUL-separated names `git <args>` prints). Newline-separated, git
     C-quotes a name with a non-ASCII byte, a `"` or a control character, and
     the quoted name named no file. Shell parity (_ev_names)."""
-    rc, out = await _git_ok(args, proj)
+    rc, out = await _git_fs(args, proj)
     return rc, [f for f in out.split("\\0") if f and _PROMPT_PATH.search(f)]
 
 
@@ -3612,14 +3627,14 @@ def _eval_gate(config):
         # SC-2] git names a path from the repo top, which is not proj when
         # the project is a subdirectory of the repo.
         m_ns = mark.stat().st_mtime_ns
-        rc, out = await _git_ok(["rev-parse", "--show-toplevel"], proj)
+        rc, out = await _git_fs(["rev-parse", "--show-toplevel"], proj)
         top = Path(out.rstrip("\\n")) if rc == 0 and out.rstrip("\\n") \\
             else proj
         for f in prompts:
             p = top / f
             if p.exists() and not m_ns > p.stat().st_mtime_ns:
                 return _deny("Eval gate: %s changed after the last eval "
-                             "pass; run evals again before pushing." % f)
+                             "pass; run evals again before pushing." % _shown(f))
         return {}
     return eval_gate
 
@@ -3748,20 +3763,41 @@ def _tdd_gate(config):
 # replaced by "default" when it holds any character outside [A-Za-z0-9._-].
 # A symlink at the marker is removed, never written through (O_NOFOLLOW
 # covers a link planted after the removal). Markers older than 7 days
-# (find's -mtime +7: 8 whole days) are purged when one is written.
+# (find's -mtime +7: 8 whole days) are purged on EVERY call, before the
+# marker is checked, so a stale marker expires ([WP2 re-review C3], shell
+# parity). Trailing newlines are stripped from the id before the check, as
+# the shell's `$( )` strips them from the payload's id ([WP2 re-review C4]):
+# "abc\\n" keys .lint-unset-abc on both substrates. The environment's id is
+# not stripped on either.
 # Returns True when the notice was already shown this session.
 _SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]+\\Z")
+
+
+def _lint_unset_purge(sdir):
+    try:
+        now = time.time()
+        for name in os.listdir(sdir):
+            p = os.path.join(sdir, name)
+            if (name.startswith(".lint-unset-") and os.path.isfile(p)
+                    and not os.path.islink(p)
+                    and (now - os.lstat(p).st_mtime) // 86400 > 7):
+                os.remove(p)
+    except OSError:
+        pass
 
 
 def _lint_unset_shown(proj, input_data):
     sid = None
     if isinstance(input_data, dict):
         sid = input_data.get("session_id")
+    if isinstance(sid, str):
+        sid = sid.rstrip("\\n")
     if not isinstance(sid, str) or not sid:
         sid = os.environ.get("CLAUDE_SESSION_ID") or "default"
     if not _SESSION_ID_RE.match(sid):
         sid = "default"
     sdir = os.path.join(str(proj), ".claude", "sessions")
+    _lint_unset_purge(sdir)
     mark = os.path.join(sdir, ".lint-unset-" + sid)
     if os.path.islink(mark):
         try:
@@ -3777,16 +3813,6 @@ def _lint_unset_shown(proj, input_data):
                              | getattr(os, "O_NOFOLLOW", 0), 0o644))
         except OSError:
             pass
-    try:
-        now = time.time()
-        for name in os.listdir(sdir):
-            p = os.path.join(sdir, name)
-            if (name.startswith(".lint-unset-") and os.path.isfile(p)
-                    and not os.path.islink(p)
-                    and (now - os.lstat(p).st_mtime) // 86400 > 7):
-                os.remove(p)
-    except OSError:
-        pass
     return False
 
 
