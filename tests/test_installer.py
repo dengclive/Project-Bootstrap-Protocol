@@ -1693,13 +1693,16 @@ _EXPECT = {
     "test-gate": ("PreToolUse", "Bash"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
     "ci-mirror": ("PreToolUse", "Bash"),
-    "cost-log": ("Stop", None),
+    "cost-log": ("SessionEnd", None),
     "dependency-gate": ("PreToolUse", "Bash"),
     "tdd-gate": ("PreToolUse", "Write"),
     "eval-gate": ("PreToolUse", "Bash"),
     "drift-detector": ("PostToolUse", None),
     "task-done-alarm": ("SubagentStop", None),
-    "decision-required-alarm": ("Notification", None),
+    # [WP2 channels] Two notification types only (not every type that
+    # waits on the operator; review RR-UP-2).
+    "decision-required-alarm": ("Notification",
+                                "permission_prompt|elicitation_dialog"),
     "drift-detector-loop-cooperation": ("PostToolUse", None),
     "iteration-summary-enforcement": ("Stop", None),
 }
@@ -2292,7 +2295,7 @@ check("RR-F1: audio config records drift_tier3_enforced=false",
 check("RR-F1: audio config carries the honest-scope header",
       "HONEST SCOPE" in _rr_audio and "BAKED" in _rr_audio)
 check("RR-F1: drift-detector body admits tier-1-only scope",
-      "TIER-1 TOOL-CALL COUNTER ONLY" in
+      "soft drift notice - TIER-1 ONLY" in
       _body_of(_rr_plan, ".claude/hooks/drift-detector.sh"))
 
 # ---------------------------------------------------------------------------
@@ -2512,8 +2515,8 @@ try:
     for _n in ("test", "lint", "format"):
         check(f"I-10: --dry-run warns that commands.{_n} is empty",
               f"warning: commands.{_n} is empty" in _r.stderr)
-    # I-6(a) is deferred to WP2: format-lint-gate is byte-identical and an
-    # empty lint runs `true` in silence, so no line may promise a TODO.
+    # [WP2 I-6(a)] format-lint-gate now shows a notice (systemMessage) for
+    # an empty lint; the installer's warning still must not promise a TODO.
     check("I-10: the lint warning says the gate checks nothing, and no line "
           "claims format-lint-gate prints a TODO",
           "warning: commands.lint is empty: format-lint-gate checks nothing"
@@ -2542,10 +2545,14 @@ check("I-6: tech.md no longer claims every TODO cell fails loudly",
       "fail loudly" not in _tech_emp)
 check("I-6: tech.md says no hook runs Format or Typecheck",
       "No hook runs Format or Typecheck." in _tech_emp)
-check("I-6: tech.md says an empty Lint checks nothing (the hook runs `true`)",
+# [WP2 I-6(a)] The hook now says so (a systemMessage), once per session
+# [WP2 re-review RS-3].
+check("I-6: tech.md says an empty Lint checks nothing and shows a notice",
       "`format-lint-gate` runs Lint after every edit and never blocks. "
-      "While its cell says TODO it checks nothing and prints nothing."
-      in _tech_emp and "TODO notice" not in _tech_emp)
+      "When Lint fails, the last 20 lines of its output go to the agent. "
+      "While its cell says TODO it checks nothing and shows a notice saying "
+      "so once per session." in _tech_emp
+      and "prints nothing" not in _tech_emp)
 _c_tg, _ = cfg_from("project:\n  name: t\n  archetype: cli\n"
                     "hooks:\n  test_gate: false\n")
 check("I-6: tech.md does not describe a test-gate the config turned off",
@@ -2564,6 +2571,20 @@ _c_js, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
 check("I-6: tech.md states no exit-5 allowance for jest (control)",
       _RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_js)
       and "no tests" not in _tmpl.TEMPLATES["tech"](_c_emp))
+# [WP2 Z-1] ci-mirror carries the same arm for the command it runs
+# (ci_local, else test), so tech.md says so on the same predicate.
+_CI_RC5_LINE = ("A CI local run at the top of the checkout that collects no "
+                "tests (exit 5) lets the push through, with a notice.")
+check("Z-1: tech.md states ci-mirror's exit-5 allowance when CI local is "
+      "empty and Test is pytest",
+      "`ci-mirror`" in _tmpl.TEMPLATES["tech"](_c_py)
+      and _CI_RC5_LINE in _tmpl.TEMPLATES["tech"](_c_py))
+_c_cil, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
+                     'commands:\n  test: "pytest -q"\n  ci_local: "make ci"\n')
+check("Z-1: no ci-mirror exit-5 line when CI local is not in the table "
+      "(control)", _CI_RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_cil)
+      and _RC5_LINE in _tmpl.TEMPLATES["tech"](_c_cil)
+      and _CI_RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_js))
 
 # ---------------------------------------------------------------------------
 # WP1 (rest): the rename-to-disable warning, MCP `purpose`
@@ -2909,7 +2930,7 @@ try:
     _rcd, _wd = _f4_run(_d, _F4_CFG + 'hooks:\n  cost_log: false\n',
                         "--dry-run")
     check("fix 4: no manifest, --dry-run says it would drop (M09)",
-          _rcd == 0 and any("cost-log.sh under Stop, " + _F4_DROP
+          _rcd == 0 and any("cost-log.sh under SessionEnd, " + _F4_DROP
                             + "; this run would drop" in w for w in _wd))
     _rc1, _w1 = _f4_run(_d, _F4_CFG + 'hooks:\n  cost_log: false\n')
     check("fix 4: no manifest, a non-security hook turned off is dropped "

@@ -1612,7 +1612,10 @@ RESOLVED_SPELLING_MAX = 16384
 # eval-gate declares no timeout at all and falls to the platform default 60 s:
 # 40 KB 0.57 -> 8.53 s (14.96x), 80 KB 1.92 -> 33.47, 100 KB 2.94 -> 52.82
 # (17.95x) - still UNDER on the machine measured, so its crossing sits just
-# past 100 KB. Both crossings are machine-dependent and are stated as BANDS,
+# past 100 KB. [CORRECTED 2026-10-03, WP2 / D9] eval-gate now declares 600 s
+# on both substrates (it runs commands.eval), so the "platform default 60 s"
+# above is history and its crossing figures are no longer near its bound.
+# Both crossings are machine-dependent and are stated as BANDS,
 # not constants. That this bound is irrelevant to the shape is measured, not
 # argued: at 40 KB on dependency-gate, words of 7 characters are 4.56x, of
 # exactly 255 characters 1.72x, of 256 characters (the guard fires) 1.06x.

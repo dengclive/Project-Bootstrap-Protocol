@@ -10,12 +10,19 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 
 import cmdpos                                    # round-4: THE command-position
                                                  # model, one definition for
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 from sdk_gates_template import NO_TESTS_NOTICE, NO_TESTS_RC5_RE  # [WP1]
+from sdk_gates_template import (LINT_CONTEXT_MAX,  # [WP2] shared plumbing
+                                LINT_UNSET_NOTICE, LINT_TAIL_LINES,
+                                RUNNER_NO_CAPTURE_NOTE,
+                                RUNNER_TAIL_BYTES, RUNNER_TAIL_LINES,
+                                TDD_TEST_BASENAMES,
+                                TDD_TEST_DIRS, TDD_TEST_SOURCE_SETS)
 
 PROTOCOL_VERSION = "2.8.0"
 
@@ -131,15 +138,46 @@ def _command_contract(cfg):
                          "weeks `.claude/hooks/rollout-schedule.md` marks "
                          "warn-only.")
     if "format-lint-gate" in hooks:
+        # [WP2 channels, I-6(a)] What the hook now says, and to whom.
         lines.append("`format-lint-gate` runs Lint after every edit and never "
-                     "blocks. While its cell says TODO it checks nothing and "
-                     "prints nothing.")
+                     "blocks. When Lint fails, the last "
+                     f"{LINT_TAIL_LINES} lines of its output go to the "
+                     "agent. While its cell says TODO it checks nothing and "
+                     "shows a notice saying so once per session.")
     if "ci-mirror" in hooks:
         lines.append("`ci-mirror` runs CI local before every push, or Test "
                      "when CI local is (none), and blocks the push when it "
                      "fails. While both are unset it checks nothing.")
+        ci_cmd = cfg["commands"].get("ci_local") or \
+            cfg["commands"].get("test") or ""
+        if ci_cmd and re.fullmatch(NO_TESTS_RC5_RE, ci_cmd) is not None:
+            # [WP2 Z-1] The same predicate that gives ci-mirror its arm.
+            lines.append("A CI local run at the top of the checkout that "
+                         "collects no tests (exit 5) lets the push through, "
+                         "with a notice.")
+    if "eval-gate" in hooks:
+        # [WP2 / D9] Which arm the emitted gate carries, for this install.
+        if (cfg["commands"].get("eval") or "").strip():
+            lines.append("`eval-gate` runs Eval before a push that touches "
+                         "a prompt file, and blocks it when Eval fails. A "
+                         "local merge is not gated; the push after it is.")
+        else:
+            lines.append("`eval-gate` blocks a push that touches a prompt "
+                         "file until "
+                         "`.claude/.last-eval-pass` is newer than the newest "
+                         "prompt change. Set `commands.eval` to have it run "
+                         "the evals instead.")
     lines.append("No hook runs Format or Typecheck.")
     return "\n".join(lines) + "\n"
+
+
+def _eval_row(cfg):
+    """[WP2 / D9] The Eval row exists only where eval-gate does, so the
+    other archetypes' tech.md keeps its bytes."""
+    if "eval-gate" not in cfg["_resolved_hooks"]:
+        return ""
+    ev = (cfg["commands"].get("eval") or "").strip() or "(none)"
+    return f"| Eval      | `{ev}` |\n"
 
 
 def _tech(cfg):
@@ -159,7 +197,7 @@ def _tech(cfg):
 | Format    | `{c['format'] or 'TODO: set commands.format'}` |
 | Typecheck | `{c['typecheck'] or '(none)'}` |
 | CI local  | `{c['ci_local'] or '(none)'}` |
-
+{_eval_row(cfg)}
 {_command_contract(cfg)}
 {_execution_location(cfg)}"""
 
@@ -3313,14 +3351,28 @@ for re-validating the subagent token-multiplier assumption on any pinned-model c
 # nothing else. `systemMessage` is shown to the user, `additionalContext` is
 # delivered to the model. There is no `permissionDecision`, so the normal
 # permission flow still applies - the arm allows the commit, it does not
-# approve it. The test command's stdout goes to stderr in this variant
-# (`>&2` on the run line), or pytest's "no tests ran" line would precede the
-# JSON and Claude Code would read the whole stdout as plain text.
+# approve it. The JSON is the hook's ONLY stdout because the run line sends
+# the runner's output to stderr (see _runner_run, every runner since
+# [WP2]); otherwise pytest's "no tests ran" line would precede the JSON and
+# Claude Code would read the whole stdout as plain text.
 _NO_TESTS_JSON = json.dumps({
     "systemMessage": NO_TESTS_NOTICE,
     "hookSpecificOutput": {"hookEventName": "PreToolUse",
                            "additionalContext": NO_TESTS_NOTICE}})
 assert "'" not in _NO_TESTS_JSON, "the JSON is emitted inside single quotes"
+# [WP2 Z-1] ci-mirror's notice. ci-mirror runs commands.ci_local, or
+# commands.test when that is empty, so a new pytest project with no
+# ci_local had every push blocked by the exit 5 that test-gate allows.
+# Shell-only, like ci-mirror itself (SDK_GATES has no ci-mirror).
+_CI_NO_TESTS_NOTICE = (
+    "ci-mirror: the CI command collected no tests (exit 5), so this push is "
+    "allowed. Write a first test. If this project already has tests, the "
+    "test runner is not finding them.")
+_CI_NO_TESTS_JSON = json.dumps({
+    "systemMessage": _CI_NO_TESTS_NOTICE,
+    "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                           "additionalContext": _CI_NO_TESTS_NOTICE}})
+assert "'" not in _CI_NO_TESTS_JSON, "the JSON is emitted inside single quotes"
 # [WP1 fix 4] Only at the top of the checkout. The command runs in the hook's
 # cwd, which is Claude Code's current directory, not CLAUDE_PROJECT_DIR: from
 # a directory with no tests (src/ in a src/ + tests/ layout) pytest collects
@@ -3331,24 +3383,430 @@ assert "'" not in _NO_TESTS_JSON, "the JSON is emitted inside single quotes"
 # fails, the comparison fails and the commit is blocked. The hook runs before
 # the command, in the session's directory, so a `cd` inside the same command
 # does not move it: the message says to change directory first.
-_TEST_GATE_RC5_ARM = (
-    '    elif [ "$rc" -eq 5 ]; then\n'
-    '      # [WP1] pytest / `python -m unittest` exit 5: no tests collected.\n'
-    '      # Allowed, with a notice, at the top of the checkout only. See\n'
-    '      # lib/sdk_gates_template.py NO_TESTS_RC5_RE for which commands\n'
-    '      # get this arm and why.\n'
-    '      _tg_top="$(git rev-parse --show-toplevel 2>/dev/null'
-    ' || printf %s "${CLAUDE_PROJECT_DIR:-.}")"\n'
-    '      if [ "$(pwd -P)" != "$(cd -P -- "$_tg_top" 2>/dev/null'
-    ' && pwd -P)" ]; then\n'
-    '        echo "Commit blocked: the test command collected no tests'
-    ' (exit 5) in $(pwd), which is not the top of the checkout'
-    ' ($_tg_top). The hook runs in the session\'s current directory, so'
-    ' run cd to the top in a Bash call of its own, then commit." >&2;'
-    ' exit 2\n'
-    '      fi\n'
-    '      log "test-gate allow: no tests collected (exit 5)"\n'
-    "      printf '%s\\n' '" + _NO_TESTS_JSON + "'\n")
+#
+# [WP2 Z-1] One arm, two gates: ci-mirror gets the same arm, scoped the same
+# way (NO_TESTS_RC5_RE, top of the checkout), with its own words.
+def _rc5_arm(hook, blocked, what, verb, notice_json):
+    return (
+        '    elif [ "$rc" -eq 5 ]; then\n'
+        '      # [WP1] pytest / `python -m unittest` exit 5: no tests collected.\n'
+        '      # Allowed, with a notice, at the top of the checkout only. See\n'
+        '      # lib/sdk_gates_template.py NO_TESTS_RC5_RE for which commands\n'
+        '      # get this arm and why.\n'
+        '      _tg_top="$(git rev-parse --show-toplevel 2>/dev/null'
+        ' || printf %s "${CLAUDE_PROJECT_DIR:-.}")"\n'
+        '      if [ "$(pwd -P)" != "$(cd -P -- "$_tg_top" 2>/dev/null'
+        ' && pwd -P)" ]; then\n'
+        f'        echo "{blocked} blocked: the {what} command collected no tests'
+        ' (exit 5) in $(pwd), which is not the top of the checkout'
+        ' ($_tg_top). The hook runs in the session\'s current directory, so'
+        f' run cd to the top in a Bash call of its own, then {verb}." >&2\n'
+        f'        log "{hook} BLOCK no tests collected (exit 5) outside the top'
+        ' of the checkout"; exit 2\n'
+        '      fi\n'
+        f'      log "{hook} allow: no tests collected (exit 5)"\n'
+        "      printf '%s\\n' '" + notice_json + "'\n")
+
+
+_TEST_GATE_RC5_ARM = _rc5_arm("test-gate", "Commit", "test", "commit",
+                              _NO_TESTS_JSON)
+_CI_MIRROR_RC5_ARM = _rc5_arm("ci-mirror", "Push", "CI", "push",
+                              _CI_NO_TESTS_JSON)
+
+
+# [WP2] Shared plumbing for the hooks that hand text to the model or the
+# operator. Exit-0 stderr reaches Claude Code's debug log and nothing else,
+# so these hooks write ONE JSON object to stdout instead, on the field the
+# event delivers to its reader: hookSpecificOutput.additionalContext reaches
+# the model, terminalSequence reaches the operator's terminal.
+#
+# Static messages are serialised HERE, at install time, by json.dumps, and
+# emitted as `printf '%s\n' '<json>'` (the _NO_TESTS_JSON precedent above),
+# so the emitted shell never escapes them. The assert keeps that safe: a `'`
+# would end the quoted word, and a `%` in a printf FORMAT would be read as a
+# directive.
+def _ctx_json(event, msg):
+    j = json.dumps({"hookSpecificOutput": {"hookEventName": event,
+                                           "additionalContext": msg}})
+    assert "'" not in j and "%" not in j, "emitted inside printf '...'"
+    return j
+
+
+# An OSC 9 desktop notification, for the operator: Claude Code writes
+# terminalSequence to the terminal in an interactive session only.
+def _osc9_json(msg):
+    j = json.dumps({"terminalSequence": "\x1b]9;" + msg + "\x07"})
+    assert "'" not in j and "%" not in j, "emitted inside printf '...'"
+    return j
+
+
+# A message for the USER only: systemMessage. Used where the model must NOT
+# get the text, because on that event additionalContext continues the turn
+# (Stop) or nobody acts on it but the operator.
+def _sysmsg_json(msg):
+    j = json.dumps({"systemMessage": msg})
+    assert "'" not in j and "%" not in j, "emitted inside printf '...'"
+    return j
+
+
+# [WP2 channels] The static messages, serialised once. Each module-level
+# name ending in _JSON is printed inside printf '...' by some hook, and
+# tests/test_hook_channels.py pins that none of them holds a ' or a %.
+#
+# spec-gate-entry (UserPromptSubmit): additionalContext, which the model and
+# the user both see. Same words as the stderr line it replaces.
+SPEC_ENTRY_NOTICE = "No active spec detected. Consider /spec-new before writing."
+_SPEC_ENTRY_JSON = _ctx_json("UserPromptSubmit", SPEC_ENTRY_NOTICE)
+# drift-detector-loop-cooperation (PostToolUse): an instruction to the model.
+_LOOP_COOP_JSON = _ctx_json("PostToolUse",
+                            "tier3-in-loop: write checkpoint and end turn.")
+# The two alarms are for the OPERATOR: an OSC 9 desktop notification.
+# task-done-alarm is a SubagentStop hook, where additionalContext would go to
+# the subagent and cost it a turn; Notification honours terminalSequence and
+# nothing else. Claude Code ignores the field under -p and in the Agent SDK.
+_TASK_DONE_JSON = _osc9_json("Claude Code: task complete. Ready for review.")
+_DECISION_JSON = _osc9_json(
+    "Claude Code: DECISION REQUIRED - operator action needed (see chat).")
+# iteration-summary-enforcement's parser-degrade path (Stop): to the user.
+# Stop additionalContext would continue the turn, the very loop the degrade
+# exists to avoid.
+_ITER_DEGRADE_JSON = _sysmsg_json(
+    "iteration-summary-enforcement: no WORKING JSON parser (need jq or "
+    "python3; one may be present but broken), so stop_hook_active cannot be "
+    "read and this demand cannot be bounded. Degrading to advisory rather "
+    "than risking an unbounded stop-loop.")
+# [WP2 I-6(a)] format-lint-gate with commands.lint empty: a notice to the
+# user, on both substrates (sdk_gates_template.LINT_UNSET_NOTICE is the one
+# definition). It checked nothing in silence before.
+_LINT_UNSET_JSON = _sysmsg_json(LINT_UNSET_NOTICE)
+
+
+# [WP2 spec-gate-entry-case] spec-gate-entry's keywords, matched without
+# regard to case. Each letter is spelled as an explicit two-member bracket,
+# `[Ww][Rr][Ii][Tt][Ee]`, because both shell ways to fold case go through
+# the locale: under tr_TR.UTF-8 `shopt -s nocasematch` does not match
+# "IMPLEMENT" against "implement", and `${P,,}` turns its I into a dotless
+# i (measured, bash 5.3). A bracket names its two characters, so no locale
+# folds them. Pure bash, valid POSIX sh, bash 3.2-safe, and it leaves no
+# shopt state behind for the later `case` in the same hook.
+SPEC_ENTRY_KEYWORDS = ("write", "edit", "create", "implement")
+
+
+def _ci_case_globs(words):
+    for w in words:
+        assert re.fullmatch(r"[a-z]+", w), f"not lowercase ASCII: {w!r}"
+    return "|".join(
+        "*" + "".join(f"[{ch.upper()}{ch}]" for ch in w) + "*" for w in words)
+
+
+_SPEC_KW_CASE = _ci_case_globs(SPEC_ENTRY_KEYWORDS)
+
+
+# THE bash JSON string encoder, for runtime text (a lint or runner tail). One
+# definition: every hook that emits runtime text splices this in, rather
+# than growing an escaper of its own. Pure bash, so it adds no jq or python3
+# dependency: the hooks need one of those to READ the payload (jget), but
+# not to write, and a hook that never calls jget works with neither.
+#   _json_str TEXT MAXBYTES  prints TEXT as one quoted JSON string.
+# - A per-byte loop rather than ${s//x/y}: bash 5.2's patsub_replacement gives
+#   `&` and `\` in a replacement a meaning bash 4 does not.
+# - `local LC_ALL=C` (scoped to the function, restored on return) makes
+#   ${s:i:1} one byte and the control-byte range bytewise. Bytes >= 0x80 pass
+#   through unchanged, so UTF-8 text stays UTF-8.
+# - \ " \n \r \t get their short escapes; the other C0 bytes become \u00XX.
+# - MAXBYTES caps the input in BYTES before encoding, and "\n[truncated]" is
+#   appended: the loop is quadratic in bash. A cut inside a multi-byte
+#   character is invalid UTF-8; the SDK twin cuts the same bytes.
+_SHELL_JSON_STR = r"""_json_str(){
+  local LC_ALL=C
+  local s="$1" o='' c i n=${#1} t=''
+  if [ "$n" -gt "$2" ]; then s="${s:0:$2}"; n=$2; t='\n[truncated]'; fi
+  for (( i=0; i<n; i++ )); do
+    c="${s:i:1}"
+    case "$c" in
+      \\) o+='\\' ;;
+      \") o+='\"' ;;
+      $'\n') o+='\n' ;;
+      $'\r') o+='\r' ;;
+      $'\t') o+='\t' ;;
+      [$'\001'-$'\037']) printf -v c '\\u%04x' "'$c"; o+="$c" ;;
+      *) o+="$c" ;;
+    esac
+  done
+  printf '"%s%s"' "$o" "$t"
+}
+"""
+
+# tdd-gate's exemption globs, joined into the `case` arms the shell hook is
+# emitted with. sdk_gates_template.TDD_TEST_* is the one definition; gates.py
+# renders the same tuples, so each substrate matches the same names.
+_TDD_BASENAME_ARM = "|".join(TDD_TEST_BASENAMES)
+_TDD_DIR_ARM = "|".join(TDD_TEST_DIRS)
+_TDD_SOURCE_SET_ARM = "|".join(TDD_TEST_SOURCE_SETS)
+for _arm in (_TDD_BASENAME_ARM, _TDD_DIR_ARM, _TDD_SOURCE_SET_ARM):
+    assert not re.search(r"""[\s'"`)$\;&<>]""", _arm), \
+        "a TDD glob would break the emitted `case` arm"
+del _arm
+
+# [WP2 review SDK-P5] tdd-gate's path normalization. The test-path
+# exemption reads path segments, so a `..` segment laundered a production
+# write through a test directory name: `src/tests/../core.py` names
+# `src/core.py` yet passed as a test path, on both spellings, while at
+# c642731 it was denied. The SDK normalized only the ABSOLUTE spelling
+# (relpath) and this hook neither, so the substrates split both ways (`.`
+# the other way round). _tdd_normpath is posixpath.normpath, which the SDK
+# twin now applies to both spellings: drop `` and `.` segments, let `..` pop
+# a real segment, keep a leading `..` on a relative path, drop it at the
+# root, and keep a leading `//` (but not `///`). A target that resolves
+# outside the project is then absolute or starts with `..`, so it is not
+# under src/ or lib/ and is never exempt. Sets _tdd_n; bash 3.2-safe, and
+# every test is an `if` or a `case` so `set -e` cannot fire.
+_TDD_NORM_SH = '''_tdd_normpath() {
+  local p="$1/" lead="" s
+  _tdd_n=""
+  case "$1" in
+    ///*) lead="/" ;;
+    //*) lead="//" ;;
+    /*) lead="/" ;;
+  esac
+  while [ -n "$p" ]; do
+    s="${p%%/*}"; p="${p#*/}"
+    case "$s" in
+      ''|.) ;;
+      ..)
+        if [ -n "$_tdd_n" ] && [ "$_tdd_n" != ".." ] \\
+            && [ "${_tdd_n%/..}" = "$_tdd_n" ]; then
+          case "$_tdd_n" in
+            */*) _tdd_n="${_tdd_n%/*}" ;;
+            *) _tdd_n="" ;;
+          esac
+        elif [ -z "$lead" ]; then
+          _tdd_n="${_tdd_n:+$_tdd_n/}.."
+        fi ;;
+      *) _tdd_n="${_tdd_n:+$_tdd_n/}$s" ;;
+    esac
+  done
+  _tdd_n="$lead$_tdd_n"
+  if [ -z "$_tdd_n" ]; then _tdd_n="."; fi
+}
+_tdd_normpath "${CLAUDE_PROJECT_DIR:-.}"; _PROJ_ABS="$_tdd_n"
+_tdd_normpath "$TARGET"; TARGET="$_tdd_n"
+case "$TARGET" in
+  "$_PROJ_ABS"/*) TARGET="${TARGET#"$_PROJ_ABS"/}" ;;
+esac
+TARGET="${TARGET#./}"
+'''
+
+# tdd-gate's stem search: sets _tdd_found to 1 when a file other than
+# $TARGET names $stem with `test` or `spec`. One copy, so the retrofit
+# warn-week arm asks the same question the greenfield body blocks on.
+_TDD_FIND_SH = '''    _tdd_found=0
+    while IFS= read -r _tf; do
+      case "$_tf" in "./$TARGET"|"$TARGET") continue ;; esac
+      _tdd_found=1; break
+    done < <(find . \
+                  \\( -name .git -o -name .claude -o -name node_modules \
+                     -o -name vendor -o -name .venv -o -name venv \
+                     -o -name target -o -name dist -o -name build \
+                     -o -name __pycache__ -o -name .tox -o -name .mypy_cache \
+                     -o -name site-packages -o -name .next \\) -prune -o \
+                  -type f \
+                  \\( -iname "*test*${stem}*" -o -iname "*${stem}*test*" \
+                     -o -iname "*${stem}*spec*" -o -iname "*spec*${stem}*" \\) \
+                  -print 2>/dev/null)
+'''
+
+# [WP2 tdd-test-paths] tdd-gate's exemption for test paths (build plan
+# blocker 5). Writing a test or a package marker IS the test-first step, yet
+# the stem search below skips the target itself, so `src/foo.test.ts` needed
+# ANOTHER file named like `foo.test` and `__init__.py` one like
+# `*test*__init__*`: under `tdd_policy: required` every such write was
+# refused on an empty project, on both substrates. One path component per
+# `case`, so `*` never spans a `/` - the per-component fnmatchcase the SDK
+# twin (_tdd_is_test_path) runs. Expects a project-relative $TARGET under
+# src/ or lib/. Bash 3.2-safe: no arrays, no `${x,,}`.
+_TDD_EXEMPT_SH = (
+    '    _tdd_rest="${TARGET#*/}"; _tdd_ex=0\n'
+    '    case "${TARGET##*/}" in\n'
+    '      ' + _TDD_BASENAME_ARM + ') _tdd_ex=1 ;;\n'
+    '    esac\n'
+    '    case "$TARGET" in src/*/*)\n'
+    '      case "${_tdd_rest%%/*}" in\n'
+    '        ' + _TDD_SOURCE_SET_ARM + ') _tdd_ex=1 ;;\n'
+    '      esac ;;\n'
+    '    esac\n'
+    '    _tdd_p="$_tdd_rest"\n'
+    '    while [ "$_tdd_ex" = 0 ]; do\n'
+    '      case "$_tdd_p" in */*) ;; *) break ;; esac\n'
+    '      _tdd_seg="${_tdd_p%%/*}"; _tdd_p="${_tdd_p#*/}"\n'
+    '      case "$_tdd_seg" in\n'
+    '        ' + _TDD_DIR_ARM + ') _tdd_ex=1 ;;\n'
+    '      esac\n'
+    '    done\n'
+    '    if [ "$_tdd_ex" = 1 ]; then\n'
+    '      log "tdd-gate $TARGET is a test path: exempt"\n'
+    '      exit 0\n'
+    '    fi\n'
+)
+
+
+def _sh_lit(text):
+    """[WP2 review SC-1, TP-1] `text` as ONE single-quoted shell word, for a
+    message that echoes a configured command. The command used to be
+    spliced into `echo "Running test gate: <cmd>"`, so bash re-read it: a
+    double-quoted part ended the echo's quotes and ran the rest at the top
+    level of the hook (`sh -c "cd x && y"`), and a `$VAR` unset under the
+    header's `set -u` killed the hook with exit 1, which does not block.
+    Inside single quotes nothing is expanded; shlex.quote writes a `'` as
+    `'"'"'`."""
+    return shlex.quote(text)
+
+
+def _user_cmd(cmd, indent, root=False):
+    """[WP2 review IU-1, TP-1] A subshell of the hook that runs a configured
+    command. [WP2 re-review RR1-EMB-4] It inherits the hook's `pipefail`,
+    its functions (`log`, `jget`, ...) and its `$$`; the SDK twin's
+    `/bin/sh -c` has none of them, so `false | cat` fails here and passes
+    there. The command sits on its own line, so a trailing `# comment` ends
+    there instead of eating the `)` (the hook used to fail to parse and exit
+    2 on every Bash call), and `set +u` lets `$f` or an unset `$VAR` expand to empty as in any shell.
+    Errexit is already off in here (the subshell is left of `||`), and the
+    ERR trap is not inherited (no `set -E`). Returns the text from `(` to
+    `)`; `indent` is the indentation of the line the `(` starts.
+
+    [WP2 review SDK-P2] With `root`, the command runs in the project root,
+    as the SDK twin runs it (`cwd=proj`), not in the session's current
+    directory; a failed `cd` is exit 1, a failing runner."""
+    cd = (f"\n{indent}  cd -- \"${{CLAUDE_PROJECT_DIR:-.}}\" || exit 1"
+          if root else "")
+    return f"(\n{indent}  set +u{cd}\n{indent}  {cmd}\n{indent})"
+
+
+def _runner_run(cmd, indent, hook, root=False):
+    """[WP2 review SC-4, SC-5, SDK-P6] The lines that run a blocking gate's
+    configured command and send its merged output to stderr, from `_rout=`
+    to the cleanup. Every line after the first takes `indent`.
+
+    The output goes to a FILE, not a pipe. `( cmd ) 2>&1 | tail` made the
+    hook wait for EOF on the pipe, so a background child that kept the
+    runner's stdout open (`server & ...; exit 1`) held the hook until the
+    child exited, and a shell hook killed at its timeout fails OPEN. Now the
+    hook goes on when the runner exits. The file is removed once read; a
+    hook killed mid-run leaves it behind.
+
+    [WP2 re-review RR1-EMB-1, RR1-EMB-2] `mktemp` creates the file: a fresh
+    random name, created exclusively, so a symlink planted in
+    .claude/logs is never opened through. It is made in .claude/logs
+    (gitignored) when that works, else in `${TMPDIR:-/tmp}`. When neither
+    works, the command runs anyway with its output discarded, and
+    RUNNER_NO_CAPTURE_NOTE goes to stderr: the verdict is the runner's exit
+    status, never a failed redirection read as "tests failing (exit 1)".
+    The output is discarded, not sent to stderr, because stderr is a pipe,
+    the thing SC-5 removed. The SDK's _run_tail falls back the same way.
+
+    Then the last RUNNER_TAIL_LINES lines, and of those the last
+    RUNNER_TAIL_BYTES bytes, go to stderr: a line count alone let one long
+    line through whole. The SDK's _runner_tail cuts the same bytes.
+
+    `rc` is the runner's status: the subshell is left of `||`, so errexit and
+    the ERR trap leave it alone, and no pipeline (or pipefail) is involved.
+    The tail and the cleanup end in `|| :`, so neither can trip the ERR
+    trap."""
+    tpl = hook + ".out.XXXXXX"
+    i2 = indent + "  "
+    return (f"_rout=\"$(mktemp \"${{CLAUDE_PROJECT_DIR:-.}}/.claude/logs/"
+            f"{tpl}\" 2>/dev/null)\" \\\n"
+            f"{indent}  || _rout=\"$(mktemp \"${{TMPDIR:-/tmp}}/{tpl}\""
+            " 2>/dev/null)\" \\\n"
+            f"{indent}  || _rout=\"\"\n"
+            f"{indent}rc=0\n"
+            f"{indent}if [ -n \"$_rout\" ]; then\n"
+            f"{i2}{_user_cmd(cmd, i2, root)} >\"$_rout\" 2>&1"
+            " || rc=$?\n"
+            f"{i2}tail -n {RUNNER_TAIL_LINES} -- \"$_rout\" 2>/dev/null"
+            f" | tail -c {RUNNER_TAIL_BYTES} >&2 || :\n"
+            f"{i2}rm -f -- \"$_rout\" 2>/dev/null || :\n"
+            f"{indent}else\n"
+            f"{i2}printf '%s\\n' {_sh_lit(RUNNER_NO_CAPTURE_NOTE)} >&2\n"
+            f"{i2}{_user_cmd(cmd, i2, root)} >/dev/null 2>&1 || rc=$?\n"
+            f"{indent}fi")
+
+
+# [WP2 review LD-1] Claude Code delivers ONE exit-2 reason per tool call
+# (measured: with ci-mirror and eval-gate both blocking one `git push`, the
+# model got eval-gate's reason only, in both runs, including the one where
+# ci-mirror finished 4 s first). So eval-gate's push blocks say that the
+# other push gate may also have blocked. Emitted on the command arms
+# (failing, 127) only where ci-mirror is installed; the marker arms keep
+# their pre-WP2 bytes (the AC-7-5 parity pin). The SDK has no ci-mirror, so
+# its reason carries no such line.
+EVAL_OTHER_GATES_NOTE = ("Other push gates (ci-mirror) may also block this "
+                         "push; Claude Code shows one block reason per tool "
+                         "call.")
+
+
+def _eval_gate_check(c, ci_mirror=False):
+    """[WP2 / D9] The eval-gate arm that runs once a push touches a prompt
+    file (`_ev_prompts` non-empty). With commands.eval set it RUNS
+    the command, the way test-gate runs commands.test, on test-gate's run
+    line: output merged and bounded to RUNNER_TAIL_LINES on stderr, because
+    at exit 2 Claude Code delivers stderr to the model and drops stdout, and
+    at exit 0 a stdout that looks like a JSON object is parsed as hook
+    output. The marker is never read once a command is configured. The
+    marker branch is the fallback for an install with no eval command, and
+    every deny arm logs its BLOCK line."""
+    cmd = (c.get("eval") or "").strip()
+    also = (f'''        printf '%s\\n' {_sh_lit(EVAL_OTHER_GATES_NOTE)} >&2
+''' if ci_mirror else "")
+    if not cmd:
+        return '''      # [lens A F4, same class as test-gate] `.last-eval-pass` is gitignored
+      # and agent-writable, and `touch`ing it satisfies this gate. This branch
+      # is emitted only when commands.eval is EMPTY [WP2 / D9]: set it and the
+      # gate runs the evals instead of trusting this file. The emitted
+      # permissions.deny refuses Write/Edit to it - defence in depth the
+      # harness enforces - but a Bash `touch` still reaches it, because the
+      # deny list carries no Bash rule. Recorded, not silently tolerated:
+      # docs/deferred-backlog.md J-9.
+      MARK="${CLAUDE_PROJECT_DIR:-.}/.claude/.last-eval-pass"
+      if [ ! -f "$MARK" ]; then
+        # The message keeps its pre-WP2 bytes, and the AC-7-5 parity pin
+        # reads it from this source.
+        echo "Eval gate: run evals before pushing prompt changes." >&2
+        log "eval-gate BLOCK prompt changes without an eval pass"; exit 2
+      fi
+      # [WP2 / D9] PRD :775: the eval must have passed SINCE the prompt was
+      # last modified, so the marker must be newer (mtime, `-nt`, to the
+      # nanosecond) than every touched prompt file still in the working
+      # tree. A file the push deletes has no mtime here and is skipped. The
+      # SDK compares st_mtime_ns the same way.
+      # [WP2 review SC-2] git names a path from the repo top, which is not
+      # CLAUDE_PROJECT_DIR when the project is a subdirectory of the repo.
+      _ev_top="$(git rev-parse --show-toplevel 2>/dev/null)" \\
+        || _ev_top="${CLAUDE_PROJECT_DIR:-.}"
+      for _f in ${_ev_prompts[@]+"${_ev_prompts[@]}"}; do
+        _p="$_ev_top/$_f"
+        if [ -e "$_p" ] && [ ! "$MARK" -nt "$_p" ]; then
+          echo "Eval gate: $_f changed after the last eval pass; run evals \\
+again before pushing." >&2
+          log "eval-gate BLOCK eval pass older than $_f"; exit 2
+        fi
+      done
+'''
+    return f'''      printf '%s\\n' {_sh_lit("Running eval gate: " + cmd)} >&2
+      # Output to a file, then its bounded tail to stderr (see _runner_run).
+      {_runner_run(cmd, "      ", "eval-gate", root=True)}
+      if [ "$rc" -eq 0 ]; then
+        :
+      elif [ "$rc" -eq 127 ]; then
+        printf 'Push blocked: eval command not found (exit 127): %s\\n' \\
+          {_sh_lit(cmd)} >&2
+        echo "Install the toolchain or fix commands.eval in bootstrap.config.yaml." >&2
+{also}        log "eval-gate BLOCK eval command not found (exit 127)"; exit 2
+      else
+        echo "Push blocked: evals failing (exit $rc)." >&2
+{also}        log "eval-gate BLOCK evals failing (exit $rc)"; exit 2
+      fi
+'''
 
 
 def _hook_body(name: str, cfg: dict):
@@ -3403,8 +3861,10 @@ def _hook_body_raw(name: str, cfg: dict):
 FAIL_CLOSED=0
 # UserPromptSubmit: warn (do not block) if writing files with no active spec.
 PROMPT="$(jget '.prompt')"
+# [WP2 spec-gate-entry-case] Any case: "Implement", "WRITE". The keywords are
+# spelled as two-member brackets, which no locale folds; see _ci_case_globs.
 case "$PROMPT" in
-  *write*|*edit*|*create*|*implement*)
+  ''' + _SPEC_KW_CASE + ''')
     # [upstream P2-8] The warning used to be guarded by [ ! -s INDEX.md ].
     # INDEX.md is ALWAYS emitted non-empty by the installer, so the condition
     # could never be true and this gate never once fired. "Non-empty file"
@@ -3419,7 +3879,10 @@ case "$PROMPT" in
       _active=1; break
     done
     if [ "$_active" = "0" ]; then
-      echo "No active spec detected. Consider /spec-new before writing." >&2
+      # [WP2 channels] UserPromptSubmit additionalContext on stdout, which
+      # the model and the user both see. On stderr at exit 0 the notice
+      # reached Claude Code's debug log and nobody else.
+      printf '%s\\n' \'''' + _SPEC_ENTRY_JSON + '''\'
     fi ;;
 esac
 log "spec-gate-entry ok"
@@ -3493,11 +3956,13 @@ if git_verb "$NCMD" "commit"; then
     if [ "$checked" -gt 0 ] && [ "${#corpus[@]}" -eq 0 ]; then
       echo "Commit blocked: no active spec/task files exist yet." >&2
       echo "Run /spec-new before committing implementation files." >&2
+      log "spec-gate-commit BLOCK no active spec/task files"
       exit 2
     fi
     if [ -n "$miss" ]; then
       echo "Commit blocked: files not referenced by any active spec:$miss" >&2
       echo "Run /spec-new or add them to a tasks/*.md file." >&2
+      log "spec-gate-commit BLOCK unreferenced:$miss"
       exit 2
     fi
 fi
@@ -4414,14 +4879,28 @@ exit 0
 '''
 
     if name == "test-gate":
-        cmd = c["test"] or \
+        # [WP2 review SDK-P1] resolve_config strips; stripped here too, so a
+        # cfg that skipped it can never emit `(   )`.
+        test = (c["test"] or "").strip()
+        cmd = test or \
             "echo 'TODO: commands.test unset' >&2 && exit 127"
         # [WP1] Only a command sdk_gates_template.NO_TESTS_RC5_RE accepts
         # gets the exit-5 arm (see there for why the table is that short).
-        # Every other command emits exactly the bytes it did before.
-        no_tests = bool(c["test"]) and \
-            re.fullmatch(NO_TESTS_RC5_RE, c["test"]) is not None
-        run = f"( {cmd} ) >&2 || rc=$?" if no_tests else f"( {cmd} ) || rc=$?"
+        no_tests = bool(test) and \
+            re.fullmatch(NO_TESTS_RC5_RE, test) is not None
+        # [WP2] EVERY runner's output goes to stderr, merged and bounded (see
+        # _runner_run). Claude Code drops a PreToolUse
+        # hook's stdout at exit 2 and delivers its stderr to the model, so
+        # `( {cmd} ) || rc=$?` told the model "tests failing (exit 1)" and
+        # nothing of what failed, for every runner that reports on stdout
+        # (npm test, jest, make, go test, cargo test); and at exit 0 a
+        # runner's `{...}` stdout (jest --json) was parsed as hook JSON.
+        # Claude Code does not cap exit-2 stderr (measured on 2.1.288: 64,133
+        # bytes arrived whole), so the bound is ours.
+        # [WP2 review SC-1, IU-1, TP-1] See _user_cmd and _sh_lit.
+        # [WP2 review SC-4, SC-5] Through a file, bounded in lines and bytes:
+        # see _runner_run, which emits `rc=0` too.
+        run = _runner_run(cmd, "    ", "test-gate")
         rc5_arm = _TEST_GATE_RC5_ARM if no_tests else ""
         return _HOOK_HEADER + f'''
 # PreToolUse git commit: block unless the configured test command passes.
@@ -4448,7 +4927,7 @@ exit 0
 _read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "commit"; then
-    echo "Running test gate: {cmd}" >&2
+    printf '%s\\n' {_sh_lit("Running test gate: " + cmd)} >&2
     # [lens B finding 3] `set +e` suppresses EXITING; it does NOT disarm an
     # ERR trap. The previous `set +e; ( {{cmd}} ); rc=$?; set -e` fired the
     # header's ERR trap on the subshell's non-zero status, so hook_fail ran
@@ -4459,18 +4938,20 @@ if git_verb "$NCMD" "commit"; then
     # A command on the left of `||` is exempt from both errexit and the ERR
     # trap, and the trap is not inherited by the subshell (no `set -E`), so
     # this reaches the dispatch with the real status.
-    rc=0
     {run}
     if [ "$rc" -eq 0 ]; then
       :
     elif [ "$rc" -eq 127 ]; then
       # [upstream P2-5] Do not claim "tests failing" when the toolchain is
       # simply absent - that sends the operator to debug the wrong thing.
-      echo "Commit blocked: test command not found (exit 127): {cmd}" >&2
+      printf '%s\\n' \\
+        {_sh_lit("Commit blocked: test command not found (exit 127): " + cmd)} >&2
       echo "Install the toolchain or fix commands.test in bootstrap.config.yaml." >&2
+      log "test-gate BLOCK test command not found (exit 127)"
       exit 2
 {rc5_arm}    else
-      echo "Commit blocked: tests failing (exit $rc)." >&2; exit 2
+      echo "Commit blocked: tests failing (exit $rc)." >&2
+      log "test-gate BLOCK tests failing (exit $rc)"; exit 2
     fi
 fi
 log "test-gate ok"
@@ -4478,8 +4959,68 @@ exit 0
 '''
 
     if name == "format-lint-gate":
-        fmt = c["format"] or "true"
-        lint = c["lint"] or "true"
+        # [WP2 I-6(a)] Stripped, as the SDK twin strips it: an all-blank lint
+        # is empty on both substrates (here it used to emit `(   )`, a bash
+        # syntax error).
+        lint = (c["lint"] or "").strip()
+        if lint:
+            # [WP2 channels] The report used to go to stderr at exit 0, which
+            # Claude Code sends to its debug log, sync or async alike: nobody
+            # read it. It now goes to the model as PostToolUse
+            # additionalContext, and only when the lint command FAILS - a
+            # clean run ("All checks passed!") would otherwise land next to
+            # every Write/Edit result. The lint output is captured, never
+            # passed through, so stdout carries exactly one JSON object.
+            # Under pipefail `|| _lrc=$?` takes the lint command's status;
+            # the ERR trap is not inherited by `$( )` (no `set -E`).
+            # _json_str cuts the message at LINT_CONTEXT_MAX bytes, as the
+            # SDK twin does (sdk_gates_template._format_lint_gate).
+            run = (_SHELL_JSON_STR + f'''_lrc=0
+_lout="$( {_user_cmd(lint, "")} 2>&1 | tail -n {LINT_TAIL_LINES} )" || _lrc=$?
+if [ "$_lrc" -ne 0 ]; then
+  [ -n "$_lout" ] || _lout="(no output)"
+  _lmsg="Lint (commands.lint) failed with exit $_lrc after this edit. \\
+Last {LINT_TAIL_LINES} lines:
+$_lout"
+  printf '{{"hookSpecificOutput":{{"hookEventName":"PostToolUse","additionalContext":%s}}}}\\n' \\
+    "$(_json_str "$_lmsg" {LINT_CONTEXT_MAX})"
+fi
+log "format-lint-gate ran rc=$_lrc (lint only; formatting is never applied here)"
+''')
+        else:
+            # [WP2 I-6(a)] commands.lint is empty: say so, to the user, on
+            # both substrates. It used to run `true` in silence while
+            # tech.md's TODO cell implied a gate.
+            # [WP2 re-review RS-3] Once per session, not after every edit:
+            # the default config ships with lint empty, so the notice rode
+            # on every Write and Edit. A marker, .lint-unset-<session id>
+            # under .claude/sessions, records that it was shown; the session
+            # id is read and sanitized as drift-detector reads it. The marker
+            # is agent-writable, so a symlink there is removed, never written
+            # through. With no working JSON parser the id falls back to
+            # CLAUDE_SESSION_ID, then "default". Markers older than 7 days
+            # are purged when a new one is written. The SDK twin keeps the
+            # same marker (sdk_gates_template._lint_unset_shown).
+            run = ('''_sid=""
+if have_jq || have_py; then
+  _sid="$(jget '.session_id' 2>/dev/null)" || _sid=""
+fi
+[ -n "$_sid" ] || _sid="${CLAUDE_SESSION_ID:-default}"
+case "$_sid" in *[!A-Za-z0-9._-]*) _sid="default" ;; esac
+_S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
+_M="$_S/.lint-unset-$_sid"
+if [ -L "$_M" ]; then rm -f "$_M" 2>/dev/null || true; fi
+if [ -e "$_M" ] && [ ! -L "$_M" ]; then
+  log "format-lint-gate: commands.lint is empty; nothing ran (notice shown earlier this session)"
+else
+  mkdir -p "$_S" 2>/dev/null || true
+  if [ ! -L "$_M" ]; then { : >"$_M"; } 2>/dev/null || true; fi
+  find "$_S" -maxdepth 1 -type f -name '.lint-unset-*' -mtime +7 \\
+    -exec rm -f {} + 2>/dev/null || true
+  printf '%s\\n' \'''' + _LINT_UNSET_JSON + '''\'
+  log "format-lint-gate: commands.lint is empty; nothing ran"
+fi
+''')
         return _HOOK_HEADER + f'''
 # Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
 # call, so a missing JSON parser degrades to a logged no-op rather
@@ -4494,23 +5035,36 @@ FAIL_CLOSED=0
 # must not mutate the working tree behind the operator's back: it makes the
 # agent's diff and the operator's diff disagree.
 #
-# Only the lint/check command runs now. It reports; it never rewrites. The
-# hook is no longer async either - async suppressed this hook's stderr, which
-# is its entire output [upstream P1-1].
-( {lint} ) 2>&1 | tail -20 >&2 || true
-log "format-lint-gate ran (lint only; formatting is never applied here)"
-exit 0
+# Only the lint/check command runs now. It reports; it never rewrites.
+# [CORRECTED WP2] This said the hook stopped being async because "async
+# suppressed this hook's stderr". Sync or async, exit-0 stderr reaches only
+# the debug log; what reaches the model is the JSON this hook prints.
+{run}exit 0
 '''
 
     if name == "ci-mirror":
-        ci = c["ci_local"] or c["test"] or "true"
+        ci = (c["ci_local"] or "").strip() or (c["test"] or "").strip() \
+            or "true"
+        # [WP2 Z-1] The exit-5 arm test-gate has, for the command that
+        # actually runs here (ci_local, else test), scoped the same way.
+        rc5_arm = _CI_MIRROR_RC5_ARM \
+            if re.fullmatch(NO_TESTS_RC5_RE, ci) is not None else ""
         return _HOOK_HEADER + f'''
 # PreToolUse git push: run the same checks CI runs, locally.
 _read_cmd; CMD="$_CMD_R"
 NCMD="$(norm_cmd "$CMD")"
 if git_verb "$NCMD" "push"; then
-  echo "CI mirror: {ci}" >&2
-  if ! ( {ci} ); then echo "Push blocked: CI mirror failed." >&2; exit 2; fi
+    printf '%s\\n' {_sh_lit("CI mirror: " + ci)} >&2
+    # [WP2] The CI command's output goes to stderr, merged and bounded, as
+    # test-gate's does (see there): at exit 2 Claude Code drops stdout, so a
+    # failing check used to tell the model only "CI mirror failed".
+    {_runner_run(ci, "    ", "ci-mirror")}
+    if [ "$rc" -eq 0 ]; then
+      :
+{rc5_arm}    else
+      echo "Push blocked: CI mirror failed." >&2
+      log "ci-mirror BLOCK CI mirror failed (exit $rc)"; exit 2
+    fi
 fi
 log "ci-mirror ok"
 exit 0
@@ -4522,13 +5076,16 @@ exit 0
 # call, so a missing JSON parser degrades to a logged no-op rather
 # than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
 FAIL_CLOSED=0
-# Stop hook: session-end cost summary. Guards against infinite loop.
-if [ "$(jget '.stop_hook_active')" = "true" ]; then
-  exit 0
-fi
+# [WP2] SessionEnd hook: one record per session termination. It was wired
+# to Stop, which fires at the end of EVERY assistant turn, so a ten-turn
+# session appended ten "session_end" lines, each stamped mid-session.
+# SessionEnd fires when the session terminates, cannot block, and gives all
+# SessionEnd hooks one shared 1.5 s budget (this body runs in ~20 ms). No
+# stop_hook_active guard: SessionEnd has no continuation to re-enter.
 # [upstream P3] This artifact was named cost.jsonl but recorded no cost -
-# every entry was {"event":"session_end","ts":...}. The Stop payload carries
-# no token or dollar figure, so the hook cannot obtain one; renaming is the
+# every entry was {"event":"session_end","ts":...}. Neither the Stop nor the
+# SessionEnd payload carries a token or dollar figure, so the hook cannot
+# obtain one; renaming is the
 # honest fix rather than inventing a number. Cost data belongs to the
 # telemetry surface (.claude/steering/telemetry.md documents Claude Code's
 # OTel `token.usage` by agent.name against an operator-owned backend).
@@ -4536,8 +5093,16 @@ OUT="${CLAUDE_PROJECT_DIR:-.}/.claude/logs/session-events.jsonl"
 mkdir -p "$(dirname "$OUT")" 2>/dev/null || true
 SID="$(jget '.session_id')"
 [ -z "$SID" ] && SID="${CLAUDE_SESSION_ID:-default}"
-printf '{"event":"session_end","session_id":"%s","ts":"%s"}\\n' \\
-  "$SID" "$(date -u +%FT%TZ)" >>"$OUT"
+# [WP2] The payload's `reason` (clear, resume, logout, prompt_input_exit,
+# other, ...) tells a session that ended from one that will be resumed and
+# end again under the same session_id. It is printed into a JSON string, so
+# anything but a plain word is recorded as "unknown", as is a missing one.
+REASON="$(jget '.reason')"
+case "$REASON" in
+  ""|*[!A-Za-z0-9_-]*) REASON="unknown" ;;
+esac
+printf '{"event":"session_end","session_id":"%s","reason":"%s","ts":"%s"}\\n' \\
+  "$SID" "$REASON" "$(date -u +%FT%TZ)" >>"$OUT"
 log "session-events appended"
 exit 0
 '''
@@ -6254,16 +6819,11 @@ TARGET="$(jget '.tool_input.file_path')"
 # The differential could not see it either: its tdd corpus used relative
 # paths exclusively, so the flagship parity test certified an agreement
 # that did not exist in production.
-# Strip the project root, then any leading `./`, so both shapes reach the
-# same matcher. Shell parity (the SDK's _rel_to_proj).
-_PROJ_ABS="${CLAUDE_PROJECT_DIR:-.}"
-case "$TARGET" in
-  "$_PROJ_ABS"/*) TARGET="${TARGET#"$_PROJ_ABS"/}" ;;
-esac
-TARGET="${TARGET#./}"
-case "$TARGET" in
+# Normalize, then strip the project root and any leading `./`, so both
+# shapes reach the same matcher. Shell parity (the SDK's relpath/normpath).
+''' + _TDD_NORM_SH + '''case "$TARGET" in
   src/*|lib/*)
-    base="${TARGET##*/}"; stem="${base%.*}"
+''' + _TDD_EXEMPT_SH + '''    base="${TARGET##*/}"; stem="${base%.*}"
     # [round-3 lens C] This was `find tests -name "*$stem*" -newer "$TARGET"`
     # and it was UNSATISFIABLE in two ways at once, both invisible until
     # F-1393 made the gate actually run:
@@ -6301,22 +6861,9 @@ case "$TARGET" in
     #
     # The pruned set is the vendor/build/tooling one, not a guess: a test has
     # to be something the project wrote.
-    _tdd_found=0
-    while IFS= read -r _tf; do
-      case "$_tf" in "./$TARGET"|"$TARGET") continue ;; esac
-      _tdd_found=1; break
-    done < <(find . \
-                  \\( -name .git -o -name .claude -o -name node_modules \
-                     -o -name vendor -o -name .venv -o -name venv \
-                     -o -name target -o -name dist -o -name build \
-                     -o -name __pycache__ -o -name .tox -o -name .mypy_cache \
-                     -o -name site-packages -o -name .next \\) -prune -o \
-                  -type f \
-                  \\( -iname "*test*${stem}*" -o -iname "*${stem}*test*" \
-                     -o -iname "*${stem}*spec*" -o -iname "*spec*${stem}*" \\) \
-                  -print 2>/dev/null)
-    if [ "$_tdd_found" = "0" ]; then
+''' + _TDD_FIND_SH + '''    if [ "$_tdd_found" = "0" ]; then
       echo "TDD gate: write a failing test for $stem before $TARGET." >&2
+      log "tdd-gate BLOCK no test for $stem before $TARGET"
       exit 2
     fi ;;
 esac
@@ -6325,8 +6872,20 @@ exit 0
 '''
 
     if name == "eval-gate":
+        # [WP2 review LD-1] See EVAL_OTHER_GATES_NOTE.
+        _ev_ci = "ci-mirror" in cfg.get("_resolved_hooks", ())
         return _HOOK_HEADER + '''
-# PreToolUse git push touching prompt files: require a passed eval.
+# PreToolUse git push touching prompt files: require an eval.
+# [WP2 / D9] With commands.eval set, the gate RUNS it (as test-gate runs
+# commands.test) and blocks when it fails. The .last-eval-pass marker is read
+# only when no eval command is configured, and then only if it is newer than
+# every prompt file the push touches (PRD :775, "since the prompt was last
+# modified").
+#
+# [WP2 fix round 2, operator decision 2026-10-04] Pushes only. A local merge
+# is not gated: a PreToolUse hook runs before the merge and cannot see the
+# incoming tree, and the push that follows evaluates the merged tree before
+# anything leaves the machine.
 #
 # [lens B finding 8] The P1-4 anchoring was applied to spec-gate-commit,
 # test-gate, ci-mirror and dependency-gate, and to the SDK's eval-gate via
@@ -6356,13 +6915,48 @@ if git_verb "$NCMD" "push"; then
     # Pure bash, no pipeline, and the git failure is now a DECISION rather
     # than a silent falsethrough: spec-gate-commit's grep already fails
     # closed, so the direction here was a choice, not a constraint.
+    #
+    # [WP2 review SC-2, SDK-P3] The names are read NUL-separated (`-z`).
+    # Newline-separated, git C-quotes a name with a non-ASCII byte, a `"` or
+    # a control character (core.quotePath), the quoted name matched the
+    # predicate but named no file, and the marker check skipped it as if the
+    # push deleted it. _ev_names appends the prompt paths among `git "$@"`'s
+    # names to _ev_prompts and returns git's status, which the process
+    # substitution writes after the last NUL (the read that fails at EOF
+    # still sets `_f`).
     _diff_rc=0
-    _CHANGED=""
-    # [round-4 D4 / backlog J-18] `@{{u}}..HEAD` IS NEW HERE, and its absence
+    _ev_prompts=()
+    _ev_names(){
+      local _f=""
+      while IFS= read -r -d '' _f; do
+        # [round-3 lenses A/B/C] The predicate was `*prompt*|*.md`. Blanket
+        # `*.md` made every documentation file a prompt file, which was
+        # survivable while the input was a two-commit diff and catastrophic
+        # once the root-commit branch fed it the WHOLE TREE: a shallow clone
+        # (`actions/checkout` defaults to depth 1) has no HEAD~1, took that
+        # branch, matched README.md, and refused every CI push. An eval gate
+        # for prompt changes should fire on prompt files; README.md is not
+        # one. Narrowed to paths that actually name a prompt.
+        case "$_f" in
+          *[Pp]rompt*|prompts/*|*/prompts/*) _ev_prompts+=("$_f") ;;
+        esac
+      done < <(_s=0; git "$@" 2>/dev/null || _s=$?; printf '%s' "$_s")
+      case "$_f" in ''|*[!0-9]*) return 1 ;; esac
+      return "$_f"
+    }
+    # [WP2 / X-36z] This body is NOT an f-string, yet it spelled the upstream
+    # revision with DOUBLED braces, which are correct only inside an
+    # f-string. Bash received them verbatim, `rev-parse` always failed, and
+    # the upstream range below was dead code: J-18 stayed open on this
+    # substrate while the record called it closed. Measured at c642731:
+    # upstream set, prompt change one commit behind HEAD, no marker -> rc 0
+    # (allowed), while the SDK denied the same push.
+    #
+    # [round-4 D4 / backlog J-18] `@{u}..HEAD` IS NEW HERE, and its absence
     # was a SHELL fail-open. This branch chain went straight to HEAD~1, i.e.
     # the newest commit only - so a push carrying two or more commits whose
     # prompt change is not in the newest one was allowed here while the SDK
-    # (which tries `@{{u}}..HEAD` first) denied it. J-18 records exactly that
+    # (which tries `@{u}..HEAD` first) denied it. J-18 records exactly that
     # and an earlier draft of the round-4 brief dropped it while claiming to
     # widen the rule.
     #
@@ -6370,53 +6964,32 @@ if git_verb "$NCMD" "push"; then
     # substrate had a range the other lacked: the shell had the root-commit
     # `ls-tree` branch and no upstream range; the SDK had the upstream range
     # and no root-commit branch. Both now carry all three, in the same order.
-    if git rev-parse --verify -q '@{{u}}' >/dev/null 2>&1; then
-      _CHANGED="$(git diff --name-only '@{{u}}..HEAD' 2>/dev/null)" \\
-        || _diff_rc=$?
+    if git rev-parse --verify -q '@{u}' >/dev/null 2>&1; then
+      _ev_names diff --name-only -z '@{u}..HEAD' || _diff_rc=$?
     elif git rev-parse --verify -q HEAD~1 >/dev/null 2>&1; then
-      _CHANGED="$(git diff --name-only HEAD~1 2>/dev/null)" || _diff_rc=$?
+      _ev_names diff --name-only -z HEAD~1 || _diff_rc=$?
     elif git rev-parse --verify -q HEAD >/dev/null 2>&1; then
       # A ROOT commit has no HEAD~1 to diff against, and the old pipeline
-      # simply reported "no prompt files changed" for it - so the very first
-      # push of a repo, the one that introduces every prompt file it has,
-      # was the one push this gate never inspected. Everything in the tree
-      # is new at that point.
-      _CHANGED="$(git ls-tree -r --name-only HEAD 2>/dev/null)" || _diff_rc=$?
+      # simply reported "no prompt files changed" for it - so the very
+      # first push of a repo, the one that introduces every prompt file it
+      # has, was the one push this gate never inspected. Everything in the
+      # tree is new at that point. [WP2 review SC-2] `--full-tree`: from
+      # a subdirectory, ls-tree lists only that subdirectory, relative to
+      # it, where diff names every path from the repo top.
+      _ev_names ls-tree -r --full-tree --name-only -z HEAD || _diff_rc=$?
     fi
-    # No HEAD at all means there is nothing to push; _CHANGED stays empty
+    # No HEAD at all means there is nothing to push; _ev_prompts stays empty
     # and the gate allows. Any OTHER git failure is a refusal, not a shrug.
     if [ "$_diff_rc" -ne 0 ]; then
       echo "Eval gate: cannot read what this push contains (git exit \\
 $_diff_rc); refusing to guess." >&2
+      log "eval-gate BLOCK cannot read push contents (git exit $_diff_rc)"
       exit 2
     fi
-    _prompt_touched=0
-    while IFS= read -r _f; do
-      # [round-3 lenses A/B/C] The predicate was `*prompt*|*.md`. Blanket
-      # `*.md` made every documentation file a prompt file, which was
-      # survivable while the input was a two-commit diff and catastrophic
-      # once the root-commit branch fed it the WHOLE TREE: a shallow clone
-      # (`actions/checkout` defaults to depth 1) has no HEAD~1, took that
-      # branch, matched README.md, and refused every CI push. An eval gate
-      # for prompt changes should fire on prompt files; README.md is not
-      # one. Narrowed to paths that actually name a prompt.
-      case "$_f" in
-        *[Pp]rompt*|prompts/*|*/prompts/*) _prompt_touched=1; break ;;
-      esac
-    done <<< "$_CHANGED"
-    if [ "$_prompt_touched" = "1" ]; then
-      # [lens A F4, same class as test-gate] `.last-eval-pass` is gitignored
-      # and agent-writable, and `touch`ing it satisfies this gate. Unlike
-      # test-gate there is no configured eval command to run instead, so the
-      # marker is the only mechanism available and is KEPT. The emitted
-      # permissions.deny now refuses Write/Edit to it - defence in depth the
-      # harness enforces - but a Bash `touch` still reaches it, because the
-      # deny list carries no Bash rule. Recorded, not silently tolerated:
-      # docs/deferred-backlog.md J-9.
-      MARK="${CLAUDE_PROJECT_DIR:-.}/.claude/.last-eval-pass"
-      [ -f "$MARK" ] || { echo "Eval gate: run evals before pushing prompt \
-changes." >&2; exit 2; }
-    fi
+    # [WP2 / D9] Every touched prompt file, not just the first: the marker
+    # fallback compares its age against each one.
+    if [ "${#_ev_prompts[@]}" -gt 0 ]; then
+''' + _eval_gate_check(c, _ev_ci) + '''    fi
 fi
 log "eval-gate ok"
 exit 0
@@ -6426,47 +6999,203 @@ exit 0
         tc = th["drift_tool_call_threshold"]
         dm = th["drift_session_duration_minutes"]
         fr = th["drift_file_read_threshold"]
+        # [WP2 drift-tier1] An ack sets each threshold to max(threshold,
+        # signal at the ack) plus half its configured value, rounded up (PRD
+        # 6.E Acknowledgement: "re-fire if tool count grows by another 50%
+        # beyond the threshold"). The half is computed here, at install
+        # time, so the hook does no arithmetic on config.
+        htc, hdm, hfr = ((v + 1) // 2 for v in (tc, dm, fr))
         return _HOOK_HEADER + f'''
 # Posture [upstream P0-3b]: ADVISORY. This hook never blocks a tool
 # call, so a missing JSON parser degrades to a logged no-op rather
 # than a spurious exit 2. Blocking gates leave FAIL_CLOSED at 1.
 FAIL_CLOSED=0
-# PostToolUse: soft drift notice - TIER-1 TOOL-CALL COUNTER ONLY. Honest
-# scope (v2.5.0 release review F1, 2026-07-27): tier-2/tier-3 escalation, the hard
-# block, audio dispatch, and the session-duration / repeated-file-read
-# triggers described in Bootstrap-Protocol-v2-5-0.md 6.E are NOT implemented
-# by this emitted stub. The thresholds below are BAKED at install time from
+# PostToolUse: soft drift notice - TIER-1 ONLY. [WP2 drift-tier1] Honest
+# scope: the three PRD 6.E tier-1 triggers are implemented - tool calls
+# since the last checkpoint, minutes since the session start file or the
+# last checkpoint, and the same file Read more than N times. The notice
+# fires ONCE, then stays silent until one of two re-arms:
+# - a checkpoint (a Write to .claude/sessions/*-checkpoint.md) zeroes every
+#   counter and restores the configured thresholds;
+# - an ack (/ack-drift writes .drift-ack-<sid>) keeps the counters and
+#   raises each threshold to max(threshold, current signal) + 50% of the
+#   configured value, so the notice re-fires only once a signal grows by
+#   another 50% (PRD 6.E Acknowledgement, operator decision 2026-10-03).
+# Tier-2/tier-3 escalation, the hard block and audio dispatch are NOT
+# implemented. The configured thresholds are BAKED at install time from
 # bootstrap.config.yaml; editing audio-alerts.config does not change them.
 # See README "Honest limitations" and docs/deferred-backlog.md I-1.
 # [upstream P2-7] The session id arrives in the stdin payload as
 # `.session_id`; CLAUDE_SESSION_ID is NOT exported by Claude Code. Keying on
 # the env var alone meant every session shared one file, .drift-state-default,
 # which never reset: it was observed at 274 against a threshold of 50, so the
-# notice fired on every tool call forever - simultaneously permanent noise and
-# invisible, because PostToolUse stderr on exit 0 is not surfaced. Payload
-# first, env var as fallback.
+# notice fired on every tool call forever. Payload first, env var as fallback.
 SID="$(jget '.session_id')"
 [ -z "$SID" ] && SID="${{CLAUDE_SESSION_ID:-default}}"
 # Path-safety: the session id reaches a filename, so allow only benign chars.
 case "$SID" in *[!A-Za-z0-9._-]*) SID="default" ;; esac
-ST="${{CLAUDE_PROJECT_DIR:-.}}/.claude/sessions/.drift-state-$SID"
-mkdir -p "$(dirname "$ST")"
-# SECURITY (upstream P0-1): the state file is gitignored and writable by any
-# ordinary Write call, so its contents are UNTRUSTED. Bash performs command
-# substitution inside arithmetic evaluation - including within array
+S="${{CLAUDE_PROJECT_DIR:-.}}/.claude/sessions"
+ST="$S/.drift-state-$SID"   # "<calls> <fired-epoch|0> <base-epoch> <tc> <dm> <fr>"
+SS="$S/.session-$SID"       # session start epoch, written once
+SA="$S/.drift-ack-$SID"     # written by /ack-drift; consumed here, never parsed
+SR="$S/.drift-reads-$SID"   # one Read path per line since the last checkpoint
+L="$S/.drift-lock-$SID"     # a directory: held from the state read to its rename
+mkdir -p "$S"
+# SECURITY (upstream P0-1): every state file here is gitignored and writable
+# by an ordinary Write call, so its contents are UNTRUSTED. Bash performs
+# command substitution inside arithmetic evaluation - including within array
 # subscripts - so the former `n=$(( $(cat "$ST") + 1 ))` executed whatever
-# the file contained: `PATH[$(touch /tmp/PWNED)]` ran `touch`. That is a
-# clean path from "the agent writes a file" (an operation no gate blocks) to
-# arbitrary command execution, bypassing every PreToolUse Bash gate. Read
-# first, validate as an unsigned integer, and only then do arithmetic. Never
-# let file or JSON content reach $(( )) unvalidated.
-n=$(cat "$ST" 2>/dev/null || echo 0)
-case "$n" in ''|*[!0-9]*) n=0 ;; esac
-n=$((n + 1)); echo "$n" >"$ST"
-if [ "$n" -ge {tc} ]; then
-  echo "DRIFT: $n tool calls (threshold {tc}). Consider /checkpoint." >&2
+# the file contained: `PATH[$(touch /tmp/PWNED)]` ran `touch`. Every value
+# read from a file passes uint() - digits only, at most 12 of them, so no
+# value can wrap - before it reaches $(( )) or a numeric test.
+uint(){{ case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "${{#1}}" -le 12 ]; }}
+rd(){{ local _v=""; {{ IFS= read -r _v <"$1"; }} 2>/dev/null || true; printf '%s' "$_v"; }}
+now="$(date +%s)"
+uint "$now" || hook_fail "date +%s returned a non-integer"
+# The session start file (PRD 6.E "Session identity"). Its first creation is
+# the new-session moment, so that is when week-old state is purged - drift's
+# own four kinds only; .decision-pending-* belongs to decision-required-alarm.
+# [WP2 review PIV-3] No write here follows a symlink: SS, SR and the tmp
+# file are agent-writable paths, so a planted link would have aimed the
+# write at its target. A link is removed first; SR is reset with rm, not `:>`.
+if [ -L "$SS" ]; then rm -f "$SS"; fi
+if [ ! -f "$SS" ]; then
+  printf '%s\\n' "$now" >"$SS"
+  find "$S" -maxdepth 1 -type f \\( -name '.drift-state-*' -o -name '.drift-ack-*' \\
+    -o -name '.drift-reads-*' -o -name '.session-*' \\) -mtime +7 \\
+    -exec rm -f {{}} + 2>/dev/null || true
+  find "$S" -maxdepth 1 -type d -name '.drift-lock-*' -mtime +7 \\
+    -exec rm -rf {{}} + 2>/dev/null || true
 fi
-log "drift-detector n=$n th={tc}/{dm}m/{fr}"
+TOOL="$(jget '.tool_name')"
+FP="$(jget '.tool_input.file_path')"
+# [WP2 review PIV-2] Parallel tool calls run this hook concurrently, and
+# tmp+rename alone stops torn writes, not lost updates: a call that read the
+# state before another consumed the ack renamed last and dropped the ack.
+# So the read-modify-write below runs under a lock. It is a mkdir lock, not
+# flock(1), because macOS ships no flock. The holder writes "<pid> <epoch>"
+# into it, the epoch read when the lock was taken. A lock is stale, and is
+# broken, when its holder is dead (killed at its timeout), when it was taken
+# 2 or more clock seconds ago, or when the directory is older than a minute.
+# [WP2 re-review TD-1] The age arm is what frees a lock whose holder is a
+# ZOMBIE: a process that has exited but is not yet reaped still passes
+# `kill -0`, as does an unrelated process that reused the pid, so liveness
+# alone kept such a lock until its minute was up and every waiter meanwhile
+# gave up and ran unlocked. The lock is held only from the state read to
+# its rename, so 2 s is far past a live holder; a holder that slow loses its
+# lock, and at worst one update. The pid file is re-read before the lock is
+# broken, because a holder that released and exited in between leaves the
+# lock to the next holder. Breaking is not atomic: two waiters that both
+# judge one stale lock stale can both proceed, once.
+# After 60 waits of 0.05 s (3 s or more) the hook proceeds UNLOCKED: it is
+# advisory, and a lost update is cheaper than a stalled tool call. The wait
+# outlasts the 2 s age bound, so a stale lock with an epoch is broken
+# before it runs out.
+_lk=0
+_unlock(){{ if [ "$_lk" = 1 ]; then rm -rf "$L" 2>/dev/null || true; _lk=0; fi; }}
+trap '_unlock' EXIT
+_i=0
+while [ "$_i" -lt 60 ]; do
+  if mkdir "$L" 2>/dev/null; then
+    _lk=1; printf '%s %s\\n' "$$" "$(date +%s)" >"$L/pid" 2>/dev/null || true
+    break
+  fi
+  # A lock that vanished between the mkdir and here was released: retry at
+  # once. Removing it instead would remove the NEXT holder's fresh lock.
+  if [ ! -e "$L" ] && [ ! -L "$L" ]; then _i=$((_i + 1)); continue; fi
+  _r="$(rd "$L/pid")"; _o="${{_r%% *}}"; _t=""
+  case "$_r" in *" "*) _t="${{_r#* }}" ;; esac
+  # Only a link or a regular file is broken on sight: "not a directory" is
+  # also true of a lock released a moment ago, and the next holder's is one.
+  # The age test compares with `[ -le ]`, never $(( )): a stored epoch with
+  # a leading zero would be read as octal there.
+  if [ -L "$L" ] || [ -f "$L" ] \\
+     || {{ uint "$_o" \\
+           && {{ ! kill -0 "$_o" 2>/dev/null \\
+                || {{ uint "$_t" && _n="$(date +%s)" && uint "$_n" \\
+                     && [ "$_t" -le "$((_n - 2))" ]; }}; }} \\
+           && [ "$(rd "$L/pid")" = "$_r" ]; }} \\
+     || [ -n "$(find "$L" -maxdepth 0 -mmin +1 2>/dev/null || true)" ]; then
+    rm -rf "$L" 2>/dev/null || true
+  else
+    sleep 0.05 2>/dev/null || true
+  fi
+  _i=$((_i + 1))
+done
+[ "$_lk" = 1 ] || log "drift-detector lock wait expired; proceeding unlocked"
+start="$(rd "$SS")"; uint "$start" || start="$now"
+n=0; fired=0; base="$start"; ctc={tc}; cdm={dm}; cfr={fr}
+read -r _a _b _c _d _e _f _rest < <(rd "$ST"; echo) || true
+uint "${{_a:-}}" && n="$_a"
+uint "${{_b:-}}" && fired="$_b"
+uint "${{_c:-}}" && base="$_c"
+# A stored threshold only ever RAISES the configured one: an ack writes it.
+uint "${{_d:-}}" && [ "$_d" -gt {tc} ] && ctc="$_d"
+uint "${{_e:-}}" && [ "$_e" -gt {dm} ] && cdm="$_e"
+uint "${{_f:-}}" && [ "$_f" -gt {fr} ] && cfr="$_f"
+# Clamp: a baseline before the session start is not one this hook wrote.
+[ "$base" -lt "$start" ] && base="$start"
+n=$((n + 1))
+if [ "$TOOL" = "Read" ] && [ -n "$FP" ]; then
+  if [ -L "$SR" ]; then rm -f "$SR"; fi
+  # A path with a newline would split into two lines: not counted.
+  case "$FP" in *$'\\n'*) ;; *) printf '%s\\n' "$FP" >>"$SR" ;; esac
+fi
+rearm=""
+# The ack is consumed on every call it is seen, so a stale ack cannot raise
+# the thresholds of a later arming.
+if [ -e "$SA" ] || [ -L "$SA" ]; then rm -f "$SA"; rearm="ack"; fi
+# A Write to a checkpoint file IS the checkpoint, and it outranks an ack.
+if [ "$TOOL" = "Write" ]; then
+  case "$FP" in *.claude/sessions/*-checkpoint.md) rearm="checkpoint" ;; esac
+fi
+el=0
+if [ "$now" -ge "$base" ]; then el=$(( (now - base) / 60 )); fi
+if [ "$rearm" = "checkpoint" ]; then
+  n=0; fired=0; base="$now"; el=0; ctc={tc}; cdm={dm}; cfr={fr}; rm -f "$SR"
+elif [ "$rearm" = "ack" ]; then
+  mx="$(awk '{{c[$0]++}} END {{m=0; for (k in c) if (c[k] > m) m = c[k]; print m}}' \\
+        "$SR" 2>/dev/null || true)"
+  uint "$mx" || mx=0
+  fired=0
+  if [ "$n" -gt "$ctc" ]; then ctc="$n"; fi
+  if [ "$el" -gt "$cdm" ]; then cdm="$el"; fi
+  if [ "$mx" -gt "$cfr" ]; then cfr="$mx"; fi
+  ctc=$((ctc + {htc})); cdm=$((cdm + {hdm})); cfr=$((cfr + {hfr}))
+fi
+why=""
+if [ "$fired" = 0 ]; then
+  if [ "$n" -ge "$ctc" ]; then
+    why="$why $n tool calls since the last checkpoint (threshold $ctc);"
+  fi
+  if [ "$el" -ge "$cdm" ]; then
+    why="$why $el minutes since the session start or last checkpoint (threshold $cdm);"
+  fi
+  if [ "$TOOL" = "Read" ] && [ -n "$FP" ]; then
+    c="$(grep -cxF -e "$FP" "$SR" 2>/dev/null || true)"
+    if uint "$c" && [ "$c" -gt "$cfr" ]; then
+      why="$why $FP read $c times (more than $cfr);"
+    fi
+  fi
+fi
+note=""
+if [ -n "$why" ]; then
+  fired="$now"
+  note="Drift signals:$why Consider /checkpoint and /clear when convenient, or /ack-drift to dismiss."
+fi
+rm -f "$ST.tmp.$$"
+printf '%s %s %s %s %s %s\\n' "$n" "$fired" "$base" "$ctc" "$cdm" "$cfr" \\
+  >"$ST.tmp.$$" && mv -f "$ST.tmp.$$" "$ST"
+_unlock
+''' + _SHELL_JSON_STR + f'''if [ -n "$note" ]; then
+  # Channel: PostToolUse additionalContext reaches the MODEL; exit-0 stderr
+  # reaches only the debug log. The note embeds a payload path, so it goes
+  # through THE one encoder, _json_str. Fire-once is what keeps this channel
+  # quiet: without it the context would ride on every later tool result.
+  printf '{{"hookSpecificOutput":{{"hookEventName":"PostToolUse","additionalContext":%s}}}}\\n' \\
+    "$(_json_str "$note" 2000)"
+fi
+log "drift-detector n=$n fired=$fired rearm=${{rearm:-none}} th=$ctc/${{cdm}}m/$cfr"
 exit 0
 '''
 
@@ -6480,7 +7209,11 @@ FAIL_CLOSED=0
 if [ "$(jget '.stop_hook_active')" = "true" ]; then
   exit 0
 fi
-echo "Task complete. Ready for review." >&2
+# [WP2 channels] For the operator: an OSC 9 desktop notification through
+# terminalSequence (interactive sessions only). Not additionalContext: on
+# SubagentStop that goes to the subagent and costs it a turn. Exit-0 stderr,
+# the old channel, reached only the debug log.
+printf '%s\\n' \'''' + _TASK_DONE_JSON + '''\'
 log "task-done-alarm"
 exit 0
 '''
@@ -6519,7 +7252,11 @@ find "$S" -maxdepth 1 -name '.decision-pending-*' -mtime +7 -delete \\
 # unwritable sessions dir must stay non-fatal on an advisory hook.
 [ -e "$P" ] || : >"$P" 2>/dev/null || true
 touch "$P" 2>/dev/null || true
-echo "DECISION REQUIRED: operator action needed (see chat)." >&2
+# [WP2 channels] Notification ignores exit codes, stderr and every JSON
+# field except terminalSequence, so the sentinel above stays the durable
+# signal and this OSC 9 notification is the live one (interactive sessions
+# only; ignored under -p and in the Agent SDK).
+printf '%s\\n' \'''' + _DECISION_JSON + '''\'
 log "decision-required-alarm fired"
 exit 0
 '''
@@ -6549,7 +7286,28 @@ S="${CLAUDE_PROJECT_DIR:-.}/.claude/sessions"
 if ls "$S"/.loop-active-* >/dev/null 2>&1 \\
    || ls "$S"/.goal-active-* >/dev/null 2>&1; then
   if ls "$S"/.drift-tier3-* >/dev/null 2>&1; then
-    echo "tier3-in-loop: write checkpoint and end turn." >&2
+    # [WP2 channels] An instruction to the model: PostToolUse
+    # additionalContext (exit-0 stderr reached only the debug log). FIRE
+    # ONCE per tier-3 sentinel per session: this hook runs after EVERY tool
+    # call, so without the guard the instruction would ride on every tool
+    # result for as long as the sentinel exists. The marker records when it
+    # last fired; a NEWER sentinel (a fresh tier-3 fire) re-arms it. The
+    # session id is read only here, so a host with no JSON parser still
+    # gets the instruction (once, under the shared "default" marker).
+    _sid="$(jget '.session_id' 2>/dev/null)" || _sid=""
+    case "$_sid" in ''|*[!A-Za-z0-9._-]*) _sid="default" ;; esac
+    _m="$S/.drift-coop-$_sid"
+    _t3=""
+    for _f in "$S"/.drift-tier3-*; do
+      if [ -z "$_t3" ] || [ "$_f" -nt "$_t3" ]; then _t3="$_f"; fi
+    done
+    if [ ! -e "$_m" ] || [ "$_t3" -nt "$_m" ]; then
+      printf '%s\\n' \'''' + _LOOP_COOP_JSON + '''\'
+      touch "$_m" 2>/dev/null || true
+      log "drift-loop-cooperation fired ($_sid)"
+    fi
+    find "$S" -maxdepth 1 -name '.drift-coop-*' -mtime +7 -delete \\
+      2>/dev/null || true
   fi
 fi
 log "drift-loop-cooperation ok"
@@ -6577,7 +7335,8 @@ fi
 # strictly worse than the inert gate this replaced. `stop_hook_active` is set
 # by the runtime when the turn is already a stop-hook continuation: the demand
 # has been made once and refusing again cannot help. Allow, and say so.
-# Same idiom as cost-log and task-done-alarm, the other two Stop-family hooks.
+# Same idiom as task-done-alarm, the other Stop-family hook ([WP2] cost-log
+# moved to SessionEnd).
 #
 # This is NOT the `summary_failure_count` / three-consecutive-failure halt of
 # 6.C - that is per-task persistent state the Stop payload cannot scope
@@ -6633,10 +7392,9 @@ if parser_ok; then
     exit 0
   fi
 else
-  echo "iteration-summary-enforcement: no WORKING JSON parser (need jq or" >&2
-  echo "python3; one may be present but broken), so stop_hook_active cannot" >&2
-  echo "be read and this demand cannot be bounded." >&2
-  echo "Degrading to advisory rather than risking an unbounded stop-loop." >&2
+  # [WP2 channels] systemMessage, to the user: exit-0 stderr reached only
+  # the debug log, and Stop additionalContext would continue the turn.
+  printf '%s\\n' \'''' + _ITER_DEGRADE_JSON + '''\'
   log "iteration-summary-enforcement: no usable parser; advisory degrade (unbounded-block risk)"
   exit 0
 fi
@@ -6654,6 +7412,7 @@ if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   echo "iteration-summary missing or empty at $S/.iteration-summary-*." >&2
   echo "Write the structured summary for this iteration before ending the turn" >&2
   echo "(goal condition, completion-criteria status, what changed, what remains)." >&2
+  log "iteration-summary-enforcement BLOCK summary missing or empty"
   exit 2
 fi
 log "iteration-summary-enforcement ok"
@@ -6680,13 +7439,22 @@ HOOK_EVENT_MAP = {
     "test-gate": ("PreToolUse", "Bash"),
     "format-lint-gate": ("PostToolUse", "Write|Edit"),
     "ci-mirror": ("PreToolUse", "Bash"),
-    "cost-log": ("Stop", None),
+    "cost-log": ("SessionEnd", None),
     "dependency-gate": ("PreToolUse", "Bash"),
     "tdd-gate": ("PreToolUse", "Write"),
     "eval-gate": ("PreToolUse", "Bash"),
     "drift-detector": ("PostToolUse", None),
     "task-done-alarm": ("SubagentStop", None),
-    "decision-required-alarm": ("Notification", None),
+    # [WP2 channels] Matches two of the twelve notification types in the
+    # hooks reference (fetched 2026-10-04): permission_prompt and
+    # elicitation_dialog. With no matcher it fired, and touched the
+    # decision-pending sentinel, on every type, auth_success and
+    # idle_prompt included. NOT matched, although each waits on the
+    # operator: elicitation_url_dialog, agent_needs_input and
+    # quota_auto_resume_stale - an open decision, recorded as a residual
+    # in the WP2 records (review RR-UP-2).
+    "decision-required-alarm": ("Notification",
+                                "permission_prompt|elicitation_dialog"),
     "drift-detector-loop-cooperation": ("PostToolUse", None),
     "iteration-summary-enforcement": ("Stop", None),
 }
@@ -6701,6 +7469,21 @@ HOOK_EVENT_MAP = {
 # operator the paths were blocked.
 HOOK_EXTRA_EVENTS = {
     "secrets-gate": [("PreToolUse", "Bash")],
+}
+
+# [WP2] Sites an EARLIER installer registered a hook at and this one never
+# does. A registration of our script at exactly one of these sites is ours
+# and is dropped on re-install, manifest or not (installer._merge_hooks).
+# Without it, a tree with no manifest (every fresh clone: the manifest is
+# gitignored) kept cost-log's old Stop registration beside the new
+# SessionEnd one, so the hook ran on both events. Same residual _merge_hooks
+# already accepts for a site we emit: an operator registration at exactly
+# that site reads as ours. Never list a site HOOK_EVENT_MAP or
+# HOOK_EXTRA_EVENTS still emits.
+HOOK_RETIRED_SITES = {
+    "cost-log": [("Stop", None)],
+    # [WP2 channels] It gained a matcher; the match-everything site is gone.
+    "decision-required-alarm": [("Notification", None)],
 }
 
 
@@ -6729,9 +7512,15 @@ TIMEOUTS = {
     # every file tool - the hottest matcher in a session. Its pure-bash
     # tokenizer is superlinear in command length (measured on the emitted
     # hook: 0.29 s / 1.38 s / 6.01 s at 100 / 500 / 2000 lines), so an
-    # unusually large command had no ceiling at all. A PreToolUse timeout
-    # fails CLOSED at the seam's runtime floor, so this is a bound in the
-    # safe direction: a pathological command is refused, never allowed.
+    # unusually large command had no ceiling at all.
+    # [CORRECTED WP2] This said "A PreToolUse timeout fails CLOSED at the
+    # seam's runtime floor, so this is a bound in the safe direction: a
+    # pathological command is refused, never allowed." On THIS substrate it
+    # is the reverse: a shell hook killed at its timeout fails OPEN (the call
+    # proceeds; only exit 2 blocks), so crossing the ceiling skips the gate.
+    # Only an Agent SDK callback that outruns its HookMatcher timeout fails
+    # CLOSED (sdk_gates_template._GATE_TIMEOUTS). The bound still ends a
+    # stalled hook; it does not refuse the command.
     # 60 s is far above any real command and far below a stalled session.
     "secrets-gate": 60,
     # [X-36l] ...AND THE SAME ARGUMENT APPLIES TO dependency-gate, which went
@@ -6751,10 +7540,24 @@ TIMEOUTS = {
     # more-permissive by EXHAUSTION rather than by a parsing hole. The scan is
     # fixed; the missing ceiling was the other half.
     "dependency-gate": 60,
-    # PostToolUse and advisory, so async was defensible - except async also
-    # suppresses stderr, which IS this hook's entire output. Synchronous with
-    # a short timeout is what makes its feedback reach the model at all.
+    # PostToolUse and advisory. [CORRECTED WP2] This said async suppresses
+    # stderr and that being synchronous "is what makes its feedback reach the
+    # model at all". Sync or async, exit-0 stderr reaches only the debug log;
+    # what reaches the model is the additionalContext JSON the hook prints on
+    # stdout. A timeout here only ends the lint run: the edit has already
+    # happened, so there is nothing to block.
     "format-lint-gate": 120,
+    # [WP2 / D9] eval-gate now RUNS commands.eval, so it gets test-gate's
+    # bound instead of the platform default. THE TWO SUBSTRATES DIFFER AT
+    # THIS BOUND, and the operator accepted that on 2026-10-03: a shell
+    # PreToolUse hook killed at its timeout fails OPEN (the call proceeds;
+    # only exit 2 blocks), while an Agent SDK callback that outruns its
+    # HookMatcher timeout BLOCKS the call (hooks reference, Timeouts). So an
+    # eval suite slower than 600 s lets the push through here and is denied
+    # by gates.py (sdk_gates_template._GATE_TIMEOUTS). test-gate's 600 s has
+    # the same split. The differential suite compares verdicts only below
+    # the bound, so it cannot see this.
+    "eval-gate": 600,
 }
 
 
@@ -6812,13 +7615,13 @@ def _settings_json(cfg):
         settings["permissions"] = {"deny": deny}
     # [lens A F4] A gate must not trust an agent-writable file that no gate
     # protects. test-gate no longer has such a file at all (it runs the tests
-    # every time), but eval-gate's `.last-eval-pass` has no configured eval
-    # command to run instead, so the marker stays and is protected here
-    # instead. These are Write/Edit rules, so a Bash `touch` still reaches
+    # every time). eval-gate reads `.last-eval-pass` only when commands.eval
+    # is empty [WP2 / D9], so the marker is protected here only then. These
+    # are Write/Edit rules, so a Bash `touch` still reaches
     # the marker - the deny list carries no `Bash` rule and Claude Code's
     # path rules do not evaluate command strings. Recorded, not implied:
     # docs/deferred-backlog.md J-9.
-    if "eval-gate" in hooks:
+    if "eval-gate" in hooks and not cfg["commands"].get("eval"):
         perms = settings.setdefault("permissions", {})
         marker_deny = perms.setdefault("deny", [])
         for tool in ("Edit", "Write"):
@@ -6839,6 +7642,13 @@ def _audio_config(cfg):
 # editing this file does not change runtime behavior. The keys below document
 # the Bootstrap-Protocol-v2-5-0.md 6.E surface an operator-completed
 # implementation would honor.
+# CORRECTION [WP2 drift-tier1, 2026-10-03]: the duration and file-read
+# triggers ARE now implemented, at tier 1 only, and all three count since
+# the last checkpoint (or the session start). The notice fires once per
+# arming; a checkpoint re-arms it. /ack-drift also re-arms it: each threshold
+# becomes the larger of the threshold and that signal's value at the ack,
+# plus half the configured threshold, rounded up. Tier 2, tier 3 and audio
+# dispatch remain unimplemented.
 # === Drift detector ===
 drift_enabled=true
 drift_tool_call_threshold={th['drift_tool_call_threshold']}
@@ -6917,6 +7727,22 @@ _SKILL_LIST = [
 # overlay reuses _skills() verbatim (installer.py appends retrofit
 # skills, never re-renders these), so both modes emit the same bodies.
 _SKILL_BODIES = {
+    # [WP2 drift-tier1] The model cannot know its session id, and the hook
+    # keys the ack file on it. Claude Code substitutes ${CLAUDE_SESSION_ID}
+    # and ${CLAUDE_PROJECT_DIR} in a skill body before the model reads it
+    # (measured on 2.1.288: the substituted id equals the hook payload's
+    # .session_id), so the command below names this session's file.
+    "ack-drift": (
+        "Acknowledge a drift alert for the session.\n\n"
+        "Run exactly this command (Claude Code substitutes the session id\n"
+        "and the project dir before you see it):\n\n"
+        "    mkdir -p \"${CLAUDE_PROJECT_DIR}/.claude/sessions\" &&\n"
+        "      date -u +%s > \"${CLAUDE_PROJECT_DIR}/.claude/sessions/"
+        ".drift-ack-${CLAUDE_SESSION_ID}\"\n\n"
+        "The drift detector consumes the file on that same tool call. The\n"
+        "notice then re-fires only once a signal grows by another 50% of\n"
+        "its threshold; a checkpoint resets every counter instead. Tier 3\n"
+        "is not implemented, so there is no tier this cannot acknowledge."),
     "checkpoint": (
         "Write a structured session synopsis to\n"
         "`.claude/sessions/<timestamp>-checkpoint.md`.\n\n"
@@ -6972,6 +7798,7 @@ def _skills(cfg):
         # and resume carry real bodies (clock-stamp rule, mtime
         # selection rule). Frontmatter desc is untouched so the paired
         # .claude/commands/*.md files do not move.
+        # [WP2 drift-tier1] ack-drift carries a body too: the ack command.
         body = _SKILL_BODIES.get(name, desc)
         out[name] = (f"---\nname: {name}\n"
                      f"description: {desc}\n---\n\n# {name}\n{rec}\n{body}\n")
@@ -8109,6 +8936,8 @@ def _gitignore(cfg):
     base = [
         "logs/", ".last-test-pass", ".last-eval-pass",
         "sessions/.session-*", "sessions/.drift-*",
+        # [WP2 re-review RS-3] format-lint-gate's once-per-session marker.
+        "sessions/.lint-unset-*",
         "sessions/.decision-pending-*", "sessions/.quiet-*",
         "sessions/.loop-active-*", "sessions/.goal-active-*",
         "sessions/.loop-complete-*", "sessions/.loop-halt-*",
@@ -8366,8 +9195,12 @@ if git_verb "$(norm_cmd "$CMD")" "commit"; then
     # Affirmative exemption 3: rollout-week says don't block yet.
     if ! retrofit_should_block spec-gate-commit; then
       log "spec-gate-commit week $RETROFIT_WEEK warn-only"
-      echo "(retrofit warn-only week $RETROFIT_WEEK) spec-gate-commit \
-would have blocked; see rollout-schedule.md" >&2
+      # [WP2 channels] To the model, as PreToolUse additionalContext at
+      # exit 0 (no permissionDecision, so the normal permission flow
+      # applies). On stderr at exit 0 it reached only the debug log.
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
+        "$(_json_str "(retrofit warn-only week $RETROFIT_WEEK) spec-gate-commit \
+would have blocked; see rollout-schedule.md" 2000)"
       exit 0
     fi
 fi
@@ -8385,8 +9218,10 @@ if git_verb "$(norm_cmd "$CMD")" "commit"; then
     # (weeks 1-2 default = warn-only for test-gate).
     if ! retrofit_should_block test-gate; then
       log "test-gate week $RETROFIT_WEEK warn-only"
-      echo "(retrofit warn-only week $RETROFIT_WEEK) test-gate would \
-have run/blocked; see rollout-schedule.md" >&2
+      # [WP2 channels] To the model; see spec-gate-commit.
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
+        "$(_json_str "(retrofit warn-only week $RETROFIT_WEEK) test-gate would \
+have run/blocked; see rollout-schedule.md" 2000)"
       exit 0
     fi
 fi
@@ -8401,20 +9236,42 @@ if retrofit_is_allowlisted "$TARGET"; then
   log "tdd-gate $TARGET legacy-allowlisted exempt"
   exit 0
 fi
-# Affirmative exemption 2: rollout-week says don't block yet.
-if ! retrofit_should_block tdd-gate; then
-  log "tdd-gate week $RETROFIT_WEEK warn-only"
-  echo "(retrofit warn-only week $RETROFIT_WEEK) tdd-gate would have \
-blocked $TARGET; see rollout-schedule.md" >&2
-  exit 0
-fi
+# [WP2 tdd-test-paths] A test path is exempt BEFORE the warn-week arm, so a
+# warn week no longer reports "would have blocked" for a test-first write.
+# Normalize as the greenfield body does (it re-reads TARGET itself).
+''' + _TDD_NORM_SH + r'''case "$TARGET" in
+  src/*|lib/*)
+''' + _TDD_EXEMPT_SH + r'''    # Affirmative exemption 2: rollout-week says don't block yet.
+    # [WP2 review SC-3] Only here, for a path the greenfield body gates, and
+    # the model is told "would have blocked" only when the greenfield stem
+    # search would fail. The arm used to sit after this `case`, so every
+    # Write in weeks 1-3 (README.md, docs/, a path outside the project, a
+    # source file whose test exists) told the model it would have been
+    # blocked, which was false. Any other path falls through to the
+    # greenfield body, which allows it in silence.
+    if ! retrofit_should_block tdd-gate; then
+      log "tdd-gate week $RETROFIT_WEEK warn-only"
+      base="${TARGET##*/}"; stem="${base%.*}"
+''' + _TDD_FIND_SH + r'''      if [ "$_tdd_found" = "0" ]; then
+        # [WP2 channels] To the model; see spec-gate-commit. $TARGET is
+        # payload text, so the message goes through the one encoder.
+        printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":%s}}\n' \
+          "$(_json_str "(retrofit warn-only week $RETROFIT_WEEK) tdd-gate \
+would have blocked $TARGET; see rollout-schedule.md" 2000)"
+      fi
+      exit 0
+    fi ;;
+esac
 # Fall through to greenfield body (ENFORCE; T2).
 '''
     else:
         # Unreachable given the guard above, but keep defensive.
         return greenfield
 
-    return _finish_hook(_HOOK_HEADER + _RETROFIT_PREAMBLE + checks + gf_body)
+    # [WP2 channels] Each check's warn-only line is JSON on stdout, through
+    # the one encoder.
+    return _finish_hook(_HOOK_HEADER + _RETROFIT_PREAMBLE + _SHELL_JSON_STR
+                        + checks + gf_body)
 
 
 def _hook_dispatch(name: str, cfg: dict):
@@ -9292,6 +10149,8 @@ def _retrofit_gitignore(cfg):
     base = [
         "logs/", ".last-test-pass", ".last-eval-pass",
         "sessions/.session-*", "sessions/.drift-*",
+        # [WP2 re-review RS-3] format-lint-gate's once-per-session marker.
+        "sessions/.lint-unset-*",
         "sessions/.decision-pending-*", "sessions/.quiet-*",
         "sessions/.loop-active-*", "sessions/.goal-active-*",
         "sessions/.loop-complete-*", "sessions/.loop-halt-*",

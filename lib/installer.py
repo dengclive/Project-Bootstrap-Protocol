@@ -30,7 +30,7 @@ from pathlib import Path
 
 from minyaml import key_line, load_yaml, YAMLError   # stdlib-only YAML subset
 from templates import (  # all file bodies live here
-    TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS)
+    TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES)
 from defaults import policy_switch_errors, resolve_config   # + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
@@ -802,6 +802,10 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                "dropped_security": [],
                "dropped_registrations": [],
                "kept_off_registrations": [],
+               # [WP2 IU-3] Paths the stale-file cleanup removed (or, on
+               # --dry-run, would remove), so main() can say which dropped
+               # registration's script stays on disk with nothing wiring it.
+               "removed_paths": [],
                "backups": []}
 
     prev = _load_manifest(root)
@@ -997,6 +1001,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             if not dry:
                 target.unlink()
             summary["removed"] += 1
+            summary["removed_paths"].append(path)
             tag = "REMOVE (dry run)" if dry else "REMOVE"
             print(f"  {tag} {path}  (dropped from plan on re-apply)")
         else:
@@ -1326,9 +1331,27 @@ def _merge_hooks(ours: dict, theirs: dict, prev_owned: list | None,
            if f"{_QUOTED_CPD}.claude/hooks/{hk}.sh" not in ours_cmds
            for ev, m in [HOOK_EVENT_MAP[hk]] + HOOK_EXTRA_EVENTS.get(hk, [])}
     off |= _unquoted_spellings(off)
-    unrecorded_off = off - prev_sites
+    # [WP2] A site an EARLIER installer registered a hook at, and this one
+    # never does (templates.HOOK_RETIRED_SITES), is ours in either spelling,
+    # manifest or not, whether or not this run emits the hook.
+    retired = {(ev, m, f"{_QUOTED_CPD}.claude/hooks/{hk}.sh")
+               for hk, sites in HOOK_RETIRED_SITES.items()
+               for ev, m in sites}
+    retired |= _unquoted_spellings(retired)
+    # [WP2 IU-2/IU-3] A retired site of a hook this run does NOT emit is
+    # treated exactly like an off site: kept when the manifest records
+    # ownership and the script is the operator's (keep_off), and otherwise
+    # dropped and, when no manifest recorded it, reported in `dropped`. A
+    # retired site of a hook this run still emits is a move, not a drop:
+    # the hook runs at its new site, so that registration goes silently.
+    retired_off = {(ev, m, f"{_QUOTED_CPD}.claude/hooks/{hk}.sh")
+                   for hk, sites in HOOK_RETIRED_SITES.items()
+                   if f"{_QUOTED_CPD}.claude/hooks/{hk}.sh" not in ours_cmds
+                   for ev, m in sites}
+    retired_off |= _unquoted_spellings(retired_off)
+    unrecorded_off = (off | retired_off) - prev_sites
     drop_sites = (prev_sites | {tuple(s) for s in ours_sites}
-                  | _unquoted_spellings(ours_sites) | off)
+                  | _unquoted_spellings(ours_sites) | off | retired)
     # A manifest written before ownership became site-keyed names a bare
     # command and cannot say where we put it. Retire one only when our
     # emission no longer carries it at all - its file is deleted this run, so
@@ -2595,6 +2618,9 @@ def _empty_command_warnings(cfg: dict) -> list[str]:
             why = "format-lint-gate checks nothing until it is set"
         elif name == "format":
             why = "no hook runs it; tech.md shows it as TODO"
+        elif name == "eval":
+            why = ("eval-gate falls back to .claude/.last-eval-pass, which "
+                   "any Bash `touch` satisfies")
         else:
             why = "the hook that runs it is off"
         msgs.append(f"commands.{name} is empty"
@@ -2848,17 +2874,50 @@ def main(argv: list[str]) -> int:
             _warn(f"{d['path']}: {why}, so this run no longer installs or "
                   f"registers the {name}. The file stays on disk: this run "
                   f"could not confirm it is a copy an earlier install wrote.")
+    def _site_is(event, matcher, cmd):
+        # [WP2 IU-2/IU-3] A retired site is not this installer's site for
+        # the hook; it is where an earlier installer registered it.
+        rel = _resolved_hook_path(cmd)
+        hk = Path(rel).name.removesuffix(".sh") if rel else None
+        if (event, matcher) in HOOK_RETIRED_SITES.get(hk, []):
+            return ("a site where an earlier installer registered that hook, "
+                    "which this config does not install")
+        return "the installer's site for a hook this config does not install"
+
     for event, matcher, cmd in summary["dropped_registrations"]:
         where = f"{event} ({matcher})" if matcher else event
         did = "would drop" if args.dry_run else "dropped"
-        _warn(f".claude/settings.json registered {cmd} under {where}, the "
-              f"installer's site for a hook this config does not install; "
-              f"this run {did} that registration.")
+        _warn(f".claude/settings.json registered {cmd} under {where}, "
+              f"{_site_is(event, matcher, cmd)}; this run {did} that "
+              f"registration.")
+    # [WP2 IU-3] The registration is gone but the script is not: the stale-
+    # file cleanup removes only a copy the manifest records unedited, so on
+    # a tree with no manifest (every fresh clone) the script stays on disk
+    # unwired by us. Say so once per script. A security gate's own
+    # line above already says its file stays.
+    security = {d["path"] for d in summary["dropped_security"]}
+    planned = {a["path"] for a in plan}
+    left = []
+    for _, _, cmd in summary["dropped_registrations"]:
+        rel = _resolved_hook_path(cmd)
+        if rel is None or rel in left or rel in security \
+                or rel in planned or rel in summary["removed_paths"] \
+                or not (root / rel).exists():
+            continue
+        left.append(rel)
+    for rel in left:
+        why = ("this tree has no installer manifest, so this run could not "
+               "confirm it is a copy an earlier install wrote" if
+               summary["no_manifest"] else
+               "it is not the unedited copy the manifest records")
+        _warn(f"{rel} stays on disk although this run "
+              f"{'would drop' if args.dry_run else 'dropped'} its "
+              f"registration: {why}. Delete it if that hook should not run.")
     for event, matcher, cmd in summary["kept_off_registrations"]:
         where = f"{event} ({matcher})" if matcher else event
         did = "would keep" if args.dry_run else "kept"
-        _warn(f".claude/settings.json registers {cmd} under {where}, the "
-              f"installer's site for a hook this config does not install. Its "
+        _warn(f".claude/settings.json registers {cmd} under {where}, "
+              f"{_site_is(event, matcher, cmd)}. Its "
               f"script is neither the copy this config would install nor one "
               f"the manifest records, so this run {did} the registration. "
               f"Remove it if that hook should not run.")

@@ -26,6 +26,7 @@ mode: retrofit path. Sections:
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -617,8 +618,10 @@ try:
 
     # FAIL-SAFE #3: missing rollout-schedule.md -> RETROFIT_WEEK=4 default
     shutil.move(rs_path, rs_path + ".saved")
+    # [WP2 review SC-3] lib/, a path the greenfield body gates: the warn
+    # arm is now reached only for one, so `non/allow.py` would pass vacuously.
     rc, out = _run_hook(d, "tdd-gate",
-                         {"tool_input": {"file_path": "non/allow.py"}})
+                         {"tool_input": {"file_path": "lib/fs3qz.py"}})
     shutil.move(rs_path + ".saved", rs_path)
     check("T2.FS3: missing rollout-schedule.md -> RETROFIT_WEEK defaults "
           "to 4 (no warn-only exemption for non-allowlisted)",
@@ -743,6 +746,30 @@ try:
           rc == 0 and ("week 1 warn-only" in
                        open(os.path.join(d, ".claude", "logs",
                                           "hooks.log")).read()))
+    # [WP2 channels] The warn-only line reaches the MODEL: ONE PreToolUse
+    # additionalContext object on stdout at exit 0, nothing on stderr (which
+    # at exit 0 reached only the debug log). No permissionDecision, so the
+    # normal permission flow still applies.
+    for _hk, _want in (
+            ("spec-gate-commit", "(retrofit warn-only week 1) "
+             "spec-gate-commit would have blocked; see rollout-schedule.md"),
+            ("test-gate", "(retrofit warn-only week 1) test-gate would "
+             "have run/blocked; see rollout-schedule.md")):
+        _e = dict(os.environ, PATH=_nojq_path(), CLAUDE_PROJECT_DIR=d)
+        _r = subprocess.run(
+            ["bash", os.path.join(d, ".claude", "hooks", f"{_hk}.sh")],
+            input=json.dumps({"tool_input": {"command": "git commit -m w"}}),
+            capture_output=True, text=True, env=_e, cwd=d)
+        try:
+            _j = json.loads(_r.stdout)
+        except ValueError:
+            _j = None
+        check(f"WP2.CH: {_hk} week 1 warn-only line is PreToolUse "
+              "additionalContext on stdout, no stderr",
+              _r.returncode == 0 and _r.stderr == "" and _j == {
+                  "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                         "additionalContext": _want}},
+              repr((_r.returncode, _r.stdout[:300], _r.stderr[:200])))
     # Restore week 4 for the fail-safe block.
     with open(rs_path, "w") as fh:
         fh.write(rs_w4)
@@ -772,6 +799,91 @@ try:
     with open(state_path, "w") as fh:
         json.dump(_saved_yes, fh)
 
+    # [WP2 tdd-test-paths] A test path is exempt BEFORE the warn-week arm.
+    # lib/, not src/: this fixture allowlists src/**, which would mask it.
+    # The paths are ABSOLUTE, the shape Claude Code sends.
+    with open(rs_path) as fh:
+        _rs_wp2 = fh.read()
+    _logp = os.path.join(d, ".claude", "logs", "hooks.log")
+    for _wk in ("1", "4"):
+        with open(rs_path, "w") as fh:
+            fh.write(re.sub(r"ROLLOUT_WEEK: \S+", "ROLLOUT_WEEK: " + _wk,
+                            _rs_wp2))
+        for _fp in ("lib/pkg/__init__.py", "lib/pkg/test_wpqz.py"):
+            rc, out = _run_hook(d, "tdd-gate", {"tool_input": {
+                "file_path": os.path.join(d, _fp)}})
+            _tail = open(_logp).read().splitlines()[-1]
+            check(f"WP2.TDD: retrofit week {_wk}: {_fp} is exempt as a "
+                  "test path, not warned about",
+                  rc == 0 and "would have blocked" not in out
+                  and _tail.endswith("tdd-gate %s is a test path: exempt"
+                                     % _fp),
+                  f"rc={rc} out={out[-200:]!r} log={_tail!r}")
+    # [WP2 channels] A production write in a warn week: the warn-only line
+    # is PreToolUse additionalContext on stdout. $TARGET is payload text, so
+    # a quote and a backslash in it must come back intact through the JSON.
+    with open(rs_path, "w") as fh:
+        fh.write(re.sub(r"ROLLOUT_WEEK: \S+", "ROLLOUT_WEEK: 1", _rs_wp2))
+    _odd = 'lib/wpqz "q" \\x.py'
+    _r = subprocess.run(
+        ["bash", os.path.join(d, ".claude", "hooks", "tdd-gate.sh")],
+        input=json.dumps({"tool_input": {"file_path": os.path.join(d,
+                                                                   _odd)}}),
+        capture_output=True, text=True, cwd=d,
+        env=dict(os.environ, PATH=_nojq_path(), CLAUDE_PROJECT_DIR=d))
+    try:
+        _j = json.loads(_r.stdout)
+    except ValueError:
+        _j = None
+    check("WP2.CH: tdd-gate week 1 warn-only line is PreToolUse "
+          "additionalContext naming the target intact, no stderr",
+          _r.returncode == 0 and _r.stderr == "" and _j == {
+              "hookSpecificOutput": {
+                  "hookEventName": "PreToolUse",
+                  "additionalContext": "(retrofit warn-only week 1) "
+                  f"tdd-gate would have blocked {_odd}; see "
+                  "rollout-schedule.md"}},
+          repr((_r.returncode, _r.stdout[:300], _r.stderr[:200])))
+    # [WP2 review SC-3] The warn line is for a path the greenfield body
+    # would block, and nothing else. It used to sit outside the src/|lib/
+    # `case`, so in weeks 1-3 every Write - README.md, docs/, a path outside
+    # the project, a source file whose test exists - told the model "tdd-gate
+    # would have blocked", which was false. Each of these is allowed by the
+    # greenfield body, so in a warn week it gets no context at all.
+    _sc3_test = os.path.join(d, "lib", "wpqzhas_test.py")
+    os.makedirs(os.path.dirname(_sc3_test), exist_ok=True)
+    with open(_sc3_test, "w") as fh:
+        fh.write("def test_x():\n    assert True\n")
+    try:
+        for _fp in ("README.md", "docs/guide.md", "/elsewhere/x.py",
+                    "lib/wpqzhas.py", os.path.join(d, "lib/wpqzhas.py"),
+                    "lib/tests/../../README.md"):
+            rc, out = _run_hook(d, "tdd-gate",
+                                {"tool_input": {"file_path": _fp}})
+            check(f"WP2.SC3: retrofit week 1: the greenfield body allows "
+                  f"{_fp}, so no 'would have blocked' context",
+                  rc == 0 and "would have blocked" not in out
+                  and "additionalContext" not in out,
+                  f"rc={rc} out={out[-200:]!r}")
+    finally:
+        os.remove(_sc3_test)
+    # Control: the same week, a gated path with no test still warns.
+    rc, out = _run_hook(d, "tdd-gate", {"tool_input": {
+        "file_path": "lib/wpqzhas.py"}})
+    check("WP2.SC3: retrofit week 1: lib/wpqzhas.py with no test still gets "
+          "the 'would have blocked' context",
+          rc == 0 and "tdd-gate would have blocked lib/wpqzhas.py" in out,
+          f"rc={rc} out={out[-200:]!r}")
+    with open(rs_path, "w") as fh:
+        fh.write(re.sub(r"ROLLOUT_WEEK: \S+", "ROLLOUT_WEEK: 4", _rs_wp2))
+    # Control: a production write in an enforcing week still blocks.
+    rc, out = _run_hook(d, "tdd-gate", {"tool_input": {
+        "file_path": os.path.join(d, "lib/wpqzmod.py")}})
+    check("WP2.TDD: retrofit week 4: lib/wpqzmod.py with no test -> blocked",
+          rc == 2, f"rc={rc} out={out[-200:]!r}")
+    with open(rs_path, "w") as fh:
+        fh.write(_rs_wp2)
+
     # FAIL-SAFE #6 (FS6): rollout-schedule present but no ROLLOUT_WEEK
     # marker -> RETROFIT_WEEK=4 default -> tdd-gate non-allowlisted ENFORCE.
     with open(rs_path) as fh:
@@ -779,7 +891,7 @@ try:
     with open(rs_path, "w") as fh:
         fh.write("# rollout schedule (no marker)\n\nSome text.\n")
     rc, out = _run_hook(d, "tdd-gate",
-                         {"tool_input": {"file_path": "other/x.py"}})
+                         {"tool_input": {"file_path": "lib/fs67qz.py"}})
     check("T2.FS6: rollout-schedule.md without ROLLOUT_WEEK marker -> "
           "week defaults to 4 (no warn-only exemption)",
           "warn-only" not in out)
@@ -791,7 +903,7 @@ try:
     with open(rs_path, "w") as fh:
         fh.write(rs_full.replace("ROLLOUT_WEEK: 4", "ROLLOUT_WEEK: abc"))
     rc, out = _run_hook(d, "tdd-gate",
-                         {"tool_input": {"file_path": "other/x.py"}})
+                         {"tool_input": {"file_path": "lib/fs67qz.py"}})
     check("T2.FS7: rollout-schedule.md ROLLOUT_WEEK: abc (non-digit) -> "
           "week stays at default 4 (no warn-only exemption)",
           "warn-only" not in out)
@@ -2354,8 +2466,19 @@ EXPECTED_RETROFIT_DIGESTS = {
     # exit-5 sentence says so. Measured against the previous `agent` digest
     # (fc66cfb7...): exactly two bodies move, test-gate.sh and tech.md;
     # `service` does not move.
-    "service": "5c141e549e19c38467c5a25b15237be9b59c171c96862eda44d67c9e30af092a",
-    "agent": "1cfea49477a4bd304a6f5fce691af1b45920ce818a6c44ca2a3de1dc56e2e925",
+    # [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model. Same
+    # change as the greenfield columns, minus gates.py, which the retrofit
+    # track never emits. Retrofit-only on top: the warn-only lines of
+    # spec-gate-commit, test-gate and tdd-gate move from exit-0 stderr to
+    # PreToolUse `additionalContext`, and tdd-gate's test-path exemption runs
+    # BEFORE the warn-week arm. `_HOOK_HEADER`, secrets-gate.sh and
+    # dependency-gate.sh do not move. Measured on the emitted plans against
+    # c642731, per file: 0 added, 0 removed, order unchanged, action counts
+    # unchanged at 79 / 93; 14 / 18 bodies move (service / agent). `service`
+    # moves the greenfield default's 14; `agent` adds tdd-gate, eval-gate,
+    # drift-detector-loop-cooperation and iteration-summary-enforcement.
+    "service": "6e0e78fc5715b2c83f9fb791a00f7d6239c779dba1fb578bffef120e1131160b",
+    "agent": "a3682788030d97fd18b6b3699165514ff3a798c994f3955d20905682a4d84f43",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

@@ -309,7 +309,7 @@ It invokes the configured `format` command (not `format --check`) after **every*
 `Write|Edit`, with no file-type filter (it runs on `.md` too). On a project whose
 `commands.format` is `gleam format`, that reformats files the agent never touched,
 project-wide, on every edit — and because it is async its output may never reach
-the model. Use the **lint/check** command here, or scope it to the edited path.
+the model. Use the **lint/check** command here, or scope it to the edited path. **[Corrected 2026-10-03, WP2.]** "because it is async its output may never reach the model" names the wrong cause. Claude Code sends a hook's stderr at exit 0 to its debug log only, synchronous or async, so the synchronous gate that P1-1 produced reached the model no better. The fix for that half is the channel: the gate now prints its report as `PostToolUse` `additionalContext`, and only when `commands.lint` fails. The mutating-formatter half is unchanged by this correction: the gate runs `commands.lint` and nothing else (PRD §6.C, Format/lint gate).
 
 ### P2-7. The drift counter never resets and is keyed wrong — **CONFIRMED**
 The emitted hook derives the session id from `CLAUDE_SESSION_ID`, which **Claude

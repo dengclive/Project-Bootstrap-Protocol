@@ -3441,7 +3441,25 @@ EXPECTED_DIGESTS = {
         # Measured on the emitted plans against 24cd8a3: 0 added, 1 removed
         # (gates.py), 2 bodies move (settings.json, tech.md); action count
         # 57 -> 56.
-        "497601c1338b801460cbe4f91391b359184b41b0f6f056e8c30f20591f27a171",
+        # [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model.
+        # Deliberate re-baseline, not a drift. A hook's stderr at exit 0
+        # reaches only Claude Code's debug log, so WP2 moves each advisory line
+        # to the channel that reaches its reader (JSON `additionalContext`,
+        # `systemMessage` or an OSC 9 `terminalSequence`), sends the runner's
+        # last 100 lines, at most 20,000 bytes, to stderr on a block, logs
+        # every non-security block, moves cost-log to SessionEnd, builds drift
+        # tier 1, runs `commands.eval`, exempts test paths from tdd-gate and
+        # shows the empty-lint notice once per session.
+        # `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh do NOT move
+        # (2026-09-27 pivot).
+        # Measured on the emitted plans against c642731, per file: 0 added,
+        # 0 removed, order unchanged, action count 56 -> 56; 14 bodies move
+        # (tech.md, settings.json, audio-alerts.config, ack-drift/SKILL.md,
+        # .claude/.gitignore, which gains `sessions/.lint-unset-*`, and hooks
+        # spec-gate-entry, spec-gate-commit, test-gate, format-lint-gate,
+        # cost-log, drift-detector, task-done-alarm, decision-required-alarm,
+        # ci-mirror).
+        "fc19712c6001de6788957410eff92a11ed8635a4e912e050314d9d705ed0d9aa",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -3999,7 +4017,24 @@ EXPECTED_DIGESTS = {
         # exit-5 sentence says so. Measured against the previous digest
         # (1368c571...): exactly two bodies move, test-gate.sh and tech.md;
         # 0 added, 0 removed, count 68.
-        "ff2c7728066409b0e990289a609cb66b21357237d9e93adffc49367e64f165b8",
+        # [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model.
+        # Deliberate re-baseline, not a drift. A hook's stderr at exit 0
+        # reaches only Claude Code's debug log, so WP2 moves each advisory line
+        # to the channel that reaches its reader (JSON `additionalContext`,
+        # `systemMessage` or an OSC 9 `terminalSequence`), sends the runner's
+        # last 100 lines, at most 20,000 bytes, to stderr on a block, logs
+        # every non-security block, moves cost-log to SessionEnd, builds drift
+        # tier 1, runs `commands.eval`, exempts test paths from tdd-gate and
+        # shows the empty-lint notice once per session.
+        # `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh do NOT move
+        # (2026-09-27 pivot).
+        # Measured on the emitted plans against c642731, per file: 0 added,
+        # 0 removed, order unchanged, action count 68 -> 68; 18 bodies move:
+        # the default fixture's 14, plus hooks tdd-gate (test-path exemption),
+        # eval-gate (D9, X-36z), drift-detector-loop-cooperation
+        # (additionalContext, fire-once) and iteration-summary-enforcement
+        # (systemMessage degrade, BLOCK log line), which this fixture emits.
+        "9abcf4533324c708867b49137fb83d4956461d58d2718be3c24732b129159546",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4484,7 +4519,22 @@ EXPECTED_DIGESTS = {
         # Measured on the emitted plans against 24cd8a3: 0 added, 1 removed
         # (gates.py), 2 bodies move (settings.json, tech.md); action count
         # 59 -> 58. The three frozen design-steering artifacts do not move.
-        "0c73dcc3699062fed2f0ddd69f6ad4d6fdb124a5952dc9ed61bfb60ab0386fbc",
+        # [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model.
+        # Deliberate re-baseline, not a drift. A hook's stderr at exit 0
+        # reaches only Claude Code's debug log, so WP2 moves each advisory line
+        # to the channel that reaches its reader (JSON `additionalContext`,
+        # `systemMessage` or an OSC 9 `terminalSequence`), sends the runner's
+        # last 100 lines, at most 20,000 bytes, to stderr on a block, logs
+        # every non-security block, moves cost-log to SessionEnd, builds drift
+        # tier 1, runs `commands.eval`, exempts test paths from tdd-gate and
+        # shows the empty-lint notice once per session.
+        # `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh do NOT move
+        # (2026-09-27 pivot).
+        # Measured on the emitted plans against c642731, per file: 0 added,
+        # 0 removed, order unchanged, action count 58 -> 58; the default
+        # fixture's 14 bodies move. The three frozen design-steering artifacts
+        # do not move.
+        "ee1fbc1fead7b299a2a93196301ec79e676808bc85f47606af154ff7a11ce668",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -4505,7 +4555,25 @@ EXPECTED_DIGESTS = {
     # (5ed422b1...): exactly one body moves, gates.py; test-gate.sh does not,
     # since this fixture's test command is empty; 0 added, 0 removed, count 57.
     "sdk_callable":
-        "1a9526384b0a392d2e8af7b846b703cced9009fab25d659f579a4e92d82d2d4c",
+        # [freeze-exception no. 83, 2026-10-03] wp2-hooks-reach-the-model.
+        # Deliberate re-baseline, not a drift. A hook's stderr at exit 0
+        # reaches only Claude Code's debug log, so WP2 moves each advisory line
+        # to the channel that reaches its reader (JSON `additionalContext`,
+        # `systemMessage` or an OSC 9 `terminalSequence`), sends the runner's
+        # last 100 lines, at most 20,000 bytes, to stderr on a block, logs
+        # every non-security block, moves cost-log to SessionEnd, builds drift
+        # tier 1, runs `commands.eval`, exempts test paths from tdd-gate and
+        # shows the empty-lint notice once per session.
+        # `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh do NOT move
+        # (2026-09-27 pivot).
+        # Measured on the emitted plans against c642731, per file: 0 added,
+        # 0 removed, order unchanged, action count 57 -> 57; the default
+        # fixture's 14 bodies move, plus `.claude/sdk_gates/gates.py`, in
+        # `_test_gate`, `_eval_gate`, `_tdd_gate`, `_format_lint_gate`, the
+        # new helpers, imports and prelude constants they use, and
+        # `_GATE_TIMEOUTS` gaining eval-gate (600 s). The secrets and
+        # dependency gates' functions and timeouts do not move.
+        "92aebfd9105b6ff36762a8c9861a0db1d31df244b1d60ad6c522017fa3522bb9",
 }
 
 EXPECTED_ACTION_COUNTS = {

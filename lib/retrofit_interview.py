@@ -75,6 +75,8 @@ ANSWER_KEYS = [
     "commands_format",
     "commands_typecheck",
     "commands_ci_local",
+    # [WP2 / D9] Run by eval-gate on a push touching a prompt file.
+    "commands_eval",
     # [W-1] A fact about the five commands above, not a sixth command: do they
     # honor the directory they are invoked from? Brownfield is where this bites
     # hardest — an established codebase is far likelier to have a containerized
@@ -104,6 +106,9 @@ _BOOL_KEYS = {
 # loud on a current file whose line was deleted.
 COMMANDS_CWD_SECTION_TITLE = "Command execution location"
 COMMANDS_CWD_SECTION_MARKER = f"## {COMMANDS_CWD_SECTION_TITLE}"
+# [WP2 / D9] Same discriminator for commands_eval.
+EVAL_SECTION_TITLE = "Eval command"
+EVAL_SECTION_MARKER = f"## {EVAL_SECTION_TITLE}"
 
 
 # --------------------------------------------------------------------------- #
@@ -151,6 +156,7 @@ def default_answers(proposal: dict) -> dict:
         "commands_format": cmds.get("format", {}).get("value", ""),
         "commands_typecheck": "",  # never auto-proposed
         "commands_ci_local": "",   # never auto-proposed
+        "commands_eval": "",       # never auto-proposed
         # [W-1] never auto-proposed either — the scan sees files, not how a
         # command reaches the code. True is the pre-W-1 behavior.
         "commands_execute_in_cwd": True,
@@ -208,6 +214,7 @@ def answers_to_config(ans: dict, proposal: dict) -> dict:
             "format": ans["commands_format"],
             "typecheck": ans["commands_typecheck"],
             "ci_local": ans["commands_ci_local"],
+            "eval": ans.get("commands_eval", ""),
             "execute_in_cwd": bool(ans.get("commands_execute_in_cwd", True)),
         },
         "retrofit": {
@@ -532,6 +539,17 @@ def render_interview(proposal: dict, repo_root: Path) -> str:
     ]
     section("Project commands", cmd_lines)
 
+    # [WP2 / D9] Unconditional, so its marker dates commands_eval.
+    section(EVAL_SECTION_TITLE, [
+        "**Proposed:** `commands_eval = ` (empty; never auto-proposed)",
+        "",
+        "`eval-gate` (on for the ai-agent archetype) runs this command "
+        "before a push that touches a prompt file, and blocks it "
+        "when it fails. Left empty, the gate instead requires "
+        "`.claude/.last-eval-pass` to be newer than the prompt change, "
+        "which any Bash `touch` satisfies.",
+    ])
+
     # [W-1] Emitted UNCONDITIONALLY so the marker dates the file. Never
     # auto-proposed from the scan: a repo containing a docker-compose.yml is
     # not evidence that the TEST COMMAND goes through it, and guessing wrong in
@@ -650,6 +668,16 @@ def parse_interview_answers(text: str) -> dict:
             # Marker present but line gone => deleted or misspelled; fail loud,
             # because this value decides whether a verification gate can see
             # the code it verifies.
+            if k == "commands_eval":
+                # [WP2 / D9] Older file: empty, what it meant then.
+                if EVAL_SECTION_MARKER not in text.splitlines():
+                    out[k] = ""
+                    continue
+                raise ValueError(
+                    f"ANSWERS block missing key: {k}. This interview file "
+                    f"carries the '{EVAL_SECTION_TITLE}' section, so the key "
+                    "was deleted or misspelled rather than predating it. "
+                    f"Restore the `{k}:` line (empty is allowed).")
             if k == "commands_execute_in_cwd":
                 if COMMANDS_CWD_SECTION_MARKER not in text:
                     out[k] = True
@@ -891,7 +919,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
                       ("commands_lint", "lint"),
                       ("commands_format", "format"),
                       ("commands_typecheck", "typecheck"),
-                      ("commands_ci_local", "ci_local")):
+                      ("commands_ci_local", "ci_local"),
+                      ("commands_eval", "eval")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
                         instream=instream, outstream=outstream, eof=eof)
 

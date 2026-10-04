@@ -93,7 +93,12 @@ commands:
   format: ""            # e.g. "ruff format ."
   typecheck: ""         # e.g. "mypy ."
   ci_local: ""          # e.g. "make ci"
-  # Phase 2: do the five commands above run in the directory they are invoked
+  # eval-gate (ai-agent) runs this before a push that touches a prompt
+  # file, and blocks on failure. A local merge is not gated. Empty: the gate falls back to
+  # requiring .claude/.last-eval-pass newer than the prompt change, which any
+  # Bash `touch` satisfies.
+  eval: ""              # e.g. "promptfoo eval -c evals.yaml"
+  # Phase 2: do the commands above run in the directory they are invoked
   # from? The gates run them bare (no `cd`), so a plain `pytest -q` inherits
   # the hook's cwd -- inside a worktree that IS the worktree, and everything
   # composes. Set FALSE for fixed-mount indirection, where the command lands

@@ -26,6 +26,7 @@ import copy
 #   hooks.drift_*             -> [ "$n" -ge <value> ]         (drift-detector)
 #   commands.test/lint/ci_local -> ( <value> )      (test-gate, format-lint-
 #                                                    gate, ci-mirror)
+#   commands.eval             -> ( <value> )         (eval-gate) [WP2 / D9]
 #
 # The heredocs are QUOTED, so a pattern is normally inert. What is not inert
 # is a pattern that IS the sentinel: it terminates the heredoc early, so
@@ -95,6 +96,50 @@ def _bad_chars(value: str, allowed: frozenset) -> str:
             seen.add(ch)
             out.append(repr(ch))
     return ", ".join(out)
+
+
+# [WP2 re-review RR1-EMB-3] What an unparseable command breaks, per key. No
+# hook runs format or typecheck; they are refused for the same reason the
+# quote check refuses them.
+_PARSE_CONSEQUENCE = {
+    k: ("The hooks run it on a line of their own, so the emitted hook would "
+        "not PARSE and every Bash call would be refused. ")
+    for k in ("test", "ci_local", "eval")}
+_PARSE_CONSEQUENCE["lint"] = (
+    "format-lint-gate runs it on a line of its own, so the hook would not "
+    "PARSE and would fail with a syntax error after every edit. ")
+
+
+def _shell_parse_error(cmd: str):
+    """[WP2 re-review RR1-EMB-3] bash's syntax error for `cmd` placed where
+    the hooks place it, or None when it parses. The probe is the exact text
+    the hooks emit: a blocking gate's run lines (templates._runner_run) and
+    format-lint-gate's capture line (templates._user_cmd inside `$( )`).
+    A command that does not parse there breaks the whole hook, so EVERY Bash
+    call is refused, while `sh -c` would fail only the gated action; one
+    `bash -n` covers a trailing `&&` or `|`, an unbalanced `(` or `$(`, and
+    an unterminated heredoc. None, too, when bash cannot be run here: the
+    quote check above still applies."""
+    import os
+    import re
+    import subprocess
+    from templates import LINT_TAIL_LINES, _runner_run, _user_cmd
+    probe = (_runner_run(cmd, "", "probe") + "\n"
+             f'_lout="$( {_user_cmd(cmd, "")} 2>&1 | tail -n '
+             f'{LINT_TAIL_LINES} )" || _lrc=$?\n')
+    env = {k: v for k, v in os.environ.items() if k not in ("BASH_ENV",
+                                                           "ENV")}
+    try:
+        r = subprocess.run(["bash", "--norc", "--noprofile", "-n"],
+                           input=probe, capture_output=True, text=True,
+                           env=env, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if r.returncode == 0:
+        return None
+    lines = [re.sub(r"^bash: line \d+: ", "", ln)
+             for ln in r.stderr.splitlines() if "warning:" not in ln]
+    return (lines[0] if lines else "exit %d" % r.returncode)
 
 
 def _quotes_balanced(cmd: str) -> bool:
@@ -267,9 +312,13 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
     # These are MEANT to be shell, so execution is by design and there is
     # nothing to reject on that count. The defect is narrower: an unbalanced
     # quote emits a hook bash cannot parse, so every commit is refused with a
-    # syntax error and no diagnosis. A newline breaks the single-line
-    # `echo "Running test gate: <cmd>"` the same way.
-    for key in ("test", "lint", "format", "typecheck", "ci_local"):
+    # syntax error and no diagnosis. A newline is refused because the hooks
+    # run the command on one line of their own. [WP2 review SC-1, IU-1,
+    # TP-1] The hooks print the command as a single-quoted literal and run
+    # it on its own line under `set +u`, so a double quote, a `# comment` or
+    # an unset `$VAR` is fine. [WP2 re-review RR1-EMB-3] A command that does
+    # not parse where the hooks put it is refused (_shell_parse_error).
+    for key in ("test", "lint", "format", "typecheck", "ci_local", "eval"):
         v = cfg.get("commands", {}).get(key)
         if v in (None, ""):
             continue
@@ -289,6 +338,15 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
                 f"backslash ({v!r}). The emitted hook would not PARSE, so "
                 f"every gated action is refused with a bash syntax error and "
                 f"no explanation of why.")
+        else:
+            perr = _shell_parse_error(v)
+            if perr is not None:
+                errors.append(
+                    f"commands.{key} is not a complete shell command "
+                    f"({v!r}): bash says {perr!r}. "
+                    + _PARSE_CONSEQUENCE.get(key, "")
+                    + "Complete the command, or put it in a script and call "
+                    "the script.")
 
     # ---- [W-1] commands.execute_in_cwd must be a real boolean ------------
     # minyaml yields a Python bool for unquoted true/false; a quoted "false"
@@ -595,7 +653,10 @@ DEFAULTS = {
     },
     "commands": {"test": "", "lint": "", "format": "",
                  "typecheck": "", "ci_local": "",
-                 # [W-1] Do the five commands above honor the working directory
+                 # [WP2 / D9] Run by eval-gate on a push touching a prompt
+                 # file. Empty = the gate falls back to .last-eval-pass.
+                 "eval": "",
+                 # [W-1] Do the commands above honor the working directory
                  # they are invoked from? True for anything that runs locally
                  # (`pytest -q`, `npm test`) and for cwd-following container
                  # invocations (`docker run -v "$(pwd)":/app ...`). FALSE for
@@ -819,13 +880,24 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
 
     # ---- Warn-not-fail: empty commands -> install-time warning ----------- #
     # The installer prints one `warning:` line per name. An empty test also
-    # renders a TODO in test-gate. An empty lint renders `true` in
-    # format-lint-gate, which checks nothing and says nothing. No hook runs
-    # format.
+    # renders a TODO in test-gate. [WP2 I-6(a)] An empty lint makes
+    # format-lint-gate print LINT_UNSET_NOTICE to the operator (systemMessage)
+    # once per session [WP2 re-review RS-3]. No hook runs format.
     cmds = cfg["commands"]
+    # [WP2 review SDK-P1] Stripped once, here, for every consumer: the shell
+    # hooks, the SDK's RESOLVED_CONFIG and tech.md. A whitespace-only value
+    # is unset. The SDK twin always stripped it, while the shell emitted
+    # `(   )`, a bash syntax error on every Bash call. A non-string is left
+    # for the validator below to refuse.
+    for key in ("test", "lint", "format", "typecheck", "ci_local", "eval"):
+        if isinstance(cmds.get(key), str):
+            cmds[key] = cmds[key].strip()
     cfg["_command_warnings"] = [
         name for name in ("test", "lint", "format")
         if not cmds.get(name)]
+    # [WP2 / D9] Only where eval-gate is installed: elsewhere nothing reads it.
+    if "eval-gate" in ordered and not cmds.get("eval"):
+        cfg["_command_warnings"].append("eval")
 
     # ---- [round-4 D12/D18] the shell-reaching fields --------------------- #
     # Placed here, ahead of the retrofit branch, so it covers BOTH modes: the

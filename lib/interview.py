@@ -120,6 +120,8 @@ ANSWER_KEYS = [
     "commands_format",
     "commands_typecheck",
     "commands_ci_local",
+    # [WP2 / D9] Run by eval-gate on a push touching a prompt file.
+    "commands_eval",
     # [W-1] Not a command, a FACT ABOUT the five above: do they honor the
     # directory they are invoked from? Defaults true (the pre-W-1 behavior);
     # false makes the installer drop `isolation: worktree` rather than emit a
@@ -243,6 +245,7 @@ def default_answers(proposal: dict, prd_path: str | None = None) -> dict:
         "commands_format": "",
         "commands_typecheck": "",
         "commands_ci_local": "",
+        "commands_eval": "",
         # [W-1] True is the pre-W-1 behavior and the common case (a plain
         # `pytest -q` does honor cwd). A PRD cannot tell us this any more than
         # it can tell us the commands themselves, so it is proposed, shown, and
@@ -318,6 +321,8 @@ def answers_to_config(ans: dict) -> dict:
             "format": ans["commands_format"],
             "typecheck": ans["commands_typecheck"],
             "ci_local": ans["commands_ci_local"],
+            # [WP2 / D9] .get so a hand-trimmed answers dict still converts.
+            "eval": ans.get("commands_eval", ""),
             # [W-1] .get with a True default so a hand-trimmed answers dict
             # lands on the pre-W-1 behavior rather than KeyError-ing.
             "execute_in_cwd": bool(ans.get("commands_execute_in_cwd", True)),
@@ -470,6 +475,8 @@ SHELL_SECTION_TITLE = "Shell"
 CICD_SECTION_TITLE = "CI/CD applicability"
 TIEBREAKERS_SECTION_TITLE = "Principle tiebreakers"
 HOOKS_SECTION_TITLE = "Hooks"
+# [WP2 / D9] Same shape: its marker dates the commands_eval key.
+EVAL_SECTION_TITLE = "Eval command"
 
 # Phase 0 step 5, verbatim from the protocol doc. The answer is inverted:
 # "no" means cicd_opt_out: true.
@@ -482,6 +489,7 @@ _WP1_KEY_SECTIONS = {
     "shell": (SHELL_SECTION_TITLE, DEFAULTS["project"]["shell"]),
     "cicd_opt_out": (CICD_SECTION_TITLE, DEFAULTS["project"]["cicd_opt_out"]),
     "principles_tiebreakers": (TIEBREAKERS_SECTION_TITLE, []),
+    "commands_eval": (EVAL_SECTION_TITLE, ""),
     **{f"hooks_{n}": (HOOKS_SECTION_TITLE, DEFAULTS["hooks"][n])
        for n in HOOK_TOGGLE_NAMES},
 }
@@ -677,6 +685,17 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "format or typecheck. Fill them in the ANSWERS block only if you "
         "actually know them; otherwise leave empty and complete them before "
         "relying on the gates.",
+    ])
+    # [WP2 / D9] Unconditional, so its marker dates commands_eval.
+    section(EVAL_SECTION_TITLE, [
+        "**Proposed:** `commands_eval = ` (empty; HUMAN-REQUIRED, like the "
+        "commands above)",
+        "",
+        "`eval-gate` (on for the ai-agent archetype) runs this command "
+        "before a push that touches a prompt file, and blocks it "
+        "when it fails. Left empty, the gate instead requires "
+        "`.claude/.last-eval-pass` to be newer than the prompt change, "
+        "which any Bash `touch` satisfies.",
     ])
     # [W-1] Emitted UNCONDITIONALLY (like telemetry and design), so
     # COMMANDS_CWD_SECTION_MARKER dates any interview file that carries it —
@@ -1256,7 +1275,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
     for ck, label in (("commands_test", "test"), ("commands_lint", "lint"),
                       ("commands_format", "format"),
                       ("commands_typecheck", "typecheck"),
-                      ("commands_ci_local", "ci_local")):
+                      ("commands_ci_local", "ci_local"),
+                      ("commands_eval", "eval")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
                        instream=instream, outstream=outstream, eof=eof)
 

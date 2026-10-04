@@ -301,6 +301,15 @@ def alarm_fire(payload):
     return p.returncode, p.stderr
 
 
+def alarm_fire_out(payload):
+    """Like alarm_fire, but -> (rc, stdout, stderr)."""
+    e = dict(os.environ)
+    e["CLAUDE_PROJECT_DIR"] = PROJ
+    p = subprocess.run([BASH, ALARM], input=json.dumps(payload),
+                       capture_output=True, text=True, env=e, cwd=PROJ)
+    return p.returncode, p.stdout, p.stderr
+
+
 def spath(sid):
     return os.path.join(SESSIONS, f".decision-pending-{sid}")
 
@@ -379,10 +388,22 @@ check("X-30 pin: hostile session_id collapses to 'default'",
       not os.path.exists(os.path.join(SESSIONS, "evil")),
       f"rc={rc}")
 
-# Operator-facing surface: the stderr cue line is byte-identical.
-check("X-30 pin: stderr cue line unchanged",
-      "DECISION REQUIRED: operator action needed (see chat)." in err,
-      repr(err[:160]))
+# [WP2 channels] Operator-facing surface. Notification ignores stderr, exit
+# codes and every JSON field but terminalSequence, so the cue is ONE OSC 9
+# notification on stdout (interactive sessions only), and nothing on stderr.
+rc, out, err = alarm_fire_out({"session_id": "x30cue", "message": "x"})
+try:
+    _ts = json.loads(out)
+except ValueError:
+    _ts = None
+check("X-30 pin: the cue is ONE terminalSequence (OSC 9 ... BEL), no stderr",
+      rc == 0 and err == "" and isinstance(_ts, dict)
+      and list(_ts) == ["terminalSequence"]
+      and _ts["terminalSequence"] == "\x1b]9;Claude Code: DECISION REQUIRED"
+      " - operator action needed (see chat).\x07",
+      repr((rc, out[:160], err[:160])))
+check("X-30 pin: the sentinel is still created alongside the cue",
+      os.path.isfile(spath("x30cue")))
 
 # D17 advisory posture: an unusable payload degrades (rc=1 hook_fail path),
 # NEVER blocks (rc=2). FAIL_CLOSED stays 0.
@@ -1019,12 +1040,14 @@ check("X-33 pin: resume command stays a thin pointer",
 check("X-33 pin: commands keep the explicit-only note",
       _ckpt_cmd is not None and "Explicit-only" in _ckpt_cmd
       and _res_cmd is not None and "Explicit-only" in _res_cmd)
-# The other skill bodies stay one-liners; the rec line stays on
+# The other skill bodies (ack-drift aside) stay one-liners; the rec line stays on
 # spec-review/code-review only.
 _ack = emitted(".claude/skills/ack-drift/SKILL.md")
-check("X-33 pin: ack-drift body stays the one-line description",
-      _ack is not None and _ack.rstrip().endswith(
-          "Acknowledge a drift alert for the session."))
+# [WP2 drift-tier1] ack-drift now carries the ack command, which the
+# drift detector consumes; the model cannot know the session id itself.
+check("drift-tier1 pin: ack-drift writes the per-session ack file",
+      _ack is not None and
+      ".drift-ack-${CLAUDE_SESSION_ID}" in _ack and "date -u +%s" in _ack)
 _srv = emitted(".claude/skills/spec-review/SKILL.md")
 check("X-33 pin: spec-review keeps the Opus rec line",
       _srv is not None and

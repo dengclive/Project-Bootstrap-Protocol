@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1378,6 +1379,127 @@ for cmd in ('echo "git push"', "true # a comment that says git push",
     differential("eval-gate", bash(cmd), "allow", repr(cmd))
 
 # --------------------------------------------------------------------------- #
+# [WP2 / X-36z + D9] eval-gate DENY rows - the section above has none (J-18).
+# A side repo with an upstream and a prompt change BURIED behind a later
+# commit: only the `@{u}..HEAD` range sees it, and the shell's range was dead
+# code (a doubled-brace revision in a non-f-string body) - shell=allow,
+# SDK=deny at c642731. Then the marker's freshness, and the pushes-only
+# rows: no local merge is gated (operator decision 2026-10-04), and the push
+# after a merge is. This install's commands.eval is empty, so the marker fallback
+# is the arm under test; tests/test_eval_gate.py covers the command arms.
+# The hooks and gates.py are PROJ's; only the repo they judge is the side one.
+# --------------------------------------------------------------------------- #
+print("\n== eval-gate: deny rows (X-36z, marker freshness, pushes only) ==")
+_EV = os.path.join(TMP, "evalside")
+_EV_BARE = os.path.join(TMP, "evalside-remote.git")
+_ev_genv = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+
+
+def _ev_git(*a):
+    return subprocess.run(["git", "-C", _EV, *a], check=True, env=_ev_genv,
+                          capture_output=True, text=True).stdout
+
+
+def _ev_commit(rel, text):
+    _p = os.path.join(_EV, rel)
+    os.makedirs(os.path.dirname(_p), exist_ok=True)
+    with open(_p, "w") as _fh:
+        _fh.write(text + "\n")
+    _ev_git("add", "-A")
+    _ev_git("commit", "-qm", text)
+
+
+def _ev_differential(cmd, want, label):
+    _e = dict(os.environ, CLAUDE_PROJECT_DIR=_EV)
+    _p = subprocess.run([BASH, os.path.join(HOOKS, "eval-gate.sh")],
+                        input=json.dumps(bash(cmd)), capture_output=True,
+                        text=True, env=_e, cwd=_EV)
+    _sh = {2: "deny", 0: "allow"}.get(_p.returncode,
+                                       f"rc={_p.returncode}:{_p.stderr[:120]}")
+    _prev = os.environ.get("CLAUDE_PROJECT_DIR")
+    os.environ["CLAUDE_PROJECT_DIR"] = _EV
+    try:
+        _sd = sdk_verdict("eval-gate", bash(cmd))
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = _prev
+    check(f"[eval-gate] shell==sdk=={want}: {label}", _sh == _sd == want,
+          f"shell={_sh} sdk={_sd} want={want}")
+
+
+subprocess.run(["git", "init", "-q", "--bare", _EV_BARE], check=True)
+os.makedirs(_EV)
+_ev_git("init", "-q", "-b", "main")
+_ev_commit("readme.txt", "base")
+_ev_git("remote", "add", "origin", _EV_BARE)
+_ev_git("push", "-q", "-u", "origin", "HEAD")
+_ev_commit("prompts/system.txt", "prompt")
+_ev_commit("notes.txt", "notes")
+_ev_differential("git push", "deny",
+                 "upstream set, prompt change behind a later commit, no "
+                 "marker (X-36z: shell=allow at c642731)")
+_EV_MARK = os.path.join(_EV, ".claude", ".last-eval-pass")
+os.makedirs(os.path.dirname(_EV_MARK), exist_ok=True)
+open(_EV_MARK, "w").close()
+os.utime(os.path.join(_EV, "prompts", "system.txt"),
+         (1_700_000_000, 1_700_000_000))
+os.utime(_EV_MARK, (1_700_000_010, 1_700_000_010))
+_ev_differential("git push", "allow", "marker newer than the prompt")
+os.utime(os.path.join(_EV, "prompts", "system.txt"),
+         (1_700_000_020, 1_700_000_020))
+_ev_differential("git push", "deny", "prompt edited after the marker")
+os.utime(_EV_MARK, (1_700_000_020, 1_700_000_020))
+_ev_differential("git push", "deny", "marker and prompt, same mtime")
+os.remove(_EV_MARK)
+_ev_git("push", "-q")
+_ev_git("checkout", "-q", "-b", "topic")
+_ev_commit("prompts/agent.txt", "agent prompt")
+_ev_git("checkout", "-q", "-b", "docs", "main")
+_ev_commit("docs/a.txt", "docs")
+_ev_git("checkout", "-q", "main")
+# [WP2 fix round 2] PUSHES ONLY: a PreToolUse hook runs before the merge and
+# cannot see the incoming tree, so no merge spelling is gated, prompt-
+# bringing or not; tests/test_eval_gate.py carries the full re-review list
+# with an eval sentinel. No marker exists here, so a gated merge would deny.
+_ev_differential("git push", "allow", "a push with nothing new")
+# An unpushed prompt change on main, so that gating a merge verb at all
+# (the push range is then non-empty) turns every row below into a deny.
+with open(os.path.join(_EV, ".git", "info", "exclude"), "a") as _fh:
+    _fh.write(".claude/\n")    # keep the hook log out of this commit
+_ev_commit("prompts/main-only.txt", "main prompt")
+os.utime(os.path.join(_EV, "prompts", "main-only.txt"),
+         (1_600_000_000, 1_600_000_000))
+for _cmd in ("git merge topic", "git merge --no-ff -m 'take it' topic",
+             "bash -c 'git merge topic'", "git merge docs",
+             "git merge --abort", "git merge no-such-ref",
+             "git merge docs && echo merge complete",
+             'git merge -m"Merge it"', "git merge -",
+             "git fetch origin && git merge origin/newfeat",
+             "git checkout docs && git merge main",
+             "git commit -m x"):
+    _ev_differential(_cmd, "allow", "not gated: " + _cmd)
+with open(os.path.join(_EV, ".git", "MERGE_HEAD"), "w") as _fh:
+    _fh.write(_ev_git("rev-parse", "topic"))
+for _cmd in ("git commit -m 'merge topic'", "git merge --continue",
+             "git merge --abort"):
+    _ev_differential(_cmd, "allow", "not gated (MERGE_HEAD = topic): " + _cmd)
+os.remove(os.path.join(_EV, ".git", "MERGE_HEAD"))
+# The push after a merge that brought in a prompt change IS gated: the
+# merge writes the prompt, so a marker from before it is stale. The marker
+# is newer than main's own unpushed prompt, so only the merged one is stale.
+open(_EV_MARK, "w").close()
+os.utime(_EV_MARK, (time.time() - 3600,) * 2)
+# topic's commit carries the hook log the rows above wrote (`add -A`).
+shutil.rmtree(os.path.join(_EV, ".claude", "logs"), ignore_errors=True)
+_ev_git("merge", "-q", "--no-ff", "-m", "merge topic", "topic")
+_ev_differential("git push", "deny",
+                 "push after a merge brought a prompt change, marker older "
+                 "than the merge")
+os.utime(_EV_MARK, (time.time() + 60,) * 2)
+_ev_differential("git push", "allow", "same push, marker refreshed")
+os.remove(_EV_MARK)
+
+# --------------------------------------------------------------------------- #
 # spec-gate-commit -- lens B finding 8, last row: ENFORCED_PREFIXES scoped
 # the shell gate to implementation paths at v2.6.0 and was never ported, so
 # a docs-only staging set was allowed by the shell and denied by the SDK --
@@ -1463,6 +1585,139 @@ for fp, want in (("docs/readme.md", "allow"),
     differential("tdd-gate", {"tool_name": "Write",
                               "tool_input": {"file_path": fp}}, want,
                  repr(fp))
+
+# [WP2 tdd-test-paths] Build plan blocker 5. The stem search skips the target
+# itself, so a test file or a package marker could never satisfy it: at
+# c642731 every ALLOW row below was deny/deny on an empty project. The DENY
+# rows are the over-exemption guard - they contain "test", "spec" or a test-
+# like name yet fall outside each ecosystem's naming rule (operator decision
+# 2026-10-03; WP2 design tdd-test-paths). Every stem is unique to this block
+# so no other file in PROJ satisfies it. Both spellings: relative, and
+# ABSOLUTE (what Claude Code sends).
+_TDD_ALLOW = (
+    "src/qzfoo.test.ts", "src/components/QzButton.spec.tsx",
+    "lib/qzwidget.spec.js", "src/qzmod.test.mjs", "src/qzmod2.spec.cts",
+    "src/__tests__/qzparser.ts", "lib/a/b/__tests__/deep/qzdeep.js",
+    "src/test/java/com/ex/QzPayment.java", "src/test/resources/qzfixture.json",
+    "src/pkg/qzfoo_test.go", "src/pkg/testdata/qzin.txt",
+    "lib/pkg/test_qzfoo.py", "lib/qzfoo_test.exs", "src/qzfoo_test.cc",
+    "src/pkg/tests/qzhelpers.py", "src/pkg/tests/__init__.py",
+    "src/pkg/__init__.py", "lib/__init__.py",
+    # The design's ecosystem set beyond the first cut.
+    "src/pkg/conftest.py", "lib/conftest.py", "lib/qzfoo_spec.rb",
+    "src/qzfoo/tests.rs", "src/Tests/qzcase.py", "src/Test/qzcase2.py",
+    "lib/test/qzlibt.py", "src/pkg/test/qznested.py",
+    "src/__mocks__/qzapi.js", "src/c/__snapshots__/qzsnap.ts.snap",
+    "src/c/__fixtures__/qzfx.ts", "src/Qz.Tests/QzFooTests.cs",
+    "src/Qz.UnitTests/QzBar.cs", "src/Qz.Test/QzBaz.cs",
+    "src/androidTest/java/QzUi.kt", "src/integrationTest/kotlin/QzIt.kt",
+    "src/testFixtures/java/QzFx.java",
+    # [WP2 review SDK-P5] `.` segments are the same path, so they reach the
+    # same matcher (the SDK allowed these and the shell denied).
+    "src/./test/qzdot.py", "src/pkg/./tests/qzdot2.py",
+    # `..` that stays inside a test location.
+    "src/tests/qzx/../qzup.py",
+)
+_TDD_DENY = (
+    "lib/qzlatest.py", "src/qzattestation.ts", "src/contest/QzContest.java",
+    "src/main/java/com/ex/QzPayment2.java", "src/testing/qzhelp.py",
+    "src/spec/qzparse.ts", "src/qzapi_spec.py",
+    "src/pkg/__main__.py", "src/QzTests.java", "src/main/java/QzFooTest.java",
+    "src/QZFOO.TEST.ts", "src/TESTS/qzup.py", "src/qzconftest.py",
+    "src/qztest.py", "src/qzfoo.test.py", "src/qztest.rs",
+    # Data files named like a spec are source: an OpenAPI spec (design).
+    "src/qzopenapi.spec.json", "src/qzapi.spec.yaml",
+    # A source set counts only directly under src/, and only lower-first.
+    "lib/androidTest/qzls.kt", "src/main/integrationTest/qzmi.kt",
+    "src/AndroidTest/qzcap.kt", "src/QzFooTests/qzx.cs",
+    # A FILE named like a test directory: the dir rule is for segments only.
+    "src/qzdir/__tests__", "src/qzdir/tests",
+    # [WP2 review SDK-P5] `..` launders a production write through a test
+    # directory name: each of these names a production file. At c642731
+    # every one was deny on the shell; WP2's exemption read raw segments
+    # and allowed them (the SDK too, for the relative spelling).
+    "src/tests/../qzcore.py", "lib/__tests__/../../src/qzcore2.py",
+    "src/test/../main/qzcore3.java", "src/tests/../../lib/qzcore4.py",
+)
+for _fp, _want in ([(f, "allow") for f in _TDD_ALLOW]
+                   + [(f, "deny") for f in _TDD_DENY]):
+    for _sp in (_fp, os.path.join(PROJ, _fp)):
+        differential("tdd-gate", {"tool_name": "Write",
+                                  "tool_input": {"file_path": _sp}}, _want,
+                     "WP2 test path: " + repr(_sp))
+
+# [WP2 tdd-test-paths] End to end, test first: the production write is
+# refused with no test, the test write itself is allowed, and once the test
+# exists the production write is allowed.
+_e2e_src = os.path.join(PROJ, "src", "qzflow.ts")
+_e2e_test = os.path.join(PROJ, "src", "qzflow.test.ts")
+_w = lambda p: {"tool_name": "Write", "tool_input": {"file_path": p}}  # noqa
+differential("tdd-gate", _w(_e2e_src), "deny",
+             "WP2 test-first flow 1/3: src/qzflow.ts before any test")
+differential("tdd-gate", _w(_e2e_test), "allow",
+             "WP2 test-first flow 2/3: the test itself, src/qzflow.test.ts")
+os.makedirs(os.path.dirname(_e2e_test), exist_ok=True)
+with open(_e2e_test, "w") as _fh:
+    _fh.write("test('qzflow', () => { expect(1).toBe(1); });\n")
+try:
+    differential("tdd-gate", _w(_e2e_src), "allow",
+                 "WP2 test-first flow 3/3: src/qzflow.ts once the test "
+                 "exists")
+finally:
+    os.remove(_e2e_test)
+
+# [WP2 re-review TD-3, TD-4] The two residuals recorded for the operator,
+# pinned in the direction the WP2 set ships, so a change to TDD_TEST_* in
+# either direction fails here until the residual rows in the WP2 records
+# are updated with it. Over-exemption (TD-3): production files the set
+# exempts - a camelCase folder directly under src/ (source-set rule),
+# `*_test.*` in any language, `test_*.*`, a `test` directory at any depth.
+# Under-exemption (TD-4): test-first writes the set still refuses on a
+# project with no matching test. At c642731 every row was deny/deny.
+_TDD_TD3_EXEMPT = (
+    "src/abTest/qrindex.ts", "src/speedTest/qrmain.kt",
+    "src/ui/qrhit_test.ts", "src/stats/qrt_test.py",
+    "src/math/qrprimality_test.c", "lib/qrab_test.rb",
+    "src/qrdjango/test/qrclient.py", "src/test_qrmode.py",
+)
+_TDD_TD4_REFUSED = (
+    "src/components/QrButton.cy.tsx", "src/base/qrfoo_unittest.cc",
+    "src/qrparser/test.rs", "src/qrapp/tests.py",
+    "src/it/scala/QrFooSpec.scala", "src/Qr.Specs/QrBarSpec.cs",
+    "src/QrFooTest.cpp",
+)
+for _fp, _want in ([(f, "allow") for f in _TDD_TD3_EXEMPT]
+                   + [(f, "deny") for f in _TDD_TD4_REFUSED]):
+    differential("tdd-gate", _w(os.path.join(PROJ, _fp)), _want,
+                 ("TD-3 over-exempt (residual): " if _want == "allow"
+                  else "TD-4 still refused (residual): ") + repr(_fp))
+
+# [WP2 tdd-test-paths] Seeded parity fuzz: the shell matches one component
+# per `case` and the SDK one per fnmatchcase. A shell edit that globbed the
+# joined path would split them (`*` crosses `/` in a `case`).
+import random  # noqa: E402
+_rng = random.Random(20261003)
+# [WP2 review SDK-P5] `.` and `..` segments too: both substrates normalize
+# them before the exemption, and a fuzz without them never saw the split.
+_segs = ("src", "lib", "docs", "test", "tests", "Tests", "__tests__",
+         "testing", "spec", "pkg", "main", "a.test", "x_test", ".", "..",
+         "__mocks__", "testdata", "Qz.Tests", "androidTest", "testFixtures",
+         "TEST")
+_bases = ("qzm.py", "test_qzm.py", "qzm_test.go", "qzm.test.ts",
+          "qzm.spec.json", "__init__.py", "qzlatest.py", "Qzm.TEST.js",
+          "qzm_spec.rb", "conftest.py", "test.py", "qzm", "tests.rs",
+          "qzm.spec.mts", "qzm.test.py")
+_tdd_splits = []
+for _ in range(160):
+    _parts = [_rng.choice(("src", "lib", "docs", "."))]
+    _parts += [_rng.choice(_segs) for _ in range(_rng.randint(0, 4))]
+    _fp = "/".join(_parts + [_rng.choice(_bases)])
+    _pl = _w(_fp if _rng.random() < 0.5 else os.path.join(PROJ, _fp))
+    _sh, _sd = shell_verdict("tdd-gate", _pl), sdk_verdict("tdd-gate", _pl)
+    if _sh != _sd:
+        _tdd_splits.append((_fp, _sh, _sd))
+check("[tdd-gate] WP2 seeded fuzz: shell==sdk on 160 random paths",
+      not _tdd_splits, repr(_tdd_splits[:5]))
 
 # --------------------------------------------------------------------------- #
 # issue #54 / X-36q -- the VERSIONED shell invoker, and the head SPELLINGS
@@ -4632,8 +4887,9 @@ for _gate, _lbl, _cmd, _want in _AMB_ROWS:
           f"{len(_enc)} bytes took "
           + ("> %g s (capped)" % (_COST_BOUND * 1.5) if _dt == float("inf")
              else "%.4f s" % _dt)
-          + " -- spec-gate-commit and eval-gate declare NO timeout on either"
-            " substrate, so a crossing there spends the platform default"
+          # [WP2 / D9] eval-gate now declares 600 s on both substrates.
+          + " -- spec-gate-commit declares NO timeout on either substrate,"
+            " so a crossing there spends the platform default"
           if _gate == "spec-gate-commit" else
           f"{len(_enc)} bytes took "
           + ("> %g s (capped)" % (_COST_BOUND * 1.5) if _dt == float("inf")
@@ -5450,6 +5706,25 @@ try:
     check("[no-tests] POSITIVE CONTROL: the same tree blocks a red suite "
           "(exit 1)", _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
 
+    # [WP2] Audience parity: both substrates hand the model the runner's own
+    # output with the block - the shell on stderr (stdout is dropped at
+    # exit 2), the SDK after the reason line in permissionDecisionReason.
+    _wp2_env = dict(os.environ, CLAUDE_PROJECT_DIR=_proj, PATH=_p1)
+    _wp2_p = subprocess.run(
+        [BASH, os.path.join(_proj, ".claude", "hooks", "test-gate.sh")],
+        input=json.dumps(bash("git commit -m x")), capture_output=True,
+        text=True, env=_wp2_env, cwd=_proj)
+    _wp2_res = _nt_both(_proj, _mod, bash("git commit -m x"), _p1)[2]
+    _wp2_why = ((_wp2_res.get("hookSpecificOutput") or {})
+                .get("permissionDecisionReason") or "")
+    check("[WP2] a red suite's runner output reaches the model on BOTH "
+          "substrates (shell stderr, SDK reason)",
+          _wp2_p.returncode == 2 and _wp2_p.stdout == ""
+          and "fake pytest: exiting 1" in _wp2_p.stderr
+          and _wp2_why.splitlines()[1:] == ["fake pytest: exiting 1"],
+          repr((_wp2_p.returncode, _wp2_p.stdout[:80], _wp2_p.stderr[-160:],
+                _wp2_why)))
+
     # [WP1 fix 4] TGX-2: the shell hook runs the command in Claude Code's
     # current directory. From src/ of a src/ + tests/ layout pytest collects
     # nothing and exits 5 while the root suite is red, so the arm holds only
@@ -5560,6 +5835,185 @@ try:
         print("  SKIP  real unittest row: Python < 3.12 exits 0, not 5")
 finally:
     shutil.rmtree(_NT_TMP, ignore_errors=True)
+
+# ============================================================================ #
+# [WP2 channels] format-lint-gate: the SAME message on both substrates.
+# The verdict rows above cannot see this gate (it never denies). What it says
+# is the whole of its behaviour: both substrates must hand the model the same
+# additionalContext, or nothing, for the same lint output and exit code -
+# including the 20-line tail, the LINT_CONTEXT_MAX byte cut and the pure-bash
+# JSON encoder - and the user the same I-6(a) notice for an empty lint.
+# ============================================================================ #
+print("\n== [WP2] format-lint-gate: shell and SDK say the same thing ==")
+_FL_TMP = tempfile.mkdtemp(prefix="substrate-diff-lint-")
+
+
+def _fl_tree(label, lint_line):
+    proj = os.path.join(_FL_TMP, label)
+    os.makedirs(proj)
+    cfgp = os.path.join(_FL_TMP, label + ".yaml")
+    with open(cfgp, "w", encoding="utf-8") as fh:
+        fh.write(CONFIG.replace('  lint: "true"\n', lint_line))
+    rr = subprocess.run([sys.executable, INSTALL, "-c", cfgp, "-C", proj],
+                        capture_output=True, text=True)
+    check(f"[lint] {label} tree installs", rr.returncode == 0,
+          (rr.stdout + rr.stderr)[-300:])
+    sp = importlib.util.spec_from_file_location(
+        f"emitted_gates_lint_{label}",
+        os.path.join(proj, ".claude", "sdk_gates", "gates.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return proj, mod._GATE_FACTORIES["format-lint-gate"](mod.RESOLVED_CONFIG)
+
+
+def _fl_clear(proj):
+    """Remove every empty-lint marker, so each substrate starts a session."""
+    d = os.path.join(proj, ".claude", "sessions")
+    for n in (os.listdir(d) if os.path.isdir(d) else ()):
+        if n.startswith(".lint-unset-"):
+            os.remove(os.path.join(d, n))
+
+
+def _fl_shell(proj, sid):
+    p = subprocess.run(
+        [BASH, os.path.join(proj, ".claude", "hooks", "format-lint-gate.sh")],
+        input=json.dumps({"session_id": sid, "tool_name": "Edit",
+                          "tool_input": {"file_path": "x"}}).encode(),
+        capture_output=True,
+        env=dict(os.environ, CLAUDE_PROJECT_DIR=proj, CLAUDE_SESSION_ID=""))
+    o = p.stdout.decode("utf-8", "replace")
+    try:
+        return p.returncode, p.stderr, (json.loads(o) if o.strip() else {})
+    except ValueError:
+        return p.returncode, p.stderr, {"unparseable": o[:200]}
+
+
+def _fl_sdk(proj, gate, sid):
+    keep = os.environ.get("CLAUDE_PROJECT_DIR")
+    os.environ["CLAUDE_PROJECT_DIR"] = proj
+    try:
+        return asyncio.run(gate({"session_id": sid, "tool_input": {}},
+                                "tu-1", None))
+    finally:
+        if keep is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        else:
+            os.environ["CLAUDE_PROJECT_DIR"] = keep
+
+
+def _fl_both(proj, gate):
+    """(shell rc, shell stderr, shell JSON or {}, sdk result).
+
+    [WP2 re-review RS-3] The empty-lint notice is once per session, and the
+    two substrates share its marker, so each runs from a cleared one."""
+    _fl_clear(proj)
+    p = subprocess.run(
+        [BASH, os.path.join(proj, ".claude", "hooks", "format-lint-gate.sh")],
+        input=json.dumps({"tool_name": "Edit",
+                          "tool_input": {"file_path": "x"}}).encode(),
+        capture_output=True, env=dict(os.environ, CLAUDE_PROJECT_DIR=proj))
+    _fl_clear(proj)
+    o = p.stdout.decode("utf-8", "replace")
+    try:
+        shj = json.loads(o) if o.strip() else {}
+    except ValueError:
+        shj = {"unparseable": o[:200]}
+    keep = os.environ.get("CLAUDE_PROJECT_DIR")
+    os.environ["CLAUDE_PROJECT_DIR"] = proj
+    try:
+        sdj = asyncio.run(gate({"tool_input": {}}, "tu-1", None))
+    finally:
+        if keep is None:
+            os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        else:
+            os.environ["CLAUDE_PROJECT_DIR"] = keep
+    return p.returncode, p.stderr, shj, sdj
+
+
+try:
+    _fl_sh = os.path.join(_FL_TMP, "lint.sh")
+    _fl_out = os.path.join(_FL_TMP, "lint.out")
+    _fl_proj, _fl_gate = _fl_tree("script", f'  lint: "sh {_fl_sh}"\n')
+    for _name, _data, _rc in (
+            ("specials", b'E1 "q" \\ \t\x1b[31mx\x1b[0m \x01\x1f 5% it\'s\n',
+             1),
+            ("passing lint", b"All checks passed!\n", 0),
+            ("silent failure", b"", 2),
+            ("30 lines", b"".join(b"l%d\n" % i for i in range(30)), 1),
+            ("trailing blank lines", b"a\nb\n\n\n", 1),
+            ("no final newline", b"a\nb", 1),
+            ("CR inside", b"a\rb\r\nc\n", 1),
+            ("over the cap, 2-byte UTF-8",
+             (("é" * 3000 + "\n") * 25).encode(), 1),
+            ("over the cap, one ASCII line", b"x" * 50000, 1)):
+        with open(_fl_out, "wb") as fh:
+            fh.write(_data)
+        with open(_fl_sh, "w") as fh:
+            fh.write(f"cat '{_fl_out}'; exit {_rc}\n")
+        _rc_sh, _err, _shj, _sdj = _fl_both(_fl_proj, _fl_gate)
+        check(f"[lint] {_name}: shell == sdk, exit 0, no stderr",
+              _rc_sh == 0 and _err == b"" and _shj == _sdj
+              and (_rc == 0) == (_sdj == {}),
+              repr((_rc_sh, _err[:120], _shj, _sdj))[:600])
+    # [TP-5] A lint killed by a signal: the shell's $? is 128+N, and the
+    # SDK must map Popen's -N to the same number, or it says "exit -9"
+    # where the shell says "exit 137". `exec` makes the SDK's own /bin/sh
+    # the process that dies, so Popen sees -9 whether or not that sh would
+    # have exec'd a lone command itself.
+    with open(_fl_out, "wb") as fh:
+        fh.write(b"half a report\n")
+    with open(_fl_sh, "w") as fh:
+        fh.write(f"cat '{_fl_out}'; kill -KILL $$\n")
+    _p, _g = _fl_tree("signal", f'  lint: "exec sh {_fl_sh}"\n')
+    _rc_sh, _err, _shj, _sdj = _fl_both(_p, _g)
+    _ctx = ((_sdj.get("hookSpecificOutput") or {})
+            .get("additionalContext", ""))
+    check("[lint] killed by SIGKILL: shell == sdk, both say exit 137 "
+          "(TP-5)", _rc_sh == 0 and _err == b"" and _shj == _sdj
+          and _ctx.startswith("Lint (commands.lint) failed with exit 137 ")
+          and "half a report" in _ctx,
+          repr((_rc_sh, _err[:120], _shj, _sdj))[:600])
+    for _label, _line in (("empty", ""), ("blank", '  lint: "   "\n')):
+        _p, _g = _fl_tree(_label, _line)
+        _rc_sh, _err, _shj, _sdj = _fl_both(_p, _g)
+        check(f"[lint] {_label} lint: shell == sdk == the I-6(a) "
+              "systemMessage", _rc_sh == 0 and _err == b"" and _shj == _sdj
+              == {"systemMessage": templates.LINT_UNSET_NOTICE},
+              repr((_rc_sh, _err[:120], _shj, _sdj))[:600])
+    # [WP2 re-review RS-3] Once per session, on both substrates, through one
+    # marker: three edits in a session show the notice once; a session the
+    # other substrate already notified stays silent; a symlinked marker is
+    # removed on both, its target untouched.
+    _N = {"systemMessage": templates.LINT_UNSET_NOTICE}
+    _fl_clear(_p)
+    _sh3 = [_fl_shell(_p, "rs3-sh") for _ in range(3)]
+    _sd3 = [_fl_sdk(_p, _g, "rs3-sd") for _ in range(3)]
+    check("[lint] RS-3: three edits in one session, shell == sdk == "
+          "[notice, {}, {}]", [x[2] for x in _sh3] == _sd3 == [_N, {}, {}]
+          and all(x[0] == 0 and x[1] == b"" for x in _sh3),
+          repr((_sh3, _sd3))[:600])
+    _fl_shell(_p, "rs3-x1")
+    _fl_sdk(_p, _g, "rs3-x2")
+    check("[lint] RS-3: one marker serves both substrates",
+          _fl_sdk(_p, _g, "rs3-x1") == {}
+          and _fl_shell(_p, "rs3-x2")[2] == {})
+    _sdd = os.path.join(_p, ".claude", "sessions")
+    _v = os.path.join(_FL_TMP, "rs3-victim")
+    _res = []
+    for _who in ("sh", "sd"):
+        with open(_v, "w", encoding="utf-8") as fh:
+            fh.write("keep\n")
+        _mk = os.path.join(_sdd, ".lint-unset-rs3-l" + _who)
+        os.symlink(_v, _mk)
+        _res.append((_fl_shell(_p, "rs3-l" + _who)[2] if _who == "sh"
+                     else _fl_sdk(_p, _g, "rs3-l" + _who),
+                     open(_v, encoding="utf-8").read(),
+                     os.path.isfile(_mk) and not os.path.islink(_mk)))
+    check("[lint] RS-3: a symlinked marker: shell == sdk (notice shown, "
+          "link replaced, target untouched)",
+          _res == [(_N, "keep\n", True)] * 2, repr(_res)[:600])
+finally:
+    shutil.rmtree(_FL_TMP, ignore_errors=True)
 
 shutil.rmtree(TMP, ignore_errors=True)
 
