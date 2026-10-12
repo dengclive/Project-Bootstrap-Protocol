@@ -158,6 +158,766 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — a spec workflow that reaches a merged commit (WP3) (2026-10-05)
+
+**No version bump** (fix, not surface; freeze exception **84**). One PR, one
+exception, one golden re-baseline (operator decisions, 2026-10-05). **Seam:
+stays at 3.0.0, SUSPENDED.** WP3's changes a consumer can see ride as dated
+in-version notes in `SEAM-CONTRACT-v3-0-0.md`; no §8.4 trigger fires (the
+walk is below). This entry describes WP3 as it merges: the build of
+2026-10-05 and four review fix rounds, of 2026-10-06, of 2026-10-06 to
+2026-10-07, of 2026-10-12 and of 2026-10-13 ("Review and fix round 1",
+"Re-review and fix round 2", "Re-review 2 and fix round 3" and "Re-review 3
+and fix round 4" below).
+
+**The gap.** At `3d866f4` the Phase 9 smoke stages 1-2 could not run. The
+spec commit gate refused the first code commit of every project, because
+`/spec-decompose` was a stub that named behaviours, not files (backlog A-6).
+Most skills were stubs, Phase 7.5 (spec versioning) was missing, nothing
+merged an implementer's worktree branch back, and the Phase 10 handoff
+pointed at `/spec-new`, which does not clear the gate. WP3 is the build
+plan's "a spec workflow that reaches a merged commit", on decisions D2
+(2026-10-04: path traceability, checked by installer-written git hooks for
+agent commits only) and D6 (2026-10-04: one emitted merge-back script, the
+integrator for conflicts only), and on the operator's rulings of 2026-10-05.
+
+**What changed, by item.** The numbers are the build plan's WP3 items.
+- **1. The spec check (D2).** The check of record is a new script,
+  `.claude/githooks/spec-check.sh`. A changed path under one of
+  `hooks.spec_gate_commit_prefixes` (default `src/ lib/ app/ test/ tests/`;
+  a config key now, which closes J-2) is covered only when some task file
+  `.claude/specs/<slug>/tasks/<file>` lists it, or a directory entry above
+  it, in its `Files:` block. The script reads the task files and
+  `.claude/specs/INDEX.md` from the index, not the working tree, honouring
+  `GIT_INDEX_FILE` for `commit -a` and pathspec commits. It exits 0
+  (covered), 2 (not covered) or 3 (could not run; also for a `--files` path
+  that ends in `/`), needs no jq, python3 or sed, and runs under bash 3.2.
+  Every verdict, 0 or 2, ends its stdout with the line `spec-check: end`; a
+  caller reads a 0 or 2 without it as a check that could not run, and a
+  verdict reached after bash reported an error in the script is exit 3
+  (re-review CRIT-1, MR-3). Fix round 3 closed three ways the check passed
+  an unlisted file, each measured in block mode; on each it now reaches
+  the right verdict or exit 3. A `sed` that was killed, or present and
+  broken, escaped every path to an empty pattern that matched almost any
+  line of `INDEX.md`; the check now escapes in bash, and reads grep's status
+  as 0 mentioned, 1 not, anything else exit 3 (re-review 2 EM-1). A `TMPDIR`
+  with room for only part of the work cut a list short; every write bash
+  makes to a temporary file is now checked, and the refusal no longer passes
+  through a file a full `TMPDIR` can drop (CRIT2-1). A backslash in `TMPDIR`
+  made the merge and pick rules keep nothing, because awk escape-processes a
+  `-v` value; awk now tells its lists apart by `ARGV` (MR2-2, the same
+  defect as EM-2). busybox awk exits 0 when a write fails, so with it a full
+  `TMPDIR` can still cut awk's two lists short (backlog Z-53). It hands the
+  task files to awk and grep in batches of under 64 KiB of arguments, so the
+  task files a project accumulates never exceed the system's argument limit
+  (review F1). Its refusal names the task file to edit (one staged in this
+  commit first, then the `in-progress` tasks, then the only open task with a
+  `Files:` block, then up to 8 open tasks), and says to add the paths with
+  the Edit tool, to stop and ask if Claude Code refuses the edit, and never
+  to write the task file another way (a shell redirect or a script). Its way
+  out fits how the commit was made: a plain commit unstages with
+  `git restore --staged`, a commit that names paths names the task file in
+  the same command, `commit -a` commits the task's paths by name instead,
+  and the first commit unstages with `git rm --cached` (review SC-2). It
+  says that a directory entry keeps covering after its task is done, so it
+  is only for files whose names cannot be known in advance (review MT-2).
+  WP3 keeps the old mention rule for a task file with no `Files:` block and
+  for `INDEX.md` (operator decision; Z-32 retires it).
+  - **Merges (operator decision 2026-10-06).** A commit that concludes a
+    merge is checked only on the merge's own changes, the agent's conflict
+    resolutions and its edits inside the merge. Since fix round 2 those are
+    the paths git left conflicted and the paths where the result differs
+    from git's automatic merge result (`git merge-tree --write-tree`, git
+    2.38 or later), so a file both sides changed and git merged on its own
+    is not one (re-review MR-1). Since fix round 3 a merge of unrelated
+    histories, such as an import, is judged the same way; the check could
+    not run on one (re-review 2 MR2-1). With an older git, or a merge of
+    more than two branches, the check keeps the paths that differ from every
+    parent, which also holds such a file (backlog Z-41). The commits a merge
+    brings in are not checked again. An agent's were checked when it made
+    them with `git commit` and the hook in place; a person's commits are
+    never checked, and neither are commits made with `--no-verify`,
+    `git stash` or `git commit-tree`, so a merge can bring in a file no task
+    file lists (backlog Z-29). Fix round 1 gave the rule's reason as "each
+    side's commits were checked when they were made", which is false for the
+    teammate's branch the rule is for (re-review RR-1, MR-9). pre-commit and
+    merge-back find the merge through `MERGE_HEAD`; inside pre-merge-commit,
+    before git writes it, the check reads git's `GITHEAD_<oid>` variables. A
+    cherry-pick or revert that stopped on conflicts fires pre-commit when
+    `--continue` or `git commit` concludes it; the check reads
+    `CHERRY_PICK_HEAD` or `REVERT_HEAD` and judges the pick's own changes
+    the same way (git 2.40 or later; an older git checks the whole picked
+    change and says so; re-review MR-2). Since fix round 3 a picked or
+    reverted merge commit (`-m`) or root commit is checked whole on any git,
+    and on git 2.40 or later the refusal says why, not "older than 2.40"
+    (re-review 2 MR2-4). A `git revert --no-commit` leaves `REVERT_HEAD`
+    even when it applied cleanly, and the text now says so; with several
+    commits it names only the last, so the earlier ones' files read as the
+    revert's own change (re-review 2 MR2-5; backlog Z-29). A `git commit`
+    made while a rebase or `git am` is stopped fires pre-commit too, though
+    their own `--continue` fires no hook. Since fix round 3 a rebase that
+    names the commit it replays (`REBASE_HEAD`) is judged as a stopped pick,
+    and a stopped `git am`, which applies a patch, or a rebase that names no
+    commit, is checked whole with that reason. Before, the plain rule told
+    the agent to unstage a teammate's file; following that left the file out
+    of the commit, and `git rebase --continue` then completed without it
+    (re-review 2 MR2-3, CRIT2-4). A task file left unmerged by a conflict is
+    not counted until it is staged; it made the check fail to run (re-review
+    MR-5). In a merge, a stopped pick, or a commit made while `git am` is
+    stopped, the refusal never says to unstage a file, which would drop the
+    other side's change. While a rebase is stopped, the block-mode refusal
+    says not to unstage a file the replayed commit changed, and since fix
+    round 4 that any other file, such as one added at an edit, exec or
+    break stop, can be unstaged; the reason for a rebase that names no
+    commit no longer speaks of a resolution (re-review 3 RR3-CHK-1). In
+    block mode it says to fix the task file or to abort
+    (`git merge --abort`, or the pick's, the rebase's or `git am`'s own
+    abort), then stop and ask; in warn mode, and since fix
+    round 3 in a retrofit warn week (re-review 2 MR2-6), where the commit
+    goes through right after the message, it offers no abort; and inside
+    merge-back it points at merge-back's Remedy line (re-review IT-4). The
+    build checked everything a merge brought in, so in block mode an agent's
+    `git pull --no-rebase` of a teammate's work was refused, and the
+    refusal's advice would have dropped that work (review SC-1).
+  - **Where it runs.** The installer writes two marked shims,
+    `<git-common-dir>/hooks/pre-commit` and `pre-merge-commit`, shared by
+    every linked worktree. Each runs `.claude/githooks/dispatch` for agent
+    commits only (`CLAUDECODE=1`, which Claude Code sets in its Bash tool,
+    its subagents and `claude -p`), on the real staged set; a person's
+    commit is never checked. On a branch cut before the install, which has
+    no `.claude/githooks/`, the shim says that the check did not run and
+    lets the commit through (review INST-4). The shims are not plan actions:
+    they are manifest rows of kind `git_hook`, non-critical. The installer
+    never writes over a hook it did not write (with or without `--force`)
+    and never sets `core.hooksPath`. It skips with a `warning:` line (exit
+    0) when `core.hooksPath` is set, the project is not the repository's top
+    level, the hooks directory is a symlink or cannot be written, a hook is
+    someone else's (naming the line to add for the pre-commit framework or
+    lefthook), or a shim was edited. The `core.hooksPath` warning names only
+    the hooks that are not the installer's own shim; for a `core.hooksPath`
+    that every repository on the machine reads (global or system config), it
+    gives a line guarded by `if [ -f .claude/githooks/dispatch ]`, so
+    commits in other repositories still land (review INST-6). Since fix
+    round 3 every remedy gives that guarded line,
+    `if [ -f .claude/githooks/dispatch ]; then bash
+    .claude/githooks/dispatch <hook> || exit 1; fi`, and the pre-commit
+    framework's `entry:` runs it through `sh -c`: the plain line a remedy
+    gave refused every commit, a person's too, on a branch cut before the
+    install (for a line in `.git/hooks`) and once the check was turned off
+    (re-review 2 HD-1, CRIT2-5). Turning the check off
+    (`hooks.spec_gate_commit: false` and a re-install) now also names each
+    hook, husky 9's `.husky/<hook>`, and lefthook or pre-commit framework
+    config at the repository top that still mentions the dispatch line, for
+    the operator to remove; a `core.hooksPath` that every repository reads
+    is left out. Since fix round 4, for `.pre-commit-config.yaml` and
+    lefthook's config it says to remove the whole hook entry or command that
+    runs the line, not only the line: either tool refuses every commit, a
+    person's too, over an entry left without it (re-review 3 INST3-2). It
+    still names a hook file other repositories share, through a
+    repository-local `core.hooksPath` or a symlink (backlog Z-55). A hook
+    that names `.claude/githooks/dispatch`, in its own text or in lefthook's
+    or the pre-commit framework's config file, still gets a warning on every
+    re-install, because the installer cannot tell whether that line runs
+    (one after husky 9's `. h`, after an `exec`, or in a comment never
+    does); the warning says how to confirm that a pre-commit line runs: an
+    agent commit from a terminal (`CLAUDECODE=1 git commit`), because
+    through Claude Code the `PreToolUse` fallback can refuse first, and no
+    ordinary commit confirms a pre-merge-commit line (re-review 2 HD-2).
+    Since fix round 4 the commit it names is of a file under the first of
+    `hooks.spec_gate_commit_prefixes`: a file outside them is not checked,
+    so it printed nothing, and a line that runs read as one that does not
+    (re-review 3 INST3-3). Fix round 1 printed a stdout
+    note there instead (review INST-3), and with the fallback deferring too,
+    the check then ran nowhere when the line did not run (re-review IT-1,
+    RG-2). The warning names `.husky/<hook>` for husky 9, whose `.husky/_`
+    husky rewrites, and says when git skips a hook that is not executable
+    (re-review IT-2). Since fix round 3 a hook git skips that also lacks the
+    line gets the line, and `chmod +x` only if its own commands should run
+    (re-review 2 HD-3), and the husky 9 sentence names only the hooks that
+    still lack the line (HD-2). An empty `core.hooksPath`, which turns every
+    git hook off, is a state of its own: the installer writes no shim and
+    says to unset it, and the fallback's note says so; a hook that is a
+    symlink to an exact copy of the shim gets a stdout note, not a warning
+    (re-review 2 HD-5). With no repository, or no git, it prints a stdout
+    note: re-run the installer after `git init`.
+  - **A project below the repository top (operator decision 2026-10-06).**
+    In a monorepo package the check is project-relative on both substrates:
+    it strips `git rev-parse --show-prefix` from the changed paths, leaves
+    paths outside the project alone, reads the project's own
+    `.claude/specs`, and takes `Files:` entries and `--files` paths as paths
+    from the project directory, the one that holds `.claude/`. The installer
+    still writes no git hook there, because one would run for every commit
+    in the repository, so the PreToolUse fallback is the check of record.
+    The build compared repository-relative paths, so it checked nothing in a
+    package such as `svc/`, and in a package whose name is a prefix, such as
+    `app/`, it refused even a listed file, which `3d866f4` had checked
+    correctly (review SC-4, SDKP-2, CR-7). Since fix round 2 a task file
+    with no `Files:` block that names a path from the repository top, such
+    as `app/src/x.py`, covers it too, as at `3d866f4` (re-review MR-7). If
+    the repository top has an install of its own, its git hook also checks
+    the project's commits, against the top's prefixes and task files, and
+    the project's install warning says so when the top was installed first,
+    or on the project's next re-install (re-review 2 HD-4; backlog Z-50).
+    Since fix round 3 the check reads the project's prefix with git's
+    repository variables cleared: in a linked worktree git runs its hooks
+    with `GIT_DIR` set, so a project's dispatch that a hook manager ran
+    there read the prefix as empty and matched no path (re-review 2
+    CRIT2-2).
+  - **The PreToolUse hook becomes the fallback.** `spec-gate-commit.sh` (and
+    its `gates.py` twin) defers, silently, only when git's active pre-commit
+    hook is the installer's own shim, byte for byte and executable, and the
+    project is the repository top, where the shim runs its check. Fix round
+    1 also deferred to any hook whose text held
+    `.claude/githooks/dispatch pre-commit` (review INST-3), and from a
+    project below the top to the top's shim, so the check could run nowhere,
+    or with the top's rules (re-review IT-1, IT-5, MR-4, RG-2). With another
+    tool's hook that does run dispatch, one agent commit can now draw two
+    messages (backlog Z-30). Otherwise (a fresh clone, an install before
+    `git init`, a hook manager that took over, a project below the top) it
+    runs the same check on the index as it stands before the command, and
+    when it has a finding its note says why no git hook checked the commit:
+    none is installed in this clone, the hook in place was written by
+    another tool, it is not executable, `core.hooksPath` is set, it is set
+    to an empty value, which turns hooks off (since fix round 3), or the
+    project is below the top. When a full `TMPDIR` lost the check's message,
+    the shell fallback's refusal names the paths from the check's stdout
+    (re-review 2 CRIT2-1). It acts on `git commit` and, since fix round 2,
+    on `git merge --continue`, `git cherry-pick --continue` and
+    `git revert --continue`, which run `git commit` (re-review MR-6).
+    Outside a git work tree it allows with a log line on the shell and with
+    no output on the SDK, which has no log.
+  - **Mode.** `hooks.spec_gate_commit_mode` is `warn` or `block`, and
+    `lib/defaults.py` DEFAULTS is its only default: `warn` (see "The check
+    ships in warn mode" below). dispatch, the fallback and `gates.py` read
+    the resolved value. In warn mode an uncovered agent commit goes through
+    with the message, and `spec-gate-commit.sh` declares `FAIL_CLOSED=0`.
+    In block mode it is refused; a check that could not run also refuses,
+    with "the check could not run. This is not a spec refusal", while a
+    shim that cannot find dispatch or bash, or a dispatch that crashes, lets
+    the commit through with a message (operator ruling 2026-10-05, critic
+    Q3). A check that exits 0 or 2 without its end line, a script bash
+    cannot parse among them, could not run; that is not a spec refusal
+    (review SC-3, F2). Fix round 1's `bash -n` guard is gone: below bash 5.2
+    it missed a syntax error inside `$(...)`, and it read the setlocale
+    warning that bash prints for an `LC_ALL` that is not installed as a
+    parse error, so in warn mode the check never ran and in block mode every
+    agent commit was refused (re-review MR-3, CRIT-1; backlog Z-37 (g)). The
+    planned `hooks.spec_gate_commit_scope` key is dropped: D2 checks agent
+    commits only.
+  - **Retrofit.** The legacy allowlist now exempts per file (it was all or
+    nothing), and a warn week (rollout weeks 1-3) evaluates the rule before
+    it warns, so it says "would refuse" only when it would.
+  - **Substrates.** `gates.py` gets `_spec_check`, a port held to the shell
+    by parity rows; its `RESOLVED_CONFIG` gains `hooks` with the mode and
+    the prefixes wherever spec-gate-commit is built. It reads task files the
+    shell's way, with one
+    `git -c core.symlinks=false checkout-index -z --stdin`, so the two give
+    the same verdict for a smudge filter, a gitlink and a file name that is
+    not UTF-8, and the same could-not-run text (review SDKP-1, CR-4, SDKP-5;
+    the build read each file with `git cat-file`, and the verdicts split).
+- **2. Skill bodies.** `spec-new`, `spec-review`, `spec-decompose`,
+  `plan-review`, `spec-validate`, `decision-log` and `test-author` carry
+  working bodies (`spec-review` and `plan-review` by operator ruling).
+  `spec-new` writes EARS criteria with permanent `AC-<n>` IDs under
+  `version: 1.0.0` frontmatter, plus `decisions.md` and `changelog.md`.
+  `spec-decompose` writes `<slug>-T<NN>.md` task files (frontmatter `id`,
+  `spec`, `spec_version`, `status`, `blocked_by`; body `Slice:`, `Covers:`,
+  `Files:`, `Verify:`) and a wave table in `plan.md`, and teaches the `Files:`
+  contract the check reads. With loop or goal mode on it also teaches the
+  eligibility criteria and the `loop_eligible` or `goal_supervised_eligible`
+  field; with queue mode on it lists each task's queue section for the
+  operator to add, and does not write `.claude/queue/backlog.md`, whose
+  emitted comment now says the operator adds the tasks (review MT-3).
+  `spec-validate` checks at the task's `spec_version`, appends to
+  `validation.md`, sets `validated_version`, and takes a `current` argument
+  for re-validation after a bump. The main session sets `in-progress` and
+  `done`, `/spec-validate` sets `validated`, and the implementer never edits
+  `status`. `spec-new`, `spec-decompose` and `plan-review` commit the spec
+  before an implementer is dispatched, and `spec-validate` commits what it
+  writes. Each body writes with the Write and Edit tools, and stops and asks
+  when Claude Code refuses a write. The gate sentences follow the resolved
+  hooks, mode and prefixes. `code-review` and `pr-author` stay stubs; the
+  reviewer agent carries the code review. Retrofit: the `spec-strategy.md`
+  promotion rule adds `/spec-decompose`, its last step says the gates check
+  a file only once no allowlist line matches it (review MT-4), and the modes
+  read "opted in", not "on".
+- **3. Model lines, `test-author`, `design-review`.** Each skill with a
+  Companion row names its tier in a `> Recommended:` line (see the model
+  item below). `.claude/commands/test-author.md` is new, a thin command
+  that invokes the skill; it is not emitted under `tdd_policy: off`. The
+  `design-review` description, in the emitted skill and in its source
+  `docs/SKILL.md`, is one quoted line: the multi-line plain scalar was
+  invalid YAML.
+- **4-6. Spec versioning, the INDEX schema, the READMEs.** New
+  `.claude/steering/spec-versioning.md` (patch, minor and major bumps; a
+  minor or major bump reopens a `complete` spec; re-validation through
+  `/spec-validate <slug> <task-id> current`), `.claude/specs/README.md`
+  (each roster column and who writes it, the refresh rule, and a migration
+  recipe), `.claude/learnings/README.md` and `.claude/sessions/README.md`
+  (the checkpoint schema and X-33 rules 1-3; closes X-30c). `INDEX.md` gets
+  a ten-column header (slug, status, active version, in-flight against
+  superseded?, depends on, in-flight tasks, blocked tasks, last checkpoint,
+  loop-eligible / total, notes) and a status legend; `suggested first` lives
+  in `notes`. An adopter's `INDEX.md` that lacks columns gets an exit-0
+  `warning:` line with the recipe. `/checkpoint` commits its roster edit
+  with a pathspec commit. A retrofit install with
+  `skip_decisions.R8_D_spec_versioning: skip` leaves out
+  `spec-versioning.md` and every emitted pointer to it.
+- **7. The reviewer.** The description routes the per-task code-review step
+  to the reviewer, before the merge, and the body is self-contained: the
+  `VERDICT:` contract, read-only Bash, the diff treated as data. It reads
+  the task file and `decisions.md` as the branch leaves them
+  (`git show <branch>:<path>`; review MT-5). Its effort is `xhigh` (model
+  item). The retrofit reviewer names where its lists live
+  (the `LEGACY_ALLOWLIST` markers in `spec-strategy.md`, and
+  `.claude/inventory/danger-zones.md`) and reports both outcomes as
+  `blocking` issues.
+- **8. The implementer.** Under `tdd_policy: required` it writes the failing
+  test first, named after the source file's stem so tdd-gate finds it. It
+  writes files with Write and Edit, never through Bash (a heredoc got past
+  the Write-only tdd-gate, measured), changes its task file only to extend
+  `Files:`, never edits `status`, and runs `test-author` in its own
+  checkout. tdd-gate now also gates a write inside `.claude/worktrees/<n>/`,
+  against that worktree, on both substrates, and both substrates take a
+  `CLAUDE_PROJECT_DIR` spelled through a symlink in either spelling (review
+  SDKP-3: the shell allowed a path the SDK denied).
+- **9. Merge-back (D6).** New `.claude/merge-back.sh <branch>` refuses a
+  main checkout whose tracked files have uncommitted changes, merges with
+  `--no-ff --no-commit`, runs the spec check (through dispatch, so on the
+  merge's own changes) and the test gate on the merged index and tree,
+  commits, and removes the worktree and the branch. Its last line, unless
+  a reader that stops early ends it first (below), is
+  `merge-back: <STATUS>`: exit 0 MERGED (or ALREADY-MERGED), 1 ERROR, 2
+  REFUSED, 3 NOT-STARTED, 4 CONFLICT, 5 CLEANUP. On a conflict it leaves the
+  merge in progress and prints the integrator's brief; the integrator
+  resolves and stages, never commits, and `--continue <branch>` gates the
+  resolution. A `--continue` the gates refuse goes back to the integrator,
+  and the main session does not edit the files itself (review MB-6). A
+  resolution git's rerere staged is treated as a resolved conflict and
+  gated. A merged result that fails its tests goes to the implementer, or
+  to the operator, never to the integrator; a test gate that could not run
+  the tests (exit 127, or a hook that failed closed) goes to the operator
+  (review MB-2). The fix rounds also made it:
+  - run each gate as a job of its own under `set -m`, with merge-back's own
+    signal dispositions. Fix round 1 ran each gate in a session of its own
+    where `setsid` exists (review MB-4), which left SIGINT and SIGQUIT
+    ignored in every gate on bash 3.2 and 5.3, so a suite that tests Ctrl-C
+    handling failed or hung inside merge-back only; fix round 2 removed it
+    (re-review RG-1). At a person's terminal a test that opens `/dev/tty`
+    therefore stops until Ctrl-C ends the run, as the script's header says
+    (backlog Z-39 (g)); under Claude Code there is no terminal;
+  - stop a gate on a signal with one TERM, with CONT, to its process group,
+    then up to 10 s for the group to end, then KILL, so a suite's own TERM
+    teardown finishes, and ignore further signals until its last line
+    (review TP-01, CR-3; re-review MBR-1, MBR-2: fix round 1's TERM every
+    0.1 s cut a teardown short, and a second Ctrl-C killed the run), and
+    since fix round 3 SIGPIPE too: piped to `2>&1 | tail` or `| tee`, the
+    interruption that also ended the reader killed merge-back at its first
+    write, before it stopped the gate, so the gate ran on and the merge
+    stayed in progress with no last line (re-review 2 MBS-1);
+  - undo a merge that a signal interrupted while git was merging, and list
+    the untracked files git had written; it used to leave part of the
+    branch checked out, and the next run said to commit it (re-review
+    MBR-3);
+  - name the files and the way out when it is interrupted while the gates
+    run after a gate changed a file the merge brought in, where git refuses
+    `git merge --abort`; the last line used to give that command (re-review
+    2 MBS-3);
+  - say, in its header and in its note to an agent, when an interruption
+    leaves the merge in progress, as its last line then does: after
+    `--continue`, after a gate changed a merged file, and when a Ctrl-C or a
+    session's end interrupts the concluding commit's pre-commit or
+    commit-msg hook (a signal to the script alone lets that commit finish;
+    re-review 2 MBS-2); and what a SIGKILL leaves: the running gate, in a
+    process group of its own, the lock directory, which the next run takes
+    over, and two scratch files in the git directory (re-review 2 MBS-4);
+  - since fix round 4, say in its header and in its note to an agent that
+    a reader that stops early, such as `| head`, ends the run at its next
+    write, with no last line, and can leave the merge in progress, which
+    `--continue <branch>` then concludes; the header said the last line was
+    always `merge-back: <STATUS>` (re-review 3 CRIT3-1, MB3-4; backlog Z-39
+    (p));
+  - since fix round 4, list at most 20 files, then how many more, and give
+    `git checkout -- :/` (it discards every unstaged change, the listed
+    files included), then `git merge --abort`, as the way to drop a merge
+    after a gate or a hook changed files it brought in: past 20 files,
+    `git checkout -- <the files above>` left git refusing the abort
+    (re-review 3 MB3-1);
+  - find a locked worktree on git before 2.31 too, through the worktree's
+    `locked` file; there merge-back merged the branch and then could not
+    remove the worktree (re-review CRIT-2);
+  - report an interruption after the merge commit as `CLEANUP MERGED`, and
+    name, in ALREADY-MERGED, the merge that landed the branch (review MB-3);
+    since fix round 3 the CLEANUP line says the worktree or the branch may
+    be left, because a TERM to the script alone lets a `git worktree
+    remove` it interrupted finish (re-review 2 MBS-6);
+  - keep the merge in progress, and name both ways out, when a pre-commit
+    hook that fixes files rewrites one and fails the commit (review MB-5);
+  - stop counting untracked files under `.claude/specs/` as a dirty tree,
+    since the spec check reads the index (review MB-7, MT-1);
+  - below the repository top, run its git steps at the top, across the
+    whole repository, and the gates in the project directory (operator
+    decision 2026-10-06).
+
+  `settings.json` gets `"worktree": {"baseRef": "head"}`, merged by sub-key:
+  an operator's `"fresh"` or `null` is kept with a `warning:` line, and any
+  other value is declined with exit 3, because Claude Code then ignores the
+  whole file (measured for `"local"`; operator ruling 2026-10-05).
+  `.claude/.gitignore` ignores `/worktrees/`; when a re-install keeps an
+  edited copy that lacks the line and no other ignore rule covers the
+  worktrees, it prints a `warning:` line (review INST-1). The integrator
+  gets a Haiku-floor note while `workflow.integrator_model` is `inherit`.
+  `CLAUDE.md` says how to start a task and land it: once the branch merged,
+  set `status: done`, and if merge-back moves to the background, wait for
+  its last line in the same turn, because ending the turn can stop it
+  (review CR-1: under `claude -p` it did, and the merge was aborted).
+  `CLAUDE.md` stays at 80 lines or fewer in every golden fixture.
+  - **Implementer isolation below the top.** Claude Code 2.1.291 makes the
+    worktree of an implementer in a project below the repository top at the
+    top's `.claude/worktrees/`, and the gates run there, so the test gate
+    refused the implementer's commit (measured in fix round 1). For such a
+    project the installer resolves `workflow.implementer_isolation: auto` to
+    `none` and says why in a `warning:` line; an explicit `worktree` is
+    kept, with a warning that its commits are refused unless `commands.test`
+    also works from the top (backlog Z-44). Since fix round 2 every
+    isolation-off text there (`tech.md`, `implementer.md`, `integrator.md`,
+    the loop wrappers and the sample config's comment) gives that reason,
+    and none offers `worktree` or a per-worktree mount as the way back
+    (re-review IT-3, MBR-9).
+- **10. The Phase 10 handoff.** spec-gate-entry's notice names the whole
+  chain (`/spec-new <slug>`, `/spec-review`, `/spec-decompose <slug>`,
+  `/plan-review`) and the task file. `bootstrap-install` prints a
+  `Next steps:` block last on stdout, on exit 0 only, never under `--adopt`
+  or `--dry-run`, and only while the project has no task file under
+  `.claude/specs/*/tasks/` (review RC-2): commit the install, the chain,
+  commit the spec before dispatch, and land with
+  `.claude/merge-back.sh <branch>`. The plugin's `/bootstrap-apply` names
+  the new `warning:` classes (step 3) and the `Next steps:` block (step 7).
+- **The interviews.** Re-running `bootstrap-interview synthesize` or
+  `retrofit-interview synthesize` over an existing config keeps the keys no
+  interview answer sets (`workflow.*`, `mcp.*`, and the `hooks` settings
+  that are not on/off toggles, such as `spec_gate_commit_mode`) and prints
+  `Kept from the <file> this replaces, ...` naming them. Before, a re-run
+  silently turned ultracode back on and a pinned `block` back to `warn`
+  (review INST-5). On/off gate toggles are not carried: the greenfield
+  interview asks each one, and a security gate's toggle is never carried
+  (WP1 D3).
+- **Model assignment (new WP3 item, operator decisions 2026-10-05).** The
+  aliases stay (`fable`, `opus`, `sonnet`, `haiku`, `inherit`; the emitted
+  `model:` values are `opus`, `sonnet`, `haiku` and `inherit`, and none is
+  `fable`); on first-party they resolve to Fable 5.1, Opus 5.5, Sonnet 5.5
+  and Haiku 4.5 (measured). Fable appears only in the `spec-review` and
+  `plan-review` recommendation lines, with Opus as the fallback. The
+  reviewer goes from `effort: high` to `xhigh`; the implementer has no
+  effort line and inherits the session's. The LLM advisor default (and
+  IC-4) moves to
+  `claude-sonnet-5-5`. New config key `workflow.ultracode` (default `true`):
+  the installer adds `"ultracode": true` to `settings.json` only where the
+  operator has no value of their own, records it in the manifest's
+  `contributed_keys`, and removes it only while it still holds that value;
+  an opt-out over a value the installer does not own prints a `warning:`
+  line. `tech.md` says what ultracode costs and how to turn it off, and the
+  dispatch command that the emitted `loop.sh` and `goal-loop.sh` give the
+  operator to complete carries `--settings '{"ultracode": false}'` (the
+  wrappers are still skeletons that dispatch nothing). `switchModelsOnFlag`
+  is not emitted. Dated notes re-date the version prose in the PRD, the
+  Companion (an amendment block with the table), `RETROFIT-COMPANION.md`,
+  `RETROFIT.md` and `.claude/specs/bootstrap-v2/requirements.md` (R-3,
+  AC-6); the README gains the ultracode addition. Fix round 1 adds dated
+  layers: the PRD says the installer turns ultracode on by default and
+  that an unattended dispatch passes that flag (review MU-3), and the
+  Companion says a refusal's model switch in the main session lasts for
+  the rest of the session, and that its target is not fixed (review
+  MU-1).
+- **The live-run harness.** `tests/live/d2_block_flip.py` and its README:
+  the fixture, the arms (headless and `:interactive`), the outcome labels
+  (`EDITED_TASK_VIA_SCRIPT` among them: a task file changed by a script or
+  shell redirect fails a record), the flip criterion (a)-(e), and the
+  protocol. Fix round 1 (review H1-H9, MU-2, MT-2, TP-07) changed the
+  harness; among the changes:
+  - every version of a task file a run left must be text that the run's
+    allowed Edit, MultiEdit and Write calls produce, or the run is
+    `EDITED_TASK_VIA_SCRIPT`; the build missed a `python3` write that
+    followed an Edit (H1, MAJOR);
+  - the spec check runs on every commit the run made, not only on the
+    branch tips, so a bypass the command parser misses still shows (H3);
+  - each arm's runs must be served by the arm's model (H5);
+  - each row records whether ultracode was on: headless arms run with it
+    off, as the dispatch the loop wrappers describe does, and interactive
+    arms run with the project's setting (MU-2);
+  - the `/spec-decompose` demo must show that the skill wrote its task
+    files (H4);
+  - a run that covered the file with a directory entry it added gets its
+    own label, `EDITED_TASK_DIR_ENTRY`, which does not count toward a pass
+    (MT-2).
+
+  Fix round 2 (re-review HF-1 to HF-4, MR-1) also changed it: it takes a
+  run's result only from a stream-json result event (a Workflow journal
+  appended per protocol step 4 crashed `summarize`); counts a Bash call that
+  a `PreToolUse` hook blocked as not run; replays the `/spec-decompose`
+  demo's writes inside the skill's window, so a `Files:` block someone else
+  supplied fails criterion (e); records and pins the run's commits before
+  the harness lands a worktree branch, so a dropped bypass commit there
+  still reads `BYPASSED` (not when the session lands the branch itself,
+  re-review 2 RR2-1); and judges a merge commit's own changes as the gate
+  now does. Fix round 3 places the demo window's marks by time, as it
+  places the events, and opens a window on a Skill call only in the main
+  session: an appended subagent's Skill call of `/spec-decompose`, even one
+  from before the window opened, re-opened a closed window, so an Edit a
+  later command made counted as the skill's (re-review 2 RR2-2, CRIT2-5).
+  The live README no longer ties the unmeasured ultracode case to the loop
+  wrappers, which start no session (RR2-4). Its limits are listed in
+  backlog Z-28 (d) and (f).
+
+  Two smoke runs on Claude Code 2.1.289 ($0.32, block mode) both stopped
+  when the task-file edit was denied, with no bypass. Two more on 2.1.291
+  ($0.36, the installed hook in block mode) gave `EDITED_TASK` (the main
+  session fixed its task file with the Edit tool) and a stop (a worktree
+  subagent's Edit was denied). The 2026-10-04 pilot record stays out of the
+  repository; read under the new rule, 4 of its 5 `EDITED_TASK` runs wrote
+  the task file through Bash (backlog Z-28).
+
+**The check ships in warn mode, and why.** D2 said warn-only until the end of
+WP3, then block, once a live run shows that the model edits the task file
+rather than bypassing the check. Under `claude -p`, Claude Code denies Write
+and Edit under `.claude/`, so a headless run can show only that the model
+stops (decision D5 is open), and the interactive arms need the operator at a
+terminal. The operator ruled on 2026-10-05 that WP3 ships warn and does not
+flip: the flip waits for D5 or for the interactive arms, and needs a
+committed record that meets the criterion (backlog Z-28). No
+`docs/live-runs/` record lands with WP3. `tests/test_live_run_records.py`
+fails if DEFAULTS says `block` with no such record.
+
+**Upgrading an install made before WP3.** At `3d866f4` the PreToolUse hook
+refused an agent commit of a file no spec named ("Commit blocked", exit 2).
+After a re-install from WP3 with the same config, the same agent commit
+goes through with the warn-mode message, and the install prints no
+`warning:` about the change (measured in fix round 1, as the review's critic
+observed). To keep such commits refused, set
+`hooks.spec_gate_commit_mode: block` before you re-install (backlog Z-28).
+
+**Smoke stages 1-2.** `tests/test_smoke_stages.py` runs both stages as a
+scripted dry run: it plays the model's part with canned actions and runs
+every gate each action triggers, the git hook and merge-back included (30
+rows, 0 pending). End to end with a model, the stages run only in an
+interactive session, because the spec skills write under `.claude/specs/`
+(D5). That run is the operator's, at a terminal, before WP3 merges (build
+plan section 10); its record is a session record, outside the repository.
+This entry does not depend on its outcome (review RC-4).
+
+**Review and fix round 1 (2026-10-06).** A review of the build, ten lenses
+and a critic, reported 3 MAJOR, 51 MINOR and 42 INFO findings. Two
+verifiers confirmed each of the lenses' 53 MAJOR and MINOR findings; the
+critic's MINOR (CR-1) had no verifiers, and fix round 1 measured it
+(Z-45). The record is
+`.claude/sessions/prd-minus-security/wp3-review-wf_33ec2047-dd2+wf_f63228c1-712.json`,
+outside the repository. The MAJOR ones: the spec check refused an agent's
+merge of other people's work, and its advice would have dropped that work
+(SC-1); the harness counted a script write that followed an Edit as a valid
+edit (H1); and merge-back refused every project below the repository top
+(MB-1). The operator decided two questions on 2026-10-06: a merge is
+checked only on its own changes, and a project below the repository top is
+supported. Fix round 1 fixed the MAJOR and MINOR findings, or filed what it
+deferred in backlog section Z (new rows Z-44 to Z-49, and corrections to
+Z-28 to Z-30 and Z-37 to Z-42). The items above describe the result.
+
+**Re-review and fix round 2 (2026-10-06 to 2026-10-07).** A re-review of
+fix round 1's tree, six lenses and a critic, reported 3 MAJOR, 21 MINOR and
+27 INFO findings. Two verifiers confirmed each of the lenses' 22 MAJOR and
+MINOR findings; the critic's MAJOR (CRIT-1) and MINOR (CRIT-2) had no
+verifiers, and fix round 2 reproduced both (rows that fail with the
+`bash -n` guard restored, and with the lock read from the porcelain alone).
+The record is
+`.claude/sessions/prd-minus-security/wp3-rereview1-wf_4855029b-81e.json`,
+outside the repository. The MAJOR ones are fix round 1 regressions: the
+fallback deferred to a hook that only named the dispatch line, so with
+husky 9 or the pre-commit framework the check could run nowhere (IT-1);
+merge-back's `setsid` launch left SIGINT and SIGQUIT ignored in every gate
+(RG-1); and the `bash -n` guard read a setlocale warning as a parse error
+(CRIT-1). Fix round 2 fixed the MAJOR and MINOR findings, took out the
+signal handling fix round 1 had added to merge-back where no row could pin
+it, and filed what it deferred in backlog section Z (new rows Z-50 and
+Z-51, and dated layers on Z-28, Z-29, Z-30, Z-37, Z-39, Z-41 and Z-45). It
+also corrected the records the re-review found wrong (RR-1 to RR-6, IT-7,
+HF-9). The items above describe the result.
+
+**Re-review 2 and fix round 3 (2026-10-12).** A second re-review, of fix
+round 2's tree, five lenses and a critic, reported no MAJOR, 12 MINOR and
+23 INFO findings; 5 of the INFO ones record what held. Two verifiers
+confirmed each of the lenses' 11 MINOR findings; the critic's MINOR
+(CRIT2-1) had no verifiers, and fix round 3 reproduced it (rows on a small
+tmpfs that fail with the writes unchecked). The record is
+`.claude/sessions/prd-minus-security/wp3-rereview2-wf_08e8d18b-090.json`,
+outside the repository. Three MINOR findings were ways the spec check
+passed an unlisted file (EM-1, CRIT2-1, MR2-2); the others were in the
+merge rules (MR2-1, MR2-3, MR2-4), installer remedies that refused a
+person's commits (HD-1), merge-back's stop (MBS-1 to MBS-3) and the
+harness (RR2-1, RR2-2). Fix round 3 fixed them, except MBS-2 and RR2-1,
+which it narrowed in the emitted text and the records, and took the INFO
+findings: HD-4 and MBS-6 are narrowed, and MBS-5 is a fix to the tests. It
+applied the critic's corrections (CRIT2-3 to CRIT2-5) and corrected the
+records the re-review found wrong (RR2-3 to RR2-5); the stray files RR2-6
+names are out of the working tree. It filed what it deferred in backlog
+section Z (new rows Z-52 and Z-53, and dated layers on Z-28, Z-29, Z-39,
+Z-41, Z-45, Z-48, Z-50 and Z-51). The items above describe the result.
+
+**Re-review 3 and fix round 4 (2026-10-13).** A third re-review, of fix
+round 3's tree, four lenses and a critic, reported no MAJOR, 7 MINOR and 13
+INFO findings; 3 of the INFO ones record what held, and one (MB3-4) is the
+item the critic graded MINOR (CRIT3-1). Two verifiers confirmed each of the
+lenses' 6 MINOR findings; the critic's MINOR had no verifiers, and the lens
+and the critic each measured it. The record is
+`.claude/sessions/prd-minus-security/wp3-rereview3-wf_19364a7b-fff+wf_d6aa9f2c-21d.json`,
+outside the repository: run `wf_19364a7b-fff`, whose critic a session's end
+cut off, and that critic re-run alone as `wf_d6aa9f2c-21d`. Fix round 4
+changed only what the scripts and the installer print, and the records; it
+added no mechanism. It fixed the rebase refusal's remedy (RR3-CHK-1),
+merge-back's 20-file list and its way to drop a merge (MB3-1), and the
+installer's gate-off and confirm texts (INST3-2, INST3-3), and took two INFO
+findings (MB3-3, REC3-1). It narrowed merge-back's "always" last line
+(CRIT3-1, MB3-4) in the emitted header, the note to an agent and the
+records, and filed the trap that would fix it as Z-39 (p). It filed reftable
+repositories (RR3-CHK-2) as Z-54, the gate-off scan's shared hook files
+(INST3-1) as Z-55 and the other seven INFO findings as Z-56 (new rows Z-54
+to Z-56), and appended dated layers to Z-39 and Z-51. The items above
+describe the result.
+
+**Seam — the §8.4 trigger walk.** Recorded in-version in
+`SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.1 (`claude -p`), §3.2 (the
+`bootstrap-install` row), §3.3 (`build_hooks` and Coverage), §4.3, §6.2, §7.1,
+§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1, 2, 3
+and 4 each re-walked the triggers against the changed tree; none fires. No
+`seam_version` bump,
+no file rename, and the contract stays SUSPENDED.
+
+| §8.4 trigger | Fires? | Why |
+|---|---|---|
+| New automated CLI entry point, or contract-level flag (§3.2) | No | No entry point or flag is added or changed. `bootstrap-install` gains exit-0 `warning:` lines (git hooks it did not install, an `INDEX.md` missing columns, an operator's `worktree.baseRef` of `"fresh"` or `null`, an ultracode opt-out a kept value overrides, a kept `.claude/.gitignore` without `/worktrees/`, a project below the repository top, a hook in place that names the dispatch line, on every re-install, a hook git skips because it is not executable, an empty `core.hooksPath`, and, once the spec gate is off, a hook or hook-manager config file that still names the dispatch line), stdout `note` lines (no repository; the hooks in `core.hooksPath` are the installer's own shim; a `.git/hooks/pre-commit` written by the pre-commit framework, which runs this installer's hook as `pre-commit.legacy`; a hook that is a symlink to an exact copy of the shim; and, beside a skip warning, which hooks were not installed), two exit-3 causes (a `worktree` that is not an object, a `worktree.baseRef` other than `"head"`, `"fresh"` or `null`), exit-2 refusals for an invalid `hooks.spec_gate_commit_mode`, `hooks.spec_gate_commit_prefixes` or `workflow.ultracode`, a `Next steps:` block at the end of stdout while the project has no task file, and writes into the repository's hooks directory. Below the repository top, `workflow.implementer_isolation: auto` now resolves to `none`, which changes the emitted agent files there. |
+| Field added/changed in §4.1 | No | No field changes. With the git hook installed, a block-mode spec refusal of an agent commit reaches the model as a failed `Bash` result carrying git's stderr, not as a `permission_denials` entry (recorded at §4.3 and §6.2). In warn mode nothing is refused. |
+| Event added/changed in the §5 table | No | No hook moves event. Git hooks are not Claude Code events. |
+| Shared sentinel names/locations/scope (§7.4) | No | No sentinel is added. merge-back holds a lock directory, `<git-common-dir>/bootstrap-merge-back.lock`, for the length of one run; it is not a §7.4 sentinel. |
+| §7.2 security-critical membership | No | No hook name is added or removed. The new plan actions (`.claude/githooks/dispatch`, `.claude/githooks/spec-check.sh`, `.claude/merge-back.sh`, the READMEs, `spec-versioning.md`, the `test-author` command) are kind `file` and non-critical, and the shims are non-critical `git_hook` rows (`tests/test_hook_tiers.py` 30/0). `settings.json` stays security-critical. |
+| §7.3 provenance markers / synthesize-file contract | No | Neither interview's ANSWERS keys change (identical to `3d866f4`'s). The new keys (`hooks.spec_gate_commit_mode`, `hooks.spec_gate_commit_prefixes`, `workflow.ultracode`) are config keys only. `lib/interview.py` changes one toggle's description, and the AC-2-3 mini-golden does not move (`tests/test_validate_only.py` 12/0). Provenance markers are unchanged. Since fix round 1, `synthesize` keeps the config-only keys of a config file it replaces and prints which (review INST-5); the interview file it reads, its refusals and `--validate-only`, which writes no file, are unchanged, so this is output behaviour, not the synthesize-file contract (seam §7.3 note). |
+| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ 322b0d3`. WP3 changes `gates.py` bytes, so once WP3 merges that commit no longer describes the shipped module; re-pointing it to the WP3 merge commit is the WP3 closeout's operator call, as it was for WP2. |
+
+**What WP3 does not do.** It does not flip the check to block (Z-28). It
+does not touch `secrets-gate`, `dependency-gate` or `_HOOK_HEADER` (2026-09-27
+pivot). It emits no `.gitattributes` union for `decisions.md` (Z-34) and runs
+no tests in the pre-merge-commit hook for a hand merge (Z-33), both by
+operator ruling. It does not check what reaches a branch without a
+`git commit` or a merge commit: a fast-forward merge, a clean `cherry-pick`
+or `revert`, and `rebase` and `git am` with their own `--continue` run
+neither the pre-commit nor the pre-merge-commit hook (measured on git 2.55;
+a `git commit` made while a rebase or `git am` is stopped does fire
+pre-commit, and is judged as above), so an agent's commits are
+checked when they are made and not again when they move (Z-29). It does not
+check a person's commits, or an agent's made with `--no-verify`,
+`git stash` or `git commit-tree`, and a merge brings those in unchecked
+(Z-29). It does not bump `PROTOCOL_VERSION`. **Deferred** to backlog
+section Z, rows Z-28 to Z-56 (layer "2026-10-05, WP3"): the flip (Z-28),
+the two-call
+`git commit --no-verify` and the routes no git hook sees (Z-29), silent
+loss of the git hook in a fresh clone, after a later `git init` or under a
+hook manager (Z-30), worktree implementers that cannot edit their own task
+file under `claude -p` (Z-31, D5), retiring the mention rule (Z-32), hand
+merges (Z-33), merge-back conflicts on `decisions.md` and `progress.md`
+(Z-34), the `code-review` and `pr-author` bodies (Z-35), the retrofit spec
+producers' contract (Z-36), spec-check edges (Z-37), substrate gaps (Z-38),
+merge-back edges (Z-39), stdout-only skips (Z-40), platforms nobody measured
+(Z-41), settings keys that void the whole file (Z-42), the model-assignment
+residue (Z-43), worktree isolation below the repository top (Z-44),
+merge-back's time limits under Claude Code (Z-45), tdd-gate and a path
+spelled through a symlink (Z-46), `synthesize` and `deps.approved` (Z-47),
+installer git-hook edges (Z-48), the review's INFO findings fix round 1
+did not take (Z-49), a nested install (Z-50), the re-review's INFO
+findings fix round 2 did not take (Z-51), subtree merges (Z-52), a full
+`TMPDIR` under busybox awk (Z-53), reftable repositories (Z-54), hook files
+the gate-off scan cannot tell are shared (Z-55) and the third re-review's
+INFO findings fix round 4 did not take (Z-56). Z-21 stays held by the pivot, and
+Z-47, which touches
+the dependency gate's configuration, is held with it.
+
+**Freeze exception 84.** One exception covers every frozen source WP3
+touches: `bootstrap.config.yaml` (comment lines only), `docs/SKILL.md` (the
+frozen `design-review` skill body that `tests/test_installer.py` pins the
+emitted skill to; review RC-3), `lib/configemit.py`, `lib/defaults.py`,
+`lib/ic_checks.py`, `lib/installer.py`, `lib/interview.py`,
+`lib/llm_advisor.py`, `lib/retrofit_interview.py`,
+`lib/sdk_gates_template.py`, `lib/templates.py` and
+`tests/test_installer.py`, and the six moving digests: the four plan goldens
+in `tests/test_greenfield_golden.py` (default `92f50795...`, full_autonomous
+`19db6e80...`, design_steering `fda75e00...`, sdk_callable `5d518c58...`) and
+the two in `tests/test_retrofit.py` (service `5ba561ee...`, agent
+`74c19243...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
+comment. `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
+(`tests/test_validate_only.py`) do not move. Measured on the emitted plans
+against `3d866f4`, per file (re-measured on the fix round 4 tree):
+
+| Fixture | Actions | Added / removed | Bodies that move |
+|---|---|---|---|
+| default | 56 → 64 | +8 / 0 | 25 |
+| full_autonomous | 68 → 76 | +8 / 0 | 29: the default's 25, plus `tdd-gate.sh`, `loop.sh`, `goal-loop.sh` and `queue/backlog.md` (review MT-3) |
+| design_steering | 58 → 65 | +7 / 0 | 25: the default's, minus `test-author/SKILL.md` (not emitted under `tdd_policy: off`), plus `design-review/SKILL.md` |
+| sdk_callable | 57 → 65 | +8 / 0 | 26: the default's 25, plus `gates.py` |
+| retrofit service | 79 → 87 | +8 / 0 | 26: the default's 25, plus `spec-strategy.md` |
+| retrofit agent | 93 → 101 | +8 / 0 | 29: the default's 25, plus `tdd-gate.sh`, `loop.sh`, `goal-loop.sh` and `spec-strategy.md` (it emits no `queue/backlog.md`) |
+
+The eight added paths are `.claude/githooks/spec-check.sh`,
+`.claude/githooks/dispatch`, `.claude/commands/test-author.md` (not in
+design_steering), `.claude/merge-back.sh`, `.claude/specs/README.md`,
+`.claude/steering/spec-versioning.md`, `.claude/learnings/README.md` and
+`.claude/sessions/README.md`. The default's 25 moved bodies are `CLAUDE.md`,
+`.claude/.gitignore`, `settings.json`, agents `implementer`, `integrator` and
+`reviewer`, commands `decision-log` and `pr-author`, hooks `spec-gate-commit`
+and `spec-gate-entry`, steering `structure.md` and `tech.md`,
+`specs/INDEX.md`, and 12 `SKILL.md` bodies (`ack-drift`, `checkpoint`,
+`code-review`, `decision-log`, `plan-review`, `pr-author`, `resume`,
+`spec-decompose`, `spec-new`, `spec-review`, `spec-validate`,
+`test-author`). No path is removed, the kept paths keep their order, and no
+mode or kind changes. `secrets-gate.sh` and `dependency-gate.sh` move in no
+fixture, and `_HOOK_HEADER`'s source string is byte-identical to
+`3d866f4`'s. In the emitted bytes one value inside the header moves:
+`spec-gate-commit.sh`'s `FAIL_CLOSED` goes from 1 to 0, because the gate is
+advisory in warn mode (block mode renders 1). In `gates.py`,
+`_secrets_gate`, `_dependency_gate`, `_match_secret` and `_GATE_TIMEOUTS`
+are unchanged. The git-hook shims are not plan actions, so no digest pins
+them; `tests/test_git_hooks.py` runs them in real git.
+
+**Tests.** Nine new files: `tests/test_git_hooks.py` (174 checks),
+`tests/test_spec_check.py` (435), `tests/test_skill_bodies.py` (220),
+`tests/test_versioning_index.py` (165), `tests/test_wp3_agents_handoff.py`
+(197), `tests/test_smoke_stages.py` (30, 0 pending),
+`tests/test_merge_back.py` (242), `tests/test_live_run_records.py` (280) and
+`tests/test_wp3_records.py` (178), plus the live harness under `tests/live/`,
+which `bin/run-tests` does not run. Rows added to `test_advisor_model`,
+`test_block_logging`, `test_installer`, `test_interview`, `test_retrofit`,
+`test_sdk_gates`, `test_settings_merge`, `test_substrate_differential` and
+`test_worktree_command_compat`; `test_composition` is unchanged (fix round
+2 removed the `setsid` exception fix round 1 had added to it). Spec-gate fixtures set the mode
+explicitly in `test_block_logging`, `test_hook_behavior`, `test_sdk_gates`
+and `test_substrate_differential`; rows move to the new check in
+`test_retrofit`, `test_sdk_gates` and `test_issue_fixes`;
+`test_wiring_verification` and `test_settings_merge` set
+`GIT_CEILING_DIRECTORIES`, and the new suites the review found reading the
+developer's git config no longer do (review TP-03); `test_wp2_records`' RR-UP-1 pins
+WP2's own test files; `tests/test_doc_citations.py` now also checks
+`bootstrap.config.yaml:N` citations (review RC-5); digests are re-baselined
+in `test_greenfield_golden` and `test_retrofit`. `test_merge_back`'s
+terminal rows give merge-back the default SIGINT, SIGQUIT and SIGPIPE
+dispositions that a person's shell gives a foreground job, so they hold
+when the suite itself starts as a background job, and a row can see a
+closed pipe (re-review 2 MBS-5). Counts are each file's final `N passed`
+line, run alone on 2026-10-13, after fix round 4. The new suites pass under
+bash 3.2.57 (docker `bash:3.2`, busybox, git 2.49.1, no jq; re-run on the
+fix round 4 tree as a user that is not root, with `--init`), each with the
+count above except two. `test_spec_check` runs 420: it skips its rows
+for a locale that is not installed, because that libc prints no setlocale
+warning, and its full-`TMPDIR` rows, because `unshare` cannot mount a
+tmpfs there. `test_merge_back` runs 239: it skips that locale row too,
+and its two end-to-end exit-127 rows, because test-gate reports exit 1
+there (backlog Z-41). Run as root, `test_git_hooks` skips the 7
+rows that need a directory it cannot write.
+
 ## Post-2.8.0 — hooks that reach the model (WP2) (2026-10-04)
 
 **No version bump** (fix, not surface; freeze exception **83**). One PR, one
