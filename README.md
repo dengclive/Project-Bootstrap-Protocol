@@ -370,7 +370,9 @@ deterministic installer).
   to confirm it: commit a file under one of
   `hooks.spec_gate_commit_prefixes` that no task file lists from a terminal
   with `CLAUDECODE=1 git commit`, which should print `spec check` (a file
-  outside them is not checked, so it prints nothing). With husky 9,
+  outside them, or one a retrofit install's legacy allowlist covers, is not
+  checked, so it prints nothing; the warning names a file the check
+  covers, or says that no commit can confirm the line yet). With husky 9,
   put the line in `.husky/pre-commit`, not in `.husky/_`, which husky
   rewrites.
   `.git/hooks` is not versioned, so a fresh clone has no shim until you

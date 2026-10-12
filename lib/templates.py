@@ -4309,6 +4309,16 @@ _gitv(){
   case "$n" in ''|*[!0-9]*|?????*) return 1 ;; esac
   [ "$j" -gt "$1" ] || { [ "$j" -eq "$1" ] && [ "$n" -ge "$2" ]; }
 }
+# _seqref NAME: git holds the pseudo-ref NAME (CHERRY_PICK_HEAD, REVERT_HEAD
+# or REBASE_HEAD); its object name is left in SEQREF. [WP3 fix5 R4-1,
+# CRIT7-1] Read as a ref, not as a file at --git-path: a reftable
+# repository keeps them in the ref store with no file, and a stopped rebase
+# or cherry-pick then read as none (measured, git 2.56). The name must
+# resolve to itself, so a branch called REBASE_HEAD is not one.
+_seqref(){
+  SEQREF="$(git rev-parse -q --verify "$1" 2>/dev/null)" || return 1
+  [ "$(git rev-parse -q --verify --symbolic-full-name "$1" 2>/dev/null)" = "$1" ]
+}
 # BATCH=(start count start count ...): the arguments in runs whose bytes
 # stay under SC_ARGMAX [WP3 fix1 F1]. A shell function's arguments are not
 # an exec, so passing them all here is safe. ${#a} counts bytes (LC_ALL=C).
@@ -4406,11 +4416,7 @@ if [ "$SRC" = staged ]; then
   # --no-commit` writes REVERT_HEAD even when it applies cleanly.
   if [ -z "$SEQ" ]; then
     for _s in pick:CHERRY_PICK_HEAD revert:REVERT_HEAD; do
-      _f="$(git rev-parse --git-path "${_s#*:}" 2>/dev/null)" || _f=""
-      if [ -n "$_f" ] && [ -f "$_f" ]; then
-        { IFS= read -r PICK || [ -n "$PICK" ]; } <"$_f"
-        SEQ="${_s%%:*}"; break
-      fi
+      if _seqref "${_s#*:}"; then PICK="$SEQREF"; SEQ="${_s%%:*}"; break; fi
     done
   fi
   # [WP3 fix3 MR2-3] A `git commit` made while a rebase or `git am` is
@@ -4427,10 +4433,7 @@ if [ "$SRC" = staged ]; then
       SEQ=am
     elif { [ -n "$_rm" ] && [ -d "$_rm" ]; } || { [ -n "$_ra" ] && [ -d "$_ra" ]; }; then
       SEQ=rebase
-      _f="$(git rev-parse --git-path REBASE_HEAD 2>/dev/null)" || _f=""
-      if [ -n "$_f" ] && [ -f "$_f" ]; then
-        { IFS= read -r PICK || [ -n "$PICK" ]; } <"$_f"
-      fi
+      _seqref REBASE_HEAD && PICK="$SEQREF"
     fi
   fi
   if [ -n "$SEQ" ]; then
@@ -4849,10 +4852,14 @@ if [ -n "$SEQ" ]; then
   _last="This is $_it, and these files changed in $_in ($_what)."
   # [WP3 fix3 MR2-6] In a retrofit warn week the commit goes through too.
   if [ "${BOOTSTRAP_SPEC_MODE:-}" != warn ] && [ "$R_WARN_WEEK" != 1 ]; then
-    # [WP3 fix4 RR3-CHK-1] An edit, exec or break stop replays nothing past
-    # HEAD: a file added there can be unstaged, unlike a replayed commit's.
-    if [ "$SEQ" = rebase ]; then
-      _last="$_last If it replays a commit, do not unstage a file that commit changed: that drops $_drop. Any other file (such as one added at an edit, exec or break stop) can be unstaged (git restore --staged <path>)."
+    # [WP3 fix4 RR3-CHK-1, fix5 R4-3] A rebase names the commit it replays
+    # (REBASE_HEAD) until that commit is made; at an edit stop git has made
+    # it (HEAD) before stopping, and an exec or break stop names none, so
+    # unstaging there drops nothing of it.
+    if [ "$SEQ" = rebase ] && [ -n "$PICK" ]; then
+      _last="$_last It replays the commit REBASE_HEAD names (git show --stat REBASE_HEAD lists its files). Until that commit is made (at an edit stop git has made it already: it is HEAD), do not unstage a file it changed: that drops $_drop. Any other file can be unstaged (git restore --staged <path>), and so can any file once that commit is made."
+    elif [ "$SEQ" = rebase ]; then
+      _last="$_last Any file here can be unstaged (git restore --staged <path>)."
     else
       _last="$_last Do not unstage a file from it: that drops $_drop."
     fi
@@ -12782,9 +12789,14 @@ if [ "$CONT" = 0 ] && [ -n "$MH" ]; then
   if [ "$MH" = "$TIP" ]; then
     _u="$(unstaged)"
     if [ -n "$_u" ]; then
-      say "Unstaged changes in the merge in progress (git merge --abort refuses to discard them):"
+      # [WP3 fix5 R4-4] git merge --abort refuses a change to a file the
+      # merge changed, keeps one to any other file, and discards an unmerged
+      # one; `git checkout -- <paths>` and `:/` fail on an unmerged path, and
+      # the list stops at 20. restore --ignore-unmerged (git 2.23) does
+      # every case, from any directory (measured, git 2.36 and 2.56).
+      say "Unstaged changes in the merge in progress:"
       list "$_u"
-      not_started "a merge of $BR is already in progress here. To keep the changes above: git add them, then .claude/merge-back.sh --continue $(q "$BR")   To drop the merge: git checkout -- <the files above>, then git merge --abort"
+      not_started "a merge of $BR is already in progress here. To keep the changes above: git add them, then .claude/merge-back.sh --continue $(q "$BR")   To drop the merge: git restore --ignore-unmerged --worktree -- :/ (it discards every unstaged change, the files above included), then git merge --abort"
     fi
     not_started "a merge of $BR is already in progress here. If the integrator resolved and staged its conflicts: .claude/merge-back.sh --continue $(q "$BR")   To drop it: git merge --abort"
   fi

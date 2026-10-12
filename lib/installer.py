@@ -2893,11 +2893,14 @@ def _apply_git_hooks(root: Path, plan: list[dict], manifest: dict,
               f"write; left alone)")
 
 
-def _mention_note(ment, cmd: str, prefix: str = "src/") -> str:
+def _mention_note(ment, cmd: str, prefix: str | None = "src/",
+                  retro: bool = False) -> str:
     """[WP3 fix2 IT-1, RG-2] What a hook that MENTIONS the dispatch line
     gets: not "nothing to install", which a line that never runs made
     false, and not the plain remedy the operator already followed.
-    `prefix`: the first of hooks.spec_gate_commit_prefixes."""
+    `prefix`: the first of hooks.spec_gate_commit_prefixes that the legacy
+    allowlist leaves checked (None: it covers every one); `retro`: a
+    retrofit install (rollout weeks, a legacy allowlist)."""
     files = " and ".join(f"{p} mentions `{cmd} {n}`" for n, p in ment)
     out = (f" {files}, but this installer cannot tell whether git runs that "
            f"line (a line after an `exit` or an `exec`, after husky 9's "
@@ -2909,16 +2912,33 @@ def _mention_note(ment, cmd: str, prefix: str = "src/") -> str:
     # with anything to check: a commit fires pre-commit, and a clean merge
     # has no changes of its own. [WP3 fix4 INST3-3] The file must be under
     # a policed prefix: one outside them prints nothing, line or no line.
-    if any(n == "pre-commit" for n, _p in ment):
+    # [WP3 fix5 R4-2] A retrofit install exempts what its legacy allowlist
+    # covers, so the example is under a prefix the allowlist leaves checked;
+    # and in rollout weeks 1 to 3 the check only warns, with its own line.
+    if any(n == "pre-commit" for n, _p in ment) and prefix is None:
+        out += (" No commit can confirm the pre-commit line yet: "
+                "retrofit.legacy_allowlist (.claude/steering/"
+                "spec-strategy.md) covers every one of "
+                "hooks.spec_gate_commit_prefixes, so the check exempts any "
+                "file under them, line or no line.")
+    elif any(n == "pre-commit" for n, _p in ment):
+        sign = "it should print `spec check (pre-commit):`"
+        if retro:
+            sign += (" (in retrofit rollout weeks 1 to 3, .claude/hooks/"
+                     "rollout-schedule.md, where the check only warns, it "
+                     "prints `the spec check would refuse this commit:` "
+                     "instead)")
         out += (f" To confirm the pre-commit line runs, commit a file under "
                 f"{prefix} that no task file lists, such as "
                 f"`{prefix}confirm.txt`, from a terminal with `CLAUDECODE=1 "
                 f"git commit` (through Claude Code, the PreToolUse hook can "
-                f"refuse the commit before git runs its hooks): it should "
-                f"print `spec check (pre-commit):`. A file outside "
-                f"hooks.spec_gate_commit_prefixes is not checked, so it "
-                f"prints nothing. If that commit lands (in warn mode it "
-                f"does), `git reset --soft HEAD~1` undoes it.")
+                f"refuse the commit before git runs its hooks): {sign}. A "
+                f"file outside hooks.spec_gate_commit_prefixes is not "
+                f"checked, so it prints nothing")
+        out += (", nor is one the legacy allowlist covers." if retro
+                else ".")
+        out += (" If that commit lands (in warn mode it does), "
+                "`git reset --soft HEAD~1` undoes it.")
     if any(n == "pre-merge-commit" for n, _p in ment):
         out += (" No ordinary commit confirms the pre-merge-commit line: git "
                 "runs that hook only for a merge it commits by itself, which "
@@ -2944,15 +2964,38 @@ def _noexec_other(paths) -> str:
             f"executable hook that holds only the line.")
 
 
+def _legacy_allowlist(root: Path, cfg: dict) -> list[str]:
+    """[WP3 fix5 R4-2] The retrofit spec check's exempt patterns, as it reads
+    them: the LEGACY_ALLOWLIST block of .claude/steering/spec-strategy.md
+    (retrofit.legacy_allowlist when the file is not there, as in a dry
+    run)."""
+    try:
+        text = (root / ".claude/steering/spec-strategy.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return list((cfg.get("retrofit") or {}).get("legacy_allowlist")
+                    or [])
+    m = re.search(r"<!-- LEGACY_ALLOWLIST_BEGIN -->\n(.*?)"
+                  r"<!-- LEGACY_ALLOWLIST_END -->", text, re.S)
+    return [ln.strip() for ln in (m.group(1) if m else "").split("\n")
+            if ln.strip()]
+
+
 def _git_hook_warnings(summary: dict, root: Path, dry: bool,
-                       prefixes=None) -> list[str]:
+                       prefixes=None, allow=None) -> list[str]:
     """[WP3 / D2] One stderr line per git hook this run did not install,
     with the remedy. The exit status does not change (see above).
-    `prefixes`: hooks.spec_gate_commit_prefixes (the default's when None)."""
+    `prefixes`: hooks.spec_gate_commit_prefixes (the default's when None).
+    `allow`: a retrofit install's legacy allowlist (None: not a retrofit)."""
+    import fnmatch
     from templates import (GIT_HOOK_DISPATCH, GIT_HOOK_NAMES,
                            SPEC_GATE_DEFAULT_PREFIXES)
-    pfx = (list(prefixes) if prefixes else
-           list(SPEC_GATE_DEFAULT_PREFIXES))[0]
+    pfxs = list(prefixes) if prefixes else list(SPEC_GATE_DEFAULT_PREFIXES)
+    retro = allow is not None
+    # [WP3 fix5 R4-2] As the check matches: a bash `case` glob, `**` as `*`.
+    pfx = next((p for p in pfxs if not any(
+        fnmatch.fnmatchcase(p + "confirm.txt", a.replace("**", "*"))
+        for a in (allow or []))), None)
     did = "would not add" if dry else "did not add"
     still = ("The PreToolUse spec-gate-commit hook still runs, but it misses "
              "`git add X && git commit` and `git commit -am`.")
@@ -3024,7 +3067,7 @@ def _git_hook_warnings(summary: dict, root: Path, dry: bool,
             if noexec_add:
                 msg += _noexec_other(noexec_add)
             if ment:
-                msg += _mention_note(ment, cmd, pfx)
+                msg += _mention_note(ment, cmd, pfx, retro)
             out.append(msg)
         elif state == "not-top":
             # [WP3 fix1, operator decision 2026-10-06 (2)] Say what works
@@ -3081,7 +3124,8 @@ def _git_hook_warnings(summary: dict, root: Path, dry: bool,
                 if g.get("noexec"):
                     msg += (f" It is not executable, so git skips it: "
                             f"chmod +x {path}.")
-                msg += _mention_note([(g["name"], g["via"])], cmd, pfx)
+                msg += _mention_note([(g["name"], g["via"])], cmd, pfx,
+                                     retro)
             else:
                 # [WP3 fix3 HD-1, HD-3] The guarded line, and the exec bit
                 # only if the hook's own commands should run.
@@ -4244,7 +4288,9 @@ def main(argv: list[str]) -> int:
     # [WP3 / D2] Git hooks this run did not install. rc stays 0.
     for msg in _git_hook_warnings(
             summary, root, args.dry_run,
-            cfg["hooks"].get("spec_gate_commit_prefixes")):
+            cfg["hooks"].get("spec_gate_commit_prefixes"),
+            _legacy_allowlist(root, cfg) if cfg.get("mode") == "retrofit"
+            else None):
         _warn(msg)
     # [WP3 fix1 MB-1] A project below the repository top: where the
     # worktrees go, and what merge-back does there. rc stays 0.

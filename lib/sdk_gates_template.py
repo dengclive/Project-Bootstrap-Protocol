@@ -1933,6 +1933,17 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
             f = os.path.join(top, f)
         return f if f and exists(f) else ""
 
+    async def seq_ref(name):
+        # [WP3 fix5 R4-1, CRIT7-1] spec-check.sh's _seqref: the pseudo-ref
+        # read as a ref (reftable keeps it in the ref store, with no file),
+        # and only when the name resolves to itself (not a branch so named).
+        rc, out, _ = await git("rev-parse", "-q", "--verify", name)
+        if rc != 0:
+            return ""
+        rc, sym, _ = await git("rev-parse", "-q", "--verify",
+                               "--symbolic-full-name", name)
+        return _spec_line(out) if rc == 0 and _spec_line(sym) == name else ""
+
     mpar, seq, rule, pick = [], "", "", ""
     if changed is None:
         rc, out, err = await git("diff", "--cached", "--name-only", "-z",
@@ -1958,13 +1969,8 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
             # [WP3 fix2 MR-2] A cherry-pick or revert stopped on conflicts.
             for s_, name in (("pick", "CHERRY_PICK_HEAD"),
                              ("revert", "REVERT_HEAD")):
-                f = await git_path(name)
-                if f:
-                    try:
-                        with open(f, "rb") as fh:
-                            pick = os.fsdecode(fh.read().split(b"\\n", 1)[0])
-                    except OSError:
-                        pick = ""
+                pick = await seq_ref(name)
+                if pick:
                     seq = s_
                     break
         if not seq:
@@ -1977,13 +1983,7 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
                 seq = "am"
             elif rm or ra:
                 seq = "rebase"
-                f = await git_path("REBASE_HEAD")
-                if f:
-                    try:
-                        with open(f, "rb") as fh:
-                            pick = os.fsdecode(fh.read().split(b"\\n", 1)[0])
-                    except OSError:
-                        pick = ""
+                pick = await seq_ref("REBASE_HEAD")
         if seq:
             for o in (mpar if seq == "merge" else
                       [] if seq in ("am", "rebase") and not pick else [pick]):
@@ -2233,13 +2233,19 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
         last = "This is %s, and these files changed in %s (%s)." % (
             it, in_, what)
         if mode != "warn":
-            # [WP3 fix4 RR3-CHK-1] An edit, exec or break stop replays
-            # nothing past HEAD (spec-check.sh).
-            if seq == "rebase":
-                last += (" If it replays a commit, do not unstage a file that "
-                         "commit changed: that drops %s. Any other file (such "
-                         "as one added at an edit, exec or break stop) can be "
-                         "unstaged (git restore --staged <path>)." % drop)
+            # [WP3 fix4 RR3-CHK-1, fix5 R4-3] What a stopped rebase lets the
+            # agent unstage (spec-check.sh).
+            if seq == "rebase" and pick:
+                last += (" It replays the commit REBASE_HEAD names (git show "
+                         "--stat REBASE_HEAD lists its files). Until that "
+                         "commit is made (at an edit stop git has made it "
+                         "already: it is HEAD), do not unstage a file it "
+                         "changed: that drops %s. Any other file can be "
+                         "unstaged (git restore --staged <path>), and so can "
+                         "any file once that commit is made." % drop)
+            elif seq == "rebase":
+                last += (" Any file here can be unstaged (git restore "
+                         "--staged <path>).")
             else:
                 last += " Do not unstage a file from it: that drops %s." % drop
             if os.environ.get("BOOTSTRAP_MERGE_BACK") == "1":

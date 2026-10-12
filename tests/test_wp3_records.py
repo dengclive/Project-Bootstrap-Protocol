@@ -5,7 +5,7 @@ Each row DERIVES the fact from the code (a resolved config, an emitted plan,
 a real install, a parsed golden table) and then checks the record that
 states it, so a record that drifts from the code fails here, not in the next
 review. The records are the tracked ones WP3 wrote: the changelog's WP3
-entry, the backlog's WP3 layers and rows Z-28 to Z-56, the seam contract's
+entry, the backlog's WP3 layers and rows Z-28 to Z-57, the seam contract's
 dated WP3 notes, the PRD, Companion, RETROFIT.md and README notes, the
 readiness layer on A-6, and the commented keys in bootstrap.config.yaml.
 
@@ -546,20 +546,21 @@ BL = read("docs/deferred-backlog.md")
 # [WP3 fix2] Z-50 and Z-51 are fix round 2's (g4-records).
 # [WP3 fix3] Z-52 and Z-53 are fix round 3's (h4-records).
 # [WP3 fix4] Z-54 to Z-56 are fix round 4's (i2-records).
-_ids = [f"Z-{n}" for n in range(28, 57)]
+# [WP3 fix5] Z-57 is fix round 5's (j2-records).
+_ids = [f"Z-{n}" for n in range(28, 58)]
 _rows = {i: anchored_line(BL, f"| {i} |") for i in _ids}
-check("rows Z-28 to Z-56 exist, once each",
+check(f"rows Z-28 to {_ids[-1]} exist, once each",
       all(_rows.values()), [i for i, r in _rows.items() if not r])
 _deferred = cut(CL, "**What WP3 does not do.**", "**Freeze exception 84.**")
-check("the entry's Deferred paragraph names exactly Z-28 to Z-56 (and the "
-      "held Z-21), and its range ends at the last row",
+check(f"the entry's Deferred paragraph names exactly Z-28 to {_ids[-1]} "
+      "(and the held Z-21), and its range ends at the last row",
       set(re.findall(r"Z-\d+", _deferred)) == set(_ids) | {"Z-21"}
       # [WP3 fix3] The range's end too: a stale "Z-28 to Z-51" passed the
       # set check while Z-52 and Z-53 were named in the list (mutant R23).
       and f"rows Z-28 to {_ids[-1]} (layer" in _deferred,
       sorted(set(re.findall(r"Z-\d+", _deferred))))
 check("the backlog's WP3 layer paragraph is there and names the range",
-      "Z-28 to Z-56 are WP3 residue" in anchored_line(
+      f"Z-28 to {_ids[-1]} are WP3 residue" in anchored_line(
           BL, "**Layer 2026-10-05, WP3 (branch `feat/wp3-spec-workflow`).**"))
 for _rid, _what, _needles in (
         ("Z-28", "the deferred D2 flip",
@@ -2132,9 +2133,9 @@ check("Z-52: the subtree merge row says what was measured and is tiered",
 check("section 10: the seam's WP3 note records fix round 3, and the walk "
       "says fix rounds 1, 2 and 3 each re-walked it",
       "Fix round 3 (2026-10-12) extends them in place" in _s10
-      # [WP3 fix4] Fix round 4 re-walked it too (5f).
-      and "Fix rounds 1, 2, 3 and 4 each re-walked the triggers"
-      in flat(CL))
+      # [WP3 fix4] Fix round 4 re-walked it too (5f). [WP3 fix5] And
+      # fix round 5 (5g).
+      and "Fix rounds 1 to 5 each re-walked the triggers" in flat(CL))
 
 # --------------------------------------------------------------------------- #
 # 5f. [WP3 fix4, i2-records] The records fix round 4 corrected (re-review 3,
@@ -2169,7 +2170,8 @@ check("re-review 3: the changelog's paragraph gives the counts the pinned "
       and "wp3-rereview3-wf_19364a7b-fff+wf_d6aa9f2c-21d.json" in _rr3p
       and "re-run alone as `wf_d6aa9f2c-21d`" in _rr3p
       and "(new rows Z-54 to Z-56)" in _rr3p
-      and "the build of 2026-10-05 and four review fix rounds" in CL
+      # [WP3 fix5] The header counts five now (5g).
+      and "the build of 2026-10-05 and five review fix rounds" in CL
       and "(`wp3-rereview3-wf_19364a7b-fff+wf_d6aa9f2c-21d.json`, "
       "2026-10-13)" in _BL_LAYER4
       and "Z-54 to Z-56 are fix round 4's (2026-10-13)" in _BL_LAYER4,
@@ -2183,10 +2185,16 @@ check("every re-review 3 finding (20, less 3 pass records) is named in the "
       [i for i in _RR3_IDS if i not in _named3])
 
 # RR3-CHK-1: the rebase refusal, on both substrates, and the records.
-_rb_say = ("If it replays a commit, do not unstage a file that commit "
-           "changed: that drops ", " Any other file (such as one added at an "
-           "edit, exec or break stop) can be unstaged (git restore --staged "
-           "<path>).", "part of that commit")
+# [WP3 fix5 R4-3] The code's sentence names REBASE_HEAD and how to see its
+# files, and says git has made it at an edit stop; a stop that names no
+# commit lets any file be unstaged.
+_rb_say = ("It replays the commit REBASE_HEAD names (git show --stat "
+           "REBASE_HEAD lists its files). Until that commit is made (at an "
+           "edit stop git has made it already: it is HEAD), do not unstage a "
+           "file it changed: that drops ", "part of that commit",
+           " Any other file can be unstaged (git restore --staged <path>), "
+           "and so can any file once that commit is made.",
+           " Any file here can be unstaged (git restore --staged <path>).")
 # The SDK's text is adjacent string literals: join them.
 _mod_src = re.sub(r'"\s*\n\s*"', "", _mod)
 check("RR3-CHK-1: both substrates tell a stopped rebase what can be "
@@ -2201,8 +2209,9 @@ check("RR3-CHK-1: both substrates tell a stopped rebase what can be "
       "stop, so this is all of the change" in _mod_src
       and "git names no commit it is replaying here, so the resolution"
       not in _SC + _mod_src
-      and "since fix round 4 that any other file, such as one added at an "
-      "edit, exec or break stop, can be unstaged" in _MERGES
+      # [WP3 fix5 R4-3] The edit, exec and break example is gone (5g).
+      and "and since fix round 4 that any other file can be unstaged"
+      in _MERGES
       and "(re-review 3 RR3-CHK-1)" in _MERGES
       and "or a commit made while a rebase or `git am` is stopped, the "
       "refusal never says" not in _MERGES)
@@ -2217,14 +2226,17 @@ _lo = _lr.stdout.split("\n")
 _z39d = after(_rows["Z-39"], "**Layer 2026-10-13 (WP3 fix round 4, "
                              "re-review 3 MB3-1, CRIT3-1, MB3-4).**")
 check("MB3-1: merge-back lists at most 20 files and then how many more, "
-      "drops a merge with `git checkout -- :/`, keeps `<the files above>` "
-      "only where a merge can hold unmerged entries; item 9, Z-39's and "
-      "Z-51's layers say so",
+      "drops a merge with `git checkout -- :/`, and where a merge can hold "
+      "unmerged entries with `git restore --ignore-unmerged` (fix round 5 "
+      "R4-4); item 9, Z-39's and Z-51's layers say so",
       len(_list_ln) == 1 and _lo[:21] == [f"    {k}" for k in range(1, 21)]
       + ["    ... and 5 more"]
       and _MB.count("git checkout -- :/ (it discards every unstaged change, "
                     "the files above included), then git merge --abort") == 2
-      and _MB.count("git checkout -- <the files above>") == 1
+      and _MB.count("git checkout -- <the files above>") == 0
+      and _MB.count("To drop the merge: git restore --ignore-unmerged "
+                    "--worktree -- :/ (it discards every unstaged change, "
+                    "the files above included), then git merge --abort") == 1
       and "a merge of $BR is already in progress here. To keep the changes "
       "above" in _MB
       and "list at most 20 files, then how many more" in _ITEM9
@@ -2286,37 +2298,286 @@ check("INST3-2, INST3-3: the confirm recipe names a file under the first "
       and "(re-review 3 INST3-3)" in _WHERE
       and "commit a file under one of `hooks.spec_gate_commit_prefixes` "
       "that no task file lists from a terminal" in _RDM
-      and "(a file outside them is not checked, so it prints nothing)"
-      in _RDM, _mn4[-500:])
+      # [WP3 fix5 R4-2] The README adds the legacy allowlist (5g).
+      and "(a file outside them, or one a retrofit install's legacy "
+      "allowlist covers, is not checked, so it prints nothing;" in _RDM,
+      _mn4[-500:])
 
 # The new rows, each tiered; Z-56 names every INFO finding fix round 4 did
 # not take, one letter each.
 _z56_ids = ["RR3-CHK-3", "RR3-CHK-4", "MB3-2", "MB3-5", "INST3-4", "INST3-5",
             "INST3-6"]
+# [WP3 fix5] Z-54 is done by fix round 5 (5g); Z-55 and Z-56 stay open.
 check("Z-54 to Z-56: reftable, the shared hook files and the INFO findings "
-      "fix round 4 did not take, each `open` · T4, and the changelog's "
-      "Deferred paragraph names them",
-      all(_rows[i].endswith("| `open` · T4 |")
-          for i in ("Z-54", "Z-55", "Z-56"))
+      "fix round 4 did not take, Z-55 and Z-56 `open` · T4, and the "
+      "changelog's Deferred paragraph names them",
+      all(_rows[i].endswith("| `open` · T4 |") for i in ("Z-55", "Z-56"))
       and "(fix round 4; re-review 3 RR3-CHK-2)" in _rows["Z-54"]
       and "`git rev-parse -q --verify REBASE_HEAD`" in _rows["Z-54"]
       and "(fix round 4; re-review 3 INST3-1)" in _rows["Z-55"]
       and all(f"({c}) {i}:" in _rows["Z-56"]
               for c, i in zip("abcdefg", _z56_ids))
-      and "reftable repositories (Z-54)" in _deferred
+      and "reftable repositories (Z-54, done in fix round 5)" in _deferred
       and "fix round 4 did not take (Z-56)" in _deferred,
-      [i for i in ("Z-54", "Z-55", "Z-56") if not _rows[i].endswith(
+      [i for i in ("Z-55", "Z-56") if not _rows[i].endswith(
           "| `open` · T4 |")])
 
 # The seam's section 10 note, the freeze table's re-measure and the Tests
 # paragraph's date follow fix round 4.
+# [WP3 fix5] The freeze table and the Tests counts are re-dated to fix
+# round 5 (5g).
 check("fix round 4: the seam's section 10 note records the section 3.2 (4) "
-      "correction and no new line, the freeze table is re-measured on its "
-      "tree, and the Tests paragraph's counts are dated after it",
+      "correction and no new line",
       "Fix round 4 (2026-10-13) corrects the §3.2 (4) note in place" in _s10
-      and "it adds no `warning:` or `note` line" in _s10
-      and "(re-measured on the fix round 4 tree)" in CL
-      and "run alone on 2026-10-13, after fix round 4" in _TESTS3)
+      and "it adds no `warning:` or `note` line" in _s10)
+
+# --------------------------------------------------------------------------- #
+# 5g. [WP3 fix5, j2-records] The records fix round 5 corrected (step 7,
+#     wp3-step7-wf_f7600f06-a5c.json, 2026-10-13), and every WP3 record
+#     brought into line with fix round 5's code. Each row first derives the
+#     fact from the emitted files, the installer, git or CI's own files,
+#     then checks the records that state it.
+# --------------------------------------------------------------------------- #
+print("\n=== 5g. Fix round 5 records ===")
+_s7p = cut(CL, "**Step 7 and fix round 5 (2026-10-13).**",
+           "**Seam — the §8.4 trigger walk.**")
+_BL_LAYER5 = anchored_line(BL, "**Layer 2026-10-05, WP3 (branch "
+                               "`feat/wp3-spec-workflow`).**")
+
+# Step 7's findings, pinned as data (the record is outside the repository):
+# each lens's list, the critic's, and how many things each said held. The
+# paragraph's counts are what the lists add up to.
+_S7_LENS = {"BODY-1": "MINOR", "BODY-2": "MINOR", "BODY-3": "MINOR",
+            "BODY-4": "INFO", "BODY-5": "INFO",
+            "R4-1": "MAJOR", "R4-2": "MINOR", "R4-3": "MINOR",
+            "R4-4": "MINOR",
+            "CI-1": "MINOR", "CI-2": "MINOR", "CI-3": "INFO", "CI-4": "INFO"}
+_S7_CRIT = {"CRIT7-1": "MAJOR", "CRIT7-2": "INFO", "CRIT7-3": "INFO",
+            "CRIT7-4": "INFO"}
+_S7_HELD = (11, 11, 6, 4)
+_s7all = dict(_S7_LENS, **_S7_CRIT)
+
+
+def _n7(sev, d=_s7all):
+    return sum(1 for v in d.values() if v == sev)
+
+
+check("step 7: the changelog's paragraph gives the counts the pinned "
+      "finding lists add up to, cites the record and fix round 5's run, "
+      "and the header, the walk and the backlog layer count fix round 5",
+      f"reported {_n7('MAJOR')} MAJOR, {_n7('MINOR')} MINOR and "
+      f"{_n7('INFO')} INFO findings; the lenses and the critic also listed "
+      f"{sum(_S7_HELD)} things that held" in _s7p
+      and f"each of the lenses' {_n7('MAJOR', _S7_LENS) + _n7('MINOR', _S7_LENS)}"
+      " MAJOR and MINOR findings" in _s7p
+      and "the critic's MAJOR (CRIT7-1) had no verifiers" in _s7p
+      and "`.claude/sessions/prd-minus-security/wp3-step7-wf_f7600f06-a5c.json`"
+      in _s7p
+      and "fix round 5 ran as `wf_a43c552f-e98`" in _s7p
+      and "filed as Z-57 (new row)" in _s7p
+      and "the build of 2026-10-05 and five review fix rounds" in CL
+      and "\"Step 7 and fix round 5\" below" in CL
+      and "Fix rounds 1 to 5 each re-walked the triggers" in CL
+      and "(`wp3-step7-wf_f7600f06-a5c.json`, 2026-10-13)" in _BL_LAYER5
+      and "Z-57 is fix round 5's (2026-10-13)" in _BL_LAYER5
+      and "fix round 5 closed Z-54" in _BL_LAYER5, _s7p[:400])
+
+# Every finding is named: a range "X-1 to X-5" names each member.
+_s7txt = " ".join((CL, _WP3_BL, _rows["Z-57"]))
+_named7 = set(re.findall(r"\b(?:BODY|R4|CI|CRIT7)-\d+", _s7txt))
+for _m in re.finditer(r"\b(BODY|R4|CI|CRIT7)-(\d+) to \1-(\d+)", _s7txt):
+    _named7 |= {f"{_m.group(1)}-{k}"
+                for k in range(int(_m.group(2)), int(_m.group(3)) + 1)}
+check("every step 7 finding (17) is named in the changelog's WP3 entry or a "
+      "WP3 backlog row",
+      len(_s7all) == 17 and not [i for i in _s7all if i not in _named7],
+      [i for i in _s7all if i not in _named7])
+
+# R4-1, CRIT7-1: both substrates read the three heads as refs, through a
+# name that must resolve to itself; no head is read as a file any more.
+# Git's own behaviour, where this git can make a reftable repository: a
+# stopped cherry-pick there has the ref and no file at --git-path.
+T7 = tempfile.mkdtemp(prefix="wp3-records-5g-")
+E7 = dict(E5, HOME=T7, XDG_CONFIG_HOME=os.path.join(T7, ".config"),
+          GIT_CEILING_DIRECTORIES=T7)
+os.makedirs(os.path.join(T7, ".config", "git"))
+with open(os.path.join(T7, ".config", "git", "config"), "w") as _fh:
+    _fh.write("[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n"
+              "[advice]\n\tdetachedHead = false\n")
+_rt = os.path.join(T7, "rt")
+os.makedirs(_rt)
+_rt_ok = g5(_rt, "init", "-q", "--ref-format=reftable", env=E7).returncode == 0
+_rt_fact = None
+if _rt_ok:
+    put(_rt, "f", "base\n")
+    g5(_rt, "add", "f", env=E7)
+    g5(_rt, "commit", "-qm", "base", env=E7)
+    g5(_rt, "checkout", "-qb", "feat", env=E7)
+    put(_rt, "f", "feat\n")
+    g5(_rt, "commit", "-qam", "feat", env=E7)
+    g5(_rt, "checkout", "-q", "main", env=E7)
+    put(_rt, "f", "main\n")
+    g5(_rt, "commit", "-qam", "main", env=E7)
+    _cp = g5(_rt, "cherry-pick", "feat", env=E7)
+    _gp = g5(_rt, "rev-parse", "--git-path", "CHERRY_PICK_HEAD",
+             env=E7).stdout.strip()
+    _rt_fact = (_cp.returncode != 0
+                and g5(_rt, "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD",
+                       env=E7).returncode == 0
+                and not os.path.isfile(os.path.join(_rt, _gp)))
+else:
+    print("  SKIP  the reftable half of the next row: this git cannot init "
+          "--ref-format=reftable (git 2.45 or later)")
+shutil.rmtree(T7, ignore_errors=True)
+_seq_sh = [ln for ln in code_lines(_SC) if "rev-parse" in ln
+           and ("--git-path \"${_s#*:}\"" in ln or "--git-path REBASE_HEAD"
+                in ln)]
+check("R4-1, CRIT7-1: spec-check.sh and the SDK read REBASE_HEAD, "
+      "CHERRY_PICK_HEAD and REVERT_HEAD as refs whose name resolves to "
+      "itself (a reftable repository keeps them with no file); item 1, the "
+      "Deferred paragraph and Z-54's done layer say so",
+      _rt_fact is not False
+      and "SEQREF=\"$(git rev-parse -q --verify \"$1\" 2>/dev/null)\"" in _SC
+      and "git rev-parse -q --verify --symbolic-full-name \"$1\"" in _SC
+      and "_seqref REBASE_HEAD && PICK=\"$SEQREF\"" in _SC
+      and not _seq_sh
+      and "await seq_ref(\"REBASE_HEAD\")" in _mod
+      and "\"--symbolic-full-name\", name)" in _mod
+      and "git_path(\"REBASE_HEAD\")" not in _mod
+      and "git_path(name)" not in _mod
+      and "Since fix round 5 the check reads `REBASE_HEAD`, "
+      "`CHERRY_PICK_HEAD` and `REVERT_HEAD` as refs" in _MERGES
+      and "(step 7 R4-1, CRIT7-1; re-review 3 RR3-CHK-2; backlog Z-54)"
+      in _MERGES
+      and "`MERGE_HEAD` stays a file on reftable" in _MERGES
+      and "reftable repositories (Z-54, done in fix round 5)" in _deferred
+      and "| `done` (was `open` · T4) — **done by WP3 fix round 5, layer "
+      "2026-10-13 (step 7 R4-1, CRIT7-1):**" in _rows["Z-54"]
+      and "The check fails closed" not in _rows["Z-54"]
+      and "`_seqref`" in _rows["Z-54"] and "`seq_ref`" in _rows["Z-54"],
+      (_rt_fact, _seq_sh))
+
+# R4-3: the rebase sentence (pinned with RR3-CHK-1 above) names the commit
+# and how to list its files; item 1 says so.
+check("R4-3: both substrates name REBASE_HEAD and `git show --stat "
+      "REBASE_HEAD`, and say any file can be unstaged at a stop that names "
+      "no commit; item 1 says so",
+      all(w in _SC and w in _mod_src for w in _rb_say)
+      and "If it replays a commit" not in _SC + _mod_src
+      and "such as one added at an edit, exec or break stop" not in
+      _SC + _mod_src
+      and "names that commit and how to list its files (`git show --stat "
+      "REBASE_HEAD`)" in _MERGES
+      and "at an exec or break stop, which names no commit, says that any "
+      "file can be unstaged (step 7 R4-3)" in _MERGES)
+
+# R4-4: merge-back's "already in progress" way to drop the merge, as the
+# script prints it, is the command item 9 and Z-39's layer give.
+_inp = re.search(r"To drop the merge: (git restore [^\"]+?), then git merge "
+                 r"--abort\"", _MB)
+_inp_cmd = _inp.group(1).split(" (")[0] if _inp else "<none>"
+_z39e = after(_rows["Z-39"], "**Layer 2026-10-13 (WP3 fix round 5, step 7 "
+                             "R4-4).**")
+check("R4-4: merge-back's in-progress remedy is `git restore "
+      "--ignore-unmerged --worktree -- :/`, its list no longer claims git "
+      "refuses the abort, and item 9, Z-39's and Z-51's layers give the "
+      "same command",
+      _inp_cmd == "git restore --ignore-unmerged --worktree -- :/"
+      and "say \"Unstaged changes in the merge in progress:\"" in _MB
+      and "in the merge in progress (git merge --abort refuses" not in _MB
+      and "<the files above>" not in _MB
+      and f"`{_inp_cmd}` (it discards every unstaged change, the listed "
+      "files included), then `git merge --abort`" in _ITEM9
+      and "(step 7 R4-4; `git restore` needs git 2.23" in _ITEM9
+      and f"is now `{_inp_cmd}` (it discards every unstaged change, the "
+      "files above included), then `git merge --abort`" in _z39e
+      and "An unmerged path is still listed twice (Z-57 (c))." in _z39e
+      and f"**Layer 2026-10-13 (WP3 fix round 5, step 7 R4-4).** (g) in part "
+      f"again: the \"already in progress\" way to drop a merge is now "
+      f"`{_inp_cmd}`" in _rows["Z-51"], _inp_cmd)
+
+# R4-2: the installer's confirm recipe in a retrofit install, derived by
+# calling it with a legacy allowlist that covers the first prefix, then
+# every prefix; the warn week's line is the check's own.
+_ra = installer._git_hook_warnings(
+    {"git_hooks": [{"state": "foreign", "path": ".git/hooks/pre-commit",
+                    "name": "pre-commit", "via": ".git/hooks/pre-commit",
+                    "mentions": True, "detail": ""}]},
+    installer.Path(ROOT), False, None, ["src/**"])
+_rall = installer._git_hook_warnings(
+    {"git_hooks": [{"state": "foreign", "path": ".git/hooks/pre-commit",
+                    "name": "pre-commit", "via": ".git/hooks/pre-commit",
+                    "mentions": True, "detail": ""}]},
+    installer.Path(ROOT), False, None,
+    [p + "**" for p in templates.SPEC_GATE_DEFAULT_PREFIXES])
+_ra_t, _rall_t = " ".join(_ra), " ".join(_rall)
+_wk = "the spec check would refuse this commit:"
+check("R4-2: in a retrofit install the recipe names a prefix the legacy "
+      "allowlist leaves checked and the warn week's own line, and says no "
+      "commit can confirm the line when the allowlist covers every prefix; "
+      "the changelog and README say so",
+      f"commit a file under {templates.SPEC_GATE_DEFAULT_PREFIXES[1]} that "
+      f"no task file lists" in _ra_t
+      and f"prints `{_wk}` instead" in _ra_t
+      and _wk in read("lib/templates.py")
+      and "nor is one the legacy allowlist covers." in _ra_t
+      and "No commit can confirm the pre-commit line yet" in _rall_t
+      and "confirm.txt" not in _rall_t
+      and "under the first prefix the legacy allowlist leaves checked"
+      in _WHERE
+      and f"(`{_wk}`)" in _WHERE and "(step 7 R4-2)" in _WHERE
+      and "or says that no commit can confirm the line yet)" in _RDM,
+      (_ra_t[-600:], _rall_t[-300:]))
+
+# CI-1, CI-2: CI's own files. run-tests marks a suite skipped only by a
+# `SUITE SKIPPED:` line, and test_spec_check's full-TMPDIR gate prints a
+# plain SKIP line; the job's timeout is the workflow's.
+_rt_src = read("bin/run-tests")
+_sc_src = read("tests/test_spec_check.py")
+_wf = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$",
+                read(".github/workflows/ic-self-check.yml"), re.M)
+_tmo = int(_wf.group(1)) * 60 if _wf else 0
+_n_sc = re.search(r"`tests/test_spec_check\.py` \((\d+)\)", _TESTS3)
+_n_sc = int(_n_sc.group(1)) if _n_sc else -1
+check("CI-1, CI-2: run-tests counts only `SUITE SKIPPED:`, the full-TMPDIR "
+      "gate prints a plain SKIP line, and the Tests paragraph and Z-57 say "
+      "what CI skips and how much of the workflow's timeout the suites take",
+      'SKIPPED_RE = re.compile(r"^SUITE SKIPPED:\\s*(.+)$", re.M)' in _rt_src
+      and "print(\"  SKIP  the full-TMPDIR rows: `unshare --user "
+      "--map-root-user \"" in _sc_src
+      and f"of its 435 checks at `c1dfa5d` (run 38300475211)" in _TESTS3
+      and f"it runs {_n_sc - 9} of {_n_sc} when `unshare` fails the same "
+      "way (measured here, not on CI)" in _TESTS3
+      and "(step 7 CI-1; backlog Z-57)" in _TESTS3
+      and _tmo == 900
+      and f"took 696 s of the job's `timeout-minutes: {_tmo // 60}` "
+      f"({_tmo} s), leaving {_tmo - 696} s (run 38300475211)"
+      in _rows["Z-57"]
+      and "(b) CI-1:" in _rows["Z-57"]
+      and _rows["Z-57"].endswith("| `open` · T4 |"), (_tmo, _n_sc))
+
+# CI-4: test_git_hooks removes what it made.
+_gh_src = read("tests/test_git_hooks.py")
+check("CI-4: test_git_hooks registers an atexit cleanup, and the step 7 "
+      "paragraph and Z-57 (e) say so",
+      "import atexit" in _gh_src and "atexit.register(" in _gh_src
+      and "left 58 directories in `TMPDIR` after each run and now leaves "
+      "none (CI-4)" in _s7p
+      and "(e) `tests/test_git_hooks.py`'s cleanup (CI-4)" in _rows["Z-57"])
+
+# The seam's section 10 note: no note quotes a text fix round 5 changed.
+check("fix round 5: the seam's section 10 note says it changes no note and "
+      "adds no line, and no seam note quotes the texts it changed; the "
+      "freeze table and the Tests counts are dated after it",
+      "Fix round 5 (2026-10-13) changes no note" in _s10
+      and "it adds no `warning:` or `note` line, flag or field" in _s10
+      and not [w for w in ("REBASE_HEAD", "CHERRY_PICK_HEAD", "unstage",
+                           "ignore-unmerged", "already in progress", _wk,
+                           "confirm.txt") if w in SEAM]
+      and "(re-measured on the fix round 5 tree)" in CL
+      and "run alone on 2026-10-13, after fix round 5" in _TESTS3
+      and "re-run on the fix round 5 tree as a user that is not root"
+      in _TESTS3)
 
 # --------------------------------------------------------------------------- #
 # 6. RR-UP-1: every test file WP3 added is named in its changelog entry

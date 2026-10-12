@@ -2595,8 +2595,16 @@ EXPECTED_RETROFIT_DIGESTS = {
     # 87 / 101. Each is in the 3d866f4 sets above, which still hold.
     # `_HOOK_HEADER`, its rendered bytes (posture values included),
     # secrets-gate.sh and dependency-gate.sh do not move.
-    "service": "5ba561ee6181f8cd6d43c81ba24a716db2c6a537efe95a8a0e110a23b2b6d5c3",
-    "agent": "74c192433b926546b201e8bf9b482f6de9f9ce1c5dde8cf689f598f36e447d29",
+    # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5; see
+    # the `default` note in tests/test_greenfield_golden.py). Measured on the
+    # emitted plans against the previous digests (5ba561ee... / 74c19243...),
+    # per file: 2 bodies move in each, the greenfield default's 2 (githooks
+    # spec-check.sh, merge-back.sh) and no other; 0 added, 0 removed, order,
+    # modes and kinds unchanged, counts 87 / 101. Each is in the 3d866f4 sets
+    # above, which still hold. `_HOOK_HEADER`, its rendered bytes (posture
+    # values included), secrets-gate.sh and dependency-gate.sh do not move.
+    "service": "2a32b548144a994a71efadcc7f172fa0398bb612bc087871694cd24b7f2b15f0",
+    "agent": "d471554a0efc19a1d14f82db81a2ceac2940745eb8fbaaf8fb94c598e39b27a1",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

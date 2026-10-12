@@ -155,10 +155,10 @@ def sh(cmd, cwd, env=None, inp=None):
     return p.returncode, p.stdout, p.stderr
 
 
-def install(name, cfg):
+def install(name, cfg, init=()):
     d = os.path.join(TMP, "tpl-" + name)
     os.makedirs(d)
-    sh([GIT, "init", "-q", "-b", "main"], d)
+    sh([GIT, "init", "-q", "-b", "main", *init], d)
     cp = os.path.join(TMP, name + ".yaml")
     with open(cp, "w") as fh:
         fh.write(cfg)
@@ -2977,12 +2977,17 @@ try:
     sh("git cherry-pick --abort", d)
 
     print("\n-- a git commit while a rebase or git am is stopped (MR2-3) --")
-    # [WP3 fix4 RR3-CHK-1] The rebase remedy, true at every stop: a conflict
-    # or edit stop names the commit it replays; an exec or break stop none.
-    REBASE_KEEP = ("If it replays a commit, do not unstage a file that "
-                   "commit changed: that drops part of that commit. Any other "
-                   "file (such as one added at an edit, exec or break stop) "
-                   "can be unstaged (git restore --staged <path>).")
+    # [WP3 fix4 RR3-CHK-1, fix5 R4-3] The rebase remedy, true at every stop:
+    # a conflict or edit stop names the commit it replays (REBASE_HEAD), and
+    # says how to see its files; an exec or break stop names none.
+    REBASE_KEEP = ("It replays the commit REBASE_HEAD names (git show --stat "
+                   "REBASE_HEAD lists its files). Until that commit is made "
+                   "(at an edit stop git has made it already: it is HEAD), do "
+                   "not unstage a file it changed: that drops part of that "
+                   "commit. Any other file can be unstaged (git restore "
+                   "--staged <path>), and so can any file once that commit is "
+                   "made.")
+    REBASE_ANY = "Any file here can be unstaged (git restore --staged <path>)."
     REBASE_NONE = ("(git names no commit it is replaying here, as at an exec "
                    "or break stop, so this is all of the change)")
     # A rebase or `git am` that stops fires no hook on --continue, but a
@@ -3083,7 +3088,7 @@ try:
           "src/shared.py), git rebase --abort; shell == SDK (MR2-3)",
           rc == 2 and out == "src/shared.py\n"
           and "This is a rebase that stopped" in err
-          and "git rebase --abort" in err and src_ == 2
+          and "git rebase --abort" in err and REBASE_KEEP in err and src_ == 2
           and smsg == err.rstrip("\n"), (rc, out, err, smsg))
     sh("git rebase --abort", d)
     d = fresh(GB)
@@ -3099,11 +3104,12 @@ try:
     src_, smsg, _ = sdk_check(d)
     check("a rebase stopped at break, with an edit staged: the whole change, "
           "said so (no commit named), with no claim that a resolution or a "
-          "replayed commit is in it; a file added there can be unstaged; "
-          "shell == SDK (MR2-3, RR3-CHK-1)", rc == 2 and out == "src/evil.py\n"
+          "replayed commit is in it; any file there can be unstaged; "
+          "shell == SDK (MR2-3, RR3-CHK-1, R4-3)",
+          rc == 2 and out == "src/evil.py\n"
           and REBASE_NONE in err and "resolution" not in err
-          and "drops part of the commit it replays" not in err
-          and REBASE_KEEP in err
+          and "drops part of" not in err
+          and REBASE_ANY in err and "REBASE_HEAD" not in err
           and "git rebase --abort" in err
           and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
     sh("git reset -q && git rebase --abort", d)
@@ -3121,9 +3127,10 @@ try:
     stage(d, "src/evil.py")
     rc, out, err = chk(d)
     src_, smsg, _ = sdk_check(d)
-    check("a rebase stopped at edit, with a new file staged: still refused, "
-          "and a file added there can be unstaged; no 'Do not unstage a file "
-          "from it'; shell == SDK (RR3-CHK-1)",
+    check("a rebase stopped at edit, with a new file staged: still refused; "
+          "the text names REBASE_HEAD and says git has made it at an edit "
+          "stop; no 'Do not unstage a file from it'; shell == SDK "
+          "(RR3-CHK-1, R4-3)",
           rc == 2 and out == "src/evil.py\n"
           and "This is a rebase that stopped" in err
           and "an edit made while it was stopped" in err
@@ -3143,13 +3150,199 @@ try:
     src_, smsg, _ = sdk_check(d)
     check("a rebase stopped at exec, with a new file staged: still refused, "
           "with no claim that a resolution or a replayed commit is in it; a "
-          "file added there can be unstaged; shell == SDK (RR3-CHK-1)",
+          "file added there can be unstaged; shell == SDK (RR3-CHK-1, R4-3)",
           rc == 2 and out == "src/evil.py\n" and REBASE_NONE in err
           and "resolution" not in err
           and "Do not unstage a file from it" not in err
-          and REBASE_KEEP in err
+          and "drops part of" not in err
+          and REBASE_ANY in err and "REBASE_HEAD" not in err
           and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
     sh("git reset -q && git rebase --abort", d)
+
+    print("\n-- a reftable repository: the stop heads are refs, not files "
+          "(R4-1, CRIT7-1) --")
+    # [WP3 fix5 R4-1, CRIT7-1] A reftable repository (git 2.45 or later)
+    # keeps REBASE_HEAD, CHERRY_PICK_HEAD and REVERT_HEAD in the ref store,
+    # with no file at --git-path. Read as files, a stopped rebase said git
+    # names no commit and allowed unstaging any other file, and a stopped
+    # cherry-pick or revert took the plain rule ("unstage it"): following
+    # either dropped the replayed or picked commit's change (measured, git
+    # 2.56). Each row also follows the printed remedy to the end.
+    _rtp = os.path.join(TMP, "rtprobe")
+    os.makedirs(_rtp)
+    if sh([GIT, "init", "-q", "--ref-format=reftable"], _rtp)[0] != 0:
+        print("  SKIP  the reftable rows: this git cannot init "
+              "--ref-format=reftable (git 2.45 or later)")
+    else:
+        GBR = install("gbr", BASE.format(
+            extra="  spec_gate_commit_mode: block\n"),
+            init=("--ref-format=reftable",))
+
+        def rt_head(d, name):
+            return (not os.path.exists(os.path.join(d, ".git", name))
+                    and sh([GIT, "rev-parse", "-q", "--verify", name],
+                           d)[0] == 0)
+
+        d = fresh(GBR)
+        teammate(d, ["src/ok.py"])
+        sh("git checkout -q feature && git rebase -q main", d, env=AGENT)
+        check("(fixture) reftable: the rebase stopped, REBASE_HEAD is a ref "
+              "with no file",
+              sh([GIT, "rev-parse", "--show-ref-format"], d)[1] ==
+              "reftable\n" and os.path.isdir(os.path.join(
+                  d, ".git", "rebase-merge")) and rt_head(d, "REBASE_HEAD"))
+        write(d, "src/shared.py", "a\nresolved\nc\n")
+        sh([GIT, "add", "src/shared.py"], d)
+        stage(d, "src/extra.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check("reftable, a rebase stopped on conflicts: judged as a stopped "
+              "pick (the resolution and the agent's own file, not the "
+              "teammate's), and the text names REBASE_HEAD, not 'git names no "
+              "commit'; shell == SDK (R4-1)",
+              rc == 2 and out == "src/extra.py\nsrc/shared.py\n"
+              and REBASE_KEEP in err and REBASE_NONE not in err
+              and "src/teammate.py" not in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        _, st, _ = sh("git show --stat --format= REBASE_HEAD", d)
+        sh("git restore --staged src/extra.py && rm src/extra.py", d)
+        task(d, T1, ["src/ok.py", "src/shared.py"])
+        rc1, _, _ = chk(d)
+        rc2, _, e2 = sh("git rebase --continue", d, env=AGENT)
+        _, tm, _ = sh("git show HEAD:src/teammate.py", d)
+        check("... and following it (unstage the file git show --stat "
+              "REBASE_HEAD does not list, list the resolution, git rebase "
+              "--continue) keeps the replayed commit's teammate file (R4-1)",
+              "src/teammate.py" in st and "src/extra.py" not in st
+              and rc1 == 0 and rc2 == 0 and tm == "t\n"
+              and not os.path.isdir(os.path.join(d, ".git", "rebase-merge")),
+              (st, rc1, rc2, e2[-300:], tm))
+
+        for kind in ("pick", "revert"):
+            d = fresh(GBR)
+            task(d, T1, ["src/ok.py"])
+            write(d, "src/app.py", "1\n2\n3\n4\n5\n")
+            sh("git add -A && git commit -qm base", d)
+            if kind == "pick":
+                sh("git checkout -qb feature", d)
+                write(d, "src/app.py", "1\n2\n30\n4\n5\n")
+                write(d, "src/billing/pay.py", "p\n")
+                sh("git add -A && git commit -qm teammate && "
+                   "git checkout -q main", d)
+                write(d, "src/app.py", "1\n2\n300\n4\n5\n")
+                sh("git commit -qam mine && git cherry-pick feature", d)
+                seqf, other = "CHERRY_PICK_HEAD", "src/billing/pay.py"
+            else:
+                write(d, "src/app.py", "1\n2\n30\n4\n5\n")
+                write(d, "src/r1.py", "r\n")
+                sh("git add -A && git commit -qm teammate", d)
+                write(d, "src/app.py", "1\n2\n300\n4\n5\n")
+                sh("git commit -qam mine && git revert --no-edit HEAD~1", d)
+                seqf, other = "REVERT_HEAD", "src/r1.py"
+            check(f"(fixture) reftable: the {kind} stopped on conflicts, "
+                  f"{seqf} is a ref with no file", rt_head(d, seqf))
+            write(d, "src/app.py", "1\n2\n3\n4\n5\nresolved\n")
+            sh([GIT, "add", "src/app.py"], d)
+            rc, out, err = chk(d)
+            src_, smsg, _ = sdk_check(d)
+            check(f"reftable, a {kind} stopped on conflicts: only its "
+                  f"resolution (src/app.py), not {other}; its own text, no "
+                  f"unstage advice; shell == SDK (CRIT7-1)",
+                  rc == 2 and out == "src/app.py\n" and other not in err
+                  and PICK_TXT[kind][0] in err and PICK_TXT[kind][1] in err
+                  and "Do not unstage a file from it" in err
+                  and "restore --staged" not in err and src_ == 2
+                  and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+            task(d, T1, ["src/ok.py", "src/app.py"])
+            rc1, _, _ = chk(d)
+            verb = "cherry-pick" if kind == "pick" else "revert"
+            rc2, _, e2 = sh(f"git {verb} --continue", d, env=AGENT)
+            _, files, _ = sh([GIT, "ls-tree", "-r", "--name-only", "HEAD",
+                              "src"], d)
+            kept = (other in files.split()) if kind == "pick" \
+                else (other not in files.split())
+            check(f"... and following it (list the resolution, git {verb} "
+                  f"--continue) keeps the {kind}'s change to {other} "
+                  f"(CRIT7-1)", rc1 == 0 and rc2 == 0 and kept
+                  and not rt_head(d, seqf), (rc1, rc2, e2[-300:], files))
+
+        d = fresh(GBR)
+        teammate(d, ["src/ok.py"])
+        sh("GIT_SEQUENCE_EDITOR=\"sed -i.b '1s/^pick/edit/'\" "
+           "git rebase -q -i HEAD~1", d)
+        stage(d, "src/evil.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check("reftable, a rebase stopped at edit (REBASE_HEAD a ref): the "
+              "same text as on the files backend; shell == SDK (R4-1, R4-3)",
+              rt_head(d, "REBASE_HEAD") and rc == 2
+              and out == "src/evil.py\n" and REBASE_KEEP in err
+              and "an edit made while it was stopped" in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        sh("git reset -q && git rebase --abort", d)
+        d = fresh(GBR)
+        teammate(d, ["src/ok.py"])
+        sh("GIT_SEQUENCE_EDITOR=\"sed -i.b '1a break'\" git rebase -q -i "
+           "HEAD~1", d)
+        stage(d, "src/evil.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check("reftable, a rebase stopped at break: no REBASE_HEAD ref "
+              "either, so 'git names no commit' and any file can be "
+              "unstaged; shell == SDK (R4-1)",
+              sh([GIT, "rev-parse", "-q", "--verify", "REBASE_HEAD"], d)[0]
+              != 0 and rc == 2 and out == "src/evil.py\n"
+              and REBASE_NONE in err and REBASE_ANY in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        sh("git reset -q && git rebase --abort", d)
+
+    # [WP3 fix5 R4-1] A head is read only where its name resolves to itself:
+    # a branch called CHERRY_PICK_HEAD, REVERT_HEAD or REBASE_HEAD (git
+    # allows them, and rev-parse --verify finds them) is not a stop.
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    sh("git commit -qm t1 && git branch CHERRY_PICK_HEAD && "
+       "git branch REVERT_HEAD", d)
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a plain commit in a repository with branches named "
+          "CHERRY_PICK_HEAD and REVERT_HEAD: the plain rule and its "
+          "unstage remedy, not a stopped cherry-pick; shell == SDK (R4-1)",
+          rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
+          and "revert" not in err and "This is" not in err
+          and "unstage it (git restore --staged <path>)" in err
+          and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+    sh([GIT, "reset", "-q"], d)
+    d = fresh(GB)
+    teammate(d, ["src/ok.py"])
+    sh("git branch REBASE_HEAD main && GIT_SEQUENCE_EDITOR=\"sed -i.b '1a "
+       "break'\" git rebase -q -i HEAD~1", d)
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a rebase stopped at break, with a branch named REBASE_HEAD: still "
+          "no commit named; shell == SDK (R4-1)",
+          rc == 2 and out == "src/evil.py\n" and REBASE_NONE in err
+          and REBASE_ANY in err and src_ == 2
+          and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+    sh("git reset -q && git rebase --abort", d)
+    # [WP3 fix5 R4-1] A CHERRY_PICK_HEAD file that names no object is no
+    # cherry-pick to git (a git commit then lands, measured on 2.56), and
+    # is none to the check either; read as a file it stopped the check
+    # with "is not an object name" (exit 3).
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    sh("git commit -qm t1", d)
+    write(d, ".git/CHERRY_PICK_HEAD", "garbage\n")
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a CHERRY_PICK_HEAD file that names no object: the plain rule, as "
+          "git itself reads it; shell == SDK (R4-1)",
+          rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
+          and "not an object name" not in err and src_ == 2
+          and smsg == err.rstrip("\n"), (rc, out, err, smsg))
 
     print("\n-- git revert --no-commit (MR2-5) --")
     d = fresh(GB)

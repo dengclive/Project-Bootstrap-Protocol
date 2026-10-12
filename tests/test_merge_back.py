@@ -2324,12 +2324,15 @@ else:
                   and "    src/feature.py" in out
                   and "To keep the changes above: git add them, then "
                   ".claude/merge-back.sh --continue worktree-agent-fxdrop"
-                  in last and "To drop the merge: git checkout -- <the files "
-                  "above>, then git merge --abort" in last, out)
-            r = run(["sh", "-c", "git checkout -- src/feature.py && "
-                     "git merge --abort"], p)
-            check("(drop) git checkout, then git merge --abort: back to "
-                  "where it started",
+                  in last and "To drop the merge: git restore "
+                  "--ignore-unmerged --worktree -- :/ (it discards every "
+                  "unstaged change, the files above included), then git "
+                  "merge --abort" in last
+                  and "refuses to discard" not in out, out)
+            r = run(["sh", "-c", "git restore --ignore-unmerged --worktree "
+                     "-- :/ && git merge --abort"], p)
+            check("(drop) git restore, then git merge --abort: back to "
+                  "where it started (R4-4)",
                   r.returncode == 0 and head(p) == pre and clean(p),
                   r.stdout + r.stderr)
 
@@ -2379,6 +2382,58 @@ else:
     r = run(["sh", "-c", "git checkout -- :/ && git merge --abort"], p)
     check("... and following it restores the tree, all 25 files included "
           "(MB3-1)", r.returncode == 0 and head(p) == pre and clean(p),
+          r.stdout + r.stderr)
+
+    # [WP3 fix5 R4-4] A rerun while such a merge is in progress: its way out
+    # named "<the files above>", which past 20 files is not every file, from
+    # a project below the top names no file (the paths are from the top),
+    # and on an unmerged path fails ("path is unmerged"); its header said
+    # git merge --abort refuses them, false for an unmerged path.
+    top, p = fixture_sub(CFG_NO_SPEC)
+    write(os.path.join(p, "tests/run.sh"),
+          "#!/bin/sh\nfor f in src/gen/*.py; do echo '# regen' >> \"$f\"; "
+          "done\necho 'FAIL: the suite refuses' >&2\nexit 1\n")
+    git(top, "commit", "-qam", "a suite that rewrites 25 tracked files")
+    impl_sub(top, "gb", {f"src/gen/g{i:02d}.py": f"g = {i}\n"
+                         for i in range(25)})
+    pre = head(top)
+    rc1, out1, last1 = mb(p, "worktree-agent-gb")
+    rc, out, last = mb(p, "worktree-agent-gb")
+    _shown = [ln for ln in out.splitlines()
+              if ln.startswith("    pkg/svc/src/gen/g")]
+    check("below the top, a rerun while a merge whose gate changed 25 merged "
+          "files is in progress: NOT-STARTED, 20 listed and '... and 5 more', "
+          "and a way out that does not depend on the list (R4-4)",
+          rc1 == 1 and rc == 3 and "already in progress" in last
+          and len(_shown) == 20 and "    ... and 5 more" in out
+          and "To drop the merge: git restore --ignore-unmerged --worktree "
+          "-- :/ (it discards every unstaged change, the files above "
+          "included), then git merge --abort" in last, out1[-600:] + out)
+    r = run(["sh", "-c", "git restore --ignore-unmerged --worktree -- :/ "
+             "&& git merge --abort"], p)
+    check("... and following it from the project directory restores the "
+          "tree, all 25 files included, HEAD unmoved (R4-4)",
+          r.returncode == 0 and head(top) == pre and clean(top),
+          r.stdout + r.stderr)
+    p = fixture()
+    impl(p, "um", {"src/app.py": "def app(): return 3  # um\n"})
+    write(os.path.join(p, "src/app.py"), "def app(): return 4  # main\n")
+    git(p, "commit", "-qam", "main edits app")
+    pre = head(p)
+    rc1, _, _ = mb(p, "worktree-agent-um")
+    rc, out, last = mb(p, "worktree-agent-um")
+    check("a rerun without --continue after a CONFLICT (an unmerged path): "
+          "NOT-STARTED, the file named, no claim that git merge --abort "
+          "refuses it, and the restore way out (R4-4)",
+          rc1 == 4 and rc == 3 and "already in progress" in last
+          and "    src/app.py" in out and "refuses" not in out
+          and "To drop the merge: git restore --ignore-unmerged --worktree "
+          "-- :/ (it discards every unstaged change, the files above "
+          "included), then git merge --abort" in last, out)
+    r = run(["sh", "-c", "git restore --ignore-unmerged --worktree -- :/ "
+             "&& git merge --abort"], p)
+    check("... and following it restores the tree, HEAD unmoved (R4-4)",
+          r.returncode == 0 and head(p) == pre and clean(p),
           r.stdout + r.stderr)
 
     print("\n== who fixes a refused resolution; the REFUSED lines (MB-6) ==")

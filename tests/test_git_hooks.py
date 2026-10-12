@@ -10,6 +10,7 @@ that a commit is allowed or refused.
 
 Run: python3 tests/test_git_hooks.py
 """
+import atexit
 import json
 import os
 import re
@@ -77,7 +78,13 @@ CEILING = tempfile.gettempdir()
 # core.hooksPath (a hook manager) made this suite crash, and
 # commit.gpgsign made every commit fail. GIT_CONFIG_GLOBAL (git 2.32+)
 # names an empty file; HOME and XDG_CONFIG_HOME cover older git.
+# [WP3 fix5 CI-4] Every temporary root this suite makes is removed when it
+# exits: it left about 58 directories (107 MB) in TMPDIR after each run.
+_ROOTS = []
+atexit.register(lambda: [shutil.rmtree(d, ignore_errors=True)
+                         for d in _ROOTS])
 _HOME = tempfile.mkdtemp()
+_ROOTS.append(_HOME)
 _GCFG = os.path.join(_HOME, "gitconfig-global")
 open(_GCFG, "w").close()
 BASE_ENV = {k: v for k, v in os.environ.items()
@@ -110,6 +117,7 @@ def install(proj, cfg=CFG, *extra):
 
 def new_repo(git_init=True):
     base = tempfile.mkdtemp()
+    _ROOTS.append(base)
     proj = os.path.join(base, "proj")
     os.mkdir(proj)
     if git_init:
@@ -1612,6 +1620,98 @@ check("... and following it prints the check's line, and the reset undoes "
       and _r0.returncode == 0
       and git(_pc, "log", "-1", "--format=%s").stdout.strip() == "harness",
       (_cc.returncode, _cc.stderr[-400:]))
+# [WP3 fix5 R4-2] A retrofit install: the check exempts what the legacy
+# allowlist covers (a retrofit proposes `<dir>/**` for each source
+# directory, so `src/**` is usual), and in rollout weeks 1 to 3 it only
+# warns, with its own line. The recipe named `src/confirm.txt`, which
+# printed nothing, and promised a line the warn week never prints.
+RETRO_CFG = """mode: "retrofit"
+project:
+  name: r-svc
+  archetype: service
+secrets:
+  enabled: false
+deps:
+  enabled: false
+hooks:
+  secrets_gate: false
+  dependency_gate: false
+  spec_gate_commit_mode: warn
+commands:
+  test: "true"
+  lint: "true"
+  format: "true"
+retrofit:
+  spec_strategy: "forward-only"
+  legacy_allowlist:
+{allow}  retrofit_active: false
+  r08_committed: true
+"""
+_rc = new_repo()
+write_hook(hook_path(_rc, "pre-commit"),
+           "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
+r = install(_rc, RETRO_CFG.format(allow="    - \"src/**\"\n"))
+_flat = " ".join(r.stderr.split())
+check("retrofit, legacy allowlist src/**: the recipe names a file under the "
+      "first prefix the allowlist leaves checked (lib/), says an "
+      "allowlisted file is not checked, and names the warn week's own line "
+      "(R4-2)",
+      r.returncode == 0
+      and "commit a file under lib/ that no task file lists, such as "
+      "`lib/confirm.txt`" in _flat and "src/confirm.txt" not in _flat
+      and "it should print `spec check (pre-commit):` (in retrofit rollout "
+      "weeks 1 to 3, .claude/hooks/rollout-schedule.md, where the check only "
+      "warns, it prints `the spec check would refuse this commit:` instead)"
+      in _flat and "so it prints nothing, nor is one the legacy allowlist "
+      "covers." in _flat, r.stderr[-1200:])
+harness_commit(_rc)
+_wk = read(os.path.join(_rc, ".claude/hooks/rollout-schedule.md")) or ""
+put(_rc, "lib/confirm.txt", "c\n")
+git(_rc, "add", "lib/confirm.txt")
+_cc = git(_rc, "commit", "-q", "-m", "confirm", agent=True)
+_r0 = git(_rc, "reset", "-q", "--soft", "HEAD~1")
+check("... and following it in the install's first week prints the warn "
+      "week's line, and the reset undoes the commit (R4-2)",
+      "ROLLOUT_WEEK: 1 " in _wk and _cc.returncode == 0
+      and "the spec check would refuse this commit:" in _cc.stderr
+      and "  lib/confirm.txt" in _cc.stderr and _r0.returncode == 0
+      and git(_rc, "log", "-1", "--format=%s").stdout.strip() == "harness",
+      (_cc.returncode, _cc.stderr[-400:]))
+# The check reads the allowlist from spec-strategy.md, which a re-install
+# keeps once the operator edits it ("locally modified"): the recipe reads
+# it there too, not from the config.
+_ss = os.path.join(_rc, ".claude/steering/spec-strategy.md")
+put(_rc, ".claude/steering/spec-strategy.md", read(_ss).replace(
+    "<!-- LEGACY_ALLOWLIST_BEGIN -->\nsrc/**\n",
+    "<!-- LEGACY_ALLOWLIST_BEGIN -->\nsrc/**\nlib/**\n"))
+r = install(_rc, RETRO_CFG.format(allow="    - \"src/**\"\n"))
+_flat = " ".join(r.stderr.split())
+put(_rc, "app/confirm.txt", "c\n")
+git(_rc, "add", "app/confirm.txt")
+_cc = git(_rc, "commit", "-q", "-m", "confirm", agent=True)
+git(_rc, "reset", "-q", "--soft", "HEAD~1")
+check("retrofit, re-installed after the operator added lib/** to "
+      "spec-strategy.md's allowlist (kept as locally modified): the recipe "
+      "names app/, which the check polices, and following it prints the "
+      "warn week's line (R4-2)",
+      "lib/**" in (read(_ss) or "")
+      and "such as `app/confirm.txt`" in _flat
+      and "the spec check would refuse this commit:" in _cc.stderr
+      and "  app/confirm.txt" in _cc.stderr,
+      (r.stderr[-800:], _cc.stderr[-300:]))
+_rc = new_repo()
+write_hook(hook_path(_rc, "pre-commit"),
+           "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
+r = install(_rc, RETRO_CFG.format(allow="".join(
+    f"    - \"{d}/**\"\n" for d in ("src", "lib", "app", "test", "tests"))))
+_flat = " ".join(r.stderr.split())
+check("retrofit, an allowlist that covers every prefix: no recipe that "
+      "prints nothing; it says no commit can confirm the line yet (R4-2)",
+      r.returncode == 0 and "confirm.txt" not in _flat
+      and "No commit can confirm the pre-commit line yet: "
+      "retrofit.legacy_allowlist (.claude/steering/spec-strategy.md) covers "
+      "every one of hooks.spec_gate_commit_prefixes" in _flat,
+      r.stderr[-1200:])
 proj = new_repo()
 write_hook(hook_path(proj, "pre-commit"),
            "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")

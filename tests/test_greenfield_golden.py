@@ -3620,7 +3620,26 @@ EXPECTED_DIGESTS = {
         # above, which still hold. `_HOOK_HEADER`, its rendered bytes in every
         # hook (the posture values included), secrets-gate.sh and
         # dependency-gate.sh do not move.
-        "92f50795a9e6d80b089cc914b5aa85b2842e10bff11538af317f4febc52d4834",
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3 step 7
+        # fix round 5 tree. spec-check.sh reads CHERRY_PICK_HEAD, REVERT_HEAD
+        # and REBASE_HEAD as refs (`git rev-parse -q --verify`, and only when
+        # the name resolves to itself), not as files at --git-path, so a
+        # stopped rebase or cherry-pick in a reftable repository is seen as one
+        # (R4-1, CRIT7-1). Its block-mode refusal for a stopped rebase names
+        # REBASE_HEAD and how to list its files, and a rebase that names no
+        # commit says any file can be unstaged (R4-3). merge-back.sh's "already
+        # in progress" remedy drops the merge with `git restore
+        # --ignore-unmerged --worktree -- :/`, and its header no longer says
+        # git merge --abort refuses to discard the changes (R4-4). What the
+        # installer prints (R4-2) is not a plan body, so it moves no fixture.
+        # Measured on the emitted plans against the previous digest
+        # (92f50795...), per file: 2 bodies move, githooks spec-check.sh and
+        # merge-back.sh, and githooks dispatch and hooks spec-gate-commit do
+        # not; 0 added, 0 removed, order, modes and kinds unchanged, count 64.
+        # Each of the 2 is in the 3d866f4 sets above, which still hold.
+        # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
+        # included), secrets-gate.sh and dependency-gate.sh do not move.
+        "f2415f0c938cba829e48c8123e553b4abed6edaf675d8536347b184b1208775a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4267,7 +4286,12 @@ EXPECTED_DIGESTS = {
         # fixture's 2 bodies move and no other; 0 added, 0 removed, order,
         # modes and kinds unchanged, count 76. The 3d866f4 sets above
         # still hold.
-        "19db6e80687c83c5a5dbc3164ec131981ee8b01d6198cca0dddfc6dfefb05cf6",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (19db6e80...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 76. The 3d866f4 sets above still hold.
+        "650dc47f4219a5d9b1fe6f880f6b3e6b38530086fd76d04c2de234eeed7d3e67",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4842,7 +4866,13 @@ EXPECTED_DIGESTS = {
         # modes and kinds unchanged, count 65. The three frozen
         # design-steering artifacts do not move, and the 3d866f4 sets above
         # still hold.
-        "fda75e000dc3264c3cc8ea7cf94cb8284859bb00648a5a585690aed5093030aa",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (fda75e00...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. The three frozen design-steering artifacts do
+        # not move, and the 3d866f4 sets above still hold.
+        "6f0b274f8bcc63b790948a98b393b705fa78bc905f8eee29fb6c488f0ad03b22",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -4987,7 +5017,17 @@ EXPECTED_DIGESTS = {
         # (the stopped-rebase refusal text, RR3-CHK-1); nothing is added or
         # removed. RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`,
         # `_dependency_gate` and `_GATE_TIMEOUTS` do not move.
-        "5d518c58e7d79b4ebd07f3af38b527b0f4d7f179aed760f582ce444d3de5ea73",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (5d518c58...), per file: 3 bodies move, the default
+        # fixture's 2 plus gates.py; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. In gates.py (top-level AST diff, async functions
+        # included): only `_spec_check` changes (its nested `seq_ref` reads the
+        # three heads as refs, R4-1 and CRIT7-1; the stopped-rebase refusal
+        # text, R4-3); nothing is added or removed. RESOLVED_CONFIG,
+        # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
+        # `_GATE_TIMEOUTS` do not move.
+        "e9f8a102bf3453989db7e8e26c1a3c5114d50b79f70c6a7f8dc1fbc8abf2f0ad",
 }
 
 EXPECTED_ACTION_COUNTS = {
