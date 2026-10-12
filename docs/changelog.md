@@ -165,10 +165,11 @@ exception, one golden re-baseline (operator decisions, 2026-10-05). **Seam:
 stays at 3.0.0, SUSPENDED.** WP3's changes a consumer can see ride as dated
 in-version notes in `SEAM-CONTRACT-v3-0-0.md`; no §8.4 trigger fires (the
 walk is below). This entry describes WP3 as it merges: the build of
-2026-10-05 and five review fix rounds, of 2026-10-06, of 2026-10-06 to
-2026-10-07, of 2026-10-12, and two of 2026-10-13 ("Review and fix round 1",
-"Re-review and fix round 2", "Re-review 2 and fix round 3", "Re-review 3
-and fix round 4" and "Step 7 and fix round 5" below).
+2026-10-05 and six review fix rounds, of 2026-10-06, of 2026-10-06 to
+2026-10-07, of 2026-10-12, and three of 2026-10-13 ("Review and fix round
+1", "Re-review and fix round 2", "Re-review 2 and fix round 3", "Re-review 3
+and fix round 4", "Step 7 and fix round 5" and "Review of fix round 5 and
+fix round 6" below).
 
 **The gap.** At `3d866f4` the Phase 9 smoke stages 1-2 could not run. The
 spec commit gate refused the first code commit of every project, because
@@ -271,18 +272,30 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     that names no commit no longer speaks of a resolution (re-review 3
     RR3-CHK-1). Since fix round 5 it names that commit and how to list its
     files (`git show --stat REBASE_HEAD`), keeps a file it changed staged
-    only until that commit is made (at an edit stop git has made it
-    already), and at an exec or break stop, which names no commit, says
-    that any file can be unstaged (step 7 R4-3). Since fix round 5 the
-    check reads `REBASE_HEAD`, `CHERRY_PICK_HEAD` and `REVERT_HEAD` as refs
-    (`git rev-parse -q --verify`, and only a name that resolves to itself,
-    so a branch called `REBASE_HEAD` is not one), not as files at
+    only until that commit is made, and at an exec or break stop, which
+    names no commit, says that any file can be unstaged (step 7 R4-3).
+    Since fix round 6 it says how to tell that the commit is made
+    (`git rev-parse HEAD REBASE_HEAD` prints one object name twice). Fix
+    round 5 said git had made it at an edit stop, which is false at an edit
+    line whose pick conflicted, and unstaging the replayed commit's file
+    there dropped it (review of fix round 5, RV5-SC-2). Since fix round 5
+    the check reads `REBASE_HEAD`, `CHERRY_PICK_HEAD` and `REVERT_HEAD` as
+    refs where a reftable repository keeps them, not only as files at
     `git rev-parse --git-path`. A reftable repository keeps them in the ref
     store with no file, so a stopped rebase read as one that names no
     commit, whose text allowed unstaging a file of the replayed commit, and
     a stopped cherry-pick or revert took the plain rule, whose remedy is to
     unstage; an agent that followed either dropped a teammate's change
-    (step 7 R4-1, CRIT7-1; re-review 3 RR3-CHK-2; backlog Z-54).
+    (step 7 R4-1, CRIT7-1; re-review 3 RR3-CHK-2; backlog Z-54). Since fix
+    round 6 the check never looks the name up: a file at `--git-path` is
+    read itself, and is a stop when its first line names a commit, and with
+    no file only a reftable repository is asked for that exact ref
+    (`git show-ref --verify`). Fix round 5 read each head with
+    `git rev-parse -q --verify` and took it only when the name resolved to
+    itself, so that a branch called `REBASE_HEAD` would not count; with a
+    branch or tag of that name beside a real stop the name is ambiguous, so
+    the stop read as none, on the files backend too, and the same two
+    remedies dropped a teammate's change (review of fix round 5, RV5-SC-1).
     `MERGE_HEAD` stays a file on reftable and is still read as one. A
     corrupt `CHERRY_PICK_HEAD` file, which git itself treats as no
     cherry-pick, now gets the plain rule, not exit 3. In
@@ -349,7 +362,19 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     (`the spec check would refuse this commit:`), and when the allowlist
     covers every prefix it says that no commit can confirm the line yet:
     the allowlist exempted the file the recipe named, and in a warn week
-    the line it promised never printed (step 7 R4-2). Fix round 1 printed
+    the line it promised never printed (step 7 R4-2). Since fix round 6 it
+    tries `confirm.txt`, `confirm.py`, `confirm` and `spec-check-probe`
+    under each prefix, says that the allowlist covers every prefix only
+    when, for each one, a pattern that ends in `*` matches the prefix
+    itself, and, when the allowlist covers every name it tried but not
+    every prefix, asks for a file the allowlist does not cover and names
+    none. One probe name decided it: with `*.txt` it said that no commit
+    could confirm the line, while a commit of `src/confirm.py` printed the
+    warn week's line (review of fix round 5, RV5-MB-2). It also reads the
+    allowlist's markers as the check does, anywhere on their line and to
+    the end of the file when the end marker is missing; with a space after
+    the begin marker it read an empty list and named a file the check
+    exempts (RV5-MB-3). Fix round 1 printed
     a stdout note there instead (review INST-3), and with the fallback
     deferring too, the check then ran nowhere when the line did not run
     (re-review IT-1, RG-2). The warning names `.husky/<hook>` for husky 9,
@@ -576,7 +601,18 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     discard those changes: it refuses only for a file the merge changed,
     discards an unmerged path, and keeps a change to a file the merge did
     not touch (step 7 R4-4; `git restore` needs git 2.23,
-    and the remedy was measured on git 2.36.6 and 2.56);
+    and the remedy was measured on git 2.36.6 and 2.56). The restore
+    discards such a change too, and no printed remedy drops the merge and
+    keeps it (review of fix round 5, RV5-MB-1, CRIT5-2; backlog Z-57 (g));
+  - since fix round 6, refuse (NOT-STARTED) while a cherry-pick or revert
+    is stopped in a reftable repository, which keeps `CHERRY_PICK_HEAD` and
+    `REVERT_HEAD` in its ref store with no file: it read a stopped revert
+    whose index and work tree matched `HEAD` as none, merged, and its merge
+    commit ended the revert without notice (review of fix round 5, CRIT5-1;
+    backlog Z-39 (q)). Once a revert of several commits has had its
+    conflicted step concluded with `git commit`, neither head is left while
+    the revert is still in progress, and merge-back merges on either
+    backend (Z-57 (h));
   - find a locked worktree on git before 2.31 too, through the worktree's
     `locked` file; there merge-back merged the branch and then could not
     remove the worktree (re-review CRIT-2);
@@ -841,10 +877,33 @@ critic's grades and its reading of the git floor (`git merge-tree
 --write-tree` needs 2.38, with a fallback). It appended dated layers to
 Z-39 and Z-51. The items above describe the result.
 
+**Review of fix round 5 and fix round 6 (2026-10-13).** A review of fix
+round 5's diff, two lenses and a critic, reported no MAJOR, 4 MINOR and 4
+INFO findings; the lenses and the critic also listed 24 things that held.
+No verifier ran in this review, so fix round 6 measured each finding before
+it acted; the critic graded one lens MINOR (RV5-MB-1) INFO (CRIT5-2),
+because round 4's remedy discarded the same change. The record is
+`.claude/sessions/prd-minus-security/wp3-fix5-wf_a43c552f-e98.json`,
+outside the repository (fix round 5 and its review are one run); fix round
+6 ran as `wf_6f9f8c5a-b8d`. Fix round 6 fixed the spec check's reading of
+the three heads, which fix round 5's name guard made miss a real stop
+beside a branch or tag of the same name (RV5-SC-1), the rebase text's
+edit-stop parenthetical (RV5-SC-2), the installer's confirm recipe, which
+one probe name decided (RV5-MB-2), its reading of the legacy allowlist
+(RV5-MB-3), and merge-back's check for a git operation in progress in a
+reftable repository (CRIT5-1). RV5-SC-3 (at a `merge -C` conflict inside
+`git rebase --rebase-merges` the check names a merge and its abort), and
+RV5-MB-1 with CRIT5-2 (no remedy that drops a merge in progress keeps a
+change to a file the merge did not touch), are filed in Z-57, with three
+residuals fix round 6 found, among them the revert merge-back still
+misses once a step of a revert of several commits is committed (new items
+(f) to (j)). It corrected Z-54's done layer in place for the new reading
+and appended a dated layer to Z-39. The items above describe the result.
+
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.1 (`claude -p`), §3.2 (the
 `bootstrap-install` row), §3.3 (`build_hooks` and Coverage), §4.3, §6.2, §7.1,
-§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 5
+§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 6
 each re-walked the triggers against the changed tree; none fires. No
 `seam_version` bump, no file rename, and the contract stays SUSPENDED.
 
@@ -892,8 +951,8 @@ findings fix round 2 did not take (Z-51), subtree merges (Z-52), a full
 `TMPDIR` under busybox awk (Z-53), reftable repositories (Z-54, done in fix
 round 5), hook files the gate-off scan cannot tell are shared (Z-55), the
 third re-review's INFO findings fix round 4 did not take (Z-56), and CI's
-time limit and the rows CI skips (Z-57). Z-21 stays held by the pivot, and
-Z-47, which touches
+time limit, the rows CI skips and what fix rounds 5 and 6 left (Z-57).
+Z-21 stays held by the pivot, and Z-47, which touches
 the dependency gate's configuration, is held with it.
 
 **Freeze exception 84.** One exception covers every frozen source WP3
@@ -904,13 +963,13 @@ emitted skill to; review RC-3), `lib/configemit.py`, `lib/defaults.py`,
 `lib/llm_advisor.py`, `lib/retrofit_interview.py`,
 `lib/sdk_gates_template.py`, `lib/templates.py` and
 `tests/test_installer.py`, and the six moving digests: the four plan goldens
-in `tests/test_greenfield_golden.py` (default `f2415f0c...`, full_autonomous
-`650dc47f...`, design_steering `6f0b274f...`, sdk_callable `e9f8a102...`) and
-the two in `tests/test_retrofit.py` (service `2a32b548...`, agent
-`d471554a...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
+in `tests/test_greenfield_golden.py` (default `2bdde6a5...`, full_autonomous
+`9c5155cd...`, design_steering `3850fa55...`, sdk_callable `0acd6a03...`) and
+the two in `tests/test_retrofit.py` (service `af8baafa...`, agent
+`9f395d29...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
 comment. `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
 (`tests/test_validate_only.py`) do not move. Measured on the emitted plans
-against `3d866f4`, per file (re-measured on the fix round 5 tree):
+against `3d866f4`, per file (re-measured on the fix round 6 tree):
 
 | Fixture | Actions | Added / removed | Bodies that move |
 |---|---|---|---|
@@ -942,12 +1001,12 @@ advisory in warn mode (block mode renders 1). In `gates.py`,
 are unchanged. The git-hook shims are not plan actions, so no digest pins
 them; `tests/test_git_hooks.py` runs them in real git.
 
-**Tests.** Nine new files: `tests/test_git_hooks.py` (178 checks),
-`tests/test_spec_check.py` (449), `tests/test_skill_bodies.py` (220),
+**Tests.** Nine new files: `tests/test_git_hooks.py` (184 checks),
+`tests/test_spec_check.py` (473), `tests/test_skill_bodies.py` (220),
 `tests/test_versioning_index.py` (165), `tests/test_wp3_agents_handoff.py`
 (197), `tests/test_smoke_stages.py` (30, 0 pending),
-`tests/test_merge_back.py` (246), `tests/test_live_run_records.py` (280) and
-`tests/test_wp3_records.py` (187), plus the live harness under `tests/live/`,
+`tests/test_merge_back.py` (250), `tests/test_live_run_records.py` (280) and
+`tests/test_wp3_records.py` (195), plus the live harness under `tests/live/`,
 which `bin/run-tests` does not run. Rows added to `test_advisor_model`,
 `test_block_logging`, `test_installer`, `test_interview`, `test_retrofit`,
 `test_sdk_gates`, `test_settings_merge`, `test_substrate_differential` and
@@ -966,13 +1025,13 @@ terminal rows give merge-back the default SIGINT, SIGQUIT and SIGPIPE
 dispositions that a person's shell gives a foreground job, so they hold
 when the suite itself starts as a background job, and a row can see a
 closed pipe (re-review 2 MBS-5). Counts are each file's final `N passed`
-line, run alone on 2026-10-13, after fix round 5. The new suites pass under
+line, run alone on 2026-10-13, after fix round 6. The new suites pass under
 bash 3.2.57 (docker `bash:3.2`, busybox, git 2.49.1, no jq; re-run on the
-fix round 5 tree as a user that is not root, with `--init`), each with the
-count above except two. `test_spec_check` runs 434: it skips its rows
+fix round 6 tree as a user that is not root, with `--init`), each with the
+count above except two. `test_spec_check` runs 458: it skips its rows
 for a locale that is not installed, because that libc prints no setlocale
 warning, and its full-`TMPDIR` rows, because `unshare` cannot mount a
-tmpfs there. `test_merge_back` runs 243: it skips that locale row too,
+tmpfs there. `test_merge_back` runs 247: it skips that locale row too,
 and its two end-to-end exit-127 rows, because test-gate reports exit 1
 there (backlog Z-41). Run as root, `test_git_hooks` skips the 7
 rows that need a directory it cannot write. CI (GitHub's `ubuntu-24.04`
@@ -980,7 +1039,7 @@ runner, where `unshare` cannot map a user: "write failed
 /proc/self/uid_map: Operation not permitted") skips `test_spec_check`'s
 full-`TMPDIR` rows too, and with them the CRIT2-1 fix goes untested
 there: CI ran 426 of its 435 checks at `c1dfa5d` (run 38300475211), and
-on the fix round 5 tree it runs 440 of 449 when `unshare` fails the same
+on the fix round 6 tree it runs 464 of 473 when `unshare` fails the same
 way (measured here, not on CI). `bin/run-tests` still scores the suite
 `ok`, because it prints a `SKIP` line, not the `SUITE SKIPPED:` marker
 (step 7 CI-1; backlog Z-57).

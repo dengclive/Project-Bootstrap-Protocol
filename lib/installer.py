@@ -2893,14 +2893,22 @@ def _apply_git_hooks(root: Path, plan: list[dict], manifest: dict,
               f"write; left alone)")
 
 
-def _mention_note(ment, cmd: str, prefix: str | None = "src/",
+# [WP3 fix6 RV5-MB-2] The file names the confirm recipe tries under each
+# prefix, in order: the extension a retrofit allowlist names is often
+# `.txt` or `.md`, so a source extension and two with none follow.
+_CONFIRM_NAMES = ("confirm.txt", "confirm.py", "confirm", "spec-check-probe")
+
+
+def _mention_note(ment, cmd: str, prefix=("src/", "confirm.txt"),
                   retro: bool = False) -> str:
     """[WP3 fix2 IT-1, RG-2] What a hook that MENTIONS the dispatch line
     gets: not "nothing to install", which a line that never runs made
     false, and not the plain remedy the operator already followed.
-    `prefix`: the first of hooks.spec_gate_commit_prefixes that the legacy
-    allowlist leaves checked (None: it covers every one); `retro`: a
-    retrofit install (rollout weeks, a legacy allowlist)."""
+    `prefix`: (prefix, name), the first of hooks.spec_gate_commit_prefixes
+    and a file name there that the legacy allowlist leaves checked;
+    "covered" when it covers every prefix; None when it covers every name
+    tried but not every prefix. `retro`: a retrofit install (rollout
+    weeks, a legacy allowlist)."""
     files = " and ".join(f"{p} mentions `{cmd} {n}`" for n, p in ment)
     out = (f" {files}, but this installer cannot tell whether git runs that "
            f"line (a line after an `exit` or an `exec`, after husky 9's "
@@ -2915,7 +2923,7 @@ def _mention_note(ment, cmd: str, prefix: str | None = "src/",
     # [WP3 fix5 R4-2] A retrofit install exempts what its legacy allowlist
     # covers, so the example is under a prefix the allowlist leaves checked;
     # and in rollout weeks 1 to 3 the check only warns, with its own line.
-    if any(n == "pre-commit" for n, _p in ment) and prefix is None:
+    if any(n == "pre-commit" for n, _p in ment) and prefix == "covered":
         out += (" No commit can confirm the pre-commit line yet: "
                 "retrofit.legacy_allowlist (.claude/steering/"
                 "spec-strategy.md) covers every one of "
@@ -2928,9 +2936,18 @@ def _mention_note(ment, cmd: str, prefix: str | None = "src/",
                      "rollout-schedule.md, where the check only warns, it "
                      "prints `the spec check would refuse this commit:` "
                      "instead)")
-        out += (f" To confirm the pre-commit line runs, commit a file under "
-                f"{prefix} that no task file lists, such as "
-                f"`{prefix}confirm.txt`, from a terminal with `CLAUDECODE=1 "
+        if prefix is None:
+            # [WP3 fix6 RV5-MB-2] The allowlist covers every name tried,
+            # but not every prefix: no example, and no claim either way.
+            what = ("a file under one of hooks.spec_gate_commit_prefixes "
+                    "that no task file lists and retrofit.legacy_allowlist "
+                    "(.claude/steering/spec-strategy.md) does not cover "
+                    "(it covers every name this installer tried)")
+        else:
+            what = (f"a file under {prefix[0]} that no task file lists, "
+                    f"such as `{prefix[0]}{prefix[1]}`")
+        out += (f" To confirm the pre-commit line runs, commit {what}, from "
+                f"a terminal with `CLAUDECODE=1 "
                 f"git commit` (through Claude Code, the PreToolUse hook can "
                 f"refuse the commit before git runs its hooks): {sign}. A "
                 f"file outside hooks.spec_gate_commit_prefixes is not "
@@ -2975,10 +2992,20 @@ def _legacy_allowlist(root: Path, cfg: dict) -> list[str]:
     except OSError:
         return list((cfg.get("retrofit") or {}).get("legacy_allowlist")
                     or [])
-    m = re.search(r"<!-- LEGACY_ALLOWLIST_BEGIN -->\n(.*?)"
-                  r"<!-- LEGACY_ALLOWLIST_END -->", text, re.S)
-    return [ln.strip() for ln in (m.group(1) if m else "").split("\n")
-            if ln.strip()]
+    # [WP3 fix6 RV5-MB-3] Line by line, as the check's awk reads it: a
+    # marker anywhere on its line, the lines after BEGIN up to END (to the
+    # end of the file when END is missing), each trimmed of [:space:].
+    out, on = [], False
+    for ln in text.split("\n"):
+        if "<!-- LEGACY_ALLOWLIST_BEGIN -->" in ln:
+            on = True
+            continue
+        if "<!-- LEGACY_ALLOWLIST_END -->" in ln:
+            on = False
+        ln = ln.strip(" \t\n\v\f\r")
+        if on and ln:
+            out.append(ln)
+    return out
 
 
 def _git_hook_warnings(summary: dict, root: Path, dry: bool,
@@ -2993,9 +3020,18 @@ def _git_hook_warnings(summary: dict, root: Path, dry: bool,
     pfxs = list(prefixes) if prefixes else list(SPEC_GATE_DEFAULT_PREFIXES)
     retro = allow is not None
     # [WP3 fix5 R4-2] As the check matches: a bash `case` glob, `**` as `*`.
-    pfx = next((p for p in pfxs if not any(
-        fnmatch.fnmatchcase(p + "confirm.txt", a.replace("**", "*"))
-        for a in (allow or []))), None)
+    # [WP3 fix6 RV5-MB-2] One probe name decided "covers every prefix", and
+    # `*.txt` matched it under every prefix while src/confirm.py was still
+    # checked. So several names are tried under each prefix, and "covers"
+    # is said only of a pattern that covers the prefix itself: it ends in
+    # `*` and matches the prefix, so it matches anything after it too.
+    globs = [a.replace("**", "*") for a in (allow or [])]
+    pfx = next(((p, n) for p in pfxs for n in _CONFIRM_NAMES
+                if not any(fnmatch.fnmatchcase(p + n, g) for g in globs)),
+               None)
+    if pfx is None and all(any(g.endswith("*") and fnmatch.fnmatchcase(p, g)
+                               for g in globs) for p in pfxs):
+        pfx = "covered"
     did = "would not add" if dry else "did not add"
     still = ("The PreToolUse spec-gate-commit hook still runs, but it misses "
              "`git add X && git commit` and `git commit -am`.")

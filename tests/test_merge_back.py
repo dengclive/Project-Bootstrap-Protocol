@@ -401,11 +401,13 @@ def write(path, text):
         fh.write(text)
 
 
-def fixture(cfg=CFG):
-    """A fresh copy of an installed, committed project for `cfg`."""
-    if cfg not in TEMPLATE_DIRS:
+def fixture(cfg=CFG, init=()):
+    """A fresh copy of an installed, committed project for `cfg` (`init`:
+    more `git init` arguments, such as --ref-format=reftable)."""
+    key = (cfg, tuple(init)) if init else cfg
+    if key not in TEMPLATE_DIRS:
         d = tempfile.mkdtemp(prefix="tpl-", dir=WORK)
-        git(d, "init", "-q", "-b", "main")
+        git(d, "init", "-q", "-b", "main", *init)
         cfgp = d + ".yaml"
         write(cfgp, cfg)
         r = run([sys.executable, BIN, "-c", cfgp, "-C", d], d)
@@ -416,10 +418,10 @@ def fixture(cfg=CFG):
         git(d, "add", "-A")
         r = git(d, "commit", "-qm", "init")
         assert r.returncode == 0, r.stdout + r.stderr
-        TEMPLATE_DIRS[cfg] = d
+        TEMPLATE_DIRS[key] = d
     dst = tempfile.mkdtemp(prefix="fx-", dir=WORK)
     shutil.rmtree(dst)
-    shutil.copytree(TEMPLATE_DIRS[cfg], dst, symlinks=True)
+    shutil.copytree(TEMPLATE_DIRS[key], dst, symlinks=True)
     return dst
 
 
@@ -2554,6 +2556,83 @@ else:
           "already on main; nothing was merged" in last
           and "Note: If the implementer reported commits, they are on "
           "another branch" in out, out)
+
+    print("\n== a stopped cherry-pick or revert in a reftable repository "
+          "(CRIT5-1) ==")
+    # [WP3 fix6 CRIT5-1] A reftable repository keeps CHERRY_PICK_HEAD and
+    # REVERT_HEAD in its ref store, with no file at --git-path. A revert
+    # stopped there (its resolution staged, so nothing reads as dirty) did
+    # not refuse: the merge went ahead and its commit ended the revert.
+    _rtp = tempfile.mkdtemp(prefix="rtprobe-", dir=WORK)
+    if git(_rtp, "init", "-q", "--ref-format=reftable").returncode != 0:
+        print("  SKIP  the reftable rows: this git cannot init "
+              "--ref-format=reftable (git 2.45 or later)")
+    else:
+        RT = ("--ref-format=reftable",)
+
+        def rt_stop(p, kind, multi=False):
+            """Stop a revert (or cherry-pick) on main on conflicts, resolved
+            to main's side and staged: the index matches HEAD."""
+            write(os.path.join(p, "src/app.py"), "def app(): return 21\n")
+            git(p, "commit", "-qam", "r1")
+            write(os.path.join(p, "src/other.py"), "o = 1\n")
+            git(p, "add", "src/other.py")
+            git(p, "commit", "-qm", "other")
+            write(os.path.join(p, "src/app.py"), "def app(): return 22\n")
+            git(p, "commit", "-qam", "r2")
+            if kind == "revert":
+                r = git(p, "revert", "--no-edit",
+                        *(("HEAD~2", "HEAD~1") if multi else ("HEAD~2",)))
+            else:
+                git(p, "branch", "pk", "HEAD~2")
+                git(p, "reset", "-q", "--hard", "HEAD~1")
+                write(os.path.join(p, "src/app.py"), "def app(): return 23\n")
+                git(p, "commit", "-qam", "r3")
+                r = git(p, "cherry-pick", "pk~0")
+            git(p, "checkout", "--ours", "src/app.py")
+            git(p, "add", "src/app.py")
+            return r.returncode
+
+        for kind, name, multi in (("revert", "REVERT_HEAD", False),
+                                  ("revert", "REVERT_HEAD", True),
+                                  ("cherry-pick", "CHERRY_PICK_HEAD", False)):
+            p = fixture(init=RT)
+            impl(p, "rt", {"src/feature.py": "def feature(): return 70\n"})
+            src = rt_stop(p, kind, multi)
+            pre = head(p)
+            gp = git(p, "rev-parse", "--git-path", name).stdout.strip()
+            fix = (src != 0 and git(p, "rev-parse", "--show-ref-format")
+                   .stdout == "reftable\n"
+                   and git(p, "show-ref", "--verify", "-q", name).returncode
+                   == 0 and not os.path.exists(os.path.join(p, gp))
+                   and git(p, "status", "--porcelain", "--untracked-files=no",
+                           "--", ".", ":(exclude).claude/worktrees")
+                   .stdout.strip() == ""
+                   and (not multi or os.path.isdir(
+                       os.path.join(p, ".git", "sequencer"))))
+            rc, out, last = mb(p, "worktree-agent-rt")
+            what = ("a multi-commit revert" if multi else f"a {kind}")
+            check(f"reftable, {what} stopped on conflicts with its resolution "
+                  f"staged ({name} a ref with no file, the index clean): rc 3 "
+                  f"NOT-STARTED, it names {name}, nothing merged, and the "
+                  f"{kind} is still in progress (CRIT5-1)",
+                  fix and rc == 3
+                  and f"a git operation ({name}) is in progress here" in last
+                  and head(p) == pre and not merging(p)
+                  and git(p, "show-ref", "--verify", "-q", name).returncode
+                  == 0, (fix, rc, out))
+        # Never by name lookup: a branch and a tag called REVERT_HEAD and
+        # CHERRY_PICK_HEAD, with no stop, do not refuse the run.
+        p = fixture(init=RT)
+        impl(p, "rn", {"src/feature.py": "def feature(): return 71\n"})
+        for name in ("REVERT_HEAD", "CHERRY_PICK_HEAD"):
+            git(p, "branch", name)
+            git(p, "tag", name)
+        rc, out, last = mb(p, "worktree-agent-rn")
+        check("reftable, a branch and a tag named REVERT_HEAD and "
+              "CHERRY_PICK_HEAD with no stop: merged, not refused (CRIT5-1)",
+              rc == 0 and last.startswith("merge-back: MERGED worktree-agent-rn"),
+              out)
 
     print("\n== a run that outlives its Bash call (CR-1) ==")
     p = fixture()

@@ -1934,15 +1934,30 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
         return f if f and exists(f) else ""
 
     async def seq_ref(name):
-        # [WP3 fix5 R4-1, CRIT7-1] spec-check.sh's _seqref: the pseudo-ref
-        # read as a ref (reftable keeps it in the ref store, with no file),
-        # and only when the name resolves to itself (not a branch so named).
-        rc, out, _ = await git("rev-parse", "-q", "--verify", name)
-        if rc != 0:
+        # [WP3 fix5 R4-1, CRIT7-1; fix6 RV5-SC-1] spec-check.sh's _seqref:
+        # never by name lookup (a branch or tag so named resolves too). A
+        # file at --git-path is read itself and is a stop when it names a
+        # commit; with no file, a reftable repository (the heads live in
+        # its ref store) is asked for that exact ref with show-ref --verify.
+        f = await git_path(name)
+        if f:
+            try:
+                with open(f, "rb") as fh:
+                    ln = os.fsdecode(fh.read().split(b"\\n", 1)[0])
+            except OSError:
+                ln = ""
+            if ln.startswith("ref: refs/"):
+                ln = ln[len("ref: "):]
+            elif not ln or re.search("[^0-9a-f]", ln):
+                return ""
+            rc, out, _ = await git("rev-parse", "-q", "--verify",
+                                   ln + "^{commit}")
+            return _spec_line(out) if rc == 0 else ""
+        rc, out, _ = await git("rev-parse", "--show-ref-format")
+        if rc != 0 or _spec_line(out) != "reftable":
             return ""
-        rc, sym, _ = await git("rev-parse", "-q", "--verify",
-                               "--symbolic-full-name", name)
-        return _spec_line(out) if rc == 0 and _spec_line(sym) == name else ""
+        rc, out, _ = await git("show-ref", "--verify", name)
+        return _spec_line(out).split(" ", 1)[0] if rc == 0 else ""
 
     mpar, seq, rule, pick = [], "", "", ""
     if changed is None:
@@ -2238,11 +2253,12 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
             if seq == "rebase" and pick:
                 last += (" It replays the commit REBASE_HEAD names (git show "
                          "--stat REBASE_HEAD lists its files). Until that "
-                         "commit is made (at an edit stop git has made it "
-                         "already: it is HEAD), do not unstage a file it "
-                         "changed: that drops %s. Any other file can be "
-                         "unstaged (git restore --staged <path>), and so can "
-                         "any file once that commit is made." % drop)
+                         "commit is made (it is made if git rev-parse HEAD "
+                         "REBASE_HEAD prints one object name twice), do not "
+                         "unstage a file it changed: that drops %s. Any "
+                         "other file can be unstaged (git restore --staged "
+                         "<path>), and so can any file once that commit is "
+                         "made." % drop)
             elif seq == "rebase":
                 last += (" Any file here can be unstaged (git restore "
                          "--staged <path>).")

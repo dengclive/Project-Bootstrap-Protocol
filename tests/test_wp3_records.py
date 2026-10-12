@@ -2134,8 +2134,8 @@ check("section 10: the seam's WP3 note records fix round 3, and the walk "
       "says fix rounds 1, 2 and 3 each re-walked it",
       "Fix round 3 (2026-10-12) extends them in place" in _s10
       # [WP3 fix4] Fix round 4 re-walked it too (5f). [WP3 fix5] And
-      # fix round 5 (5g).
-      and "Fix rounds 1 to 5 each re-walked the triggers" in flat(CL))
+      # fix round 5 (5g). [WP3 fix6] And fix round 6 (5h).
+      and "Fix rounds 1 to 6 each re-walked the triggers" in flat(CL))
 
 # --------------------------------------------------------------------------- #
 # 5f. [WP3 fix4, i2-records] The records fix round 4 corrected (re-review 3,
@@ -2170,8 +2170,8 @@ check("re-review 3: the changelog's paragraph gives the counts the pinned "
       and "wp3-rereview3-wf_19364a7b-fff+wf_d6aa9f2c-21d.json" in _rr3p
       and "re-run alone as `wf_d6aa9f2c-21d`" in _rr3p
       and "(new rows Z-54 to Z-56)" in _rr3p
-      # [WP3 fix5] The header counts five now (5g).
-      and "the build of 2026-10-05 and five review fix rounds" in CL
+      # [WP3 fix5] The header counts five now (5g). [WP3 fix6] Six (5h).
+      and "the build of 2026-10-05 and six review fix rounds" in CL
       and "(`wp3-rereview3-wf_19364a7b-fff+wf_d6aa9f2c-21d.json`, "
       "2026-10-13)" in _BL_LAYER4
       and "Z-54 to Z-56 are fix round 4's (2026-10-13)" in _BL_LAYER4,
@@ -2189,9 +2189,9 @@ check("every re-review 3 finding (20, less 3 pass records) is named in the "
 # files, and says git has made it at an edit stop; a stop that names no
 # commit lets any file be unstaged.
 _rb_say = ("It replays the commit REBASE_HEAD names (git show --stat "
-           "REBASE_HEAD lists its files). Until that commit is made (at an "
-           "edit stop git has made it already: it is HEAD), do not unstage a "
-           "file it changed: that drops ", "part of that commit",
+           "REBASE_HEAD lists its files). Until that commit is made (it is "
+           "made if git rev-parse HEAD REBASE_HEAD prints one object name "
+           "twice), do not unstage a file it changed: that drops ", "part of that commit",
            " Any other file can be unstaged (git restore --staged <path>), "
            "and so can any file once that commit is made.",
            " Any file here can be unstaged (git restore --staged <path>).")
@@ -2269,7 +2269,8 @@ check("CRIT3-1, MB3-4: merge-back's header and note say a reader that "
 
 # INST3-2, INST3-3: the installer's texts, derived by calling it.
 _mn4 = installer._mention_note([("pre-commit", ".husky/pre-commit")],
-                               ".claude/githooks/dispatch", "pkg/")
+                               ".claude/githooks/dispatch",
+                               ("pkg/", "confirm.txt"))
 _off4 = installer._git_hook_warnings(
     {"git_hooks": [{"state": "gate-off-mention", "detail": "", "path": _p,
                     "name": "pre-commit"}
@@ -2375,9 +2376,10 @@ check("step 7: the changelog's paragraph gives the counts the pinned "
       in _s7p
       and "fix round 5 ran as `wf_a43c552f-e98`" in _s7p
       and "filed as Z-57 (new row)" in _s7p
-      and "the build of 2026-10-05 and five review fix rounds" in CL
-      and "\"Step 7 and fix round 5\" below" in CL
-      and "Fix rounds 1 to 5 each re-walked the triggers" in CL
+      # [WP3 fix6] The header and the walk count fix round 6 too (5h).
+      and "the build of 2026-10-05 and six review fix rounds" in CL
+      and "\"Step 7 and fix round 5\" and" in CL
+      and "Fix rounds 1 to 6 each re-walked the triggers" in CL
       and "(`wp3-step7-wf_f7600f06-a5c.json`, 2026-10-13)" in _BL_LAYER5
       and "Z-57 is fix round 5's (2026-10-13)" in _BL_LAYER5
       and "fix round 5 closed Z-54" in _BL_LAYER5, _s7p[:400])
@@ -2433,18 +2435,20 @@ _seq_sh = [ln for ln in code_lines(_SC) if "rev-parse" in ln
            and ("--git-path \"${_s#*:}\"" in ln or "--git-path REBASE_HEAD"
                 in ln)]
 check("R4-1, CRIT7-1: spec-check.sh and the SDK read REBASE_HEAD, "
-      "CHERRY_PICK_HEAD and REVERT_HEAD as refs whose name resolves to "
-      "itself (a reftable repository keeps them with no file); item 1, the "
+      "CHERRY_PICK_HEAD and REVERT_HEAD as refs, never by name lookup "
+      "(a reftable repository keeps them with no file); item 1, the "
       "Deferred paragraph and Z-54's done layer say so",
       _rt_fact is not False
-      and "SEQREF=\"$(git rev-parse -q --verify \"$1\" 2>/dev/null)\"" in _SC
-      and "git rev-parse -q --verify --symbolic-full-name \"$1\"" in _SC
+      # [WP3 fix6 RV5-SC-1] The file itself, else (reftable) the exact ref.
+      and "SEQREF=\"$(git rev-parse -q --verify \"$l^{commit}\" 2>/dev/null)\""
+      in _SC and "l=\"$(git show-ref --verify \"$1\" 2>/dev/null)\"" in _SC
+      and not [ln for ln in code_lines(_SC) if "--symbolic-full-name" in ln]
       and "_seqref REBASE_HEAD && PICK=\"$SEQREF\"" in _SC
       and not _seq_sh
       and "await seq_ref(\"REBASE_HEAD\")" in _mod
-      and "\"--symbolic-full-name\", name)" in _mod
+      and "\"show-ref\", \"--verify\", name)" in _mod
+      and "--symbolic-full-name" not in _mod
       and "git_path(\"REBASE_HEAD\")" not in _mod
-      and "git_path(name)" not in _mod
       and "Since fix round 5 the check reads `REBASE_HEAD`, "
       "`CHERRY_PICK_HEAD` and `REVERT_HEAD` as refs" in _MERGES
       and "(step 7 R4-1, CRIT7-1; re-review 3 RR3-CHK-2; backlog Z-54)"
@@ -2574,10 +2578,260 @@ check("fix round 5: the seam's section 10 note says it changes no note and "
       and not [w for w in ("REBASE_HEAD", "CHERRY_PICK_HEAD", "unstage",
                            "ignore-unmerged", "already in progress", _wk,
                            "confirm.txt") if w in SEAM]
-      and "(re-measured on the fix round 5 tree)" in CL
-      and "run alone on 2026-10-13, after fix round 5" in _TESTS3
-      and "re-run on the fix round 5 tree as a user that is not root"
+      # [WP3 fix6] Re-measured and re-run after fix round 6 (5h).
+      and "(re-measured on the fix round 6 tree)" in CL
+      and "run alone on 2026-10-13, after fix round 6" in _TESTS3
+      and "re-run on the fix round 6 tree as a user that is not root"
       in _TESTS3)
+
+# --------------------------------------------------------------------------- #
+# 5h. [WP3 fix6, k2-records] The records fix round 6 corrected (the review of
+#     fix round 5, wp3-fix5-wf_a43c552f-e98.json, 2026-10-13), and every WP3
+#     record brought into line with fix round 6's code. Each row first
+#     derives the fact from the emitted files, the installer or git, then
+#     checks the records that state it.
+# --------------------------------------------------------------------------- #
+print("\n=== 5h. Fix round 6 records ===")
+_r5p = cut(CL, "**Review of fix round 5 and fix round 6 (2026-10-13).**",
+           "**Seam — the §8.4 trigger walk.**")
+
+# The review's findings, pinned as data (the record is outside the
+# repository): each lens's list, the critic's, and how many things each
+# said held. No verifier ran in this review. CRIT5-2 grades RV5-MB-1 INFO;
+# the counts are the lenses' own grades.
+_R5_LENS = {"RV5-SC-1": "MINOR", "RV5-SC-2": "MINOR", "RV5-SC-3": "INFO",
+            "RV5-MB-1": "MINOR", "RV5-MB-2": "MINOR", "RV5-MB-3": "INFO"}
+_R5_CRIT = {"CRIT5-1": "INFO", "CRIT5-2": "INFO"}
+_R5_HELD = (9, 8, 7)
+_r5all = dict(_R5_LENS, **_R5_CRIT)
+
+
+def _n5(sev, d=_r5all):
+    return sum(1 for v in d.values() if v == sev)
+
+
+check("review of fix round 5: the changelog's paragraph gives the counts the "
+      "pinned finding lists add up to, cites the record and fix round 6's "
+      "run, and the header, the walk and the backlog layer count fix round 6",
+      _n5("MAJOR") == 0
+      and f"reported no MAJOR, {_n5('MINOR')} MINOR and {_n5('INFO')} INFO "
+      f"findings; the lenses and the critic also listed {sum(_R5_HELD)} "
+      "things that held" in _r5p
+      and "two lenses and a critic" in _r5p
+      and "No verifier ran in this review" in _r5p
+      and "the critic graded one lens MINOR (RV5-MB-1) INFO (CRIT5-2)" in _r5p
+      and "`.claude/sessions/prd-minus-security/wp3-fix5-wf_a43c552f-e98.json`"
+      in _r5p
+      and "fix round 6 ran as `wf_6f9f8c5a-b8d`" in _r5p
+      and "(new items (f) to (j))" in _r5p
+      and "the build of 2026-10-05 and six review fix rounds" in CL
+      and "and three of 2026-10-13" in CL
+      and "\"Review of fix round 5 and fix round 6\" below" in CL
+      and "Fix rounds 1 to 6 each re-walked the triggers" in CL
+      and "(`wp3-fix5-wf_a43c552f-e98.json`, 2026-10-13), added items (f) to "
+      "(j) to Z-57, corrected Z-54's done layer in place, and appended a "
+      "dated layer to Z-39" in _BL_LAYER5
+      and "and the review of fix round 5 and its fix round 6." in _BL_LAYER5,
+      _r5p[:400])
+
+_r5txt = " ".join((CL, _WP3_BL))
+_named5 = set(re.findall(r"\b(?:RV5-SC|RV5-MB|CRIT5)-\d+", _r5txt))
+check("every finding of the review of fix round 5 (8) is named in the "
+      "changelog's WP3 entry or a WP3 backlog row",
+      len(_r5all) == 8 and not [i for i in _r5all if i not in _named5],
+      [i for i in _r5all if i not in _named5])
+
+# RV5-SC-1: git's own behaviour on the files backend. With a branch called
+# CHERRY_PICK_HEAD beside a real cherry-pick stop, fix round 5's guard
+# (--symbolic-full-name must print the name) misses the stop, and the
+# emitted _seqref, run as spec-check.sh carries it, finds the picked commit.
+T8 = tempfile.mkdtemp(prefix="wp3-records-5h-")
+E8 = dict(E5, HOME=T8, XDG_CONFIG_HOME=os.path.join(T8, ".config"),
+          GIT_CEILING_DIRECTORIES=T8)
+os.makedirs(os.path.join(T8, ".config", "git"))
+with open(os.path.join(T8, ".config", "git", "config"), "w") as _fh:
+    _fh.write("[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n"
+              "[advice]\n\tdetachedHead = false\n")
+
+
+def _stop8(d, fmt=None, op="cherry-pick"):
+    os.makedirs(d)
+    _i = ["init", "-q"] + ([f"--ref-format={fmt}"] if fmt else [])
+    if g5(d, *_i, env=E8).returncode != 0:
+        return False
+    put(d, "f", "base\n")
+    g5(d, "add", "f", env=E8)
+    g5(d, "commit", "-qm", "base", env=E8)
+    g5(d, "checkout", "-qb", "feat", env=E8)
+    put(d, "f", "feat\n")
+    g5(d, "commit", "-qam", "feat", env=E8)
+    g5(d, "checkout", "-q", "main", env=E8)
+    put(d, "f", "main\n")
+    g5(d, "commit", "-qam", "main", env=E8)
+    if op == "revert":
+        put(d, "f", "main2\n")
+        g5(d, "commit", "-qam", "main2", env=E8)
+        return g5(d, "revert", "--no-edit", "HEAD~1", env=E8).returncode != 0
+    return g5(d, "cherry-pick", "feat", env=E8).returncode != 0
+
+
+_sq = re.search(r"^_seqref\(\)\{\n.*?^\}\n", _SC, re.M | re.S)
+_cpd = os.path.join(T8, "cp")
+_sc1_fact = None
+if _stop8(_cpd) and _sq:
+    g5(_cpd, "branch", "CHERRY_PICK_HEAD", "main", env=E8)
+    _feat = g5(_cpd, "rev-parse", "feat", env=E8).stdout.strip()
+    _sym = g5(_cpd, "rev-parse", "-q", "--verify", "--symbolic-full-name",
+              "CHERRY_PICK_HEAD", env=E8).stdout.strip()
+    _gp = g5(_cpd, "rev-parse", "--git-path", "CHERRY_PICK_HEAD",
+             env=E8).stdout.strip()
+    _run = subprocess.run(
+        ["bash", "-c", _sq.group(0) + "_seqref CHERRY_PICK_HEAD && "
+         "printf '%s' \"$SEQREF\""], cwd=_cpd, capture_output=True,
+        text=True, env=E8, timeout=60)
+    _sc1_fact = (_sym != "CHERRY_PICK_HEAD"
+                 and os.path.isfile(os.path.join(_cpd, _gp))
+                 and _run.returncode == 0 and _run.stdout == _feat)
+check("RV5-SC-1: beside a branch called CHERRY_PICK_HEAD, fix round 5's "
+      "guard misses a real stop and the emitted _seqref finds it; item 1 and "
+      "Z-54's done layer describe the reading that never looks the name up",
+      _sc1_fact is True
+      and "Since fix round 6 the check never looks the name up: a file at "
+      "`--git-path` is read itself" in _MERGES
+      and "(`git show-ref --verify`)" in _MERGES
+      and "(review of fix round 5, RV5-SC-1)" in _MERGES
+      and "only a name that resolves to itself" not in _MERGES
+      and "so a branch called `REBASE_HEAD` is not one" not in CL
+      and "as fix round 6 corrected it in place (review of fix round 5, "
+      "RV5-SC-1)" in _rows["Z-54"]
+      and "never look the name up" in _rows["Z-54"]
+      and "`git show-ref --verify <name>`" in _rows["Z-54"]
+      and "`git rev-parse --show-ref-format` prints `reftable`"
+      in _rows["Z-54"]
+      and "and take a name only when" not in _rows["Z-54"]
+      and "a file with CRLF line endings, which git accepts, reads as no "
+      "stop (Z-57 (i))" in _rows["Z-54"]
+      # The rows the done layer names are in test_spec_check.
+      and "(RV5-SC-1)\"" in read("tests/test_spec_check.py")
+      and "Since fix round 6 it also has rows for a branch, a tag or both "
+      "named for the head" in _rows["Z-54"], _sc1_fact)
+
+# RV5-SC-2: the rebase text's check for a made commit, as both substrates
+# print it, is the command item 1 gives; the edit-stop claim is gone.
+_made = re.search(r"\(it is made if (git rev-parse HEAD REBASE_HEAD) prints "
+                  r"one object name twice\)", _SC)
+_made_cmd = _made.group(1) if _made else "<none>"
+check("RV5-SC-2: both substrates say the commit is made when `git rev-parse "
+      "HEAD REBASE_HEAD` prints one object name twice, and item 1 gives the "
+      "same command and drops the edit-stop claim",
+      _made is not None
+      and f"(it is made if {_made_cmd} prints one object name twice)"
+      in _mod_src
+      and "at an edit stop git has made it" not in _SC + _mod_src
+      and f"(`{_made_cmd}` prints one object name twice)" in _MERGES
+      and "(review of fix round 5, RV5-SC-2)" in _MERGES
+      and "(at an edit stop git has made it already)" not in CL, _made_cmd)
+
+# RV5-MB-2, RV5-MB-3: the installer's confirm recipe, derived by calling it.
+# `*.txt` covers the first probe name under every prefix, not the prefix;
+# an allowlist that covers every probe name but no prefix gets the recipe
+# that names no file. The allowlist is read as the check's awk reads it.
+_hk8 = {"git_hooks": [{"state": "foreign", "path": ".git/hooks/pre-commit",
+                       "name": "pre-commit", "via": ".git/hooks/pre-commit",
+                       "mentions": True, "detail": ""}]}
+_txt8 = " ".join(installer._git_hook_warnings(
+    _hk8, installer.Path(ROOT), False, None, ["*.txt"]))
+_nm8 = list(installer._CONFIRM_NAMES)
+_any8 = " ".join(installer._git_hook_warnings(
+    _hk8, installer.Path(ROOT), False, None,
+    ["*/" + _nm8[0].split(".")[0] + "*"] + ["*/" + n for n in _nm8
+                                           if "." not in n
+                                           and not n.startswith("confirm")]))
+_la8 = os.path.join(T8, "la")
+put(_la8, ".claude/steering/spec-strategy.md",
+    "x\n<!-- LEGACY_ALLOWLIST_BEGIN --> \n  src/**\t\n")
+_la8_got = installer._legacy_allowlist(installer.Path(_la8), {})
+_p0 = templates.SPEC_GATE_DEFAULT_PREFIXES[0]
+check("RV5-MB-2, RV5-MB-3: with `*.txt` the recipe names a file the check "
+      "still covers, an allowlist that covers every probe name but no prefix "
+      "names none, the allowlist markers are read as the awk reads them, and "
+      "the changelog and README say so",
+      f"such as `{_p0}{_nm8[1]}`" in _txt8
+      and "No commit can confirm the pre-commit line yet" not in _txt8
+      and "(it covers every name this installer tried)" in _any8
+      and "No commit can confirm the pre-commit line yet" not in _any8
+      and "such as `" not in _any8.split("To confirm the pre-commit line")[-1]
+      .split("A file outside")[0]
+      and _la8_got == ["src/**"]
+      and "tries " + ", ".join(f"`{n}`" for n in _nm8[:-1])
+      + f" and `{_nm8[-1]}`" in _WHERE
+      and "(review of fix round 5, RV5-MB-2)" in _WHERE
+      and "anywhere on their line and to the end of the file when the end "
+      "marker is missing" in _WHERE and "(RV5-MB-3)" in _WHERE
+      and "asks for one when the allowlist covers every file name it tries"
+      in _RDM, (_txt8[-500:], _any8[-500:], _la8_got))
+
+# CRIT5-1: merge-back's in-progress check asks a reftable repository for the
+# two heads; git keeps a stopped revert's REVERT_HEAD there with no file.
+_rvd = os.path.join(T8, "rv")
+_c51_fact = None
+if _stop8(_rvd, fmt="reftable", op="revert"):
+    _gp = g5(_rvd, "rev-parse", "--git-path", "REVERT_HEAD",
+             env=E8).stdout.strip()
+    _c51_fact = (g5(_rvd, "show-ref", "--verify", "REVERT_HEAD",
+                    env=E8).returncode == 0
+                 and not os.path.exists(os.path.join(_rvd, _gp)))
+else:
+    print("  SKIP  the reftable half of the next row: this git cannot init "
+          "--ref-format=reftable (git 2.45 or later)")
+_mbl = "\n".join(code_lines(_MB))
+check("CRIT5-1: merge-back asks a reftable repository for CHERRY_PICK_HEAD "
+      "and REVERT_HEAD with show-ref --verify, a file still refuses, and "
+      "item 9, Z-39's layer and Z-57 (h) say so",
+      _c51_fact is not False
+      and "for _op in CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply "
+      "BISECT_LOG; do" in _mbl
+      and "[ -e \"$(git rev-parse --git-path \"$_op\")\" ] && _f=1" in _mbl
+      and "[ \"$(git rev-parse --show-ref-format 2>/dev/null)\" = reftable ]"
+      in _mbl
+      and "git show-ref --verify \"$_op\" >/dev/null 2>&1 && _f=1" in _mbl
+      and "since fix round 6, refuse (NOT-STARTED) while a cherry-pick or "
+      "revert is stopped in a reftable repository" in _ITEM9
+      and "(review of fix round 5, CRIT5-1; backlog Z-39 (q))" in _ITEM9
+      and "**Layer 2026-10-13 (WP3 fix round 6, review of fix round 5 "
+      "CRIT5-1).** (q) Fixed:" in _rows["Z-39"]
+      and "asks `git show-ref --verify` for the head" in _rows["Z-39"]
+      and "(h) Once a `git revert` of several commits stops on a conflict"
+      in _rows["Z-57"], _c51_fact)
+shutil.rmtree(T8, ignore_errors=True)
+
+# RV5-SC-3, RV5-MB-1 and CRIT5-2, and what fix round 6 found, are filed in
+# Z-57; the remedy item 9 gives is the one Z-57 (g) says loses the change.
+_z57g = _rows["Z-57"].split("(g) ", 1)[-1].split(" (h) ", 1)[0]
+check("Z-57 (f) to (j): the review's deferred findings and fix round 6's "
+      "residuals are filed, the row stays open, and item 9 and the Deferred "
+      "paragraph point at it",
+      all(f"({k}) " in _rows["Z-57"] for k in "fghij")
+      and "(f) RV5-SC-3:" in _rows["Z-57"]
+      and "(g) RV5-MB-1, CRIT5-2:" in _rows["Z-57"]
+      and f"`{_inp_cmd}` then `git merge --abort`" in _z57g
+      and "and what fix rounds 5 and 6 left." in _rows["Z-57"]
+      and "Added by fix round 6 (2026-10-13), from the review of fix round "
+      "5:" in _rows["Z-57"]
+      and _rows["Z-57"].endswith("| `open` · T4 |")
+      and "(review of fix round 5, RV5-MB-1, CRIT5-2; backlog Z-57 (g))"
+      in _ITEM9
+      and "the rows CI skips and what fix rounds 5 and 6 left (Z-57)"
+      in _deferred)
+
+# The seam's section 10 note: no note quotes a text fix round 6 changed.
+check("fix round 6: the seam's section 10 note says it changes no note and "
+      "adds no line, and no seam note quotes the texts it changed",
+      "Fix round 6 (2026-10-13) changes no note either" in _s10
+      and "it adds no `warning:` or `note` line, flag or field." in _s10
+      and not [w for w in ("show-ref", _made_cmd, "spec-check-probe",
+                           "confirm.py", "every name this installer tried")
+               if w in SEAM])
 
 # --------------------------------------------------------------------------- #
 # 6. RR-UP-1: every test file WP3 added is named in its changelog entry

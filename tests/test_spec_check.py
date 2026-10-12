@@ -2982,9 +2982,9 @@ try:
     # says how to see its files; an exec or break stop names none.
     REBASE_KEEP = ("It replays the commit REBASE_HEAD names (git show --stat "
                    "REBASE_HEAD lists its files). Until that commit is made "
-                   "(at an edit stop git has made it already: it is HEAD), do "
-                   "not unstage a file it changed: that drops part of that "
-                   "commit. Any other file can be unstaged (git restore "
+                   "(it is made if git rev-parse HEAD REBASE_HEAD prints one "
+                   "object name twice), do not unstage a file it changed: "
+                   "that drops part of that commit. Any other file can be unstaged (git restore "
                    "--staged <path>), and so can any file once that commit is "
                    "made.")
     REBASE_ANY = "Any file here can be unstaged (git restore --staged <path>)."
@@ -3170,6 +3170,7 @@ try:
     # 2.56). Each row also follows the printed remedy to the end.
     _rtp = os.path.join(TMP, "rtprobe")
     os.makedirs(_rtp)
+    GBR = None
     if sh([GIT, "init", "-q", "--ref-format=reftable"], _rtp)[0] != 0:
         print("  SKIP  the reftable rows: this git cannot init "
               "--ref-format=reftable (git 2.45 or later)")
@@ -3343,6 +3344,231 @@ try:
           rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
           and "not an object name" not in err and src_ == 2
           and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+
+    # [WP3 fix6 RV5-SC-1] A branch or tag with a head's name, beside a real
+    # stop: rev-parse --symbolic-full-name failed as ambiguous, so a stopped
+    # rebase read as one that names no commit ("Any file here can be
+    # unstaged") and a stopped cherry-pick took the plain rule; following
+    # the rebase text dropped the teammate's file. On both backends: the
+    # file itself, else (reftable) show-ref --verify, names no branch or tag.
+    def named_refs(d, name, at="main"):
+        sh(f"git branch {name} {at} && git tag {name} {at}", d)
+
+    def has_named(d, name):
+        return all(sh([GIT, "show-ref", "--verify", "-q", r], d)[0] == 0
+                   for r in (f"refs/heads/{name}", f"refs/tags/{name}"))
+
+    for tpl, fmt in ((GB, "files"), (GBR, "reftable")):
+        if tpl is None:
+            print("  SKIP  the reftable half of the same-named branch and tag "
+                  "rows: this git cannot init --ref-format=reftable (git "
+                  "2.45 or later)")
+            continue
+        d = fresh(tpl)
+        teammate(d, ["src/ok.py"])
+        named_refs(d, "REBASE_HEAD")
+        sh("git checkout -q feature && git rebase -q main", d, env=AGENT)
+        check(f"(fixture) {fmt}: the rebase stopped on conflicts, with a "
+              f"branch and a tag named REBASE_HEAD",
+              os.path.isdir(os.path.join(d, ".git", "rebase-merge"))
+              and has_named(d, "REBASE_HEAD")
+              # (git before 2.45 has no --show-ref-format: files only.)
+              and (sh([GIT, "rev-parse", "--show-ref-format"], d)[1]
+                   == "reftable\n") == (fmt == "reftable"))
+        write(d, "src/shared.py", "a\nresolved\nc\n")
+        sh([GIT, "add", "src/shared.py"], d)
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check(f"{fmt}, a rebase stopped on conflicts beside a branch and a tag "
+              f"named REBASE_HEAD: still judged as a stopped pick (only the "
+              f"resolution), with the REBASE_HEAD text, not 'git names no "
+              f"commit'; shell == SDK (RV5-SC-1)",
+              rc == 2 and out == "src/shared.py\n" and REBASE_KEEP in err
+              and REBASE_NONE not in err and REBASE_ANY not in err
+              and "src/teammate.py" not in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        task(d, T1, ["src/ok.py", "src/shared.py"])
+        rc1, _, _ = chk(d)
+        rc2, _, e2 = sh("git rebase --continue", d, env=AGENT)
+        _, tm, _ = sh("git show feature:src/teammate.py", d)
+        check(f"... and following it ({fmt}: list the resolution, git rebase "
+              f"--continue) keeps the teammate's file (RV5-SC-1)",
+              rc1 == 0 and rc2 == 0 and tm == "t\n"
+              and not os.path.isdir(os.path.join(d, ".git", "rebase-merge")),
+              (rc1, rc2, e2[-300:], tm))
+        for kind in ("pick", "revert"):
+            d = fresh(tpl)
+            task(d, T1, ["src/ok.py"])
+            write(d, "src/app.py", "1\n2\n3\n4\n5\n")
+            sh("git add -A && git commit -qm base", d)
+            if kind == "pick":
+                sh("git checkout -qb feature", d)
+                write(d, "src/app.py", "1\n2\n30\n4\n5\n")
+                write(d, "src/billing/pay.py", "p\n")
+                sh("git add -A && git commit -qm teammate && "
+                   "git checkout -q main", d)
+                write(d, "src/app.py", "1\n2\n300\n4\n5\n")
+                sh("git commit -qam mine", d)
+                seqf, other = "CHERRY_PICK_HEAD", "src/billing/pay.py"
+                named_refs(d, seqf)
+                sh("git cherry-pick feature", d)
+            else:
+                write(d, "src/app.py", "1\n2\n30\n4\n5\n")
+                write(d, "src/r1.py", "r\n")
+                sh("git add -A && git commit -qm teammate", d)
+                write(d, "src/app.py", "1\n2\n300\n4\n5\n")
+                sh("git commit -qam mine", d)
+                seqf, other = "REVERT_HEAD", "src/r1.py"
+                named_refs(d, seqf)
+                sh("git revert --no-edit HEAD~1", d)
+            write(d, "src/app.py", "1\n2\n3\n4\n5\nresolved\n")
+            sh([GIT, "add", "src/app.py"], d)
+            rc, out, err = chk(d)
+            src_, smsg, _ = sdk_check(d)
+            check(f"{fmt}, a {kind} stopped on conflicts beside a branch and a "
+                  f"tag named {seqf}: still judged as a stopped {kind} (only "
+                  f"src/app.py, not {other}), with its own text, not the "
+                  f"plain rule; shell == SDK (RV5-SC-1)",
+                  has_named(d, seqf) and rc == 2 and out == "src/app.py\n"
+                  and other not in err and PICK_TXT[kind][0] in err
+                  and "Do not unstage a file from it" in err
+                  and "restore --staged" not in err
+                  and src_ == 2 and smsg == err.rstrip("\n"),
+                  (rc, out, err, smsg))
+        d = fresh(tpl)
+        task(d, T1, ["src/ok.py"])
+        sh("git commit -qm t1", d)
+        for name in ("CHERRY_PICK_HEAD", "REVERT_HEAD", "REBASE_HEAD"):
+            named_refs(d, name)
+        stage(d, "src/evil.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check(f"{fmt}, no stop, with a branch and a tag named for each head: "
+              f"the plain rule and its unstage remedy; shell == SDK (RV5-SC-1)",
+              all(has_named(d, n) for n in ("CHERRY_PICK_HEAD", "REVERT_HEAD",
+                                            "REBASE_HEAD"))
+              and rc == 2 and out == "src/evil.py\n" and "This is" not in err
+              and "unstage it (git restore --staged <path>)" in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        sh([GIT, "reset", "-q"], d)
+
+        # [WP3 fix6 RV5-SC-2] "at an edit stop git has made it already" was
+        # false at an edit line whose pick conflicted: git's status says
+        # "edit", and HEAD is still the commit before it, so unstaging the
+        # replayed commit's file dropped it. The text now gives a check, and
+        # it is true there: git rev-parse prints two names.
+        d = fresh(tpl)
+        teammate(d, ["src/ok.py"])
+        sh("git checkout -q feature && GIT_SEQUENCE_EDITOR=\"sed -i.b "
+           "'1s/^pick/edit/'\" git rebase -q -i main", d)
+        _, hr, _ = sh("git rev-parse HEAD REBASE_HEAD", d)
+        _, st3, _ = sh("git status", d)
+        check(f"(fixture) {fmt}: a rebase stopped at an edit line whose pick "
+              f"conflicted (git status says edit; rev-parse HEAD REBASE_HEAD "
+              f"prints two names)",
+              os.path.isdir(os.path.join(d, ".git", "rebase-merge"))
+              and "   edit " in st3 and len(set(hr.split())) == 2
+              and len(hr.split()) == 2, (hr, st3[:300]))
+        write(d, "src/shared.py", "a\nresolved\nc\n")
+        sh([GIT, "add", "src/shared.py"], d)
+        stage(d, "src/extra.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check(f"{fmt}, a rebase stopped at an edit line whose pick conflicted: "
+              f"the resolution and the agent's file, with the text that says "
+              f"how to tell whether the commit is made; shell == SDK "
+              f"(RV5-SC-2)",
+              rc == 2 and out == "src/extra.py\nsrc/shared.py\n"
+              and REBASE_KEEP in err and "src/teammate.py" not in err
+              and "at an edit stop" not in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        _, st, _ = sh("git show --stat --format= REBASE_HEAD", d)
+        sh("git restore --staged src/extra.py && rm src/extra.py", d)
+        task(d, T1, ["src/ok.py", "src/shared.py"])
+        rc1, _, _ = chk(d)
+        rcs = [sh("git rebase --continue", d, env=AGENT)[0]]
+        while os.path.isdir(os.path.join(d, ".git", "rebase-merge")) \
+                and len(rcs) < 4:
+            rcs.append(sh("git rebase --continue", d, env=AGENT)[0])
+        _, tm, _ = sh("git show feature:src/teammate.py", d)
+        check(f"... and following it ({fmt}: two names, so not made; unstage "
+              f"only what git show --stat REBASE_HEAD does not list, list the "
+              f"resolution, git rebase --continue) keeps the replayed "
+              f"commit's teammate file (RV5-SC-2)",
+              "src/teammate.py" in st and rc1 == 0 and rcs[-1] == 0
+              and tm == "t\n"
+              and not os.path.isdir(os.path.join(d, ".git", "rebase-merge")),
+              (st, rc1, rcs, tm))
+        d = fresh(tpl)
+        teammate(d, ["src/ok.py"])
+        sh("GIT_SEQUENCE_EDITOR=\"sed -i.b '1s/^pick/edit/'\" "
+           "git rebase -q -i HEAD~1", d)
+        _, hr, _ = sh("git rev-parse HEAD REBASE_HEAD", d)
+        check(f"{fmt}, a clean edit stop: rev-parse HEAD REBASE_HEAD prints "
+              f"one object name twice, so the text's check says the commit is "
+              f"made (RV5-SC-2)",
+              len(hr.split()) == 2 and len(set(hr.split())) == 1
+              and os.path.isfile(os.path.join(d, ".git", "rebase-merge",
+                                              "amend")), hr)
+        sh("git rebase --abort", d)
+
+    # [WP3 fix6 RV5-SC-1] The file is read itself, not by name lookup: with
+    # a branch called CHERRY_PICK_HEAD, a file that names no object made
+    # rev-parse --verify find the branch. Git reads the file (the commit
+    # lands as a plain one, measured), and so does the check. And a file
+    # git reads as a cherry-pick (a symbolic ref; git then takes the
+    # picked commit's author and removes the file, measured) is one.
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    sh("git commit -qm t1 && git branch CHERRY_PICK_HEAD", d)
+    write(d, ".git/CHERRY_PICK_HEAD", "garbage\n")
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a CHERRY_PICK_HEAD file that names no object, beside a branch so "
+          "named: the plain rule; shell == SDK (RV5-SC-1)",
+          rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
+          and "not an object name" not in err and src_ == 2
+          and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    sh("git commit -qm t1", d)
+    write(d, ".git/CHERRY_PICK_HEAD", "main\n")
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a CHERRY_PICK_HEAD file that holds a branch name, not an object "
+          "name: the plain rule, as git reads it (its commit lands as a plain "
+          "one, measured); shell == SDK (RV5-SC-1)",
+          rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
+          and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    write(d, "src/app.py", "1\n")
+    sh("git add -A && git commit -qm t1 && git checkout -qb feature && "
+       "echo p > src/pay.py && git add src/pay.py && git commit -qm tm && "
+       "git checkout -q main", d)
+    write(d, ".git/CHERRY_PICK_HEAD", "ref: refs/heads/feature\n")
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a CHERRY_PICK_HEAD file that is a symbolic ref to a commit: a "
+          "stopped cherry-pick, as git reads it; shell == SDK (RV5-SC-1)",
+          rc == 2 and out == "src/evil.py\n"
+          and PICK_TXT["pick"][0] in err and src_ == 2
+          and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+    d = fresh(GB)
+    task(d, T1, ["src/ok.py"])
+    sh("git commit -qm t1", d)
+    write(d, ".git/CHERRY_PICK_HEAD", "1234567890" * 4 + "\n")
+    stage(d, "src/evil.py")
+    rc, out, err = chk(d)
+    src_, smsg, _ = sdk_check(d)
+    check("a CHERRY_PICK_HEAD file that names no commit in the repository: "
+          "no cherry-pick (git refuses the commit itself); shell == SDK "
+          "(RV5-SC-1)",
+          rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
+          and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
 
     print("\n-- git revert --no-commit (MR2-5) --")
     d = fresh(GB)

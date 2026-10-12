@@ -4313,11 +4313,27 @@ _gitv(){
 # or REBASE_HEAD); its object name is left in SEQREF. [WP3 fix5 R4-1,
 # CRIT7-1] Read as a ref, not as a file at --git-path: a reftable
 # repository keeps them in the ref store with no file, and a stopped rebase
-# or cherry-pick then read as none (measured, git 2.56). The name must
-# resolve to itself, so a branch called REBASE_HEAD is not one.
+# or cherry-pick then read as none (measured, git 2.56). [WP3 fix6 RV5-SC-1]
+# Never by name lookup: rev-parse finds a branch or tag called REBASE_HEAD
+# too, and with one beside a real stop its --symbolic-full-name fails as
+# ambiguous. So a file at --git-path is read itself, and is a stop when it
+# names a commit (a file that does not is none to git either: a commit
+# then lands, measured); with no file, a reftable repository (git 2.45 or
+# later) is asked for that exact ref with show-ref --verify, which names no
+# branch or tag (measured, git 2.49 and 2.56).
 _seqref(){
-  SEQREF="$(git rev-parse -q --verify "$1" 2>/dev/null)" || return 1
-  [ "$(git rev-parse -q --verify --symbolic-full-name "$1" 2>/dev/null)" = "$1" ]
+  local f l
+  SEQREF=""
+  f="$(git rev-parse --git-path "$1" 2>/dev/null)" || f=""
+  if [ -n "$f" ] && [ -f "$f" ]; then
+    { IFS= read -r l || [ -n "$l" ]; } <"$f" 2>/dev/null || l=""
+    case "$l" in "ref: refs/"*) l="${l#ref: }" ;; ''|*[!0-9a-f]*) return 1 ;; esac
+    SEQREF="$(git rev-parse -q --verify "$l^{commit}" 2>/dev/null)"
+  elif [ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ]; then
+    l="$(git show-ref --verify "$1" 2>/dev/null)" || l=""
+    SEQREF="${l%% *}"
+  fi
+  [ -n "$SEQREF" ]
 }
 # BATCH=(start count start count ...): the arguments in runs whose bytes
 # stay under SC_ARGMAX [WP3 fix1 F1]. A shell function's arguments are not
@@ -4853,11 +4869,14 @@ if [ -n "$SEQ" ]; then
   # [WP3 fix3 MR2-6] In a retrofit warn week the commit goes through too.
   if [ "${BOOTSTRAP_SPEC_MODE:-}" != warn ] && [ "$R_WARN_WEEK" != 1 ]; then
     # [WP3 fix4 RR3-CHK-1, fix5 R4-3] A rebase names the commit it replays
-    # (REBASE_HEAD) until that commit is made; at an edit stop git has made
-    # it (HEAD) before stopping, and an exec or break stop names none, so
-    # unstaging there drops nothing of it.
+    # (REBASE_HEAD) until that commit is made, and an exec or break stop
+    # names none, so unstaging there drops nothing of it. [WP3 fix6 RV5-SC-2]
+    # Whether it is made is said as a check, not as "at an edit stop": an
+    # edit line whose pick conflicted stops with HEAD still the commit
+    # before it (measured, git 2.56). The check is sufficient, not needed:
+    # replayed onto a new base, the made commit has a new name.
     if [ "$SEQ" = rebase ] && [ -n "$PICK" ]; then
-      _last="$_last It replays the commit REBASE_HEAD names (git show --stat REBASE_HEAD lists its files). Until that commit is made (at an edit stop git has made it already: it is HEAD), do not unstage a file it changed: that drops $_drop. Any other file can be unstaged (git restore --staged <path>), and so can any file once that commit is made."
+      _last="$_last It replays the commit REBASE_HEAD names (git show --stat REBASE_HEAD lists its files). Until that commit is made (it is made if git rev-parse HEAD REBASE_HEAD prints one object name twice), do not unstage a file it changed: that drops $_drop. Any other file can be unstaged (git restore --staged <path>), and so can any file once that commit is made."
     elif [ "$SEQ" = rebase ]; then
       _last="$_last Any file here can be unstaged (git restore --staged <path>)."
     else
@@ -12779,9 +12798,19 @@ PAY="$(mktemp "$COMMON/bootstrap-merge-back.in.XXXXXX" 2>/dev/null)" \
   || { PAY=""; finish 1 "ERROR cannot create a temporary file in $COMMON; nothing changed"; }
 printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git commit"}}' >"$PAY"
 
+# [WP3 fix6 CRIT5-1] A reftable repository (git 2.45 or later) keeps
+# CHERRY_PICK_HEAD and REVERT_HEAD in its ref store, with no file: a stopped
+# revert read as none, the merge went ahead, and its commit ended the revert
+# (measured, git 2.56). As spec-check.sh's _seqref, never by name lookup (a
+# branch so named resolves too); any file there still refuses, as before.
 for _op in CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply BISECT_LOG; do
-  [ -e "$(git rev-parse --git-path "$_op")" ] \
-    && not_started "a git operation ($_op) is in progress here; finish or abort it first"
+  _f=0
+  [ -e "$(git rev-parse --git-path "$_op")" ] && _f=1
+  case "$_f:$_op" in
+    0:*_HEAD) [ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ] \
+                && git show-ref --verify "$_op" >/dev/null 2>&1 && _f=1 ;;
+  esac
+  [ "$_f" = 1 ] && not_started "a git operation ($_op) is in progress here; finish or abort it first"
 done
 
 MH="$(merge_head)" || MH=""

@@ -1712,6 +1712,102 @@ check("retrofit, an allowlist that covers every prefix: no recipe that "
       "retrofit.legacy_allowlist (.claude/steering/spec-strategy.md) covers "
       "every one of hooks.spec_gate_commit_prefixes" in _flat,
       r.stderr[-1200:])
+# [WP3 fix6 RV5-MB-2] One probe name decided "covers every prefix": `*.txt`
+# matched src/confirm.txt (a `case` glob's `*` crosses `/`), so the
+# installer said no commit could confirm the line while src/confirm.py was
+# still checked. It now tries several names under each prefix.
+_rc = new_repo()
+write_hook(hook_path(_rc, "pre-commit"),
+           "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
+r = install(_rc, RETRO_CFG.format(allow="    - \"*.txt\"\n"))
+_flat = " ".join(r.stderr.split())
+check("retrofit, legacy allowlist *.txt: no claim that it covers every "
+      "prefix; the recipe names a file it leaves checked, `src/confirm.py` "
+      "(RV5-MB-2)",
+      r.returncode == 0 and "No commit can confirm" not in _flat
+      and "commit a file under src/ that no task file lists, such as "
+      "`src/confirm.py`" in _flat and "confirm.txt" not in _flat,
+      r.stderr[-1200:])
+harness_commit(_rc)
+put(_rc, "src/confirm.py", "c\n")
+git(_rc, "add", "src/confirm.py")
+_cc = git(_rc, "commit", "-q", "-m", "confirm", agent=True)
+git(_rc, "reset", "-q", "--soft", "HEAD~1")
+check("... and following it prints the warn week's line (RV5-MB-2)",
+      _cc.returncode == 0
+      and "the spec check would refuse this commit:" in _cc.stderr
+      and "  src/confirm.py" in _cc.stderr, (_cc.returncode, _cc.stderr[-400:]))
+# Every name tried is covered, but no pattern covers a prefix itself: no
+# example, and no claim that nothing can confirm the line.
+_rc = new_repo()
+write_hook(hook_path(_rc, "pre-commit"),
+           "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
+# (A line naming a prefix itself, with no `*`, covers no file under it.)
+r = install(_rc, RETRO_CFG.format(
+    allow="    - \"*confirm*\"\n    - \"*probe\"\n" + "".join(
+        f"    - \"{d}/\"\n" for d in ("src", "lib", "app", "test", "tests"))))
+_flat = " ".join(r.stderr.split())
+check("retrofit, an allowlist that covers every name tried but no prefix: "
+      "neither an example nor 'No commit can confirm'; it says to commit a "
+      "file the allowlist does not cover (RV5-MB-2)",
+      r.returncode == 0 and "No commit can confirm" not in _flat
+      and "such as `" not in _flat
+      and "To confirm the pre-commit line runs, commit a file under one of "
+      "hooks.spec_gate_commit_prefixes that no task file lists and "
+      "retrofit.legacy_allowlist (.claude/steering/spec-strategy.md) does "
+      "not cover (it covers every name this installer tried), from a "
+      "terminal with `CLAUDECODE=1 git commit`" in _flat, r.stderr[-1200:])
+harness_commit(_rc)
+put(_rc, "src/x.c", "c\n")
+git(_rc, "add", "src/x.c")
+_cc = git(_rc, "commit", "-q", "-m", "confirm", agent=True)
+git(_rc, "reset", "-q", "--soft", "HEAD~1")
+check("... and following it with a file the allowlist does not cover prints "
+      "the warn week's line (RV5-MB-2)",
+      _cc.returncode == 0
+      and "the spec check would refuse this commit:" in _cc.stderr
+      and "  src/x.c" in _cc.stderr, (_cc.returncode, _cc.stderr[-400:]))
+# [WP3 fix6 RV5-MB-3] The installer read the block only where a newline
+# came straight after BEGIN and END was present; the check's awk matches a
+# marker anywhere on its line and reads to the end of the file without
+# END. Trailing whitespace after BEGIN made the installer read an empty
+# allowlist and name src/confirm.txt, which the check exempts.
+for _label, _edit in (
+        ("trailing whitespace after the BEGIN marker",
+         lambda t: t.replace("<!-- LEGACY_ALLOWLIST_BEGIN -->\n",
+                             "<!-- LEGACY_ALLOWLIST_BEGIN --> \n")),
+        ("no END marker",
+         lambda t: t.replace("<!-- LEGACY_ALLOWLIST_END -->\n", ""))):
+    _rc = new_repo()
+    write_hook(hook_path(_rc, "pre-commit"),
+               "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
+    install(_rc, RETRO_CFG.format(allow="    - \"src/**\"\n"))
+    _ss = os.path.join(_rc, ".claude/steering/spec-strategy.md")
+    _t0 = read(_ss) or ""
+    put(_rc, ".claude/steering/spec-strategy.md", _edit(_t0))
+    r = install(_rc, RETRO_CFG.format(allow="    - \"src/**\"\n"))
+    _flat = " ".join(r.stderr.split())
+    harness_commit(_rc)
+    put(_rc, "src/confirm.txt", "c\n")
+    git(_rc, "add", "src/confirm.txt")
+    _cs = git(_rc, "commit", "-q", "-m", "exempt", agent=True)
+    git(_rc, "reset", "-q", "--soft", "HEAD~1")
+    git(_rc, "reset", "-q", "src/confirm.txt")
+    put(_rc, "lib/confirm.txt", "c\n")
+    git(_rc, "add", "lib/confirm.txt")
+    _cc = git(_rc, "commit", "-q", "-m", "confirm", agent=True)
+    git(_rc, "reset", "-q", "--soft", "HEAD~1")
+    check(f"retrofit, spec-strategy.md with {_label}: the recipe reads the "
+          f"allowlist as the check does (src/confirm.txt is exempt and prints "
+          f"nothing), so it names lib/confirm.txt, whose commit prints the "
+          f"warn week's line (RV5-MB-3)",
+          _edit(_t0) != _t0 and (read(_ss) or "") == _edit(_t0)
+          and "such as `lib/confirm.txt`" in _flat
+          and "src/confirm.txt" not in _flat
+          and _cs.returncode == 0 and "spec check" not in _cs.stderr
+          and "the spec check would refuse this commit:" in _cc.stderr
+          and "  lib/confirm.txt" in _cc.stderr,
+          (r.stderr[-800:], _cs.stderr[-300:], _cc.stderr[-300:]))
 proj = new_repo()
 write_hook(hook_path(proj, "pre-commit"),
            "#!/bin/sh\n" + GUARDED.format("pre-commit") + "\n")
