@@ -128,7 +128,10 @@ def _ic4_advisor_default() -> tuple[bool, str]:
     import llm_advisor
     model = getattr(llm_advisor, "DEFAULT_ADVISOR_MODEL", None)
     env = getattr(llm_advisor, "MODEL_ENV", None)
-    ok = model == "claude-sonnet-5" and env == "BOOTSTRAP_INTERVIEW_LLM_MODEL"
+    # [WP3 / model assignment] Moves with llm_advisor.DEFAULT_ADVISOR_MODEL:
+    # the constant alone would refuse every sdk-callable install.
+    ok = (model == "claude-sonnet-5-5"
+          and env == "BOOTSTRAP_INTERVIEW_LLM_MODEL")
     return ok, (f"advisor default is {model!r} (env-overridable via {env})"
                 if ok else
                 f"advisor default is {model!r}, MODEL_ENV={env!r}")

@@ -134,3 +134,74 @@ def emit(cfg: dict, *, header: str | None = None,
         lines.append("")
     _emit(cfg, 0, lines, sink, "")
     return "\n".join(lines) + "\n"
+
+
+# [WP3 fix1 INST-5] Keys no interview answer sets. tech.md, the README and
+# the interview's own toggle text send the operator to bootstrap.config.yaml
+# for them (workflow.ultracode, the cost opt-out; hooks.spec_gate_commit_mode
+# and its prefixes), and `synthesize` writes the config from the ANSWERS
+# block, so re-running it dropped them silently: the next install turned
+# ultracode back on and reverted a pinned `block` to warn. Whole sections
+# no interview writes (`workflow`, `mcp`) and the `hooks` settings that are
+# not on/off toggles. A toggle is an answer in the greenfield interview,
+# and the security gates' toggles are never carried (WP1 D3: a written
+# `false` made gate-off sticky).
+CONFIG_ONLY_SECTIONS = ("workflow", "mcp")
+CONFIG_ONLY_HOOK_KEYS = ("spec_gate_commit_mode", "spec_gate_commit_prefixes",
+                         "drift_tool_call_threshold",
+                         "drift_session_duration_minutes",
+                         "drift_file_read_threshold")
+
+
+def carry_config_only(new: dict, old) -> list[str]:
+    """Copy into `new` each config-only key the replaced config `old` set
+    and `new` does not. Returns the dotted names copied, in file order."""
+    kept: list[str] = []
+    if not isinstance(old, dict):
+        return kept
+    for sec in CONFIG_ONLY_SECTIONS:
+        src = old.get(sec)
+        if not isinstance(src, dict):
+            continue
+        dst = new.setdefault(sec, {})
+        if not isinstance(dst, dict):
+            continue
+        for k, v in src.items():
+            if k not in dst:
+                dst[k] = v
+                kept.append(f"{sec}.{k}")
+        if not dst:
+            del new[sec]
+    src = old.get("hooks")
+    if isinstance(src, dict):
+        for k in CONFIG_ONLY_HOOK_KEYS:
+            if k in src and k not in (new.get("hooks") or {}):
+                new.setdefault("hooks", {})[k] = src[k]
+                kept.append(f"hooks.{k}")
+    return kept
+
+
+def carry_from_file(out_path, new: dict) -> list[str]:
+    """[WP3 fix1 INST-5] carry_config_only from the config file `synthesize`
+    is about to replace. Returns the lines to show the operator: none when
+    there is no such file or nothing to keep."""
+    from minyaml import load_yaml
+    try:
+        text = out_path.read_text()
+    except FileNotFoundError:
+        return []
+    except (OSError, ValueError) as exc:
+        return [f"Could not read the {out_path} this replaces ({exc}), so "
+                f"none of its hand-set keys (workflow, mcp, hooks settings) "
+                f"was kept."]
+    try:
+        old = load_yaml(text)
+    except ValueError as exc:
+        return [f"Could not parse the {out_path} this replaces ({exc}), so "
+                f"none of its hand-set keys (workflow, mcp, hooks settings) "
+                f"was kept."]
+    kept = carry_config_only(new, old)
+    if not kept:
+        return []
+    return [f"Kept from the {out_path} this replaces, because no interview "
+            f"answer sets them: " + ", ".join(kept) + "."]

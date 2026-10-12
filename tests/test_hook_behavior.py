@@ -84,6 +84,11 @@ commands:
   lint: "true"
   format: "true"
   ci_local: "true"
+# [WP3 / D2] block: the rows below exercise the spec gate's REFUSAL
+# path. warn, the default WP3 ships, is pinned in
+# tests/test_spec_check.py.
+hooks:
+  spec_gate_commit_mode: block
 """
 
 cfg_path = os.path.join(TMP, "config.yaml")

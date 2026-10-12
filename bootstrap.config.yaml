@@ -66,6 +66,13 @@ deps:
 hooks:
   spec_gate_entry: true
   spec_gate_commit: true
+  # [WP3, 2026-10-05] The spec commit check runs from git pre-commit and
+  # pre-merge-commit hooks the installer writes, for agent commits only. A
+  # changed file under one of the prefixes must be listed in a task file's
+  # Files: block. warn (the default) lets an unlisted file through with a
+  # message; block refuses the commit.
+  # spec_gate_commit_mode: "warn"     # warn | block
+  # spec_gate_commit_prefixes: ["src/", "lib/", "app/", "test/", "tests/"]
   secrets_gate: true        # off only: secrets.enabled false wins
   test_gate: true
   format_lint_gate: true
@@ -129,7 +136,20 @@ workflow:
   # (worktree when true, none when false) and is what you want unless you know
   # otherwise. Force `worktree` when each worktree gets its own mount (e.g. a
   # per-worktree compose project); force `none` to disable the isolation
-  # outright. This key exists so you never have to hand-edit the emitted
-  # implementer.md -- a hand-edit trips the digest guard and that file then
-  # SKIPs forever, keeping your change and losing every upstream fix to it.
+  # outright. [WP3 fix2 IT-3] `auto` is none for a project installed below its
+  # repository's top, where Claude Code makes the worktree at the top; a
+  # forced `worktree` there gets the implementer's commits refused unless
+  # commands.test also works from the repository top. This key exists so you
+  # never have to hand-edit the emitted implementer.md -- a hand-edit trips
+  # the digest guard and that file then SKIPs forever, keeping your change
+  # and losing every upstream fix to it.
   implementer_isolation: "auto"
+  # [WP3, 2026-10-05] ultracode: true (the default) adds "ultracode": true to
+  # .claude/settings.json unless you set that key there yourself. It is one
+  # switch for the whole main session, Sonnet sessions included (Haiku
+  # ignores it), never for a subagent: the session is told to use the
+  # Workflow tool on every substantive task with token cost no constraint,
+  # so sessions cost more. false adds none and removes only a value the
+  # installer added. Unattended `claude -p` runs should pass
+  # --settings '{"ultracode": false}'.
+  # ultracode: true

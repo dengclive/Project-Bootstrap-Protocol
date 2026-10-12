@@ -162,22 +162,43 @@ tmp = tempfile.mkdtemp(prefix="blklog-")
 try:
     # ------------------------------------------------------------------ #
     print("\n== every non-security block writes a BLOCK line ==")
-    d = _project(tmp, "p", CFG)
+    # [WP3 critic 1m] The spec gate's mode is set, never inherited from
+    # DEFAULTS: warn here, block on the copy below.
+    d = _project(tmp, "p", CFG + "hooks:\n  spec_gate_commit_mode: warn\n")
     os.makedirs(os.path.join(d, "src"))
     open(os.path.join(d, "src", "a.py"), "w").write("x\n")
     _git(d, "add", "src/a.py")
 
-    rc, _, dl = _hook(d, "spec-gate-commit", _bash("git commit -m x"))
+    # [WP3 / D2] spec-gate-commit blocks only in block mode (warn is the
+    # default WP3 ships), so its rows run on a block-mode copy.
+    db = _project(tmp, "pb", CFG + "hooks:\n  spec_gate_commit_mode: block\n")
+    # These rows test the PreToolUse FALLBACK, which defers to the git
+    # pre-commit hook when the installer has written one: take it away.
+    for _pd in (d, db):
+        for _h in ("pre-commit", "pre-merge-commit"):
+            try:
+                os.remove(os.path.join(_pd, ".git", "hooks", _h))
+            except FileNotFoundError:
+                pass
+    os.makedirs(os.path.join(db, "src"))
+    open(os.path.join(db, "src", "a.py"), "w").write("x\n")
+    _git(db, "add", "src/a.py")
+    rc, _, dl = _hook(db, "spec-gate-commit", _bash("git commit -m x"))
     check("spec-gate-commit: an unreferenced file logs its BLOCK line",
           _blocked("spec-gate-commit", rc, dl, "unreferenced: src/a.py"),
           f"rc={rc} log={dl!r}")
-    # No spec corpus at all: INDEX.md moved aside, no tasks/ files.
-    idx = os.path.join(d, ".claude", "specs", "INDEX.md")
+    # No spec corpus at all: INDEX.md moved aside, no tasks/ files. The
+    # check names the same file; the log line is the same.
+    idx = os.path.join(db, ".claude", "specs", "INDEX.md")
     os.rename(idx, idx + ".aside")
-    rc, _, dl = _hook(d, "spec-gate-commit", _bash("git commit -m x"))
+    rc, _, dl = _hook(db, "spec-gate-commit", _bash("git commit -m x"))
     os.rename(idx + ".aside", idx)
     check("spec-gate-commit: no spec corpus logs its BLOCK line",
-          _blocked("spec-gate-commit", rc, dl, "no active spec/task files"),
+          _blocked("spec-gate-commit", rc, dl, "unreferenced: src/a.py"),
+          f"rc={rc} log={dl!r}")
+    rc, _, dl = _hook(d, "spec-gate-commit", _bash("git commit -m x"))
+    check("spec-gate-commit, warn: exit 0 and a WARN line",
+          rc == 0 and " spec-gate-commit WARN unreferenced: src/a.py" in dl,
           f"rc={rc} log={dl!r}")
 
     rc, _, dl = _hook(d, "test-gate", _bash("git commit -m x"))

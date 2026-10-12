@@ -1048,6 +1048,57 @@ with tempfile.TemporaryDirectory() as _d:
           _r.returncode == 0 and "REJECTED" not in _r.stdout
           and os.path.isfile(os.path.join(_d, "sub", "c.yaml")))
 
+# [WP3 fix1 INST-5] Keys no ANSWERS line sets (workflow.ultracode, the cost
+# opt-out; hooks.spec_gate_commit_mode and its prefixes) live only in
+# bootstrap.config.yaml, and re-running synthesize over it dropped them
+# with an "(OK)": the next install turned ultracode back on and reverted a
+# pinned block to warn. A toggle an answer decides is the ANSWERS block's,
+# and the security gates' toggles are never written (WP1 D3).
+with tempfile.TemporaryDirectory() as _d:
+    open(os.path.join(_d, "p.md"), "w").write(SAMPLE_TEXT)
+    subprocess.run([sys.executable, BIN, "analyze", "--prd", "p.md", "-o",
+                    "iv.md"], cwd=_d, capture_output=True, text=True)
+    _syn = [sys.executable, BIN, "synthesize", "-i", "iv.md", "-o", "c.yaml"]
+    subprocess.run(_syn, cwd=_d, capture_output=True, text=True)
+    _cp = os.path.join(_d, "c.yaml")
+    with open(_cp, "a") as _fh:
+        _fh.write('workflow:\n  ultracode: false\n  reviewer_model: "sonnet"\n'
+                  'hooks:\n  spec_gate_commit_mode: "block"\n'
+                  '  spec_gate_commit_prefixes:\n    - "src/"\n    - "pkg/"\n'
+                  '  test_gate: false\n  secrets_gate: false\n')
+    _r = subprocess.run(_syn, cwd=_d, capture_output=True, text=True)
+    _c2 = load_yaml(open(_cp).read())
+    check("INST-5: re-running synthesize keeps the config-only keys of the "
+          "file it replaces (workflow.*, the spec gate's mode and prefixes)",
+          _r.returncode == 0
+          and _c2.get("workflow") == {"ultracode": False,
+                                      "reviewer_model": "sonnet"}
+          and _c2.get("hooks", {}).get("spec_gate_commit_mode") == "block"
+          and _c2.get("hooks", {}).get("spec_gate_commit_prefixes")
+          == ["src/", "pkg/"])
+    check("... and says which, on its output",
+          "Kept from the c.yaml this replaces, because no interview answer "
+          "sets them: workflow.ultracode, workflow.reviewer_model, "
+          "hooks.spec_gate_commit_mode, hooks.spec_gate_commit_prefixes."
+          in _r.stdout)
+    check("... but not a gate toggle (an answer decides it) nor a security "
+          "gate's toggle (D3: never written)",
+          "test_gate" not in _c2.get("hooks", {})
+          and "secrets_gate" not in _c2.get("hooks", {}))
+    _pc = subprocess.run([sys.executable, INSTALL_BIN, "-c", _cp, "-C", _d,
+                          "--print-config"], capture_output=True, text=True)
+    _pj = json.loads(_pc.stdout) if _pc.returncode == 0 else {}
+    check("... so the config the next install reads keeps the opt-out and "
+          "the block pin", _pj.get("workflow", {}).get("ultracode") is False
+          and _pj.get("hooks", {}).get("spec_gate_commit_mode") == "block")
+    with open(_cp, "w") as _fh:
+        _fh.write("workflow: [unclosed\n")
+    _r = subprocess.run(_syn, cwd=_d, capture_output=True, text=True)
+    check("a replaced file that does not parse: synthesize still writes, "
+          "and says nothing of it was kept",
+          _r.returncode == 0 and "Could not parse the c.yaml this replaces"
+          in _r.stdout and "workflow" not in load_yaml(open(_cp).read()))
+
 
 class _KeyedResponder:
     """Answers by prompt substring; Enter for everything else."""

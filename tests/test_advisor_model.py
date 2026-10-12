@@ -43,15 +43,27 @@ PRD = "# Demo Service\nA REST API service for managing widgets.\n"
 
 # --------------------------------------------------------------------------- #
 # AC-3-1: the default resolves to a live ID; the retired string is gone.
-# "claude-sonnet-5" is the current Sonnet's Claude API ID and alias (a
+# "claude-sonnet-5" was the current Sonnet's Claude API ID and alias (a
 # dateless pinned snapshot), verified against the platform.claude.com models
 # overview on 2026-07-17. "claude-sonnet-4-20250514" is retired.
+# [WP3 / model assignment, operator decision 2026-10-05] The default is now
+# "claude-sonnet-5-5", the newest Sonnet (measured: the `sonnet` alias
+# resolves to it on first-party, Claude Code 2.1.289). Asserted by
+# ATTRIBUTE as well as in source, and IC-4 must agree: the two move
+# together or every sdk-callable install is refused.
 # --------------------------------------------------------------------------- #
 src = open(os.path.join(ROOT, "lib", "llm_advisor.py")).read()
 check("AC-3-1: retired claude-sonnet-4-20250514 absent from source",
       "claude-sonnet-4-20250514" not in src)
-check("AC-3-1: default is claude-sonnet-5",
-      '"claude-sonnet-5"' in src)
+check("AC-3-1: default is claude-sonnet-5-5",
+      '"claude-sonnet-5-5"' in src)
+check("AC-3-1 [WP3]: DEFAULT_ADVISOR_MODEL is claude-sonnet-5-5 (attribute)",
+      llm_advisor.DEFAULT_ADVISOR_MODEL == "claude-sonnet-5-5",
+      llm_advisor.DEFAULT_ADVISOR_MODEL)
+import ic_checks                                       # noqa: E402
+_ic4_ok, _ic4_detail = ic_checks._ic4_advisor_default()
+check("AC-3-1 [WP3]: IC-4 passes on the new default (they move together)",
+      _ic4_ok and "'claude-sonnet-5-5'" in _ic4_detail, _ic4_detail)
 check("AC-3-1: BOOTSTRAP_INTERVIEW_LLM_MODEL override retained",
       "BOOTSTRAP_INTERVIEW_LLM_MODEL" in src)
 

@@ -36,7 +36,7 @@ from pathlib import Path
 
 import retrofit_heuristics as RH
 import prd_heuristics as PH  # for ARCHETYPE_REQUIRED_TIER, TIER_ORDER, CONF_*
-from configemit import emit
+from configemit import carry_from_file, emit
 from defaults import (
     resolve_config, ARCHETYPES, RETROFIT_SPEC_STRATEGIES,
     RETROFIT_PM_STRATEGIES,
@@ -949,6 +949,9 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
 def _finalize(answers: dict, proposal: dict, out_path: Path, *,
               outstream) -> int:
     cfg = answers_to_config(answers, proposal)
+    # [WP3 fix1 INST-5] Keep the hand-set keys no answer sets.
+    for line in carry_from_file(out_path, cfg):
+        outstream.write(f"\n{line}\n")
     errs = validate_config_dict(cfg)
     if errs:
         outstream.write("\nConfig did NOT validate (resolve_config + "

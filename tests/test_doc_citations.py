@@ -34,7 +34,8 @@ suite tells you what it should be.
 SCOPE, stated rather than implied.
   IN:  explicit `Bootstrap-Protocol*.md:NNN` / `:NNN-MMM` citations in LIVE
        files, including the one that is EMITTED (lib/templates.py), where the
-       filename and the `:NNN` are on DIFFERENT LINES.
+       filename and the `:NNN` are on DIFFERENT LINES; and, since WP3's fix
+       round 1, `bootstrap.config.yaml:NNN` citations (review RC-5).
   OUT: (a) HISTORICAL records — `docs/changelog.md` and closed backlog rows
        date-stamp their citations, and renumbering them to today's lines would
        corrupt the record by asserting a line that did not exist on that date;
@@ -78,6 +79,11 @@ FROZEN_V200 = "Bootstrap-Protocol-v2-0-0.md"
 # CITED as well as historical-as-a-CITER: `.claude/dynamic-workflow-policy.md`
 # quotes it by line, and this branch's own 66-line prepend rotted that citation.
 CHANGELOG = "docs/changelog.md"
+# [WP3 fix1, review RC-5] The config fixture is cited by line too. WP2 and
+# WP3 each moved its `workflow:` block (:116 at c67b962, :121 at 3d866f4,
+# :128 after WP3) and nothing checked the citation, because the scan below
+# covered only the two living documents above.
+CONFIG = "bootstrap.config.yaml"
 
 # (citing file, cited doc, anchor). The anchor must be unique in the cited doc;
 # section 1 enforces that. `Iteration-summary enforcement` alone is NOT unique
@@ -119,6 +125,9 @@ CITATIONS = [
      "**`.claude/goal-config.md`** — operator-tunable settings"),
     (".claude/dynamic-workflow-policy.md", CHANGELOG,
      "**A judge that only scores designs inherits their shared blind"),
+    # The `workflow:` block's own line; "workflow:" occurs once in the file
+    # (section 1 fails loudly if a comment ever repeats it).
+    (".claude/dynamic-workflow-policy.md", CONFIG, "workflow:"),
 ]
 
 # Normalise: rows may be 3-tuples (single line) or 4-tuples (a range).
@@ -261,7 +270,8 @@ print("\n=== Section 4: the table covers every live citation ===")
 _re_lic = re.compile(r"LICEN[CS]E(\.(txt|md))?")
 
 SCAN = re.compile(
-    r"((?:Bootstrap-Protocol(?:-Companion)?-v\d+-\d+-\d+|docs/changelog)\.md)" + CITE)
+    r"((?:Bootstrap-Protocol(?:-Companion)?-v\d+-\d+-\d+|docs/changelog)\.md"
+    r"|bootstrap\.config\.yaml)" + CITE)
 
 try:
     tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True,

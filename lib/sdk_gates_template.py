@@ -108,6 +108,43 @@ LINT_UNSET_NOTICE = (
 # `tail -n LINES | tail -c BYTES`, the SDK with _runner_tail.
 RUNNER_TAIL_LINES = 100
 RUNNER_TAIL_BYTES = 20000
+# [WP3 fix1 INST-3] spec-gate-commit's fallback note where a re-install adds
+# no git hook: another tool's pre-commit hook is in place, or core.hooksPath
+# is set. "Re-run bootstrap-install to add it" was false there. Printed
+# inside "..." by the shell hook: no ", $, ` or backslash. [WP3 fix2 IT-1,
+# RG-2] The fallback defers to bootstrap-install's own shim only, so these
+# no longer say whether that hook runs the check: its text cannot tell
+# (a line after husky 9's `. h`, after an exec, or in a comment never runs).
+SPEC_FALLBACK_NOTE_FOREIGN = (
+    "(spec-gate-commit, the PreToolUse fallback: git's pre-commit hook here "
+    "is not the one bootstrap-install wrote (another tool's, or an edited "
+    "copy), so this check read the index as it stood before this command "
+    "and does not see files the command stages. If that hook, or a hook "
+    "manager's config file, runs .claude/githooks/dispatch pre-commit, the "
+    "message it prints at commit time is the one that counts.)")
+SPEC_FALLBACK_NOTE_HOOKS_PATH = (
+    "(spec-gate-commit, the PreToolUse fallback: core.hooksPath is set, and "
+    "git finds no pre-commit hook there, so this check read the index as it "
+    "stood before this command and does not see files the command stages. "
+    "Have that directory's pre-commit hook run .claude/githooks/dispatch "
+    "pre-commit; bootstrap-install's warning gives the line.)")
+# [WP3 fix3 HD-5] core.hooksPath set to an empty value turns off every git
+# hook (measured on git 2.38.0, 2.49.1 and 2.55.0), and a re-install alone
+# cannot add one.
+SPEC_FALLBACK_NOTE_HOOKS_OFF = (
+    "(spec-gate-commit, the PreToolUse fallback: core.hooksPath is set to an "
+    "empty value, which turns off every git hook in this repository, so this "
+    "check read the index as it stood before this command and does not see "
+    "files the command stages. Unset core.hooksPath and re-run "
+    "bootstrap-install to add the git hook.)")
+# [WP3 fix2 IT-2] git skips a hook that is not executable (it prints a hint
+# saying so), whoever wrote it.
+SPEC_FALLBACK_NOTE_NOEXEC = (
+    "(spec-gate-commit, the PreToolUse fallback: git's pre-commit hook here "
+    "is not executable, so git skips it, and this check read the index as "
+    "it stood before this command and does not see files the command "
+    "stages. Make the hook executable (chmod +x); a re-install does that "
+    "for the hook bootstrap-install wrote.)")
 # [WP2 re-review RR1-EMB-1] What a blocking gate says when it cannot create
 # a file to capture the runner's output: it runs the runner anyway, output
 # discarded, and the verdict is the runner's exit status. The shell hooks
@@ -174,6 +211,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import hashlib
 import os
 import re
 import shlex
@@ -1673,69 +1711,690 @@ def _match_secret(target, patterns, dir_ok=True, dotenv_tmpl=False):
 
 
 # [upstream P1-2, lens B finding 8] Enforcement is scoped to IMPLEMENTATION
-# paths. The shell gate got this at v2.6.0 and this module did NOT - it still
-# iterated every staged file - so under `gate_substrate: "sdk-callable"` the
-# bootstrap commit was still impossible (the gate blocked its own
-# `.claude/specs/INDEX.md`), which is the half of P1-2 the changelog reported
-# as fixed. Same constant, same order, so the two substrates cannot drift.
+# paths, so the bootstrap commit of .claude/ itself passes.
+# [WP3 / D2] The prefixes are config now (hooks.spec_gate_commit_prefixes,
+# carried in RESOLVED_CONFIG); this tuple is only the default, the same one
+# lib/templates.SPEC_GATE_DEFAULT_PREFIXES renders into
+# .claude/githooks/spec-check.sh.
 _ENFORCED_PREFIXES = ("src/", "lib/", "app/", "test/", "tests/")
+_SPEC_CAND_CAP = 8
+_SPEC_CTRL = {c: "?" for c in range(32)}
+_SPEC_FALLBACK_NOTE = (
+    "(spec-gate-commit, the PreToolUse fallback: the git pre-commit hook "
+    "that runs this check on the real staged set is not installed in this "
+    "clone, so files staged by this same command are not seen. Re-run "
+    "bootstrap-install to add it.)")
+# [WP3 fix1, operator decision 2026-10-06 (2)] The note for a project below
+# the repository top, where a re-install adds no git hook.
+_SPEC_FALLBACK_NOTE_BELOW = (
+    "(spec-gate-commit, the PreToolUse fallback: this project is below the "
+    "repository's top level, where no git pre-commit hook runs this check "
+    "on the real staged set, so files staged by this same command are not "
+    "seen.)")
+
+
+def _spec_is_task_or_index(p):
+    """.claude/specs/INDEX.md, or a task file .claude/specs/<slug>/tasks/
+    <file> (no dot-named slug or file), as spec-check.sh's case arms."""
+    if p == ".claude/specs/INDEX.md":
+        return True
+    if not p.startswith(".claude/specs/"):
+        return False
+    parts = p[len(".claude/specs/"):].split("/")
+    return (len(parts) == 3 and parts[1] == "tasks" and bool(parts[0])
+            and not parts[0].startswith(".") and bool(parts[2])
+            and not parts[2].startswith("."))
+
+
+def _spec_parse_task(text):
+    """[WP3 / D2] One task file -> (status, has_files_block, entries): the
+    records spec-check.sh's awk program prints, in the same order."""
+    status, hasb, ents = "", False, []
+    fm, inb = 0, False
+    for ln, raw in enumerate(text.split("\\n"), 1):
+        line = raw.rstrip(" \\t\\r")
+        if ln == 1 and line == "---":
+            fm = 1
+            continue
+        if fm == 1:
+            if line in ("---", "..."):
+                fm = 2
+            elif line.startswith("status:"):
+                v = line[len("status:"):].lstrip(" \\t")
+                status = v.replace('"', "").replace("'", "").lower()
+            continue
+        if inb:
+            if line[:2] == "- ":
+                e = line[2:].lstrip(" \\t")
+                if e:
+                    ents.append(e)
+                continue
+            inb = False
+        if line == "Files:":
+            inb, hasb = True, True
+    return status, hasb, ents
+
+
+async def _spec_pre_commit_hook(proj):
+    """The pre-commit file where git will look for it (--git-path hooks),
+    or None when git cannot say."""
+    try:
+        rc, out, _ = await _run(["git", "rev-parse", "--git-path", "hooks"],
+                                cwd=proj, shell=False)
+    except OSError:
+        return None
+    hd = out.strip()
+    if rc != 0 or not hd:
+        return None
+    pc = Path(hd) if os.path.isabs(hd) else proj / hd
+    return pc / "pre-commit"
+
+
+async def _spec_git_hook_installed(proj):
+    """[WP3 / D2] Is the git pre-commit shim (the check on the REAL staged
+    set) installed where git will run it? Same test as spec-gate-commit.sh.
+    [WP3 fix2 IT-1, IT-2, IT-5, MR-4, RG-2] Only bootstrap-install's own
+    shim, byte for byte (_SPEC_SHIM_SHA256), executable, and only at the
+    repository top: the shim runs the top's check, never a package's below
+    it. A hook that merely held the text .claude/githooks/dispatch
+    pre-commit was deferred to, and the check then ran nowhere."""
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+    if rc != 0 or _spec_line(out):
+        return False
+    pc = await _spec_pre_commit_hook(proj)
+    if pc is None:
+        return False
+    try:
+        if not (pc.is_file() and os.access(pc, os.X_OK)):
+            return False
+        data = pc.read_bytes()
+    except OSError:
+        return False
+    return hashlib.sha256(data).hexdigest() == _SPEC_SHIM_SHA256
+
+
+async def _spec_fallback_note(proj):
+    """[WP3 fix1 INST-3] The fallback's note, as spec-gate-commit.sh picks
+    it: a pre-commit hook in place that is not bootstrap-install's shim
+    ([WP3 fix2 IT-2] or is not executable), else core.hooksPath set
+    ([WP3 fix3 HD-5] or set to an empty value, which turns hooks off), else
+    the hook is missing and a re-install adds it. (Below the top the
+    caller overrides it.)"""
+    pc = await _spec_pre_commit_hook(proj)
+    if pc is not None and pc.exists():
+        return (_SPEC_FALLBACK_NOTE_FOREIGN if os.access(pc, os.X_OK)
+                else _SPEC_FALLBACK_NOTE_NOEXEC)
+    try:
+        rc, out, _ = await _run(["git", "config", "--get", "core.hooksPath"],
+                                cwd=proj, shell=False)
+    except OSError:
+        rc, out = 1, ""
+    if rc == 0 and out.rstrip("\\n"):
+        return _SPEC_FALLBACK_NOTE_HOOKS_PATH
+    if rc == 0:
+        return _SPEC_FALLBACK_NOTE_HOOKS_OFF
+    return _SPEC_FALLBACK_NOTE
+
+
+async def _spec_git(cwd, *args, inp=None):
+    """[WP3 fix1 SDKP-1] git with bytes in and out, as spec-check.sh reads
+    git. Names go through os.fsdecode (surrogateescape), so a name that is
+    not UTF-8 goes back to git as the same bytes; with _run's
+    errors="replace" such a task file could not be read. Returns (rc,
+    stdout bytes, stderr text)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=str(cwd),
+            stdin=(asyncio.subprocess.PIPE if inp is not None
+                   else asyncio.subprocess.DEVNULL),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await proc.communicate(inp)
+    except OSError as exc:
+        return 127, b"", str(exc)
+    return proc.returncode, out or b"", (err or b"").decode(errors="replace")
+
+
+def _spec_names(out):
+    """A -z name list from git -> names."""
+    return [os.fsdecode(n) for n in out.split(b"\\0") if n]
+
+
+def _spec_line(out):
+    """One line of git output, its newline dropped, as a name."""
+    return os.fsdecode(out[:-1] if out.endswith(b"\\n") else out)
+
+
+def _spec_err(err):
+    """spec-check.sh's _err: the stderr, trailing newlines dropped, cut at
+    300 (SDKP-5: the cut kept git's newline, so the texts differed)."""
+    return err.rstrip("\\n")[:300]
+
+
+def _spec_disp(p):
+    """A name as spec-check.sh prints it: control characters as "?", and
+    bytes that are not UTF-8 as U+FFFD (a message must be valid text)."""
+    return (p.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+            .translate(_SPEC_CTRL))
+
+
+async def _spec_gitv(top, major, minor):
+    """[WP3 fix2 MR-1] spec-check.sh's _gitv: this git is MAJOR.MINOR or
+    later, read from `git version` as the shell reads it."""
+    rc, out, _ = await _spec_git(top, "version")
+    v = out.decode("utf-8", "replace").rstrip("\\n") if rc == 0 else ""
+    if v.startswith("git version "):
+        v = v[len("git version "):]
+    j = v.split(".", 1)[0]
+    v = v.split(".", 1)[1] if "." in v else v
+    n = v.split(".", 1)[0]
+    if not (re.fullmatch("[0-9]{1,4}", j) and re.fullmatch("[0-9]{1,4}", n)):
+        return False
+    return int(j) > major or (int(j) == major and int(n) >= minor)
+
+
+async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
+    """[WP3 / D2] Port of .claude/githooks/spec-check.sh (the canonical copy).
+    Returns (rc, message, missing): rc 0 = every enforced path is covered,
+    2 = some is not (message names the task file to edit), 3 = the check
+    could not run. `changed` None reads the staged set; a given `changed`
+    holds paths from the project directory, as --files does. `mode` is the
+    caller's hooks.spec_gate_commit_mode (the shell reads it from
+    BOOTSTRAP_SPEC_MODE, as it does here when `mode` is None).
+
+    [WP3 fix1] As the shell check: a project below the repository top is
+    checked on its own paths and its own .claude/specs (operator decision
+    2026-10-06 (2)); a commit that concludes a merge on the merge's own
+    changes (decision (1)); task files read through one checkout-index
+    (SDKP-1: filters, encodings, gitlinks and names that are not UTF-8 read
+    as the shell reads them); the remedy follows the commit's form.
+    [WP3 fix2] The merge's own changes are judged against git's automatic
+    merge result (MR-1); a stopped cherry-pick or revert likewise (MR-2);
+    unmerged task files do not count (MR-5); below the top, a mention of
+    the path from the repository top covers too (MR-7). [WP3 fix3] Also a
+    merge of unrelated histories (MR2-1), and a commit made while a rebase
+    or `git am` is stopped (MR2-3); the whole change has its own reason on
+    any git (MR2-4)."""
+    if mode is None:
+        mode = os.environ.get("BOOTSTRAP_SPEC_MODE", "")
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-toplevel")
+    if rc != 0:
+        return 3, "spec check: not inside a git work tree", []
+    top = _spec_line(out)
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+    pfx = _spec_line(out) if rc == 0 else ""
+
+    async def git(*args, inp=None):
+        return await _spec_git(top, *args, inp=inp)
+
+    async def git_path(name, exists=os.path.isfile):
+        rc, out, _ = await git("rev-parse", "--git-path", name)
+        f = _spec_line(out) if rc == 0 else ""
+        if f and not os.path.isabs(f):
+            f = os.path.join(top, f)
+        return f if f and exists(f) else ""
+
+    mpar, seq, rule, pick = [], "", "", ""
+    if changed is None:
+        rc, out, err = await git("diff", "--cached", "--name-only", "-z",
+                                 "--no-renames")
+        if rc != 0:
+            return 3, "spec check: git diff --cached failed: " + _spec_err(err), []
+        raw = _spec_names(out)
+        # A merge: MERGE_HEAD, or inside pre-merge-commit GITHEAD_<oid>.
+        mh = await git_path("MERGE_HEAD")
+        if mh:
+            try:
+                with open(mh, "rb") as fh:
+                    mpar = [os.fsdecode(o) for o in fh.read().split(b"\\n")
+                            if o]
+            except OSError:
+                mpar = []
+        elif os.environ.get("BOOTSTRAP_GIT_HOOK") == "pre-merge-commit":
+            mpar = [k[len("GITHEAD_"):] for k in os.environ
+                    if k.startswith("GITHEAD_")]
+        if mpar:
+            seq = "merge"
+        else:
+            # [WP3 fix2 MR-2] A cherry-pick or revert stopped on conflicts.
+            for s_, name in (("pick", "CHERRY_PICK_HEAD"),
+                             ("revert", "REVERT_HEAD")):
+                f = await git_path(name)
+                if f:
+                    try:
+                        with open(f, "rb") as fh:
+                            pick = os.fsdecode(fh.read().split(b"\\n", 1)[0])
+                    except OSError:
+                        pick = ""
+                    seq = s_
+                    break
+        if not seq:
+            # [WP3 fix3 MR2-3] A `git commit` made while a rebase or `git
+            # am` is stopped (spec-check.sh): a rebase that names its commit
+            # (REBASE_HEAD) is judged as a stopped pick; `git am` names none.
+            ra = await git_path("rebase-apply", os.path.isdir)
+            rm = await git_path("rebase-merge", os.path.isdir)
+            if ra and os.path.isfile(os.path.join(ra, "applying")):
+                seq = "am"
+            elif rm or ra:
+                seq = "rebase"
+                f = await git_path("REBASE_HEAD")
+                if f:
+                    try:
+                        with open(f, "rb") as fh:
+                            pick = os.fsdecode(fh.read().split(b"\\n", 1)[0])
+                    except OSError:
+                        pick = ""
+        if seq:
+            for o in (mpar if seq == "merge" else
+                      [] if seq in ("am", "rebase") and not pick else [pick]):
+                if not o or re.search("[^0-9a-f]", o):
+                    return 3, ("spec check: the %s's other commit '%s' is not "
+                               "an object name" % (seq, _spec_disp(o))), []
+            rule, mt = "parents", []
+            if seq == "merge":
+                if len(mpar) == 1 and await _spec_gitv(top, 2, 38):
+                    # [WP3 fix3 MR2-1] unrelated histories (an import).
+                    rule, mt = "auto", ["--allow-unrelated-histories",
+                                        "HEAD", mpar[0]]
+            else:
+                # [WP3 fix3 MR2-4] old: git before 2.40; whole: its commit
+                # is a merge or has no parent, or there is none (git am).
+                rule = "whole"
+                if pick and not await _spec_gitv(top, 2, 40):
+                    rule = "old"
+                elif pick:
+                    rc2, _o2, _ = await git("rev-parse", "-q", "--verify",
+                                            pick + "^2")
+                    rc1, out1, _ = await git("rev-parse", "-q", "--verify",
+                                             pick + "^1")
+                    if rc2 != 0 and rc1 == 0:
+                        pb = _spec_line(out1)
+                        rule = "auto"
+                        mt = (["--merge-base=" + pick, "HEAD", pb]
+                              if seq == "revert" else
+                              ["--merge-base=" + pb, "HEAD", pick])
+            if rule == "auto":
+                # A conflicted path, or one where the index differs from
+                # git's automatic result.
+                rc, out, err = await git("merge-tree", "--write-tree",
+                                         "--no-messages", "--name-only",
+                                         "-z", *mt)
+                if rc not in (0, 1):
+                    return 3, ("spec check: git merge-tree failed: "
+                               + _spec_err(err)), []
+                parts = out.split(b"\\0")
+                tree = parts[0].decode("ascii", "replace")
+                if not tree or re.search("[^0-9a-f]", tree):
+                    return 3, "spec check: git merge-tree gave no tree", []
+                keep = set(_spec_names(b"\\0".join(parts[1:])))
+                rc, out, err = await git("diff", "--cached", "--name-only",
+                                         "-z", "--no-renames", tree, "--")
+                if rc != 0:
+                    return 3, ("spec check: git diff --cached %s failed: %s"
+                               % (tree, _spec_err(err))), []
+                keep |= set(_spec_names(out))
+                raw = [f for f in raw if f in keep]
+            elif rule == "parents":
+                # Older git, or an octopus merge: the paths that differ
+                # from EVERY parent.
+                for o in mpar:
+                    rc, out, err = await git("diff", "--cached", "--name-only",
+                                             "-z", "--no-renames", o, "--")
+                    if rc != 0:
+                        return 3, ("spec check: git diff --cached %s failed: %s"
+                                   % (o, _spec_err(err))), []
+                    keep = set(_spec_names(out))
+                    raw = [f for f in raw if f in keep]
+        changed = ([f[len(pfx):] for f in raw if f.startswith(pfx)] if pfx
+                   else raw)
+    enf, ch_t = [], set()
+    for f in changed:
+        f = f[2:] if f.startswith("./") else f
+        if not f:
+            continue
+        if f.endswith("/"):
+            return 3, ("spec check: '%s' ends in \\"/\\": pass file paths, "
+                       "not directories" % _spec_disp(f)), []
+        # A task file in the change set: the refusal names it first.
+        if f.startswith(".claude/specs/") and "/tasks/" in f[14:]:
+            ch_t.add(f)
+        if f.startswith(tuple(prefixes)):
+            enf.append(f)
+    if not enf:
+        return 0, "", []
+    # [WP3 fix2 MR-5] Stage 0 only: an unmerged task file is not yet in
+    # what the commit records (spec-check.sh's comment).
+    rc, out, err = await git("--literal-pathspecs", "ls-files", "-z",
+                             "--stage", "--", pfx + ".claude/specs")
+    if rc != 0:
+        return 3, "spec check: git ls-files failed: " + _spec_err(err), []
+    tasks, have_index = [], False
+    for rec in out.split(b"\\0"):
+        meta, _tab, path = rec.partition(b"\\t")
+        if not rec or meta.rsplit(b" ", 1)[-1] != b"0":
+            continue
+        p = os.fsdecode(path)
+        p = p[len(pfx):] if p.startswith(pfx) else p
+        if p == ".claude/specs/INDEX.md":
+            have_index = True
+            continue
+        if _spec_is_task_or_index(p):
+            tasks.append(p)
+    if task:
+        task = task[2:] if task.startswith("./") else task
+        if task not in tasks:
+            return 3, ("spec check: --task " + task + " is not a task file "
+                       "in the index (.claude/specs/<slug>/tasks/<file>)"), []
+        tasks, have_index = [task], False
+    stat, hasb, entries, legacy = {}, {}, [], []
+    names = [pfx + p for p in tasks]
+    if have_index:
+        names.append(pfx + ".claude/specs/INDEX.md")
+    try:
+        tmpd = tempfile.TemporaryDirectory(prefix="spec-check.")
+    except OSError:
+        return 3, "spec check: cannot create a temporary directory", []
+    with tmpd as tmp:
+        rc, _out, err = await git(
+            "-c", "core.symlinks=false", "checkout-index", "-z", "--stdin",
+            "--prefix=" + tmp + "/",
+            inp=b"".join(os.fsencode(n) + b"\\0" for n in names))
+        if rc != 0:
+            return 3, "spec check: git checkout-index failed: " + _spec_err(err), []
+
+        def read(n):
+            # A gitlink under tasks/ comes out as an empty directory: an
+            # empty file, as in spec-check.sh.
+            try:
+                with open(os.path.join(tmp, n), "rb") as fh:
+                    return fh.read().decode("utf-8", "surrogateescape")
+            except OSError:
+                return ""
+        for p in tasks:
+            text = read(pfx + p)
+            stat[p], hasb[p], ents = _spec_parse_task(text)
+            entries.extend((p, e) for e in ents)
+            if not hasb[p]:
+                legacy.append(text)
+        if have_index:
+            legacy.append(read(pfx + ".claude/specs/INDEX.md"))
+
+    aff = set()   # tasks whose Files: block lists a path of this change
+
+    def covered(f):
+        for p, e in entries:
+            if f == e or (e.endswith("/") and f.startswith(e)):
+                aff.add(p)
+                return True
+        if not legacy or "\\n" in f:
+            return False
+        # The pre-WP3 rule: a word-bounded mention of the path or its bare
+        # file name. The classes are spec-check.sh's under LC_ALL=C.
+        b = f.rsplit("/", 1)[-1]
+        alts = [re.escape(f), re.escape(b)]
+        if pfx:
+            # [WP3 fix2 MR-7] the path from the repository top too.
+            alts.append(re.escape(pfx + f))
+        pat = re.compile(r"(^|[^A-Za-z0-9_./-])(" + "|".join(alts)
+                         + r")([^A-Za-z0-9_-]|$)", re.M)
+        return any(pat.search(t) for t in legacy)
+
+    miss = [f for f in enf if not covered(f)]
+    if not miss:
+        return 0, "", []
+    # The naming order of spec-check.sh: --task; a task file this change
+    # stages; the in-progress tasks (several: those whose Files: block lists
+    # another path of this change); the only open task with a Files: block;
+    # the open tasks.
+    if task:
+        cand, why = [task], "the task given to this check"
+    else:
+        cand = [p for p in tasks if p in ch_t]
+        why = "staged in this commit"
+    if not task and not cand:
+        cand = [p for p in tasks if stat.get(p) == "in-progress"]
+        why = "status: in-progress"
+        a = [p for p in cand if p in aff]
+        if len(cand) > 1 and a:
+            cand = a
+            why = ("status: in-progress, and its Files: block lists other "
+                   "files of this change" if len(a) == 1 else
+                   "status: in-progress, each listing other files of this "
+                   "change")
+        if not cand:
+            opn = [p for p in tasks if stat.get(p) not in ("done", "validated")]
+            opnb = [p for p in opn if hasb.get(p)]
+            if len(opnb) == 1:
+                cand, why = opnb, "the only open task with a Files: block"
+            elif opn:
+                cand, why = opn, "open tasks"
+    # The remedy follows the form of this commit (spec-check.sh's FORM).
+    gif = os.environ.get("GIT_INDEX_FILE", "")
+    if (fnmatch.fnmatchcase(gif, "next-index-*.lock")
+            or fnmatch.fnmatchcase(gif, "*/next-index-*.lock")):
+        form = "paths"
+    elif gif == "index.lock" or fnmatch.fnmatchcase(gif, "*/index.lock"):
+        form = "all"
+    else:
+        form = "plain"
+    rc, _out, _ = await git("rev-parse", "-q", "--verify", "HEAD")
+    unborn = rc != 0
+    stage = "stage that file (git add) and commit again"
+    stage1 = "stage it (git add) and commit again"
+    unst_head = ("Not counted, because the index does not have them (task "
+                 "files are read from what the commit records; stage them "
+                 "with git add):")
+    if seq:
+        # [WP3 fix2 MR-1, MR-2, IT-4] spec-check.sh's merge remedy: what the
+        # listed files are, by the rule that kept them, and what to do, by
+        # the mode and by whether merge-back runs the check.
+        if seq == "merge":
+            what = ("a conflict resolution, or an edit made during the merge"
+                    if rule == "auto" else
+                    "a conflict resolution, an edit made during the merge, or "
+                    "a file both sides changed")
+            it, in_, drop, abort = ("a merge", "the merge itself",
+                                    "the other side's change",
+                                    "git merge --abort")
+        else:
+            # [WP3 fix3 MR2-4] The whole change has its own reason on git
+            # 2.40 or later (spec-check.sh).
+            if rule == "auto":
+                what = ("a conflict resolution, or an edit made while it was "
+                        "stopped")
+            elif rule == "old":
+                what = ("this git, older than 2.40, cannot tell the "
+                        "resolution from the rest of the change, so this is "
+                        "all of it")
+            elif seq == "am":
+                what = ("git am applies a patch, not a commit, so the "
+                        "resolution cannot be told from the rest of it: this "
+                        "is all of it")
+            elif pick:
+                what = ("its commit is a merge or has no parent, so the "
+                        "resolution cannot be told from the rest of the "
+                        "change: this is all of it")
+            else:
+                what = ("git names no commit it is replaying here, as at an "
+                        "exec or break stop, so this is all of the change")
+            # [WP3 fix3 MR2-3, MR2-5] A stopped rebase or git am; a revert
+            # that ran with --no-commit leaves REVERT_HEAD too.
+            it, in_, drop, abort = {
+                "pick": ("a cherry-pick that stopped on conflicts", "it",
+                         "part of the picked commit",
+                         "git cherry-pick --abort"),
+                "revert": ("a revert that stopped on conflicts or ran with "
+                           "--no-commit", "it", "part of the revert",
+                           "git revert --abort"),
+                "rebase": ("a rebase that stopped", "it",
+                           "part of that commit", "git rebase --abort"),
+                "am": ("a git am that stopped", "it", "part of the patch",
+                       "git am --abort")}[seq]
+        last = "This is %s, and these files changed in %s (%s)." % (
+            it, in_, what)
+        if mode != "warn":
+            # [WP3 fix4 RR3-CHK-1] An edit, exec or break stop replays
+            # nothing past HEAD (spec-check.sh).
+            if seq == "rebase":
+                last += (" If it replays a commit, do not unstage a file that "
+                         "commit changed: that drops %s. Any other file (such "
+                         "as one added at an edit, exec or break stop) can be "
+                         "unstaged (git restore --staged <path>)." % drop)
+            else:
+                last += " Do not unstage a file from it: that drops %s." % drop
+            if os.environ.get("BOOTSTRAP_MERGE_BACK") == "1":
+                stage = stage1 = "as merge-back's Remedy below says"
+                last += (" merge-back's Remedy, below, says who makes the fix "
+                         "and what runs next.")
+            else:
+                last += (" Fix the task file as above, or run %s, then stop "
+                         "and ask." % abort)
+    elif form == "paths":
+        stage = ("then commit again with that file named in the same "
+                 "command (git commit <paths> <task file>)")
+        stage1 = ("then commit again with it named in the same command (git "
+                  "commit <paths> <task file>)")
+        unst_head = ("Not counted, because this commit does not record them "
+                     "(a commit that names paths records only those; name "
+                     "them in the same command):")
+        last = ("If a file does not belong to the task, leave it out of the "
+                "paths you name, or stop and ask.")
+    elif form == "all":
+        last = ("If a file does not belong to the task, commit the task's "
+                "paths by name instead (git commit -- <paths>): commit -a and "
+                "--include stage tracked changes themselves, so unstaging "
+                "does not leave a file out. Or stop and ask.")
+    elif unborn:
+        last = ("If a file does not belong to the task, unstage it (git rm "
+                "--cached <path>; this is the first commit) or stop and ask.")
+    else:
+        last = ("If a file does not belong to the task, unstage it (git "
+                "restore --staged <path>) or stop and ask.")
+    clean = [_spec_disp(f) for f in miss]
+    n = len(miss)
+    what = "1 changed file is" if n == 1 else "%d changed files are" % n
+    lines = ["spec check: %s not listed in any task file's Files: block:"
+             % what]
+    lines += ["  " + f for f in clean]
+    if pfx:
+        lines.append("Paths here are from the project directory, %s in the "
+                     "repository." % _spec_disp(pfx))
+    if len(cand) == 1:
+        c = _spec_disp(cand[0])
+        if hasb.get(cand[0]):
+            lines.append('To trace them, edit %s (%s) with the Edit tool: add '
+                         'these lines under its "Files:" line, %s:'
+                         % (c, why, stage))
+        else:
+            lines.append('To trace them, edit %s (%s) with the Edit tool: add '
+                         'a line that is exactly "Files:" followed by these '
+                         'lines, %s:' % (c, why, stage))
+    elif len(cand) > 1:
+        lines.append('To trace them, edit the task file this change belongs '
+                     'to with the Edit tool: add these lines under its '
+                     '"Files:" line, %s:' % stage)
+    else:
+        lines.append('No open task file exists (.claude/specs/<slug>/tasks/'
+                     '<id>.md). /spec-decompose <slug> writes task files with '
+                     'a Files: block; or create one with the Write tool, with '
+                     'a line that is exactly "Files:" followed by these '
+                     'lines, %s:' % stage1)
+    lines += ["- " + f for f in clean]
+    unst = []
+    for args in (("--literal-pathspecs", "ls-files", "-z", "--others",
+                  "--exclude-standard", "--", pfx + ".claude/specs"),
+                 ("--literal-pathspecs", "diff", "--name-only", "-z", "--",
+                  pfx + ".claude/specs")):
+        rc, out, _ = await git(*args)
+        if rc == 0:
+            for p in _spec_names(out):
+                p = p[len(pfx):] if p.startswith(pfx) else p
+                if _spec_is_task_or_index(p):
+                    unst.append(p)
+    if unst:
+        lines.append(unst_head)
+        lines += ["  " + _spec_disp(p) for p in unst]
+    if len(cand) > 1:
+        lines.append("Candidate task files (%s):" % why)
+        for k, p in enumerate(cand):
+            if k >= _SPEC_CAND_CAP:
+                lines.append("  (and %d more)" % (len(cand) - _SPEC_CAND_CAP))
+                break
+            lines.append("  " + _spec_disp(p))
+    lines.append('A directory entry ending in "/" (for example src/gen/) '
+                 'covers every file below it, even after its task is done: '
+                 'use one only for files whose names cannot be known in '
+                 'advance, such as generated code, and otherwise list each '
+                 'file. If Claude Code refuses the edit, stop and ask; do not '
+                 'write the task file another way (a shell redirect or a '
+                 'script). ' + last)
+    return 2, "\\n".join(lines), clean
+
+
+def _spec_ctx(text):
+    """additionalContext, capped as spec-gate-commit.sh's _json_str cap."""
+    raw = text.encode("utf-8")
+    if len(raw) > 4000:
+        text = raw[:4000].decode("utf-8", "ignore") + "\\n[truncated]"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                   "additionalContext": text}}
 
 
 def _spec_gate_commit(config):
+    hooks_cfg = (config or {}).get("hooks") or {}
+    # [WP3 critic 1g] No default here: DEFAULTS is the mode's one default,
+    # carried in the resolved config (and RESOLVED_CONFIG). Only "block"
+    # refuses; a config that does not carry the key never does.
+    mode = hooks_cfg.get("spec_gate_commit_mode")
+    prefixes = tuple(hooks_cfg.get("spec_gate_commit_prefixes")
+                     or _ENFORCED_PREFIXES)
+
     async def spec_gate_commit(input_data, tool_use_id, context):
-        # Block `git commit` of staged files not referenced by an active
-        # spec. Word-boundary match on path or basename (shell S-3
-        # semantics), never a loose substring.
+        # [WP3 / D2] The FALLBACK, as spec-gate-commit.sh: defer to the git
+        # pre-commit hook when it is installed; otherwise run the check on
+        # the index as it stands before the command.
         cmd = _cmd_of(input_data)
-        if not _git_verb(cmd, "commit"):
+        # [WP3 fix2 MR-6] Also a merge, cherry-pick or revert concluded with
+        # --continue: it runs git commit, and below the repository top (no
+        # git hook) this is the only check.
+        if not (_git_verb(cmd, "commit")
+                or _git_verb(cmd, r"(?:merge|cherry-pick|revert)\\s+--continue")):
             return {}
         proj = _proj()
+        # [critic r3] No repository: nothing to check (as the shell twin).
         try:
-            _, staged_raw, _ = await _run(
-                ["git", "diff", "--cached", "--name-only"],
-                cwd=proj, shell=False)
+            _rc, _out, _ = await _run(["git", "rev-parse",
+                                       "--is-inside-work-tree"],
+                                      cwd=proj, shell=False)
         except OSError:
-            staged_raw = ""            # mirrors shell `2>/dev/null || true`
-        staged = [f for f in staged_raw.splitlines() if f.strip()]
-        if not staged:
+            _rc = 1
+        if _rc != 0:
             return {}
-        staged = [f for f in staged
-                  if f.startswith(_ENFORCED_PREFIXES)]
-        if not staged:
+        if await _spec_git_hook_installed(proj):
             return {}
-        corpus_files = []
-        index = proj / ".claude" / "specs" / "INDEX.md"
-        if index.is_file():
-            corpus_files.append(index)
-        specs_dir = proj / ".claude" / "specs"
-        # Skip dot-dirs/dotfiles so the corpus matches the shell globs
-        # `specs/*/tasks/` and `"$d"*` (which never expand dot-entries) -
-        # a Python glob superset would let commits pass the shell blocks.
-        for tasks_dir in sorted(specs_dir.glob("*/tasks")):
-            if tasks_dir.is_dir() and not tasks_dir.parent.name.startswith("."):
-                corpus_files.extend(
-                    p for p in sorted(tasks_dir.iterdir())
-                    if p.is_file() and not p.name.startswith("."))
-        if not corpus_files:
-            return _deny("Commit blocked: no active spec/task files exist "
-                         "yet.\\nRun /spec-new before committing.")
-        corpus = "\\n".join(
-            p.read_text(errors="replace") for p in corpus_files)
-        miss = ""
-        for f in staged:
-            b = os.path.basename(f)
-            # [^\\w./-] mirrors the shell class [^[:alnum:]_./-].
-            pat = re.compile(
-                r"(^|[^\\w./-])(" + re.escape(f) + "|" + re.escape(b)
-                + r")([^\\w-]|$)", re.M)
-            if not pat.search(corpus):
-                miss += " " + f
-        if miss:
-            return _deny("Commit blocked: files not referenced by any "
-                         "active spec:" + miss
-                         + "\\nRun /spec-new or add them to a tasks/*.md "
-                           "file.")
-        return {}
+        rc, msg, _miss = await _spec_check(proj, prefixes, mode=mode)
+        if rc == 0:
+            return _spec_ctx(msg) if msg else {}
+        note = await _spec_fallback_note(proj)
+        _prc, _pout, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+        if _prc == 0 and _spec_line(_pout):
+            note = _SPEC_FALLBACK_NOTE_BELOW
+        if rc == 2:
+            if mode == "block":
+                return _deny(msg + "\\nCommit refused. " + note)
+            return _spec_ctx(
+                msg + "\\nhooks.spec_gate_commit_mode is warn, so this commit "
+                "was allowed; fix what it names before your next commit. "
+                + note)
+        if mode == "block":
+            # [WP3 critic 1c] the shell fallback's hook_fail text.
+            return _deny("BLOCKED (fail-closed): the spec check could not run "
+                         "(exit %d), which is not a spec refusal: %s. Stop and "
+                         "tell the operator: hooks.spec_gate_commit: false "
+                         "and a re-install turn the check off." % (rc, msg))
+        return _spec_ctx("spec-gate-commit: the spec check could not run "
+                         "(exit %d), so this commit was not checked: %s"
+                         % (rc, msg))
     return spec_gate_commit
 
 
@@ -3690,8 +4349,18 @@ def _tdd_gate(config):
         # relative before the src/|lib/ test (a bare re.match on an
         # absolute path never matches, silently disabling the gate).
         if os.path.isabs(raw):
+            # [WP3 fix1 SDKP-3] Shell parity: CLAUDE_PROJECT_DIR as spelled
+            # (lexically normalized, as _tdd_normpath does), then the
+            # physical spelling _proj() resolved. The resolved root alone
+            # split a symlinked project from the shell both ways.
+            _cpd = os.environ.get("CLAUDE_PROJECT_DIR") or ""
+            _bases = ([os.path.normpath(_cpd)] if os.path.isabs(_cpd)
+                      else []) + [str(proj)]
             try:
-                rel = os.path.relpath(raw, proj)
+                for _base in _bases:
+                    rel = os.path.relpath(raw, _base)
+                    if rel != ".." and not rel.startswith("../"):
+                        break
             except ValueError:         # different drive (Windows) - give up
                 return {}
         else:
@@ -3712,16 +4381,31 @@ def _tdd_gate(config):
         rel = os.path.normpath(rel)
         while rel.startswith("./"):
             rel = rel[2:]
+        # [WP3 agents-handoff] An isolation:worktree implementer writes under
+        # .claude/worktrees/<n>/ while CLAUDE_PROJECT_DIR is the main
+        # checkout, so `rel` was never src/ or lib/ and every write in a
+        # worktree was allowed (measured on both substrates at 3d866f4).
+        # Gate the path inside the worktree and search that worktree for its
+        # test. A worktree directory that does not exist leaves the search
+        # at the project root, as the shell's failed `cd` leaves its `find`
+        # where the hook started. Shell parity (the `.claude/worktrees/*/*`
+        # arm after _tdd_normpath).
+        root = proj
+        _wt = rel.split("/")
+        if len(_wt) > 3 and _wt[0] == ".claude" and _wt[1] == "worktrees":
+            if (proj / ".claude" / "worktrees" / _wt[2]).is_dir():
+                root = proj / ".claude" / "worktrees" / _wt[2]
+            rel = "/".join(_wt[3:])
         if not re.match(r"(src|lib)/", rel):
             return {}
         if _tdd_is_test_path(rel):
             return {}
         stem = os.path.basename(rel)
         stem = stem.rsplit(".", 1)[0] if "." in stem else stem
-        tpath = proj / rel
+        tpath = root / rel
         found = False
         low = stem.lower()
-        for cand in proj.rglob("*"):
+        for cand in root.rglob("*"):
             # [round-4 D11] `.git` was the ONLY pruned directory, so a test
             # nobody wrote satisfied the gate: `node_modules/p/dist/
             # test_zzz.js` satisfied `src/zzz.py` on both substrates, and on a
@@ -3739,7 +4423,7 @@ def _tdd_gate(config):
             # by executing the fix against a project under `~/.claude/`:
             # every candidate was pruned and every write was refused.
             try:
-                parts = cand.relative_to(proj).parts
+                parts = cand.relative_to(root).parts
             except ValueError:
                 continue
             if _TDD_PRUNE & set(parts):
@@ -4189,6 +4873,16 @@ def sdk_gates_module(cfg: dict) -> str:
     # fixtures keep their bytes.
     if "eval-gate" in gates:
         resolved["commands"]["eval"] = str(cfg["commands"].get("eval") or "")
+    # [WP3 / D2] spec-gate-commit reads its mode and prefixes from config.
+    if "spec-gate-commit" in gates:
+        resolved["hooks"] = {
+            # [WP3 critic 1g] the resolved value: DEFAULTS is its one
+            # default, so a flip there reaches this module too.
+            "spec_gate_commit_mode":
+                str(cfg["hooks"]["spec_gate_commit_mode"]),
+            "spec_gate_commit_prefixes": [
+                str(x) for x in cfg["hooks"].get("spec_gate_commit_prefixes")
+                or ["src/", "lib/", "app/", "test/", "tests/"]]}
     # [round-4 D3] THE command-position model, interpolated from lib/cmdpos.py.
     # The emitted module must stay import-standalone, so the sets are rendered
     # into its prelude rather than imported - but they are rendered from the
@@ -4349,10 +5043,27 @@ def sdk_gates_module(cfg: dict) -> str:
            RUNNER_NO_CAPTURE_NOTE,
            RUNNER_TAIL_LINES, RUNNER_TAIL_BYTES, TDD_TEST_BASENAMES,
            TDD_TEST_DIRS, TDD_TEST_SOURCE_SETS))
+    # [WP3 fix2 IT-1] The shim's identity is lib/templates.py's (templates
+    # imports this module, so the import waits until a module is rendered).
+    from templates import GIT_HOOK_SHIM_SHA256
+    wp3_prelude = (
+        "# [WP3 fix1 INST-3] Rendered from sdk_gates_template's shared\n"
+        "# notes, which spec-gate-commit.sh is emitted from.\n"
+        "_SPEC_FALLBACK_NOTE_FOREIGN = %r\n"
+        "_SPEC_FALLBACK_NOTE_HOOKS_PATH = %r\n"
+        "_SPEC_FALLBACK_NOTE_NOEXEC = %r\n"
+        "_SPEC_FALLBACK_NOTE_HOOKS_OFF = %r\n"
+        "# [WP3 fix2 IT-1] The SHA-256 of the git-hook shim bootstrap-install\n"
+        "# writes (lib/templates.py); the fallback defers to that file only.\n"
+        "_SPEC_SHIM_SHA256 = %r\n\n"
+        % (SPEC_FALLBACK_NOTE_FOREIGN, SPEC_FALLBACK_NOTE_HOOKS_PATH,
+           SPEC_FALLBACK_NOTE_NOEXEC, SPEC_FALLBACK_NOTE_HOOKS_OFF,
+           GIT_HOOK_SHIM_SHA256))
     dynamic = (
         cmdpos_prelude
         + no_tests_prelude
         + wp2_prelude
+        + wp3_prelude
         + "# The gates enabled for THIS project at emission.\n"
         "#\n"
         "# [upstream P2-2] NOT parity with the shell suite - the\n"

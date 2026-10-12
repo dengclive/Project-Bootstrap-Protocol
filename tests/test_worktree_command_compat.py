@@ -263,6 +263,77 @@ check("OFF: no gate hook body changes (the bare-command design is correct)",
 
 
 # --------------------------------------------------------------------------- #
+# 3b. [WP3 fix2 IT-3] Below the repository top, `auto` resolves to none
+# although the commands honor cwd (installer._below_top_isolation sets these
+# two keys before build_plan). Every isolation-off text gives THAT reason, and
+# none offers `worktree` as the way back: there it gets the implementer's
+# commits refused.
+# --------------------------------------------------------------------------- #
+print("\n== emission: isolation off below the repository top (IT-3) ==")
+
+bt_cfg, _ = cfg_for()
+bt_cfg["_implementer_isolation"] = "none"
+bt_cfg["_isolation_below_top"] = "pkg/app"
+bt = bodies(bt_cfg)
+nt_cfg, _ = cfg_for(workflow={"implementer_isolation": "none"})
+nt = bodies(nt_cfg)        # forced none at the top: the generic texts
+_flat = {p: " ".join(b.split()) for p, b in bt.items()}
+check("below the top: tech.md gives the below-top reason, not the "
+      "execute_in_cwd one",
+      "this project is `pkg/app/` below its repository's top, and Claude "
+      "Code would make the agent's worktree at the repository top" in
+      _flat[".claude/steering/tech.md"]
+      and "therefore emitted WITHOUT" not in bt[".claude/steering/tech.md"],
+      _flat[".claude/steering/tech.md"][-900:])
+check("below the top: implementer.md does not offer `worktree` once each "
+      "worktree gets its own mount, and says its commits would be refused",
+      "own mount" not in bt[IMPL]
+      and "does not help here: the worktree would still start at the "
+      "repository top, and the gates refuse this agent's commits unless "
+      "`commands.test` also works from there" in _flat[IMPL]
+      and "digest guard" in bt[IMPL], _flat[IMPL][-900:])
+check("below the top: integrator.md does not say setting `worktree` back "
+      "makes it live",
+      "is set back to `worktree`" not in bt[".claude/agents/integrator.md"]
+      and "which below the repository top gets the implementer's commits "
+      "refused" in _flat[".claude/agents/integrator.md"])
+for _w in (".claude/loop.sh", ".claude/goal-loop.sh"):
+    check(f"below the top: {_w} gives the below-top reason, not "
+          "execute_in_cwd false, and not the per-worktree-mount way back",
+          "execute_in_cwd is" not in bt[_w] and "execute_in_cwd is" in nt[_w]
+          and "give each worktree its own mount" not in bt[_w]
+          and "# Reason: this project is installed below its repository's "
+          "top." in bt[_w]
+          and 'dispatch WITHOUT --worktree, this project is below its' in bt[_w]
+          and "Dispatch\n# WITHOUT --worktree" in bt[_w])
+    _r = subprocess.run(["bash", "-n"], input=bt[_w], capture_output=True,
+                        text=True)
+    check(f"below the top: {_w} still parses (bash -n)", _r.returncode == 0,
+          _r.stderr)
+check("forced none at the top keeps the generic texts (the below-top ones "
+      "are keyed on the installer's below-top fact alone)",
+      "once each worktree gets its own mount" in nt[IMPL]
+      and "is set back to `worktree`" in nt[".claude/agents/integrator.md"]
+      and "therefore emitted WITHOUT" in nt[".claude/steering/tech.md"]
+      and "give each worktree its own mount" in nt[".claude/loop.sh"]
+      and "below its repository's top" not in "".join(nt.values()))
+_moved_bt = sorted(p for p in nt if nt[p] != bt.get(p))
+check("below the top: the blast radius against forced none is exactly the "
+      "isolation-off texts",
+      _moved_bt == sorted([IMPL, ".claude/agents/integrator.md",
+                           ".claude/loop.sh", ".claude/goal-loop.sh",
+                           ".claude/steering/tech.md"])
+      and sorted(nt) == sorted(bt), str(_moved_bt))
+_sample = open(os.path.join(ROOT, "bootstrap.config.yaml")).read()
+check("the sample config's `auto` comment says it is none below the "
+      "repository top, and what a forced `worktree` costs there",
+      "`auto` is none for a project installed below its\n  # repository's "
+      "top" in _sample
+      and "forced `worktree` there gets the implementer's commits refused"
+      in _sample)
+
+
+# --------------------------------------------------------------------------- #
 # 4. Retrofit mode gets the same treatment
 # --------------------------------------------------------------------------- #
 print("\n== retrofit mode ==")

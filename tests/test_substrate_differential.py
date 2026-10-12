@@ -103,6 +103,11 @@ commands:
   lint: "true"
   format: "true"
   ci_local: "true"
+# [WP3 / D2] block: the rows below exercise the spec gate's REFUSAL
+# path. warn, the default WP3 ships, is pinned in
+# tests/test_spec_check.py.
+hooks:
+  spec_gate_commit_mode: block
 """
 
 TMP = tempfile.mkdtemp(prefix="substrate-diff-")
@@ -1581,6 +1586,12 @@ differential("spec-gate-commit", bash("git commit -m code"), "deny",
 
 with open(os.path.join(PROJ, ".claude", "specs", "INDEX.md"), "a") as fh:
     fh.write("covers src/auth.py here\n")
+# [WP3 / D2] Task files and INDEX.md are read from the INDEX now: an
+# unstaged mention does not count (the trace travels with the commit).
+differential("spec-gate-commit", bash("git commit -m code"), "deny",
+             "a mention in an UNSTAGED INDEX.md does not count")
+subprocess.run(["git", "-C", PROJ, "add", "-f", ".claude/specs/INDEX.md"],
+               check=True)
 differential("spec-gate-commit", bash("git commit -m code"), "allow",
              "referenced implementation file")
 
@@ -1767,6 +1778,71 @@ for _ in range(160):
         _tdd_splits.append((_fp, _sh, _sd))
 check("[tdd-gate] WP2 seeded fuzz: shell==sdk on 160 random paths",
       not _tdd_splits, repr(_tdd_splits[:5]))
+
+# [WP3 fix1 SDKP-3] A CLAUDE_PROJECT_DIR spelled through a symlink. The SDK
+# resolved the project and took paths against that alone, while the shell
+# stripped the spelling as given, so the two split both ways: the SDK
+# allowed Lk/src/x.py, which the shell denied, and denied P/src/x.py, which
+# the shell allowed. Both now try the spelling as given, then the physical
+# one. Worktree paths too (WP3's .claude/worktrees/<n>/ arm).
+_LK = os.path.join(TMP, "link-to-proj")
+os.symlink(PROJ, _LK)
+
+
+def _verdicts_cpd(gate, payload, cpd):
+    p = subprocess.run([BASH, os.path.join(HOOKS, f"{gate}.sh")],
+                       input=json.dumps(payload), capture_output=True,
+                       text=True, cwd=PROJ,
+                       env=dict(os.environ, CLAUDE_PROJECT_DIR=cpd))
+    sh = ("deny" if p.returncode == 2 else "allow" if p.returncode == 0
+          else f"rc={p.returncode}:{p.stderr.strip()[:120]}")
+    os.environ["CLAUDE_PROJECT_DIR"] = cpd
+    try:
+        sd = sdk_verdict(gate, payload)
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = PROJ
+    return sh, sd
+
+
+_WT_S = os.path.join(PROJ, ".claude", "worktrees", "agent-s1")
+os.makedirs(os.path.join(_WT_S, "src"))
+try:
+    for _cpd, _base, _rel, _want in (
+            (_LK, _LK, "src/qzsym.py", "deny"),
+            (_LK, PROJ, "src/qzsym.py", "deny"),
+            (PROJ, PROJ, "src/qzsym.py", "deny"),
+            (_LK, _LK, ".claude/worktrees/agent-s1/src/qzsym2.py", "deny"),
+            (_LK, PROJ, ".claude/worktrees/agent-s1/src/qzsym2.py", "deny")):
+        _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(_base, _rel)),
+                                 _cpd)
+        check(f"[tdd-gate] symlinked project: CLAUDE_PROJECT_DIR="
+              f"{'link' if _cpd == _LK else 'physical'}, a "
+              f"{'link' if _base == _LK else 'physical'}-spelled {_rel}: "
+              f"shell==sdk=={_want}", _sh == _sd == _want,
+              f"shell={_sh} sdk={_sd}")
+    os.makedirs(os.path.join(_WT_S, "tests"))
+    with open(os.path.join(_WT_S, "tests", "test_qzsym2.py"), "w") as _fh:
+        _fh.write("def test_x():\n    assert True\n")
+    for _base in (_LK, PROJ):
+        _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(
+            _base, ".claude/worktrees/agent-s1/src/qzsym2.py")), _LK)
+        check(f"[tdd-gate] symlinked project, the worktree's own test "
+              f"exists: a {'link' if _base == _LK else 'physical'}-spelled "
+              f"worktree write is allowed, shell==sdk",
+              _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+    # Residual (backlog): with the PHYSICAL CLAUDE_PROJECT_DIR Claude Code
+    # passes, a write spelled through a link to the project is outside it
+    # on both substrates (resolving it means resolving the file's own
+    # directory, which may not exist yet).
+    _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(
+        _LK, "src", "qzsym.py")), PROJ)
+    check("[tdd-gate] residual: physical CLAUDE_PROJECT_DIR, a link-spelled "
+          "path: shell==sdk==allow (not gated on either; backlog)",
+          _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+finally:
+    shutil.rmtree(os.path.join(PROJ, ".claude", "worktrees"),
+                  ignore_errors=True)
+    os.remove(_LK)
 
 # --------------------------------------------------------------------------- #
 # issue #54 / X-36q -- the VERSIONED shell invoker, and the head SPELLINGS
@@ -2339,6 +2415,104 @@ for _c, _want in (('echo "git commit"', "allow"),
                   ("true # git commit", "allow"),
                   ('git commit -m "not; a separator"', "deny")):
     differential("spec-gate-commit", bash(_c), _want, repr(_c))
+
+# [WP3 fix2 MR-6] A merge, cherry-pick or revert concluded with --continue
+# runs git commit: below the repository top no git hook checks it, so the
+# fallback acts on it on both substrates. Other forms of those verbs do not
+# commit what the index holds, and stay out of the gate.
+for _c, _want in (("git merge --continue", "deny"),
+                  ("git -c core.editor=true merge --continue", "deny"),
+                  ("git cherry-pick --continue", "deny"),
+                  ("git revert --continue", "deny"),
+                  ("sudo git merge --continue", "deny"),
+                  ("git add -A && git merge --continue", "deny"),
+                  ("git merge --abort", "allow"),
+                  ("git merge feature", "allow"),
+                  ("git rebase --continue", "allow"),
+                  ("git cherry-pick --abort", "allow"),
+                  ('echo "git merge --continue"', "allow")):
+    differential("spec-gate-commit", bash(_c), _want, repr(_c))
+
+# [WP3 fix3 MR2-1, MR2-3] States the check judges by their own changes, on
+# both substrates: a clean merge of an unrelated history (merge-tree refused
+# it, so the check could not run: deny/deny), and a rebase stopped on a
+# conflict whose resolution the task lists (the plain rule refused the
+# teammate's file git applied: deny/deny). PROJ's harness, copied into a
+# repository of its own.
+_SQ = os.path.join(TMP, "seq")
+shutil.copytree(os.path.join(PROJ, ".claude"), os.path.join(_SQ, ".claude"))
+
+
+def _sq(*a):
+    return subprocess.run(["git", "-C", _SQ, *a], capture_output=True,
+                          text=True)
+
+
+def _sq_differential(cmd, want, label):
+    p = subprocess.run(
+        [BASH, os.path.join(_SQ, ".claude", "hooks", "spec-gate-commit.sh")],
+        input=json.dumps(bash(cmd)), capture_output=True, text=True,
+        env=dict(os.environ, CLAUDE_PROJECT_DIR=_SQ), cwd=_SQ)
+    sh = ("deny" if p.returncode == 2 else "allow" if p.returncode == 0
+          else f"rc={p.returncode}:{p.stderr.strip()[:120]}")
+    os.environ["CLAUDE_PROJECT_DIR"] = _SQ
+    try:
+        sd = sdk_verdict("spec-gate-commit", bash(cmd))
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = PROJ
+    check(f"[spec-gate-commit] shell==sdk=={want}: {label}",
+          sh == sd == want, f"shell={sh} sdk={sd} want={want}")
+
+
+def _sq_write(rel, text):
+    os.makedirs(os.path.dirname(os.path.join(_SQ, rel)), exist_ok=True)
+    with open(os.path.join(_SQ, rel), "w") as fh:
+        fh.write(text)
+
+
+_sq("init", "-q", "-b", "main")
+_sq("config", "user.email", "t@t")
+_sq("config", "user.name", "t")
+_sq_write(".claude/specs/f/tasks/f-T01.md", "---\nstatus: in-progress\n---\n"
+          "Files:\n- src/ok.py\n- src/shared.py\n")
+_sq_write("src/shared.py", "a\nb\nc\n")
+_sq("add", "-A")
+_sq("commit", "-qm", "base")
+_sq("checkout", "-q", "--orphan", "other")
+_sq("rm", "-rqf", ".")
+_sq_write("lib/imported.py", "i\n")
+_sq("add", "lib/imported.py")
+_sq("commit", "-qm", "import")
+_sq("checkout", "-q", "-f", "main")
+_sq("merge", "--allow-unrelated-histories", "--no-commit", "-q", "other")
+_sq_differential("git commit --no-edit", "allow",
+                 "a clean merge of an unrelated history (MR2-1)")
+_sq_write("src/evil.py", "e\n")
+_sq("add", "src/evil.py")
+_sq_differential("git commit --no-edit", "deny",
+                 "... with an unlisted edit made inside it")
+_sq("merge", "--abort")
+_sq("checkout", "-q", "-b", "feature")
+_sq_write("src/shared.py", "a\nfeature\nc\n")
+_sq_write("src/teammate.py", "t\n")
+_sq("add", "-A")
+_sq("commit", "-qm", "teammate: feature X")
+_sq("checkout", "-q", "main")
+_sq_write("src/shared.py", "a\nmain\nc\n")
+_sq("commit", "-qam", "mine")
+_sq("checkout", "-q", "feature")
+_sq("rebase", "-q", "main")
+_sq_write("src/shared.py", "a\nresolved\nc\n")
+_sq("add", "src/shared.py")
+_sq_differential("git commit --no-edit", "allow",
+                 "a rebase stopped on a conflict, its listed resolution "
+                 "staged: the teammate's src/teammate.py is not the commit's "
+                 "own (MR2-3)")
+_sq_write("src/evil.py", "e\n")
+_sq("add", "src/evil.py")
+_sq_differential("git commit --no-edit", "deny",
+                 "... with an unlisted edit made while it was stopped")
+_sq("rebase", "--abort")
 
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row

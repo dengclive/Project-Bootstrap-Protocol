@@ -35,7 +35,7 @@ from pathlib import Path
 
 import prd_heuristics as H
 import llm_advisor as LLM
-from configemit import emit
+from configemit import carry_from_file, emit
 from defaults import DEFAULTS, resolve_config
 from minyaml import load_yaml
 
@@ -66,7 +66,9 @@ POLICY_ANSWER_KEYS = {"secrets_enabled": "the secrets gate",
                       "deps_enabled": "the dependency gate"}
 HOOK_TOGGLES = (
     ("spec_gate_entry", "prints a notice when a prompt has no active spec"),
-    ("spec_gate_commit", "blocks a commit of files no active spec names"),
+    ("spec_gate_commit", "checks that an agent commit's files are listed in a "
+                         "task file; warns, or blocks with "
+                         "hooks.spec_gate_commit_mode: block"),
     ("test_gate", "runs commands.test before a commit; blocks on failure"),
     ("format_lint_gate", "runs commands.lint after a Write or Edit"),
     ("ci_mirror", "runs commands.ci_local, or commands.test when that is "
@@ -1323,6 +1325,10 @@ def _finalize(answers: dict, out_path: Path, *, outstream) -> int:
     """answers -> config dict -> in-process validate -> write -> installer
     validate. Refuses to leave an invalid config in place."""
     cfg = answers_to_config(answers)
+    # [WP3 fix1 INST-5] Keep the hand-set keys no answer sets.
+    carried = carry_from_file(out_path, cfg)
+    for line in carried:
+        outstream.write(f"\n{line}\n")
     errs = validate_config_dict(cfg)
     if errs:
         outstream.write("\nConfig did NOT validate (resolve_config):\n")

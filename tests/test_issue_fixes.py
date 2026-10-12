@@ -1040,8 +1040,14 @@ check("X-33 pin: resume command stays a thin pointer",
 check("X-33 pin: commands keep the explicit-only note",
       _ckpt_cmd is not None and "Explicit-only" in _ckpt_cmd
       and _res_cmd is not None and "Explicit-only" in _res_cmd)
-# The other skill bodies (ack-drift aside) stay one-liners; the rec line stays on
-# spec-review/code-review only.
+# [WP3 skills] Every skill with a Companion row now carries a model line
+# (tests/test_skill_bodies.py pins the map), and spec-new, spec-decompose,
+# spec-validate and decision-log carry real bodies. What stays pinned HERE is
+# that checkpoint/resume never gain a higher tier's line: their Companion row
+# is Sonnet. [WP3 model assignment] The operator moved spec-review to Fable,
+# with Opus as the fallback (2026-10-05), so the positive pin follows it and
+# the negative pin asserts the Sonnet line itself plus the absence of both
+# higher tiers (a check for "Opus session" alone would not see a Fable line).
 _ack = emitted(".claude/skills/ack-drift/SKILL.md")
 # [WP2 drift-tier1] ack-drift now carries the ack command, which the
 # drift detector consumes; the model cannot know the session id itself.
@@ -1049,12 +1055,16 @@ check("drift-tier1 pin: ack-drift writes the per-session ack file",
       _ack is not None and
       ".drift-ack-${CLAUDE_SESSION_ID}" in _ack and "date -u +%s" in _ack)
 _srv = emitted(".claude/skills/spec-review/SKILL.md")
-check("X-33 pin: spec-review keeps the Opus rec line",
+check("X-33 pin: spec-review carries the Fable rec line, Opus as fallback",
       _srv is not None and
-      "Recommended: invoke from an Opus session." in _srv)
-check("X-33 pin: checkpoint/resume do NOT gain the Opus rec line",
-      _ckpt is not None and "Opus session" not in _ckpt
-      and _res is not None and "Opus session" not in _res)
+      "Recommended: invoke from a Fable session (Opus if Fable is "
+      "unavailable or Claude Code switches the model)." in _srv)
+check("X-33 pin: checkpoint/resume keep the Sonnet rec line and gain no "
+      "Opus or Fable line",
+      _ckpt is not None and _res is not None
+      and all("> Recommended: invoke from a Sonnet session." in b
+              and "Opus" not in b and "Fable" not in b
+              for b in (_ckpt, _res)))
 # Single emission surface: the installed bytes ARE the _skills() render,
 # so retrofit (which APPENDS retrofit skills and never re-renders the
 # greenfield ones, installer.py build_retrofit_plan) inherits the fix.
@@ -3708,7 +3718,10 @@ print("\n-- (q9) THE FOUR HOOKS A `true`-COMMANDS FIXTURE CANNOT PIN --")
 _F1_CONFIG = (CONFIG.replace('test: "true"', 'test: "false"')
                     .replace('lint: "true"', 'lint: "false"')
                     .replace('format: "true"', 'format: "false"')
-                    .replace('ci_local: "true"', 'ci_local: "false"'))
+                    .replace('ci_local: "true"', 'ci_local: "false"')
+              # [WP3 / D2] block: the (q9)/(q12) rows need spec-gate-commit
+              # to DENY (warn, the default WP3 ships, never does).
+              + "hooks:\n  spec_gate_commit_mode: block\n")
 _F1_TMP = tempfile.mkdtemp(prefix="issue54-denycapable-")
 _F1_PROJ = os.path.join(_F1_TMP, "proj")
 os.makedirs(_F1_PROJ)
