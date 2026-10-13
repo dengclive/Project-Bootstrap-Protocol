@@ -453,8 +453,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # 7211305's message says "Every non-security block is logged", which the SDK
 # substrate does not do. Pin moved 49 -> 50 in the same commit, per runbook
 # step 10b.
+# [wp3-spec-workflow closeout, 2026-10-13] WP3 of the PRD-minus-security plan
+# (PR #122, merge 042d88a, freeze exception 84). Graded `harmful` by the same
+# 10b rule: d3072ba and c1dfa5d reached origin with step 7's reftable MAJOR
+# (R4-1, and the critic's CRIT7-1), and 3b914b9 was posted as merge-ready with
+# a test-gate defect that refused a new project's first commit, found by the
+# interactive smoke run (driven at the operator's request) and fixed in
+# 4cc5975. Pin moved 50 -> 51 in the same commit, per runbook step 10b.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 50, f"{len(es)} entries")
+      len(es) == 51, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's

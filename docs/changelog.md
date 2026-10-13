@@ -1015,7 +1015,7 @@ allow-with-notice shape) and appended a dated descriptive correction to
 | Shared sentinel names/locations/scope (§7.4) | No | No sentinel is added. merge-back holds a lock directory, `<git-common-dir>/bootstrap-merge-back.lock`, for the length of one run; it is not a §7.4 sentinel. |
 | §7.2 security-critical membership | No | No hook name is added or removed. The new plan actions (`.claude/githooks/dispatch`, `.claude/githooks/spec-check.sh`, `.claude/merge-back.sh`, the READMEs, `spec-versioning.md`, the `test-author` command) are kind `file` and non-critical, and the shims are non-critical `git_hook` rows (`tests/test_hook_tiers.py` 30/0). `settings.json` stays security-critical. |
 | §7.3 provenance markers / synthesize-file contract | No | Neither interview's ANSWERS keys change (identical to `3d866f4`'s). The new keys (`hooks.spec_gate_commit_mode`, `hooks.spec_gate_commit_prefixes`, `workflow.ultracode`) are config keys only. `lib/interview.py` changes one toggle's description, and the AC-2-3 mini-golden does not move (`tests/test_validate_only.py` 12/0). Provenance markers are unchanged. Since fix round 1, `synthesize` keeps the config-only keys of a config file it replaces and prints which (review INST-5); the interview file it reads, its refusals and `--validate-only`, which writes no file, are unchanged, so this is output behaviour, not the synthesize-file contract (seam §7.3 note). |
-| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ 322b0d3`. WP3 changes `gates.py` bytes, so once WP3 merges that commit no longer describes the shipped module; re-pointing it to the WP3 merge commit is the WP3 closeout's operator call, as it was for WP2. |
+| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ 322b0d3`. WP3 changes `gates.py` bytes, so once WP3 merges that commit no longer describes the shipped module; re-pointing it to the WP3 merge commit is the WP3 closeout's operator call, as it was for WP2. **[Layer 2026-10-13, the WP3 closeout.]** WP3 merged as `042d88a` (PR #122, 2026-10-13T12:44:10Z), and the bind is re-pointed in-version to `2.8.0 @ 042d88a` (the seam's v3.0.0 entry has the dated note). The text before this layer stays as written on its date. |
 
 **What WP3 does not do.** It does not flip the check to block (Z-28). It
 does not touch `secrets-gate`, `dependency-gate` or `_HOOK_HEADER` (2026-09-27
@@ -6659,7 +6659,8 @@ it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
 `2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut;
 the TODO was filled in-version on 2026-10-03 with the WP1 merge commit
 `c642731`, and re-pointed in-version on 2026-10-04 to the WP2 merge
-commit `322b0d3`). Branch `version-2-1-0`.
+commit `322b0d3` and on 2026-10-13 to the WP3 merge commit `042d88a`).
+Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 
