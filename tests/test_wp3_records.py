@@ -2547,7 +2547,8 @@ _n_sc = re.search(r"`tests/test_spec_check\.py` \((\d+)\)", _TESTS3)
 _n_sc = int(_n_sc.group(1)) if _n_sc else -1
 check("CI-1, CI-2: run-tests counts only `SUITE SKIPPED:`, the full-TMPDIR "
       "gate prints a plain SKIP line, and the Tests paragraph and Z-57 say "
-      "what CI skips and how much of the workflow's timeout the suites take",
+      "what CI skips, how much of the 15-minute timeout the suites took, "
+      "and that the timeout is now 30 minutes",
       'SKIPPED_RE = re.compile(r"^SUITE SKIPPED:\\s*(.+)$", re.M)' in _rt_src
       and "print(\"  SKIP  the full-TMPDIR rows: `unshare --user "
       "--map-root-user \"" in _sc_src
