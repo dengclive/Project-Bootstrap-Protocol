@@ -24,13 +24,16 @@ import os
 import re
 import shlex
 import stat
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from minyaml import key_line, load_yaml, YAMLError   # stdlib-only YAML subset
 from templates import (  # all file bodies live here
-    TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES)
+    TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES,
+    INDEX_COLUMNS, SPEC_START_CHAIN, SPEC_TASK_FILE, SPEC_VERSIONING_PATH,
+    _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
 
 MANIFEST = ".claude/.installer-manifest.json"
@@ -223,6 +226,20 @@ def build_plan(cfg: dict) -> list[dict]:
             continue
         add(f".claude/hooks/{hook_name}.sh", body, mode=0o755, kind="hook")
 
+    # [WP3 / D2] The spec traceability check that spec-gate-commit.sh (the
+    # PreToolUse fallback) and the git pre-commit / pre-merge-commit hooks
+    # both run. Not a Claude Code hook: kind "file", so verify_wiring does
+    # not look for a settings.json registration.
+    if "spec-gate-commit" in hook_set:
+        add(".claude/githooks/spec-check.sh", TEMPLATES["spec_check"](cfg),
+            mode=0o755)
+    # [WP3 / D2] The spec check's git-hook entry point, exactly where the
+    # spec gate is. _apply_git_hooks writes the shims that call it into the
+    # repository's hooks directory at apply time.
+    if "spec-gate-commit" in hook_set:
+        add(".claude/githooks/dispatch", TEMPLATES["git_hook_dispatch"](cfg),
+            mode=0o755)
+
     add(".claude/hooks/audio-alerts.config", TEMPLATES["audio_config"](cfg))
     add(".claude/settings.json", TEMPLATES["settings_json"](cfg), kind="settings")
 
@@ -254,6 +271,14 @@ def build_plan(cfg: dict) -> list[dict]:
     if cfg["workflow"]["install_agents"]:
         for agent, body in TEMPLATES["agents"](cfg).items():
             add(f".claude/agents/{agent}.md", body)
+
+    # [WP3 / D6] The one script through which the main session lands an
+    # implementer's worktree branch. Unconditional, like CLAUDE.md, which
+    # points at it: its bytes are the same with worktree isolation on or
+    # off (isolation off simply leaves nothing to land), so the isolation
+    # decision still adds and removes no file. Kind "file", 0o755: not a
+    # Claude Code hook, so not registered and not security-critical.
+    add(".claude/merge-back.sh", TEMPLATES["merge_back_sh"](cfg), mode=0o755)
 
     # ---- Per-task autonomous wrappers (Phase 9.5 / 9.6) ------------------- #
     # Bootstrap-Protocol-v2-0-0.md Phase 9.5 "What the wizard generates when loop mode is
@@ -288,6 +313,18 @@ def build_plan(cfg: dict) -> list[dict]:
     # roster. Separate file, separate ownership: this one updates cleanly.
     add(".claude/specs/progress-template.md",
         TEMPLATES["progress_template"](cfg))
+    # [WP3 versioning-index] The roster schema, as an installer-owned file
+    # beside the operator-owned INDEX.md, for the GR2-01 reason above: an
+    # upgrade can reach it, so an older roster can find its migration
+    # recipe here. Phase 7.5's protocol document, and the Phase 7 step 5/6
+    # READMEs. All unconditional, kind "file" (non-critical tier), so no
+    # seam 7.2 membership change; the retrofit overlay passes them through
+    # (RETROFIT.md R8.C/R8.D name the same artifacts), except that it drops
+    # spec-versioning.md when the operator skipped R8.D.
+    add(".claude/specs/README.md", TEMPLATES["specs_readme"](cfg))
+    add(SPEC_VERSIONING_PATH, TEMPLATES["spec_versioning"](cfg))
+    add(".claude/learnings/README.md", TEMPLATES["learnings_readme"](cfg))
+    add(".claude/sessions/README.md", TEMPLATES["sessions_readme"](cfg))
 
     # ---- gitignore fragment ----------------------------------------------- #
     add(".claude/.gitignore", TEMPLATES["gitignore"](cfg))
@@ -536,6 +573,22 @@ def _apply_retrofit_overlay(plan: list[dict], cfg: dict) -> list[dict]:
         replace(".claude/skills/spec-decompose/SKILL.md",
                 TEMPLATES["retrofit_spec_decompose"](cfg))
 
+    # ---- R8.D skip [WP3 versioning-index, critic 3d] -------------------- #
+    # RETROFIT.md R0.8's manifest emits spec-versioning.md "(if not
+    # skipped)", and R0.5 step 7 records the decision as
+    # skip_decisions.R8_D_spec_versioning, a key nothing read before WP3
+    # (the state file only copied it). Drop the file and reword every
+    # pointer to it (templates._SPEC_VERSIONING_POINTERS), last, so the
+    # bodies replaced above are reworded too. A re-apply after an earlier
+    # run removes the dropped file through the stale-file cleanup, like any
+    # opt-out.
+    if spec_versioning_skipped(cfg):
+        by_path.pop(SPEC_VERSIONING_PATH, None)
+        for path, a in list(by_path.items()):
+            if isinstance(a.get("body"), str):
+                by_path[path] = dict(
+                    a, body=drop_spec_versioning_pointers(a["body"]))
+
     # Rebuild the plan in a deterministic order: original greenfield
     # entries first (in their existing order, with replacements in place),
     # then new retrofit entries (sorted by path for determinism). This
@@ -781,6 +834,8 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                # these on stderr at the end of the run. Each entry is
                # {"path", "untracked"}; untracked means the manifest has no
                # record of the file, so main() must not call it "your edits".
+               # [WP3 critic 1i] Also the kind "file" scripts in
+               # _CONFIG_BEARING_SCRIPTS, which embed config the same way.
                "skipped_hooks": [],
                # Project-relative paths of operator content --force displaced.
                # [round-7] Planned paths that were a SYMLINK and are now a
@@ -806,7 +861,22 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                # --dry-run, would remove), so main() can say which dropped
                # registration's script stays on disk with nothing wiring it.
                "removed_paths": [],
-               "backups": []}
+               # [WP3 versioning-index] Every path the hand-edit guard
+               # skipped this run, so main() can say what a skipped
+               # operator-owned file (INDEX.md) did not receive.
+               "skipped_paths": [],
+               "backups": [],
+               # [WP3 / D2] Git hooks this run did not install, and why
+               # ({"name", "path", "state", "detail", "rel"}); main() says
+               # each on stderr. See _apply_git_hooks.
+               "git_hooks": [],
+               # [WP3 / D6] What main() says on stderr about a
+               # worktree.baseRef in the operator's settings.json that is
+               # not ours: "fresh", or null (see _worktree_note). rc stays
+               # 0; any other value is declined, rc 3 (critic 5e). [WP3 /
+               # model assignment] Also an ultracode opt-out that a value
+               # this installer does not own overrides (_contributed_note).
+               "settings_notes": []}
 
     prev = _load_manifest(root)
     summary["no_manifest"] = prev is None
@@ -891,6 +961,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                     continue
                 else:
                     summary["skipped"] += 1
+                    summary["skipped_paths"].append(action["path"])
                     reason = _skip_reason(untracked, prev is None)
                     print(f"  SKIP   {action['path']}  ({reason}; "
                           f"use --force to overwrite)")
@@ -898,7 +969,8 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                     if tier == TIER_SECURITY:
                         summary["skipped_security"].append(
                             {"path": action["path"], "reason": reason})
-                    elif action["kind"] == "hook":
+                    elif (action["kind"] == "hook"
+                          or action["path"] in _CONFIG_BEARING_SCRIPTS):
                         summary["skipped_hooks"].append(
                             {"path": action["path"], "untracked": untracked})
                     manifest["files"].append(
@@ -976,7 +1048,10 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     # unlinking, so the preview is faithful for exactly the destructive
     # case this cleanup introduced.
     for path, known in prev_files.items():
-        if path in planned_paths or known.get("kind") == "gitignore_root":
+        # [WP3 / D2] Git-hook shims are not plan actions; _apply_git_hooks
+        # installs and retires them.
+        if path in planned_paths or known.get("kind") in ("gitignore_root",
+                                                          "git_hook"):
             continue
         target = root / path
         if not target.exists():
@@ -1007,6 +1082,12 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         else:
             print(f"  KEEP   {path}  (dropped from plan but locally "
                   f"modified; left in place)", file=sys.stderr)
+
+    # [WP3 / D2] The spec check's git-hook shims: after the stale-file
+    # cleanup (which skips their rows), before the manifest is written.
+    _apply_git_hooks(root, plan, manifest, summary, prev_files, cfg=cfg,
+                     dry=dry,
+                     force=force, adopt=adopt)
 
     # If the SDK gate module is not being emitted this run (retrofit
     # overlay drop, or a shell reconfigure) but a greenfield state file
@@ -1050,12 +1131,28 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
 # operator wrote FIRST is never claimed, because claiming it meant deleting it
 # later on their behalf.
 #
-# tests/test_wiring_verification.py asserts that every top-level key our own
-# emission produces is claimed here or is one of the two shared keys, so a key
+# tests/test_settings_merge.py asserts that every top-level key our own
+# emission produces is claimed here, shared or contributed (below), so a key
 # added to _settings_json without a co-ownership decision fails loudly instead
-# of silently becoming operator-owned and never updated again.
+# of silently becoming operator-owned and never updated again. [WP3 / model
+# assignment: this named test_wiring_verification.py and "the two shared
+# keys"; the row lives in test_settings_merge.py, and D6 added a third.]
 _SETTINGS_OWNED_KEYS = ("$schema", "_generatedBy", "_note_mcp")
-_SETTINGS_SHARED_KEYS = ("hooks", "permissions")
+# [WP3 / D6] `worktree` is shared by SUB-KEY, like `permissions.deny` by rule:
+# we contribute `worktree.baseRef` and own only what we added (manifest
+# `owned_worktree`, {sub-key: the value we wrote}). Owning the whole object
+# would delete an operator's `worktree.symlinkDirectories` and the rest, and
+# popping it on a config that does not emit it would too (_merge_settings
+# pops an owned key our emission lacks).
+_SETTINGS_SHARED_KEYS = ("hooks", "permissions", "worktree")
+# [WP3 / model assignment, operator decision 2026-10-05] Top-level keys we
+# CONTRIBUTE only where the operator has none, and own only while they hold
+# the value we wrote (manifest `contributed_keys`, {key: value we wrote}).
+# An operator's own value, `true` or `false`, is never replaced, and a value
+# of ours that the config no longer emits is removed. Owning `ultracode`
+# outright (the model-assignment prototype, fx3) overwrote an operator's
+# `false` with `true` beneath "operator settings untouched".
+_SETTINGS_CONTRIBUTED_KEYS = ("ultracode",)
 
 
 def _settings_unmergeable_reason(theirs: dict) -> str | None:
@@ -1087,6 +1184,27 @@ def _settings_unmergeable_reason(theirs: dict) -> str | None:
         if deny is not None and not isinstance(deny, list):
             return (f"existing settings.json has a `permissions.deny` that is "
                     f"a {type(deny).__name__}, not a list")
+    # [WP3 / D6] We write one sub-key into `worktree`; a non-object there
+    # cannot take it. Claude Code rejects such a file anyway.
+    wt = theirs.get("worktree")
+    if wt is not None and not isinstance(wt, dict):
+        return (f"existing settings.json has a `worktree` key that is a "
+                f"{type(wt).__name__}, not an object")
+    # [WP3 critic 5e, operator ruling 2026-10-05 (Q15)] A baseRef Claude
+    # Code rejects makes it ignore the WHOLE file, every hook and deny rule
+    # included (WP3 scout facts-cc C1-invalid: "local", measured on
+    # 2.1.289), so a merge that kept it would install gates that never run.
+    # Declined like a non-object `worktree`: exit 3. A null is the one
+    # value that only warns (operator ruling; _worktree_note).
+    if isinstance(wt, dict) and "baseRef" in wt:
+        from templates import WORKTREE_BASE_REFS
+        ref = wt["baseRef"]
+        if ref is not None and ref not in WORKTREE_BASE_REFS:
+            return (f"existing settings.json sets worktree.baseRef to "
+                    f"{json.dumps(ref)}, which Claude Code rejects, and it "
+                    f"then ignores the whole file, every hook and deny rule "
+                    f"included; set it to \"head\" or \"fresh\", or delete "
+                    f"it, and re-run")
     hooks = theirs.get("hooks")
     if hooks is None:
         return None
@@ -1410,11 +1528,118 @@ def _merge_hooks(ours: dict, theirs: dict, prev_owned: list | None,
     return merged, ours_sites
 
 
+def _merge_worktree(ours_wt: dict, theirs_wt, prev_owned) -> tuple[dict, dict]:
+    """[WP3 / D6] Merge the `worktree` object by sub-key. Returns (merged
+    object, {sub-key: value} this run owns).
+
+    A sub-key we wrote on a previous run, still holding the value we wrote,
+    is ours to update or retire. Every other sub-key is the operator's and
+    is kept as it is, even where we emit the same name: an operator's
+    explicit `baseRef: "fresh"` stays, and so does a value they changed ours
+    to (it stopped matching what we wrote, so they own it now). With no
+    record (a fresh clone) everything already there reads as theirs; the
+    residual is a stale `baseRef` left by --uninstall, never one deleted."""
+    prev = prev_owned if isinstance(prev_owned, dict) else {}
+    theirs_wt = theirs_wt if isinstance(theirs_wt, dict) else {}
+    merged = {k: v for k, v in theirs_wt.items()
+              if not (k in prev and v == prev[k])}
+    owned = {}
+    for k, v in (ours_wt or {}).items():
+        if k in merged:
+            continue
+        merged[k] = v
+        owned[k] = v
+    return merged, owned
+
+
+def _contributed(ours: dict) -> dict:
+    """[WP3 / model assignment] The contributed top-level keys our emission
+    carries, as {key: value}."""
+    return {k: ours[k] for k in _SETTINGS_CONTRIBUTED_KEYS if k in ours}
+
+
+def _same_value(a, b) -> bool:
+    """Equal AND the same JSON type: an operator's `1` is not our `true`,
+    though Python reads `1 == True`."""
+    return type(a) is type(b) and a == b
+
+
+def _merge_contributed(ours: dict, theirs: dict,
+                       prev_owned) -> tuple[dict, dict]:
+    """[WP3 / model assignment] Merge the contributed top-level keys
+    (_SETTINGS_CONTRIBUTED_KEYS). Returns ({key: value} the merged file
+    carries, {key: value} this run owns).
+
+    A key we wrote on a previous run that still holds the value we wrote is
+    ours to update or retire. Any other value is the operator's and stays,
+    even one equal to ours. With no record (a fresh clone: the manifest is
+    gitignored) an earlier install's `true` therefore reads as theirs, never
+    one deleted; _contributed_note says so when the config turned it off."""
+    prev = prev_owned if isinstance(prev_owned, dict) else {}
+    kept = {k: theirs[k] for k in _SETTINGS_CONTRIBUTED_KEYS
+            if k in theirs
+            and not (k in prev and _same_value(theirs[k], prev[k]))}
+    owned = {k: v for k, v in _contributed(ours).items() if k not in kept}
+    return dict(kept, **owned), owned
+
+
+def _contributed_note(merged: dict, ours: dict) -> str | None:
+    """[WP3 / model assignment] What to tell the operator when the config
+    turned ultracode off (our emission lacks the key) but the merged file
+    still turns it on. Such a value is never ours (_merge_contributed drops
+    ours when the emission lacks the key): it is theirs, or an earlier
+    install's that no manifest records. None otherwise."""
+    if ("ultracode" in ours or merged.get("ultracode") is not True):
+        return None
+    return (".claude/settings.json sets \"ultracode\": true, and no install "
+            "record says this installer wrote it (yours, or an earlier "
+            "install's in a checkout without the gitignored manifest), so "
+            "it was kept although workflow.ultracode is false. Delete the "
+            "key from .claude/settings.json to turn ultracode off for this "
+            "project.")
+
+
+def _worktree_note(wt) -> str | None:
+    """[WP3 / D6] What to tell the operator about the `worktree.baseRef` of
+    the merged settings.json `worktree` object `wt`, or None when it is
+    ours ("head") or absent."""
+    from templates import WORKTREE_BASE_REF, WORKTREE_BASE_REFS
+    if not isinstance(wt, dict) or "baseRef" not in wt:
+        return None
+    value = wt["baseRef"]
+    if value is None:
+        # [WP3 critic 5e, operator ruling 2026-10-05] Kept, with a warning,
+        # where any other value Claude Code rejects is declined (exit 3,
+        # _settings_unmergeable_reason). An operator may write null to mean
+        # "unset"; Claude Code does not read it that way (d6 rebuild
+        # verifier: `claude doctor` on 2.1.289).
+        return (".claude/settings.json sets worktree.baseRef to null, which "
+                "Claude Code reports as an invalid value (`claude doctor`, "
+                "2.1.289); a baseRef it rejects makes it ignore the WHOLE "
+                "file, every hook and deny rule included (measured for "
+                "\"local\"). Delete the key, or set it to \"head\" or "
+                "\"fresh\".")
+    if value in WORKTREE_BASE_REFS and value != WORKTREE_BASE_REF:
+        return (f".claude/settings.json sets worktree.baseRef to "
+                f"{json.dumps(value)} (yours, kept): implementer worktrees "
+                f"start from origin's default branch, so a spec or task "
+                f"committed here but not pushed is missing from them. "
+                f"\"head\" starts them from this checkout's HEAD.")
+    # "head", ours. Any other value never gets here: the merge declined it
+    # (_settings_unmergeable_reason, exit 3).
+    return None
+
+
 def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
                     prev_owned_hooks: list | None,
                     dropped: list | None = None,
                     keep_off=None,
-                    kept_off: list | None = None) -> tuple[dict, list, list]:
+                    kept_off: list | None = None,
+                    prev_owned_worktree: dict | None = None,
+                    owned_worktree: dict | None = None,
+                    prev_contributed: dict | None = None,
+                    contributed: dict | None = None
+                    ) -> tuple[dict, list, list]:
     """Overlay the installer's contribution onto the operator's `theirs`.
     Returns (merged, deny rules ADDED by this run, hook sites contributed).
 
@@ -1482,7 +1707,46 @@ def _merge_settings(ours: dict, theirs: dict, prev_owned_deny: list,
         merged["permissions"] = new_perms
     else:
         merged.pop("permissions", None)
+
+    # [WP3 / D6] `worktree`, by sub-key. `owned_worktree` is an OUT
+    # parameter (the return shape is pinned by tests/test_settings_merge.py).
+    new_wt, owned_wt = _merge_worktree(ours.get("worktree") or {},
+                                       theirs.get("worktree"),
+                                       prev_owned_worktree)
+    if new_wt:
+        merged["worktree"] = new_wt
+    else:
+        merged.pop("worktree", None)
+    if owned_worktree is not None:
+        owned_worktree.clear()
+        owned_worktree.update(owned_wt)
+
+    # [WP3 / model assignment] Contributed keys (`ultracode`): the
+    # operator's value stays; ours is added only where they have none.
+    # `contributed` is an OUT parameter, like `owned_worktree`.
+    new_c, owned_c = _merge_contributed(ours, theirs, prev_contributed)
+    for key in _SETTINGS_CONTRIBUTED_KEYS:
+        if key in new_c:
+            merged[key] = new_c[key]
+        else:
+            merged.pop(key, None)
+    if contributed is not None:
+        contributed.clear()
+        contributed.update(owned_c)
     return merged, owned_deny, owned_hooks
+
+
+# [WP3 critic 1i] Kind "file" scripts that carry config the way a hook body
+# does, so a kept local edit gets the same stderr line as an edited hook
+# (main(): "a config change it embeds ... does NOT reach it"). Each value
+# names what it embeds. Two verifiers measured a stdout-only SKIP for an
+# edited dispatch and spec-check.sh: a mode flip or a prefix change then
+# silently never reached them.
+_CONFIG_BEARING_SCRIPTS = {
+    ".claude/githooks/dispatch": "hooks.spec_gate_commit_mode",
+    ".claude/githooks/spec-check.sh": "hooks.spec_gate_commit_prefixes",
+    ".claude/merge-back.sh": "which commit gates it runs",
+}
 
 
 def _apply_settings_json(root: Path, action: dict, manifest: dict,
@@ -1549,6 +1813,10 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
             # retire.
             "owned_deny": _own_deny,
             "owned_hooks": _own_hooks,
+            # [WP3 / D6] What we wrote into `worktree`, as for deny rules.
+            "owned_worktree": dict(ours.get("worktree") or {}),
+            # [WP3 / model assignment] And the contributed keys we wrote.
+            "contributed_keys": _contributed(ours),
             "displaced_keys": displaced,
             "tier": TIER_SECURITY,
         }
@@ -1572,7 +1840,8 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         # what an earlier run recorded is still true. Dropping it made the
         # next run read the tree as having no record and drop the operator's
         # own registrations at a site of a hook this config does not install.
-        for key in ("owned_deny", "owned_hooks"):
+        for key in ("owned_deny", "owned_hooks", "owned_worktree",
+                    "contributed_keys"):
             if isinstance(known, dict) and key in known:
                 row[key] = known[key]
         manifest["files"].append(row)
@@ -1690,13 +1959,26 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         return not (isinstance(rec, dict)
                     and rec.get("digest") == _digest(text))
 
+    owned_worktree: dict = {}
+    contributed: dict = {}
     merged, owned_deny, owned_hooks = _merge_settings(
         ours, theirs,
         (known or {}).get("owned_deny") or [],
         (known or {}).get("owned_hooks"),
         summary["dropped_registrations"], _keep_off,
-        summary["kept_off_registrations"])
+        summary["kept_off_registrations"],
+        (known or {}).get("owned_worktree"), owned_worktree,
+        (known or {}).get("contributed_keys"), contributed)
     new_text = json.dumps(merged, indent=2) + "\n"
+    # [WP3 / D6] An operator's own baseRef stays; say what it costs.
+    _wt = merged.get("worktree")
+    note = _worktree_note(_wt)
+    if note:
+        summary["settings_notes"].append(note)
+    # [WP3 / model assignment] An opt-out that could not take effect.
+    note = _contributed_note(merged, ours)
+    if note:
+        summary["settings_notes"].append(note)
 
     co_owned = {
         "path": action["path"],
@@ -1705,6 +1987,8 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
         "block_digest": _digest(body),
         "owned_deny": owned_deny,
         "owned_hooks": owned_hooks,
+        "owned_worktree": owned_worktree,
+        "contributed_keys": contributed,
         # Their values for the keys we take over outright, so uninstall can
         # give them back rather than delete them.
         "displaced_keys": _displaced_owned_keys(ours, theirs, known),
@@ -1773,6 +2057,26 @@ def _uninstall_settings_merge(root: Path, entry: dict) -> str:
             cur["hooks"] = stripped
         else:
             cur.pop("hooks", None)
+
+    # [WP3 / D6] `worktree` sub-keys we wrote, while they still hold the
+    # value we wrote; the operator's stay.
+    owned_wt = entry.get("owned_worktree")
+    wt = cur.get("worktree")
+    if isinstance(owned_wt, dict) and isinstance(wt, dict):
+        for k, v in owned_wt.items():
+            if k in wt and wt[k] == v:
+                del wt[k]
+        if not wt:
+            cur.pop("worktree", None)
+
+    # [WP3 / model assignment] A contributed key goes while it still holds
+    # the value we wrote; the operator's own value stays.
+    contrib = entry.get("contributed_keys")
+    if isinstance(contrib, dict):
+        for k, v in contrib.items():
+            if (k in _SETTINGS_CONTRIBUTED_KEYS and k in cur
+                    and _same_value(cur[k], v)):
+                del cur[k]
 
     owned = entry.get("owned_deny") or []
     perms = cur.get("permissions")
@@ -2089,6 +2393,924 @@ def _apply_root_gitignore(root: Path, action: dict, manifest: dict,
             sep = "" if text.endswith("\n") else "\n"
             _atomic_write(text + sep + block)
     manifest["files"].append(co_owned)
+
+
+# --------------------------------------------------------------------------- #
+# [WP3 / D2] Git hooks for the spec check - installer-managed shims
+# --------------------------------------------------------------------------- #
+# The shims are the installer's first write into a repository's hooks
+# directory. The rules, each from a measured failure of the alternatives:
+#   * Write <git-common-dir>/hooks/{pre-commit,pre-merge-commit}. The
+#     common directory is shared by every linked worktree, so one shim
+#     fires in each implementer worktree. A RELATIVE core.hooksPath
+#     resolves per worktree instead, and a worktree whose branch lacks the
+#     directory runs no hook at all, silently.
+#   * Never write over a hook this installer did not write (no marker),
+#     with or without --force, and never rename one to chain it: hook
+#     managers rename and re-run hooks too, and two tools chaining each
+#     other's renamed files can recurse. Leave it, and say which line to
+#     add to it.
+#   * Never set core.hooksPath. When it is already set (husky does), git
+#     ignores .git/hooks, so write nothing and say so.
+#   * A shim this installer wrote follows the normal file rules: updated
+#     while unedited, kept (and reported) once edited, --force backs it up
+#     and overwrites it, --uninstall removes it only while unedited.
+#   * No repository, or no git: write nothing, say so, and let a re-install
+#     after `git init` add them. Nothing here changes the exit status: the
+#     PreToolUse spec-gate-commit hook still runs, and these are quality
+#     gates (seam SS7.2 non-critical tier).
+_GIT_ENV_DROP = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
+                 "GIT_COMMON_DIR", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY")
+
+
+def _git_out(root: Path, *args: str):
+    """(returncode, stdout) of `git -C root ARGS`, or None when git cannot
+    be run. The caller's GIT_DIR and friends are dropped: an install run
+    from inside a git hook would otherwise inspect that hook's repository."""
+    env = {k: v for k, v in os.environ.items() if k not in _GIT_ENV_DROP}
+    try:
+        r = subprocess.run(["git", "-C", str(root), *args], env=env,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    return r.returncode, r.stdout.rstrip("\n")
+
+
+def _git_hooks_target(root: Path):
+    """Where the shims go: (hooks_dir, rel, None), where rel is the project
+    directory relative to the repository's top level ("." when equal).
+    Otherwise (None, rel_or_None, (code, detail)) saying why not."""
+    probe = _git_out(root, "rev-parse", "--is-inside-work-tree")
+    if probe is None:
+        return None, None, ("no-git-binary", "")
+    if probe[0] != 0 or probe[1] != "true":
+        return None, None, ("no-repo", "")
+    loc = _git_out(root, "rev-parse", "--show-toplevel", "--git-common-dir",
+                   "--show-prefix")
+    if loc is None or loc[0] != 0:
+        return None, None, ("no-repo", "")
+    lines = loc[1].split("\n") + ["", "", ""]
+    top, common, prefix = Path(lines[0]), Path(lines[1]), lines[2]
+    if not common.is_absolute():
+        common = root / common
+    rel = prefix.rstrip("/") or "."
+    if rel != ".":
+        # A project inside a larger repository (a monorepo package, or a
+        # directory under a home-directory repository): hooks there would
+        # run for every commit in that repository. [WP3 fix1, operator
+        # decision 2026-10-06 (2)] The spec check itself works there: it
+        # polices the project's own paths against its own .claude/specs
+        # (spec-check.sh and gates.py), through the PreToolUse fallback.
+        return None, rel, ("not-top", str(top))
+    hooks = Path(os.path.abspath(common)) / "hooks"
+    hp = _git_out(root, "config", "--get", "core.hooksPath")
+    if hp is not None and hp[0] == 0 and hp[1] == "":
+        # [WP3 fix3 HD-5] Set to an empty value: git runs no hook at all
+        # (measured on git 2.38.0, 2.49.1 and 2.55.0), so a shim in
+        # .git/hooks would not run either.
+        return None, rel, ("hooks-off", "")
+    if hp is not None and hp[0] == 0 and hp[1].strip():
+        val = os.path.expanduser(hp[1].strip())
+        where = Path(val) if os.path.isabs(val) else top / val
+        if os.path.realpath(where) != os.path.realpath(hooks):
+            return None, rel, ("hooks-path", hp[1].strip())
+    if hooks.is_symlink():
+        return None, rel, ("hooks-dir-symlink", os.readlink(hooks))
+    return hooks, rel, None
+
+
+def _hook_manager_of(text) -> str | None:
+    """Name the tool that wrote a foreign hook, when its file says so."""
+    if text is None:
+        return None
+    low = text.lower()
+    if "pre-commit.com" in low or "file generated by pre-commit" in low:
+        return "the pre-commit framework"
+    if "lefthook" in low:
+        return "lefthook"
+    if "husky" in low:
+        return "husky"
+    return None
+
+
+# [WP3 fix1 INST-3] A hook this installer did not write that already runs
+# the check: the operator followed the warning's remedy (a husky hook under
+# core.hooksPath, a hand-written one), or a hook manager runs it from its
+# own config file. [WP3 fix2 IT-1, IT-2, RG-2] Its TEXT cannot say so: a
+# line after husky 9's `. h` (which ends in `exit`), after the pre-commit
+# framework's `exec`, or in a comment never runs, and git skips a file that
+# is not executable. Read that way, a re-install said "nothing to install"
+# (and the PreToolUse fallback went quiet) while the check ran nowhere. So
+# only this installer's own shim, byte for byte and executable, counts as
+# running the check; a hook that mentions the line gets a warning that says
+# so and how to confirm it, not the plain remedy it already follows.
+_MANAGER_CONFIGS = {
+    "lefthook": tuple(f"{dot}lefthook{local}.{ext}" for dot in ("", ".")
+                      for local in ("", "-local")
+                      for ext in ("yml", "yaml", "toml", "json")),
+    "the pre-commit framework": (".pre-commit-config.yaml",),
+}
+
+
+def _mentions_dispatch(text, name: str) -> bool:
+    """Does a hook file (or a hook manager's config) hold the text
+    `.claude/githooks/dispatch <name>`. A mention only: see above."""
+    from templates import GIT_HOOK_DISPATCH
+    return text is not None and f"{GIT_HOOK_DISPATCH} {name}" in text
+
+
+def _guarded_line(name: str) -> str:
+    """[WP3 fix1 INST-6, fix3 HD-1] The line every remedy gives for hook
+    `name`. The guard lets a commit through where there is no dispatch, as
+    the installer's own shim does: on a branch cut before the install, in a
+    repository that shares the hooks directory, and after the spec gate is
+    turned off (hooks.spec_gate_commit: false and a re-install remove
+    dispatch). Unguarded, the line exits 127 there and git refuses every
+    commit, a person's too."""
+    from templates import GIT_HOOK_DISPATCH as cmd
+    return f"if [ -f {cmd} ]; then bash {cmd} {name} || exit 1; fi"
+
+
+def _manager_mentions_dispatch(root: Path, manager, name: str) -> str | None:
+    """The config file at the repository top in which `manager` mentions
+    the check for `name`, if one does; else None."""
+    names = _MANAGER_CONFIGS.get(manager)
+    loc = _git_out(root, "rev-parse", "--show-toplevel") if names else None
+    if not names or loc is None or loc[0] != 0 or not loc[1]:
+        return None
+    for fn in names:
+        try:
+            text = (Path(loc[1]) / fn).read_text(errors="replace")
+        except (OSError, ValueError):
+            continue
+        if _mentions_dispatch(text, name):
+            return fn
+    return None
+
+
+def _husky9_user_hook(where: Path, name: str):
+    """husky 9 points core.hooksPath at <dir>/_ and writes there a wrapper
+    per hook that sources `h`, which runs <dir>/<name> with sh and then
+    exits: a line added to the wrapper never runs, and husky rewrites the
+    directory. The file to edit is <dir>/<name>; None when `where` is not
+    that layout."""
+    if where.name != "_" or not (where / "h").is_file():
+        return None
+    try:
+        wrapper = (where / name).read_text(errors="replace")
+    except (OSError, ValueError):
+        return None
+    if not re.search(r'(?m)^\.\s.*/h"?\s*$', wrapper):
+        return None
+    return where.parent / name
+
+
+def _hook_state(path: Path, name: str, shim: str) -> str:
+    """[WP3 fix2 IT-1, IT-2, RG-2] What git would run as hook `name` at
+    `path`: "absent"; "noexec" (git skips it, with a hint); "shim" (this
+    installer's, byte for byte, executable: the only state that counts as
+    running the check); "mentions" (it holds the dispatch line, which may
+    or may not run); or "other". [WP3 fix3 HD-3] "noexec-other": git skips
+    it and it does not hold the line, so it needs the line too."""
+    if not os.path.lexists(path):
+        return "absent"
+    try:
+        text = path.read_text(errors="replace")
+    except (OSError, ValueError):
+        text = None
+    if not os.access(path, os.X_OK):
+        return "noexec" if _mentions_dispatch(text, name) else "noexec-other"
+    if text == shim:
+        return "shim"
+    return "mentions" if _mentions_dispatch(text, name) else "other"
+
+
+def _gate_off_mentions(root: Path) -> dict:
+    """[WP3 fix3 HD-1] With the spec gate off: {file: [hook names]} for each
+    hook git runs here (husky 9's .husky/<hook> for its wrapper), or lefthook
+    or pre-commit framework config at the repository top, that still
+    mentions the dispatch line. None below the top, where no remedy gave
+    one, and none in a core.hooksPath every repository reads. A shim this
+    installer wrote is the retire step's (its marker)."""
+    from templates import GIT_HOOK_MARKER, GIT_HOOK_NAMES
+    hooks, _rel, why = _git_hooks_target(root)
+    if why is not None and why[0] in ("no-git-binary", "no-repo", "not-top"):
+        return {}
+    if why is not None and why[0] == "hooks-path":
+        # A directory every repository uses holds lines for the others too,
+        # and INST-6 always gave it the guarded one: leave it out.
+        where, shared = _hooks_path_where(root, why[1])
+        hooks = None if shared else where
+    loc = _git_out(root, "rev-parse", "--show-toplevel")
+    top = Path(loc[1]) if loc is not None and loc[0] == 0 else root
+    found: dict = {}
+    for n in GIT_HOOK_NAMES:
+        files = []
+        if hooks is not None:
+            user = _husky9_user_hook(hooks, n)
+            files.append(user if user is not None else hooks / n)
+        for m in _MANAGER_CONFIGS:
+            fn = _manager_mentions_dispatch(root, m, n)
+            if fn:
+                files.append(top / fn)
+        for f in files:
+            try:
+                text = f.read_text(errors="replace")
+            except (OSError, ValueError):
+                continue
+            if GIT_HOOK_MARKER not in text and _mentions_dispatch(text, n):
+                found.setdefault(f, []).append(n)
+    return found
+
+
+def _hooks_path_where(root: Path, value: str):
+    """(directory, shared) for a core.hooksPath value: where git looks for
+    hooks, and whether that setting comes from a config every repository
+    on the machine reads (global, system, or a -c on the command line).
+    [WP3 fix1 INST-6] A remedy for a shared directory must not run dispatch
+    unguarded: that hook fires in every repository, and where dispatch does
+    not exist it exits 127 and git refuses every commit, a person's too."""
+    loc = _git_out(root, "rev-parse", "--show-toplevel")
+    top = Path(loc[1]) if loc is not None and loc[0] == 0 else root
+    val = os.path.expanduser(value)
+    where = Path(val) if os.path.isabs(val) else top / val
+    scope = _git_out(root, "config", "--show-scope", "--get",
+                     "core.hooksPath")
+    if scope is not None and scope[0] == 0 and scope[1]:
+        return where, scope[1].split()[0] not in ("local", "worktree")
+    # git before 2.26 has no --show-scope: shared unless the repository's
+    # own config sets it.
+    own = _git_out(root, "config", "--local", "--get", "core.hooksPath")
+    return where, not (own is not None and own[0] == 0 and own[1].strip())
+
+
+def _apply_git_hooks(root: Path, plan: list[dict], manifest: dict,
+                     summary: dict, prev_files: dict, *, cfg: dict, dry: bool,
+                     force: bool, adopt: bool) -> None:
+    """[WP3 / D2] Install, update or retire the spec check's git-hook shims.
+    The plan decides whether they should exist: they follow the
+    .claude/githooks/dispatch action, which build_plan emits exactly when
+    it emits spec-gate-commit."""
+    from templates import GIT_HOOK_DISPATCH, GIT_HOOK_MARKER, GIT_HOOK_NAMES
+
+    want = any(a["path"] == GIT_HOOK_DISPATCH for a in plan)
+    prev_rows = {p: f for p, f in prev_files.items()
+                 if f.get("kind") == "git_hook"}
+    root_r = Path(os.path.abspath(root))
+
+    def shown(p: Path) -> str:
+        try:
+            return str(Path(os.path.abspath(p)).relative_to(root_r))
+        except ValueError:
+            return str(Path(os.path.abspath(p)))
+
+    def located(path: str) -> Path:
+        return Path(path) if os.path.isabs(path) else root / path
+
+    def read(p: Path):
+        try:
+            return p.read_text()
+        except (OSError, ValueError):
+            return None
+
+    if not want:
+        # The plan dropped the spec gate (hooks.spec_gate_commit: false):
+        # retire each shim an earlier run wrote, while it is unedited.
+        for path, known in prev_rows.items():
+            target = located(path)
+            if target.is_symlink() or not target.is_file():
+                continue
+            text = read(target)
+            if (text is not None and known.get("digest") == _digest(text)
+                    and known.get("state") != "skipped-local-edit"):
+                if not dry:
+                    target.unlink()
+                summary["removed"] += 1
+                summary["removed_paths"].append(path)
+                tag = "REMOVE (dry run)" if dry else "REMOVE"
+                print(f"  {tag} {path}  (git hook; the spec gate is off)")
+            else:
+                print(f"  KEEP   {path}  (git hook dropped from the plan "
+                      f"but locally modified; left in place)",
+                      file=sys.stderr)
+                summary["git_hooks"].append(
+                    {"name": Path(path).name, "path": path,
+                     "state": "kept-edited", "detail": ""})
+        # [WP3 fix3 HD-1] The re-install retires dispatch and its own
+        # shims, never a line the operator added to another hook or to a
+        # hook manager's config: name each one that still mentions it.
+        for fn, names in _gate_off_mentions(root).items():
+            summary["git_hooks"].append(
+                {"name": names[0], "names": names, "path": shown(fn),
+                 "state": "gate-off-mention", "detail": ""})
+        return
+
+    hooks, rel, why = _git_hooks_target(root)
+    if hooks is None:
+        code, detail = why
+        entry = {"name": None, "path": None, "state": code,
+                 "detail": detail, "rel": rel}
+        if code == "hooks-path":
+            # [WP3 fix1 INST-3, INST-6] Which of the hooks there already
+            # run the check, and whether the directory is shared by every
+            # repository (the remedy differs). [WP3 fix2 IT-1, IT-2, RG-2]
+            # "Runs the check" is this installer's shim, byte for byte and
+            # executable; a mention of the line is said as a mention.
+            where, shared = _hooks_path_where(root, detail)
+            entry["shared"] = shared
+            shim = TEMPLATES["git_hook_shim"](cfg)
+            states = {}
+            for n in GIT_HOOK_NAMES:
+                user = _husky9_user_hook(where, n)
+                if user is not None:
+                    # husky runs the user's file with sh: no exec bit needed.
+                    st = ("mentions" if _mentions_dispatch(read(user), n)
+                          else "other")
+                    states[n] = (st, shown(user), "husky9")
+                else:
+                    states[n] = (_hook_state(where / n, n, shim),
+                                 shown(where / n), "")
+            entry["missing"] = [n for n in GIT_HOOK_NAMES
+                                if states[n][0] != "shim"]
+            entry["states"] = {n: states[n] for n in entry["missing"]}
+            if not entry["missing"]:
+                print(f"  note   git hooks pre-commit, pre-merge-commit: "
+                      f"the hooks in core.hooksPath ({detail}) are "
+                      f"bootstrap-install's shim; nothing to install")
+                manifest["files"].extend(prev_rows.values())
+                return
+        summary["git_hooks"].append(entry)
+        if code in ("no-repo", "no-git-binary"):
+            # Stdout only: with no repository there is no commit to check
+            # yet, and a VCS-less project is a valid Phase 0 state
+            # (PRD:474), so this is not a `warning:` on every re-install.
+            why_txt = ("this directory is not inside a git repository"
+                       if code == "no-repo" else "git is not on PATH")
+            print(f"  note   git hooks pre-commit, pre-merge-commit not "
+                  f"installed: {why_txt}. After `git init`, re-run "
+                  f"bootstrap-install to add them.")
+        else:
+            print(f"  note   git hooks pre-commit, pre-merge-commit not "
+                  f"installed ({code}; see the warning below)")
+        # Keep the rows of shims an earlier run wrote, so --uninstall can
+        # still find them.
+        manifest["files"].extend(prev_rows.values())
+        return
+
+    body = TEMPLATES["git_hook_shim"](cfg)
+
+    def place(name: str, target: Path, via: str = "") -> str | None:
+        """Create, update, keep or skip one shim. Returns None when done,
+        else the text of a hook this installer did not write ("" when it
+        could not be read)."""
+        path = shown(target)
+        known = prev_rows.get(path)
+        row = {"path": path, "digest": _digest(body), "mode": oct(0o755),
+               "kind": "git_hook", "tier": TIER_NON}
+        note = via
+        if not target.exists():
+            verdict = "create"
+        else:
+            text = read(target)
+            if text == body:
+                verdict = "unchanged"
+            elif text is None or GIT_HOOK_MARKER not in text:
+                return text or ""
+            else:
+                on_disk = _digest(text)
+                if not _is_operator_content(known, on_disk):
+                    verdict = "update"
+                elif force:
+                    saved = _save_forced_copy(
+                        _backup_root(root, manifest), root,
+                        path if not os.path.isabs(path)
+                        else "git-hooks/" + target.name, text, dry=dry)
+                    summary["backups"].append(saved)
+                    note += f"  (forced; previous version saved to {saved})"
+                    verdict = "update"
+                elif adopt:
+                    summary["adopted"] += 1
+                    print(f"  ADOPT  {path}  (recorded as installer-owned; "
+                          f"nothing written)")
+                    row["digest"] = on_disk
+                    manifest["files"].append(row)
+                    return None
+                else:
+                    summary["skipped"] += 1
+                    reason = _skip_reason(known is None,
+                                          summary["no_manifest"])
+                    print(f"  SKIP   {path}  ({reason}; use --force to "
+                          f"overwrite)")
+                    summary["git_hooks"].append(
+                        {"name": name, "path": path, "state": "edited",
+                         "detail": reason, "rel": rel})
+                    row.update(digest=on_disk, state="skipped-local-edit")
+                    manifest["files"].append(row)
+                    return None
+        # [WP3 critic 1h] A hooks directory that cannot be written (a
+        # root-owned .git/hooks after a container `git init`, a read-only
+        # mount) is reported per shim, like every other shim this run did
+        # not install. It used to raise out of apply_plan before the
+        # manifest was written, on every later run too.
+        tmp = target.with_name(target.name + ".bootstrap-tmp")
+        try:
+            if not dry and verdict != "unchanged":
+                hooks.mkdir(parents=True, exist_ok=True)
+                tmp.write_text(body)
+                tmp.chmod(0o755)
+                os.replace(tmp, target)
+            elif not dry and stat.S_IMODE(target.stat().st_mode) != 0o755:
+                target.chmod(0o755)
+        except OSError as exc:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            print(f"  SKIP   {path}  (git hook: could not write it: "
+                  f"{exc.strerror or exc})")
+            summary["git_hooks"].append(
+                {"name": name, "path": path, "state": "write-failed",
+                 "detail": exc.strerror or str(exc), "rel": rel})
+            # The shim an earlier run wrote is still there: keep its row,
+            # so --uninstall can find it.
+            if known is not None and target.exists():
+                manifest["files"].append(known)
+            return None
+        summary[verdict] += 1
+        tag = {"create": "CREATE", "update": "UPDATE",
+               "unchanged": "  ok  "}[verdict]
+        print(f"  {tag} {path}  (git hook: runs {GIT_HOOK_DISPATCH} for "
+              f"agent commits){note}")
+        manifest["files"].append(row)
+        return None
+
+    for name in GIT_HOOK_NAMES:
+        target = hooks / name
+        path = shown(target)
+        if target.is_symlink():
+            # [WP3 fix3 HD-5] A symlink to an exact, executable copy of the
+            # shim runs the check (git follows it, and both fallbacks defer
+            # to it): no "does not run from it".
+            if read(target) == body and os.access(target, os.X_OK):
+                print(f"  note   {path}  (a symlink to {os.readlink(target)}, "
+                      f"which holds bootstrap-install's shim; left alone)")
+                continue
+            summary["git_hooks"].append(
+                {"name": name, "path": path, "state": "foreign-symlink",
+                 "detail": os.readlink(target), "rel": rel})
+            print(f"  SKIP   {path}  (a symlink this installer did not "
+                  f"write; left alone)")
+            continue
+        foreign = place(name, target)
+        if foreign is None:
+            continue
+        manager = _hook_manager_of(foreign)
+        # [WP3 fix1 INST-3] It may already run the check: from its own
+        # text, or from its manager's config file at the repository top.
+        # [WP3 fix2 IT-1, IT-2, RG-2] A mention, which the warning names
+        # as one; and git skips a hook that is not executable.
+        noexec = not os.access(target, os.X_OK)
+        via = (path if _mentions_dispatch(foreign, name)
+               else _manager_mentions_dispatch(root, manager, name))
+        # The pre-commit framework keeps a hook it replaces as
+        # <name>.legacy and still runs it (measured, pre-commit 4.6.2).
+        # When that file is a shim this installer wrote, keep managing it
+        # there: the check still runs, and --uninstall can remove it.
+        legacy = hooks / (name + ".legacy")
+        if (manager == "the pre-commit framework" and legacy.is_file()
+                and not legacy.is_symlink()
+                and GIT_HOOK_MARKER in (read(legacy) or "")):
+            print(f"  note   {path}  (written by the pre-commit framework, "
+                  f"which runs this installer's hook as {name}.legacy)")
+            if place(name, legacy, via="  (run by the pre-commit "
+                                       "framework)") is None:
+                continue
+        summary["git_hooks"].append(
+            {"name": name, "path": path, "state": "foreign",
+             "detail": manager, "rel": rel, "via": via or "",
+             "noexec": noexec})
+        print(f"  SKIP   {path}  (an existing hook this installer did not "
+              f"write; left alone)")
+
+
+# [WP3 fix6 RV5-MB-2] The file names the confirm recipe tries under each
+# prefix, in order: the extension a retrofit allowlist names is often
+# `.txt` or `.md`, so a source extension and two with none follow.
+_CONFIRM_NAMES = ("confirm.txt", "confirm.py", "confirm", "spec-check-probe")
+
+
+def _mention_note(ment, cmd: str, prefix=("src/", "confirm.txt"),
+                  retro: bool = False) -> str:
+    """[WP3 fix2 IT-1, RG-2] What a hook that MENTIONS the dispatch line
+    gets: not "nothing to install", which a line that never runs made
+    false, and not the plain remedy the operator already followed.
+    `prefix`: (prefix, name), the first of hooks.spec_gate_commit_prefixes
+    and a file name there that the legacy allowlist leaves checked;
+    "covered" when it covers every prefix; None when it covers every name
+    tried but not every prefix. `retro`: a retrofit install (rollout
+    weeks, a legacy allowlist)."""
+    files = " and ".join(f"{p} mentions `{cmd} {n}`" for n, p in ment)
+    out = (f" {files}, but this installer cannot tell whether git runs that "
+           f"line (a line after an `exit` or an `exec`, after husky 9's "
+           f"`. h`, or in a comment never runs), so it does not count as "
+           f"the check.")
+    # [WP3 fix3 HD-2] Confirm from a terminal: through Claude Code the
+    # PreToolUse fallback refuses on the index first in block mode, so git
+    # never runs the hook. And no ordinary commit fires pre-merge-commit
+    # with anything to check: a commit fires pre-commit, and a clean merge
+    # has no changes of its own. [WP3 fix4 INST3-3] The file must be under
+    # a policed prefix: one outside them prints nothing, line or no line.
+    # [WP3 fix5 R4-2] A retrofit install exempts what its legacy allowlist
+    # covers, so the example is under a prefix the allowlist leaves checked;
+    # and in rollout weeks 1 to 3 the check only warns, with its own line.
+    if any(n == "pre-commit" for n, _p in ment) and prefix == "covered":
+        out += (" No commit can confirm the pre-commit line yet: "
+                "retrofit.legacy_allowlist (.claude/steering/"
+                "spec-strategy.md) covers every one of "
+                "hooks.spec_gate_commit_prefixes, so the check exempts any "
+                "file under them, line or no line.")
+    elif any(n == "pre-commit" for n, _p in ment):
+        sign = "it should print `spec check (pre-commit):`"
+        if retro:
+            sign += (" (in retrofit rollout weeks 1 to 3, .claude/hooks/"
+                     "rollout-schedule.md, where the check only warns, it "
+                     "prints `the spec check would refuse this commit:` "
+                     "instead)")
+        if prefix is None:
+            # [WP3 fix6 RV5-MB-2] The allowlist covers every name tried,
+            # but not every prefix: no example, and no claim either way.
+            what = ("a file under one of hooks.spec_gate_commit_prefixes "
+                    "that no task file lists and retrofit.legacy_allowlist "
+                    "(.claude/steering/spec-strategy.md) does not cover "
+                    "(it covers every name this installer tried)")
+        else:
+            what = (f"a file under {prefix[0]} that no task file lists, "
+                    f"such as `{prefix[0]}{prefix[1]}`")
+        out += (f" To confirm the pre-commit line runs, commit {what}, from "
+                f"a terminal with `CLAUDECODE=1 "
+                f"git commit` (through Claude Code, the PreToolUse hook can "
+                f"refuse the commit before git runs its hooks): {sign}. A "
+                f"file outside hooks.spec_gate_commit_prefixes is not "
+                f"checked, so it prints nothing")
+        out += (", nor is one the legacy allowlist covers." if retro
+                else ".")
+        out += (" If that commit lands (in warn mode it does), "
+                "`git reset --soft HEAD~1` undoes it.")
+    if any(n == "pre-merge-commit" for n, _p in ment):
+        out += (" No ordinary commit confirms the pre-merge-commit line: git "
+                "runs that hook only for a merge it commits by itself, which "
+                "normally has no changes of its own for the check to judge.")
+    return out
+
+
+# [WP3 fix3 HD-1] Said once with a guarded line, so nobody drops the guard.
+_GUARD_WHY = (" The `if [ -f ... ]` guard lets a commit through where there "
+              "is no dispatch: on a branch from before the install, and once "
+              "the spec gate is turned off.")
+
+
+def _noexec_other(paths) -> str:
+    """[WP3 fix3 HD-3] For hooks git skips that do not hold the line: the
+    line goes in too, and the exec bit only if their own commands should run
+    (a hook can be left non-executable on purpose)."""
+    it = "it" if len(paths) == 1 else "them"
+    return (" " + " and ".join(paths) + (" is" if len(paths) == 1 else " are")
+            + f" not executable, so git skips {it}: put the line in {it} and "
+            f"chmod +x {it} only if {'its' if it == 'it' else 'their'} own "
+            f"commands should run too; otherwise replace {it} with an "
+            f"executable hook that holds only the line.")
+
+
+def _legacy_allowlist(root: Path, cfg: dict) -> list[str]:
+    """[WP3 fix5 R4-2] The retrofit spec check's exempt patterns, as it reads
+    them: the LEGACY_ALLOWLIST block of .claude/steering/spec-strategy.md
+    (retrofit.legacy_allowlist when the file is not there, as in a dry
+    run)."""
+    try:
+        text = (root / ".claude/steering/spec-strategy.md").read_text(
+            encoding="utf-8", errors="replace")
+    except OSError:
+        return list((cfg.get("retrofit") or {}).get("legacy_allowlist")
+                    or [])
+    # [WP3 fix6 RV5-MB-3] Line by line, as the check's awk reads it: a
+    # marker anywhere on its line, the lines after BEGIN up to END (to the
+    # end of the file when END is missing), each trimmed of [:space:].
+    out, on = [], False
+    for ln in text.split("\n"):
+        if "<!-- LEGACY_ALLOWLIST_BEGIN -->" in ln:
+            on = True
+            continue
+        if "<!-- LEGACY_ALLOWLIST_END -->" in ln:
+            on = False
+        ln = ln.strip(" \t\n\v\f\r")
+        if on and ln:
+            out.append(ln)
+    return out
+
+
+def _git_hook_warnings(summary: dict, root: Path, dry: bool,
+                       prefixes=None, allow=None) -> list[str]:
+    """[WP3 / D2] One stderr line per git hook this run did not install,
+    with the remedy. The exit status does not change (see above).
+    `prefixes`: hooks.spec_gate_commit_prefixes (the default's when None).
+    `allow`: a retrofit install's legacy allowlist (None: not a retrofit)."""
+    import fnmatch
+    from templates import (GIT_HOOK_DISPATCH, GIT_HOOK_NAMES,
+                           SPEC_GATE_DEFAULT_PREFIXES)
+    pfxs = list(prefixes) if prefixes else list(SPEC_GATE_DEFAULT_PREFIXES)
+    retro = allow is not None
+    # [WP3 fix5 R4-2] As the check matches: a bash `case` glob, `**` as `*`.
+    # [WP3 fix6 RV5-MB-2] One probe name decided "covers every prefix", and
+    # `*.txt` matched it under every prefix while src/confirm.py was still
+    # checked. So several names are tried under each prefix, and "covers"
+    # is said only of a pattern that covers the prefix itself: it ends in
+    # `*` and matches the prefix, so it matches anything after it too.
+    globs = [a.replace("**", "*") for a in (allow or [])]
+    pfx = next(((p, n) for p in pfxs for n in _CONFIRM_NAMES
+                if not any(fnmatch.fnmatchcase(p + n, g) for g in globs)),
+               None)
+    if pfx is None and all(any(g.endswith("*") and fnmatch.fnmatchcase(p, g)
+                               for g in globs) for p in pfxs):
+        pfx = "covered"
+    did = "would not add" if dry else "did not add"
+    still = ("The PreToolUse spec-gate-commit hook still runs, but it misses "
+             "`git add X && git commit` and `git commit -am`.")
+    out = []
+    for g in summary["git_hooks"]:
+        rel = g.get("rel") or "."
+        cmd = GIT_HOOK_DISPATCH
+        state, detail, path = g["state"], g["detail"], g["path"]
+        if state in ("no-git-binary", "no-repo"):
+            continue        # said on stdout by _apply_git_hooks
+        elif state == "hooks-path":
+            # [WP3 fix1 INST-3] Only the hooks that do not run it yet.
+            # [WP3 fix2 IT-1, IT-2, RG-2] Per hook, by what is there: none
+            # or another hook (the line to add), one git skips (chmod +x),
+            # one that mentions the line (it may not run: confirm it), and
+            # husky 9's wrapper directory (edit the hook husky runs).
+            names = g.get("missing") or list(GIT_HOOK_NAMES)
+            states = g.get("states") or {}
+            add, noexec, noexec_add, ment, h9 = [], [], [], [], []
+            for n in names:
+                st, shown_p, kind = states.get(n, ("absent", "", ""))
+                where_n = (os.path.dirname(shown_p) if shown_p
+                           else detail)
+                if st == "noexec":
+                    noexec.append(shown_p)
+                elif st == "mentions":
+                    ment.append((n, shown_p))
+                else:
+                    # [WP3 fix3 HD-3] One git skips that lacks the line
+                    # needs the line as well as the exec bit. [HD-2] The
+                    # husky 9 sentence names only the hooks still to edit.
+                    add.append((n, where_n))
+                    if st == "noexec-other":
+                        noexec_add.append(shown_p)
+                    if kind == "husky9":
+                        h9.append((n, shown_p))
+            # [WP3 fix1 INST-6, fix3 HD-1] Every remedy's line is guarded,
+            # so it lets a commit through where there is no dispatch.
+            line = " and ".join(f"the {n} hook in {w} run `{_guarded_line(n)}`"
+                                for n, w in add)
+            if g.get("shared"):
+                # [WP3 fix1 INST-6] A directory every repository on the
+                # machine uses.
+                msg = (f"core.hooksPath is set to {detail} in a git config "
+                       f"every repository on this machine reads, so git does "
+                       f"not run hooks from .git/hooks and this run {did} the "
+                       f"spec check's git hooks. {still} The hooks there run "
+                       f"for every repository, so a line that runs {cmd} "
+                       f"unguarded refuses every commit in a repository that "
+                       f"has none.")
+            else:
+                msg = (f"core.hooksPath is set to {detail}, so git does not "
+                       f"run hooks from .git/hooks and this run {did} the "
+                       f"spec check's git hooks. {still}")
+            if add:
+                msg += (f" To add the check, have {line}."
+                        + ("" if g.get("shared") else _GUARD_WHY))
+            if h9:
+                msg += (f" {detail} is husky 9's directory, which husky "
+                        f"rewrites, and its hooks there end in `exit` before "
+                        f"a line added after them: put the line in "
+                        + " and ".join(p for _n, p in h9)
+                        + ", which husky runs.")
+            if noexec:
+                msg += (f" " + " and ".join(noexec) + (" is" if len(noexec) == 1
+                        else " are") + " not executable, so git skips "
+                        + ("it" if len(noexec) == 1 else "them")
+                        + ": chmod +x " + " ".join(noexec) + ".")
+            if noexec_add:
+                msg += _noexec_other(noexec_add)
+            if ment:
+                msg += _mention_note(ment, cmd, pfx, retro)
+            out.append(msg)
+        elif state == "not-top":
+            # [WP3 fix1, operator decision 2026-10-06 (2)] Say what works
+            # there: the check is project-relative (spec-check.sh and
+            # gates.py), so the PreToolUse hook polices this project's own
+            # paths against its own task files.
+            msg = (f"{root} is the directory {rel}/ inside the git "
+                   f"repository at {detail}, so this run {did} the spec "
+                   f"check's git hooks: they would run for every commit "
+                   f"in that repository. The spec check still checks "
+                   f"this project's own paths against its own task "
+                   f"files through the PreToolUse spec-gate-commit "
+                   f"hook, but that misses `git add X && git commit` "
+                   f"and `git commit -am`.")
+            # [WP3 fix2 IT-5, MR-4] A nested install: the top's git hook
+            # runs for this project's commits too, with the top's rules
+            # (backlog). This project's fallback no longer defers to it.
+            if os.path.isfile(os.path.join(detail, GIT_HOOK_DISPATCH)):
+                msg += (f" The repository top has its own install: its git "
+                        f"hook also runs for this project's commits and "
+                        f"checks the paths under its own "
+                        f"hooks.spec_gate_commit_prefixes against its own "
+                        f"task files, so narrow those prefixes there to "
+                        f"leave {rel}/ to this project.")
+            out.append(msg)
+        elif state == "hooks-off":
+            # [WP3 fix3 HD-5] Not unset: an empty value turns hooks off.
+            out.append(f"core.hooksPath is set to an empty value, which "
+                       f"turns off every git hook in this repository, so "
+                       f"this run {did} the spec check's git hooks: git "
+                       f"would not run them. {still} To add them, unset "
+                       f"core.hooksPath (`git config --show-origin --get "
+                       f"core.hooksPath` names the file that sets it) and "
+                       f"re-run bootstrap-install.")
+        elif state == "hooks-dir-symlink":
+            out.append(f"The repository's hooks directory is a symlink to "
+                       f"{detail}, so this run {did} the spec check's git "
+                       f"hooks: writing through it would reach every "
+                       f"repository that shares it. {still}")
+        elif state == "foreign-symlink":
+            out.append(f"{path} is a symlink to {detail}, which this "
+                       f"installer did not write, so it was left alone and "
+                       f"the spec check does not run from it. {still} To add "
+                       f"the check, have that hook run "
+                       f"`{_guarded_line(g['name'])}`.{_GUARD_WHY}")
+        elif state == "foreign" and (g.get("via") or g.get("noexec")):
+            # [WP3 fix2 IT-1, IT-2, RG-2] It mentions the line (in its own
+            # text or its manager's config), or git skips it: say which,
+            # not the plain remedy (INST-3), and never "it runs".
+            who = f", written by {detail}" if detail else ""
+            msg = (f"{path} already exists{who}, and this installer did not "
+                   f"write it, so it was left alone. {still}")
+            if g.get("via"):
+                if g.get("noexec"):
+                    msg += (f" It is not executable, so git skips it: "
+                            f"chmod +x {path}.")
+                msg += _mention_note([(g["name"], g["via"])], cmd, pfx,
+                                     retro)
+            else:
+                # [WP3 fix3 HD-1, HD-3] The guarded line, and the exec bit
+                # only if the hook's own commands should run.
+                msg += (f" To add the check, have that hook run "
+                        f"`{_guarded_line(g['name'])}`.{_GUARD_WHY}"
+                        + _noexec_other([path]))
+            out.append(msg)
+        elif state == "foreign":
+            who = f", written by {detail}" if detail else ""
+            hint = ""
+            # [WP3 fix3 HD-1] Guarded entries too: the framework runs
+            # `entry` without a shell, so its guard goes through sh -c.
+            if detail == "the pre-commit framework":
+                hint = (f" With the pre-commit framework, add a `repo: local` "
+                        f"hook with `entry: sh -c '[ ! -f {cmd} ] || exec "
+                        f"bash {cmd} {g['name']}'`, "
+                        f"`language: system`, `pass_filenames: false`, "
+                        f"`always_run: true` and `stages: [{g['name']}]`.")
+            elif detail == "lefthook":
+                hint = (f" With lefthook, add a `{g['name']}` command that "
+                        f"runs `{_guarded_line(g['name'])}` to lefthook.yml.")
+            out.append(f"{path} already exists{who}, and this installer did "
+                       f"not write it, so it was left alone and the spec "
+                       f"check does not run from it. {still} To add the "
+                       f"check, have that hook run "
+                       f"`{_guarded_line(g['name'])}`.{_GUARD_WHY}{hint}")
+        elif state == "edited":
+            kept = "keeps your local edits" if dry else "kept your local edits"
+            out.append(f"{path} {kept}, so this run "
+                       f"{'would not update' if dry else 'did not update'} "
+                       f"it. Pass --force to overwrite (it saves the current "
+                       f"file to .claude/.installer-backups/ first).")
+        elif state == "write-failed":
+            out.append(f"{path} could not be written ({detail}), so the "
+                       f"spec check does not run from it. {still} Make the "
+                       f"repository's hooks directory writable and re-run "
+                       f"bootstrap-install.")
+        elif state == "kept-edited":
+            out.append(f"{path} is a git hook an earlier install wrote and "
+                       f"you have edited, so this run left it in place "
+                       f"although the spec gate is now off. Delete it if it "
+                       f"should not run.")
+        elif state == "gate-off-mention":
+            # [WP3 fix3 HD-1] A line the operator added stays when the gate
+            # goes off; unguarded, it refuses every commit once dispatch is
+            # gone, and the off switch is what the block-mode text prescribes.
+            names = g.get("names") or [g["name"]]
+            lines = " and ".join(f"`{cmd} {n}`" for n in names)
+            one = len(names) == 1
+            what = f"{'that line' if one else 'those lines'} from {path}"
+            # [WP3 fix4 INST3-2] In a hook manager's config the mention is
+            # one key of an entry; the entry left without it breaks the
+            # tool, which then refuses every commit too.
+            base = Path(path).name
+            if base in _MANAGER_CONFIGS["the pre-commit framework"]:
+                what = (f"the whole hook {'entry' if one else 'entries'} that "
+                        f"{'runs' if one else 'run'} it from {path} (each "
+                        f"`- id:` item with that `entry:`, not only the line)")
+            elif base in _MANAGER_CONFIGS["lefthook"]:
+                what = (f"the whole lefthook "
+                        f"{'command' if one else 'commands'} that "
+                        f"{'runs' if one else 'run'} it from {path} (each "
+                        f"command's name with its `run:` key, not only the "
+                        f"line)")
+            out.append(f"{path} still mentions {lines}, but the spec gate is "
+                       f"off (hooks.spec_gate_commit: false): remove {what}. "
+                       f"Once {cmd} is gone, a line that runs it "
+                       f"without first checking that it exists refuses every "
+                       f"commit, a person's too.")
+    return out
+
+
+def _below_top(root: Path):
+    """(top, rel) when the project directory is below its repository's top
+    level (a monorepo package): rel is its path from there, without the
+    trailing "/". None at the top, outside a repository, or with no git."""
+    loc = _git_out(root, "rev-parse", "--show-toplevel", "--show-prefix")
+    if loc is None or loc[0] != 0:
+        return None
+    lines = loc[1].split("\n") + ["", ""]
+    top, rel = lines[0], lines[1].rstrip("/")
+    return (top, rel) if top and rel else None
+
+
+# [WP3 fix1 MB-1, operator decision 2026-10-06 (2)] Measured on Claude Code
+# 2.1.291 (wp3-fix1 f2-merge-back, live/runs/mono*.jsonl): for a project
+# below the repository top, an agent with `isolation: worktree` gets its
+# worktree at the TOP's .claude/worktrees/, starts at that worktree's top,
+# and a `cd` does not persist between its Bash calls. Its PreToolUse gates
+# run there, so the test gate ran `sh tests/run.sh` from the worktree's top
+# and refused the commit (exit 127, test command not found). Making every
+# cwd-bound gate find the project inside a worktree, on both substrates, is
+# more than this round can carry, so that part falls back as the decision
+# allows: `auto` resolves to none there (an explicit `worktree` is kept,
+# with a warning), and merge-back, which works there, still lands a branch
+# made by hand.
+_BELOW_TOP_WT = ("Claude Code makes an implementer's worktree at "
+                 "{top}/.claude/worktrees/ and starts it at that worktree's "
+                 "top, where the gates run the test command from the wrong "
+                 "directory: its `git commit` was refused, test command not "
+                 "found (measured on Claude Code 2.1.291)")
+
+
+def _below_top_isolation(root: Path, cfg: dict) -> None:
+    """Resolve `workflow.implementer_isolation: auto` to none for a project
+    below the repository top (see _BELOW_TOP_WT). Runs before build_plan,
+    so every isolation-dependent file follows; an explicit value stands."""
+    where = _below_top(root)
+    if (where is not None and cfg.get("_implementer_isolation") == "worktree"
+            and cfg.get("workflow", {}).get("implementer_isolation",
+                                            "auto") == "auto"):
+        cfg["_implementer_isolation"] = "none"
+        cfg["_isolation_below_top"] = where[1]
+
+
+def _below_top_notes(root: Path, cfg: dict) -> list[str]:
+    """[WP3 fix1 MB-1, operator decision 2026-10-06 (2)] What works for a
+    project below the repository top: merge-back runs its git steps at the
+    top and the gates in the project; worktree isolation does not (see
+    _BELOW_TOP_WT). One stderr line; rc unchanged."""
+    where = _below_top(root)
+    if where is None:
+        return []
+    top, rel = where
+    lands = (f".claude/merge-back.sh works here: it runs its git steps (the "
+             f"dirty check, the merge, the commit) at the repository top, "
+             f"across the whole repository, and the gates in {rel}/.")
+    head = (f"{root} is the directory {rel}/ inside the git repository at "
+            f"{top}. " + _BELOW_TOP_WT.format(top=top))
+    if cfg.get("_isolation_below_top"):
+        return [head + ". So workflow.implementer_isolation `auto` resolved "
+                "to none here: the implementer commits on the current "
+                "branch, one task at a time, and there is nothing to merge "
+                "back. " + lands + " It still lands a worktree branch made "
+                "by hand."]
+    if not _worktrees_on(cfg):
+        return []
+    msg = (head + ". workflow.implementer_isolation is set to worktree, so "
+           "its commits will be refused there unless commands.test also "
+           "works from the repository top; `auto` would resolve to none. "
+           + lands)
+    ign = _git_out(Path(top), "check-ignore", "-q", "--no-index",
+                   ".claude/worktrees/agent-x/")
+    if ign is None or ign[0] != 0:
+        msg += (f" Add `/.claude/worktrees/` to {top}/.gitignore (or to "
+                f".git/info/exclude): this project's .claude/.gitignore "
+                f"does not cover them, so `git add -A` in the repository "
+                f"would stage each worktree as an embedded repository.")
+    return [msg]
 
 
 def _reconcile_orphaned_substrate(root: Path) -> None:
@@ -2599,6 +3821,95 @@ def _warn(msg: str) -> None:
     print(f"warning: {msg}", file=sys.stderr)
 
 
+def _index_schema_warning(root: Path, summary: dict,
+                          dry: bool = False) -> str | None:
+    """[WP3 versioning-index] INDEX.md is the operator's roster, so the
+    hand-edit guard skips it and a re-install never delivers a new schema.
+    That is correct, but the SKIP line alone does not say what was missed.
+    When it was skipped and its roster header lacks columns the current
+    schema has, return one message naming them and pointing at the
+    migration recipe, or giving it when the README on disk lacks it;
+    otherwise None. Reads the on-disk files only; writes nothing. Columns
+    compare case-insensitively, with surrounding spaces ignored."""
+    rel = ".claude/specs/INDEX.md"
+    if rel not in summary.get("skipped_paths", ()):
+        return None
+    try:
+        text = (root / rel).read_text(errors="replace")
+    except OSError:
+        return None
+    header = None
+    for line in text.splitlines():
+        cells = [c.strip().lower() for c in line.strip().strip("|").split("|")]
+        if line.lstrip().startswith("|") and cells and cells[0] == "slug":
+            header = set(cells)
+            break
+    if header is None:
+        what = "it has no roster table whose header starts with 'slug'"
+    else:
+        missing = [c for c in INDEX_COLUMNS if c not in header]
+        if not missing:
+            return None
+        what = ("its table lacks the column(s) "
+                + ", ".join(f"'{c}'" for c in missing))
+    did = "would not update" if dry else "did not update"
+    head = (f"{rel} keeps your rows, so this run {did} it, and {what}. "
+            f"The spec skills fill only the columns your table has.")
+    # [WP3 versioning-index, critic 3e] The recipe is in the installer's
+    # README. When the README on disk is the adopter's own (skipped as
+    # pre-existing or edited) and lacks it, the pointer led nowhere (the
+    # conformance verifier's scenario h), so give the recipe here instead.
+    # On --dry-run a missing README is one this run would create.
+    readme = root / ".claude/specs/README.md"
+    try:
+        has_recipe = "## Migrating an older INDEX.md" in readme.read_text(
+            errors="replace")
+    except OSError:
+        has_recipe = dry and not readme.exists()
+    if has_recipe:
+        return (f"{head} To add the current columns without losing a row, "
+                f"follow \"Migrating an older INDEX.md\" in "
+                f".claude/specs/README.md.")
+    if header is None:
+        fix = ("Start the roster table with this header row: "
+               "| " + " | ".join(INDEX_COLUMNS) + " |.")
+    else:
+        fix = ("To add them without losing a row, append them to the "
+               "header row in the order named here, then one '---' cell "
+               "per added column to the separator row and one '-' cell "
+               "per added column to every data row.")
+    return (f"{head} .claude/specs/README.md is not the installer's, so it "
+            f"has no migration recipe. {fix} To receive the installer's "
+            f"README, which says what each column holds and how to refresh "
+            f"them, move yours aside and re-install.")
+
+
+def _worktrees_ignore_warning(root: Path, summary: dict,
+                              dry: bool = False) -> str | None:
+    """[WP3 fix1 INST-1] .claude/.gitignore is installer-owned, so an edited
+    copy (or one in a fresh clone, with no manifest) is skipped, and the
+    `/worktrees/` line WP3 added never reaches it. One SKIP line on stdout
+    was all the run said. When the file was skipped and git does not ignore
+    .claude/worktrees/ by any other rule (the root .gitignore,
+    .git/info/exclude, a global excludes file), return one message naming
+    the line and what its absence costs; otherwise None. Outside a
+    repository there is nothing to stage, so None."""
+    rel = ".claude/.gitignore"
+    if rel not in summary.get("skipped_paths", ()):
+        return None
+    r = _git_out(root, "check-ignore", "-q", "--no-index",
+                 ".claude/worktrees/agent-x/")
+    if r is None or r[0] != 1:
+        return None
+    did = "would not receive" if dry else "did not receive"
+    return (f"{rel} was left as it is (see its SKIP line), so it {did} the "
+            f"line `/worktrees/`, and no other ignore rule covers "
+            f".claude/worktrees/. While an implementer's worktree is there, "
+            f"`git add -A` or `git add .claude/` stages it as an embedded "
+            f"repository (a 160000 gitlink). Add the line `/worktrees/` to "
+            f"{rel}.")
+
+
 def _empty_command_warnings(cfg: dict) -> list[str]:
     """[I-10] One message per empty command in cfg["_command_warnings"].
     What it says depends on whether the hook that runs the command is in
@@ -2627,6 +3938,80 @@ def _empty_command_warnings(cfg: dict) -> list[str]:
                     + (f": {why}" if why else "")
                     + ". Set it in bootstrap.config.yaml and re-install.")
     return msgs
+
+
+
+def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
+    """[WP3 agents-handoff, item 10] The Phase 10 handoff's "next three
+    things" (PRD:2158-2161; RETROFIT.md R7 step 8), printed after an install
+    while the project has no task file yet, and empty once it has one, so a
+    re-install of a project already doing spec work prints nothing new.
+
+    The PRD names `/spec-new <first-feature>` as the next step; after D2
+    that alone does not clear the spec commit gate (a requirements.md is not
+    in its corpus; measured rc=2 at 3d866f4). The step that does is the task
+    file /spec-decompose writes. So the lines name the whole entry chain,
+    and say why code waits for the task file only where the gate is
+    installed.
+
+    [WP3 critic 4b] The lines run to a merged commit: commit the spec before
+    dispatch (an implementer's worktree starts from the last commit, and the
+    spec check reads task files from git), and land an approved worktree
+    branch with .claude/merge-back.sh (D6). The first line names every
+    path the plan writes outside .claude/ (CLAUDE.md, and the root
+    .gitignore block when a wrapper is emitted), not .claude/ alone.
+    `paths` is the plan's paths; None builds the plan from `cfg`."""
+    specs = root / ".claude" / "specs"
+    try:
+        if any(specs.glob("*/tasks/*")):
+            return []
+    except OSError:
+        pass
+    if paths is None:
+        paths = [a["path"] for a in build_plan(cfg)]
+    # A file at the root by name, anything deeper by its top directory.
+    top = sorted({p.split("/", 1)[0] + ("/" if "/" in p else "")
+                  for p in paths if not p.startswith(".claude/")})
+    lines = [
+        "Commit what the install wrote: "
+        + ", ".join([".claude/"] + top)
+        + " (and docs/prd/, if you wrote a PRD).",
+        f"Start real work with {SPEC_START_CHAIN}.",
+    ]
+    task = (f"/spec-decompose writes {SPEC_TASK_FILE} with a Files: list.")
+    gate = "spec-gate-commit" in cfg.get("_resolved_hooks", ())
+    if gate:
+        task += (" The spec commit gate checks the files you commit against "
+                 "those lists.")
+        if cfg.get("mode") == "retrofit":
+            # [WP3 critic 4b] Not "until their first change": the gates
+            # exempt a listed path until its line is deleted from the list
+            # (retrofit_is_allowlisted; spec-strategy.md "To REMOVE a
+            # path"). A first change alone ends nothing.
+            task += (" A file the legacy allowlist covers is exempt until "
+                     "its line is deleted from that list "
+                     "(.claude/steering/spec-strategy.md says when).")
+    lines.append(task)
+    # Each reason only where it holds: no spec check, no first reason; no
+    # worktree, no second.
+    why = ", and ".join(
+        (["the spec check reads task files from git"] if gate else [])
+        + (["the implementer's worktree starts from the last commit"]
+           if _worktrees_on(cfg) else []))
+    lines.append("To start a task, set status: in-progress in its task "
+                 "file, then commit .claude/specs/<slug>/ and "
+                 ".claude/specs/INDEX.md before you hand it to the "
+                 "implementer agent" + (f": {why}." if why else "."))
+    if _worktrees_on(cfg):
+        lines.append("Pass the implementer's branch to the reviewer agent. "
+                     "Once it answers VERDICT: approve, land the branch "
+                     "with .claude/merge-back.sh <branch>; never merge it "
+                     "by hand.")
+    else:
+        lines.append("Pass the commit the implementer started from to the "
+                     "reviewer agent. The implementer commits on the "
+                     "current branch, so there is nothing to merge back.")
+    return lines
 
 
 def main(argv: list[str]) -> int:
@@ -2717,6 +4102,10 @@ def main(argv: list[str]) -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 2
+    # [WP3 fix1 MB-1] Below the repository top, `auto` isolation resolves
+    # to none (_below_top_isolation); the warning comes with the git-hook
+    # ones below.
+    _below_top_isolation(root, cfg)
 
     # [round-4 D18] Spellings that were normalized rather than refused. These
     # are NOT errors - the install proceeds - but they must be visible: the
@@ -2826,12 +4215,22 @@ def main(argv: list[str]) -> int:
     # fresh clone, since the manifest is gitignored) the file is as likely an
     # earlier install's as the operator's, and --adopt is the remedy for that.
     would = "would not update" if args.dry_run else "did not update"
-    embeds = ("a config change it embeds (a command, a path list) does NOT "
-              "reach it.")
     force = ("pass --force to overwrite (it saves the current file to "
              ".claude/.installer-backups/ first)")
+    idx_msg = _index_schema_warning(root, summary, dry=args.dry_run)
+    if idx_msg:
+        _warn(idx_msg)
+    wt_msg = _worktrees_ignore_warning(root, summary, dry=args.dry_run)
+    if wt_msg:
+        _warn(wt_msg)
     for skipped in summary["skipped_hooks"]:
         path = skipped["path"]
+        if path in _CONFIG_BEARING_SCRIPTS:
+            embeds = (f"a config change it embeds "
+                      f"({_CONFIG_BEARING_SCRIPTS[path]}) does NOT reach it.")
+        else:
+            embeds = ("a config change it embeds (a command, a path list) "
+                      "does NOT reach it.")
         if skipped["untracked"] and summary["no_manifest"]:
             _warn(f"{path}: this tree has no installer manifest, so this run "
                   f"{would} it and cannot tell whether it is your work or an "
@@ -2922,6 +4321,23 @@ def main(argv: list[str]) -> int:
               f"the manifest records, so this run {did} the registration. "
               f"Remove it if that hook should not run.")
 
+    # [WP3 / D2] Git hooks this run did not install. rc stays 0.
+    for msg in _git_hook_warnings(
+            summary, root, args.dry_run,
+            cfg["hooks"].get("spec_gate_commit_prefixes"),
+            _legacy_allowlist(root, cfg) if cfg.get("mode") == "retrofit"
+            else None):
+        _warn(msg)
+    # [WP3 fix1 MB-1] A project below the repository top: where the
+    # worktrees go, and what merge-back does there. rc stays 0.
+    for msg in _below_top_notes(root, cfg):
+        _warn(msg)
+    # [WP3 / D6] An operator's worktree.baseRef that is "fresh" or null.
+    # rc stays 0 (any other value was declined: exit 3 below). [WP3 / model
+    # assignment] Also an ultracode opt-out a kept value overrides.
+    for msg in summary["settings_notes"]:
+        _warn(msg)
+
     if args.dry_run:
         print("(dry run - no files written)")
         return 0
@@ -2970,6 +4386,17 @@ def main(argv: list[str]) -> int:
               f"install does not enforce. Do not treat it as installed.",
               file=sys.stderr)
         return EXIT_UNENFORCED
+
+    # [WP3 critic 4b] The Phase 10 handoff, last, and only on an install
+    # that is one: after the enforcement checks above, so an exit-3 run is
+    # never told to commit .claude/ and start work, and never under
+    # --adopt, which writes nothing (--dry-run returned above).
+    steps = ([] if args.adopt else
+             next_steps(root, cfg, [a["path"] for a in plan]))
+    if steps:
+        print("\nNext steps:")
+        for n, line in enumerate(steps, 1):
+            print(f"  {n}. {line}")
     return 0
 
 

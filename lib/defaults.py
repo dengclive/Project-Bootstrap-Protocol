@@ -11,6 +11,7 @@ returning (resolved_cfg, errors). errors non-empty => installer aborts.
 from __future__ import annotations
 
 import copy
+import re
 
 # ---- [round-4 D12/D18] CONFIG IS AN ATTACK SURFACE -------------------------
 #
@@ -334,6 +335,12 @@ def _normalize_never_read(patterns: list) -> tuple[list, list]:
     return out, notices
 
 
+# [WP3 / D2] One hooks.spec_gate_commit_prefixes entry: relative path
+# segments of [A-Za-z0-9._-], ending in "/". `.` and `..` segments are
+# refused separately.
+_SPEC_PREFIX_RE = re.compile(r"[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*/")
+
+
 def _validate_shell_reaching(cfg: dict, errors: list) -> list:
     """Validate every config field that reaches executable shell. Returns the
     list of operator notices (non-fatal); appends to `errors` for the fatal
@@ -377,6 +384,37 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
                     f"emitted shell hook and is never expanded, so `$HOME` and "
                     f"`$(...)` cannot mean what they look like - write the "
                     f"literal path, or a glob.")
+
+    # ---- [WP3 / D2] the spec check's mode and prefixes -------------------
+    h = cfg.get("hooks", {})
+    # The mode is emitted as a shell literal; the prefixes are joined into
+    # ONE single-quoted word that spec-check.sh word-splits under `set -f`,
+    # so an entry must be a plain relative directory path: no space, quote,
+    # glob or `..`, and a trailing "/" (a prefix without one, "src", would
+    # also police "srcfoo/x.py"). [WP3 critic 1a] There is no scope key:
+    # D2 checks AGENT commits only (CLAUDECODE=1), and a scope of "all"
+    # made merge-back, which skips the check for a person, fail open.
+    if ("spec_gate_commit_mode" in h
+            and h["spec_gate_commit_mode"] not in ("warn", "block")):
+        errors.append(f"hooks.spec_gate_commit_mode must be one of 'warn', "
+                      f"'block'; got {h['spec_gate_commit_mode']!r}")
+    if "spec_gate_commit_prefixes" in h:
+        pf = h["spec_gate_commit_prefixes"]
+        if not isinstance(pf, list) or not pf:
+            errors.append(
+                "hooks.spec_gate_commit_prefixes must be a non-empty list of "
+                "directory prefixes such as \"src/\" (to stop policing, set "
+                f"hooks.spec_gate_commit: false); got {pf!r}")
+        else:
+            for i, v in enumerate(pf):
+                if not (isinstance(v, str) and _SPEC_PREFIX_RE.fullmatch(v)
+                        and not any(seg in (".", "..")
+                                    for seg in v[:-1].split("/"))):
+                    errors.append(
+                        f"hooks.spec_gate_commit_prefixes[{i}] must be a "
+                        f"relative directory path of letters, digits and "
+                        f"._- ending in \"/\" (for example \"src/\" or "
+                        f"\"packages/api/\"); got {v!r}")
 
     # ---- the numeric drift thresholds ------------------------------------
     # Interpolated raw and UNQUOTED into `[ "$n" -ge <value> ]`, which runs on
@@ -486,6 +524,9 @@ ARCHETYPES = {
 #   auto      derive from commands.execute_in_cwd (worktree when true, none
 #             when false). The default: the protocol decides, and the decision
 #             follows the one fact that determines whether it is sound.
+#             [WP3 fix2 IT-3] The installer then resolves it to none for a
+#             project below its repository's top
+#             (installer._below_top_isolation).
 #   worktree  force the isolation on regardless of the commands answer.
 #   none      force it off regardless.
 IMPLEMENTER_ISOLATIONS = {"auto", "worktree", "none"}
@@ -747,6 +788,17 @@ DEFAULTS = {
         "tdd_gate": None, "dependency_gate": True, "eval_gate": None,
         "drift_detector": True, "task_done_alarm": True,
         "decision_required_alarm": True,
+        # [WP3 / D2, owner decision 2026-10-04] The spec traceability check
+        # (.claude/githooks/spec-check.sh), run for AGENT commits only
+        # (CLAUDECODE=1). mode: WP3 ships "warn"; the switch to "block"
+        # waits for D5 or for interactive live-run arms (backlog). This
+        # line is the ONLY default of the mode: dispatch, the PreToolUse
+        # fallback and the SDK twin all read the resolved value. prefixes:
+        # the paths it polices (closes backlog J-2: they were a constant in
+        # both substrates).
+        "spec_gate_commit_mode": "warn",
+        "spec_gate_commit_prefixes": ["src/", "lib/", "app/", "test/",
+                                      "tests/"],
         "drift_tool_call_threshold": 50,
         "drift_session_duration_minutes": 120,
         "drift_file_read_threshold": 3,
@@ -768,7 +820,13 @@ DEFAULTS = {
     "workflow": {"install_skills": True, "install_commands": True,
                  "install_agents": True, "implementer_model": "sonnet",
                  "reviewer_model": "opus", "integrator_model": "inherit",
-                 "implementer_isolation": "auto"},
+                 "implementer_isolation": "auto",
+                 # [WP3 / model assignment, operator decision 2026-10-05]
+                 # Ultracode on by default, with an opt-out: true adds
+                 # "ultracode": true to .claude/settings.json where the
+                 # operator has no value of their own. A config key, not
+                 # an interview ANSWERS key (no seam 7.3 trigger).
+                 "ultracode": True},
 }
 
 
@@ -1011,6 +1069,20 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
     # agent whose `isolation:` line is decided here, and both read the same
     # `commands` block, so the derivation must cover both.
     _resolve_implementer_isolation(cfg, errors)
+
+    # ---- [WP3 / model assignment] workflow.ultracode is a real boolean --- #
+    # Ahead of the retrofit branch: both modes emit the same settings.json.
+    # A quoted "false" is a truthy string, so reading it by truthiness would
+    # turn on the cost switch the operator meant to turn off. Refused, and
+    # read as off for a caller that ignores `errors`.
+    uc = cfg["workflow"].get("ultracode")
+    if not isinstance(uc, bool):
+        errors.append(
+            f"workflow.ultracode must be true or false (unquoted); got "
+            f"{type(uc).__name__} ({uc!r}). It decides whether the "
+            f"installer turns ultracode on in .claude/settings.json, and a "
+            f"quoted \"false\" would read as true.")
+        cfg["workflow"]["ultracode"] = False
 
     # ---- Retrofit-mode: fill defaults + validate retrofit invariants ----- #
     # Runs only when mode == "retrofit". Greenfield path is byte-identical

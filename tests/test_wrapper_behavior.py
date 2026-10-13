@@ -498,9 +498,10 @@ os.rmdir(os.path.join(PROJ, ".halt"))
 
 print("\n== regression: eligibility refusal (the I-1/I-2 mitigation) ==")
 
-# The wrappers hard-require loop_eligible / goal_supervised_eligible, and
-# greenfield spec-decompose does not teach those fields. The recorded
-# mitigation is that the wrappers "fail closed -- they refuse rather than run".
+# The wrappers hard-require loop_eligible / goal_supervised_eligible. Until
+# WP3, greenfield spec-decompose did not teach those fields; it now teaches
+# them only when loop or goal mode is on. Either way the wrappers must "fail
+# closed -- they refuse rather than run" on a task file that lacks them.
 clear_sentinels()
 rc, _, err = wrapper("loop.sh", "T-DOES-NOT-EXIST")
 check("loop.sh: no task file -> refuses", rc != 0, f"rc={rc}")

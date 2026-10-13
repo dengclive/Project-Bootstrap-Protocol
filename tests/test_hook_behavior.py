@@ -84,6 +84,11 @@ commands:
   lint: "true"
   format: "true"
   ci_local: "true"
+# [WP3 / D2] block: the rows below exercise the spec gate's REFUSAL
+# path. warn, the default WP3 ships, is pinned in
+# tests/test_spec_check.py.
+hooks:
+  spec_gate_commit_mode: block
 """
 
 cfg_path = os.path.join(TMP, "config.yaml")
@@ -1424,6 +1429,62 @@ check("[WP2 Z-1] scope pin: the table accepts the commands the allow rows "
                                                      "python3.99 -m pytest"))
       and not any(re.fullmatch(NO_TESTS_RC5_RE, c)
                   for c in ("mocha", "make ci")))
+
+
+print("\n== [WP3 fix 8 review C1] ci-mirror: a missing start directory ==")
+# test-gate allows unittest's exit 1 for a start directory that does not
+# exist yet (sdk_gates_template.NO_START_DIR_RE); ci-mirror runs
+# commands.test when ci_local is empty, so without the same arm a new
+# project could commit but push nothing. REAL unittest, so the line is its
+# own; and a fake that prints the line last and exits 1 for the scope rows.
+_ns_proj = _br_install("ci-ns-fallback", [
+    ('test: "true"', 'test: "python3 -m unittest discover -s tests -t ."'),
+    ('ci_local: "true"', 'ci_local: ""')])
+subprocess.run(["git", "init", "-q", _ns_proj], check=True)
+_r = _br_hook(_ns_proj, "ci-mirror", _CI_PUSH)
+try:
+    _ns_json = json.loads(_r.stdout)
+except ValueError:
+    _ns_json = None
+check("[WP3 fix 8 C1] ci_local empty, unittest, no tests/: the push is "
+      "ALLOWED, and stdout is ONLY ci-mirror's notice JSON",
+      _r.returncode == 0 and _ns_json is not None
+      and _ns_json.get("systemMessage", "").startswith("ci-mirror: the start "
+                                                       "directory")
+      and "push is allowed" in _ns_json.get("systemMessage", "")
+      and ((_ns_json.get("hookSpecificOutput") or {}).get("additionalContext")
+           == _ns_json.get("systemMessage")),
+      repr((_r.returncode, _r.stdout[:200], _r.stderr[-200:])))
+_r = _br_hook(_ns_proj, "ci-mirror", _CI_PUSH,
+              cwd=os.path.join(_ns_proj, ".claude"))
+check("[WP3 fix 8 C1] from a subdirectory the push BLOCKS, saying why",
+      _r.returncode == 2 and _ci_off in _r.stderr and "then push." in
+      _r.stderr, repr((_r.returncode, _r.stderr[-200:])))
+os.makedirs(os.path.join(_ns_proj, "tests"))
+with open(os.path.join(_ns_proj, "tests", "__init__.py"), "w") as _fh:
+    _fh.write("")
+with open(os.path.join(_ns_proj, "tests", "test_a.py"), "w") as _fh:
+    _fh.write("import unittest\nclass T(unittest.TestCase):\n"
+              "    def test_x(self):\n        self.fail()\n")
+_r = _br_hook(_ns_proj, "ci-mirror", _CI_PUSH)
+check("[WP3 fix 8 C1] POSITIVE CONTROL: a red suite in tests/ still blocks "
+      "the push", _r.returncode == 2 and "Push blocked: CI mirror failed."
+      in _r.stderr, repr((_r.returncode, _r.stderr[-160:])))
+_ns_fake = os.path.join(TMP, "ci-ns-bin")
+os.makedirs(_ns_fake, exist_ok=True)
+with open(os.path.join(_ns_fake, "python3.97"), "w") as _fh:
+    _fh.write("#!/bin/sh\necho \"ImportError: Start directory is not "
+              "importable: 'tests'\"\nexit 1\n")
+os.chmod(os.path.join(_ns_fake, "python3.97"), 0o755)
+_ns_path = _ns_fake + os.pathsep + os.environ.get("PATH", "")
+for _lbl, _ci, _want in (
+        ("ci-ns-explicit", "python3.97 -m unittest discover -s tests", 0),
+        ("ci-ns-pytest", "python3.97 -m pytest tests", 2)):
+    _p = _br_install(_lbl, [('ci_local: "true"', f'ci_local: "{_ci}"')])
+    _r = _br_hook(_p, "ci-mirror", _CI_PUSH, path=_ns_path)
+    check(f"[WP3 fix 8 C1] ci_local `{_ci}`, the line last, exit 1: "
+          f"{'allowed' if _want == 0 else 'blocked (unittest only)'}",
+          _r.returncode == _want, repr((_r.returncode, _r.stderr[-160:])))
 
 
 print("\n== P2-6: format-lint-gate must never mutate the tree ==")

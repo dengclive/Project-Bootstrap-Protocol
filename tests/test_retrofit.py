@@ -482,12 +482,18 @@ d = install(AGENT_RETROFIT_CFG)  # has tdd_policy: required
 try:
     h_dir = os.path.join(d, ".claude", "hooks")
     spec_commit = open(os.path.join(h_dir, "spec-gate-commit.sh")).read()
+    # [WP3 / D2] spec-gate-commit's retrofit rules moved into the check the
+    # git hooks and the PreToolUse fallback both run.
+    spec_check = open(os.path.join(d, ".claude", "githooks",
+                                   "spec-check.sh")).read()
     test_gate = open(os.path.join(h_dir, "test-gate.sh")).read()
     tdd_gate = open(os.path.join(h_dir, "tdd-gate.sh")).read()
     secrets_gate = open(os.path.join(h_dir, "secrets-gate.sh")).read()
 
-    check("6.1: spec-gate-commit has Retrofit preamble",
-          "Retrofit preamble" in spec_commit)
+    check("6.1: spec-check.sh carries the retrofit rules, and "
+          "spec-gate-commit delegates to it",
+          "retrofit (RETROFIT.md R4, R8.A.3, R8.A.6)" in spec_check
+          and "githooks/spec-check.sh" in spec_commit)
     check("6.2: test-gate has Retrofit preamble",
           "Retrofit preamble" in test_gate)
     check("6.3: tdd-gate has Retrofit preamble",
@@ -495,10 +501,11 @@ try:
     check("6.4: secrets-gate has NO Retrofit preamble (R8.A.3 forbids it)",
           "Retrofit preamble" not in secrets_gate)
 
-    check("6.5: spec-gate-commit retrofit checks have retrofit_active path",
-          "retrofit_active exempt" in spec_commit)
-    check("6.6: spec-gate-commit retrofit checks have all-allowlisted path",
-          "all-allowlisted exempt" in spec_commit)
+    check("6.5: spec-check retrofit rules have the retrofit_active path",
+          "retrofit_active exempt" in spec_check)
+    check("6.6: spec-check retrofit rules have the allowlisted path",
+          "all-allowlisted exempt" in spec_check
+          and "legacy-allowlisted exempt" in spec_check)
     check("6.7: tdd-gate retrofit checks have legacy-allowlisted path",
           "legacy-allowlisted exempt" in tdd_gate)
 
@@ -726,12 +733,14 @@ try:
     with open(rs_path, "w") as fh:
         fh.write(rs_w4.replace("ROLLOUT_WEEK: 4", "ROLLOUT_WEEK: 1"))
     # Stage something that doesn't match either exemption to force the
-    # rollout-week branch (use a non-allowlisted .py path).
-    _af4_file = os.path.join(d, "other", "x.py")
+    # rollout-week branch: a non-allowlisted path UNDER an enforced prefix
+    # ([WP3 / D2] the week note is printed only when the rule fails, so
+    # `other/x.py`, which no prefix polices, now passes in silence).
+    _af4_file = os.path.join(d, "app", "x.py")
     os.makedirs(os.path.dirname(_af4_file), exist_ok=True)
     with open(_af4_file, "w") as fh:
         fh.write("# non-allowlisted\n")
-    subprocess.run(["git", "add", "other/x.py"], cwd=d, check=False)
+    subprocess.run(["git", "add", "app/x.py"], cwd=d, check=False)
     rc, out = _run_hook(d, "spec-gate-commit",
                          {"tool_input": {"command": "git commit -m wk1"}})
     check("T2.AF4: spec-gate-commit week 1 warn-only -> exit 0",
@@ -751,8 +760,10 @@ try:
     # at exit 0 reached only the debug log). No permissionDecision, so the
     # normal permission flow still applies.
     for _hk, _want in (
-            ("spec-gate-commit", "(retrofit warn-only week 1) "
-             "spec-gate-commit would have blocked; see rollout-schedule.md"),
+            ("spec-gate-commit", "(retrofit warn-only week 1; see "
+             ".claude/hooks/rollout-schedule.md) the spec check would refuse "
+             "this commit:\nspec check: 1 changed file is not listed in any "
+             "task file's Files: block:\n  app/x.py\n"),
             ("test-gate", "(retrofit warn-only week 1) test-gate would "
              "have run/blocked; see rollout-schedule.md")):
         _e = dict(os.environ, PATH=_nojq_path(), CLAUDE_PROJECT_DIR=d)
@@ -764,11 +775,15 @@ try:
             _j = json.loads(_r.stdout)
         except ValueError:
             _j = None
+        _ctx = ((_j or {}).get("hookSpecificOutput") or {}).get(
+            "additionalContext", "")
         check(f"WP2.CH: {_hk} week 1 warn-only line is PreToolUse "
               "additionalContext on stdout, no stderr",
-              _r.returncode == 0 and _r.stderr == "" and _j == {
-                  "hookSpecificOutput": {"hookEventName": "PreToolUse",
-                                         "additionalContext": _want}},
+              _r.returncode == 0 and _r.stderr == ""
+              and set((_j or {}).get("hookSpecificOutput") or {})
+              == {"hookEventName", "additionalContext"}
+              and (_ctx.startswith(_want) if _hk == "spec-gate-commit"
+                   else _ctx == _want),
               repr((_r.returncode, _r.stdout[:300], _r.stderr[:200])))
     # Restore week 4 for the fail-safe block.
     with open(rs_path, "w") as fh:
@@ -996,10 +1011,18 @@ try:
     # The guarantee this case exists for is UNCHANGED and now stronger: a
     # parser outage still cannot fabricate the .claude/-only exemption
     # (asserted above), and it can no longer wave the commit through either.
-    check("T2.FS7b': no parser -> blocking gate FAILS CLOSED with a reason "
-          "(exit 2, not the former silent exit-0 pass-through)",
-          _r7b.returncode == 2
-          and "fail-closed" in (_r7b.stderr or "").lower(),
+    # [WP3 / D2] Posture follows hooks.spec_gate_commit_mode: in block
+    # mode the gate fails CLOSED (exit 2); in warn mode (the default while
+    # WP3 is built) it never blocks, so a parser outage degrades to a
+    # logged exit 1 - and still grants no exemption (FS7b above).
+    _sgc_block = "SPEC_GATE_MODE=block" in open(os.path.join(
+        d, ".claude", "hooks", "spec-gate-commit.sh")).read()
+    check("T2.FS7b': no parser -> a block-mode gate FAILS CLOSED (exit 2); "
+          "a warn-mode gate degrades (exit 1), never the silent exit-0 pass",
+          (_r7b.returncode == 2
+           and "fail-closed" in (_r7b.stderr or "").lower()) if _sgc_block
+          else (_r7b.returncode == 1
+                and "degraded" in (_r7b.stderr or "").lower()),
           f"rc={_r7b.returncode} stderr={(_r7b.stderr or '')[:200]}")
     shutil.rmtree(_no_py_path, ignore_errors=True)
 finally:
@@ -2506,12 +2529,107 @@ EXPECTED_RETROFIT_DIGESTS = {
     # the previous digests (6a545f58... / 92b3ee4e...): exactly one body
     # moves in each, drift-detector.sh; 0 added, 0 removed, order, modes
     # and kinds unchanged, counts 79 / 93.
-    "service": "8107a26ea35414cae6f46e0f80c0144e80c7f62c74771eee67fc8eb300643477",
-    "agent": "1826b9fa8f7c042e4b8bda8d53c0138298e0dbe7a22e46b09a8ecd89a782a69e",
+    # [freeze-exception no. 84, 2026-10-05] wp3-spec-workflow. Same change
+    # as the greenfield columns (see the `default` note in
+    # tests/test_greenfield_golden.py), minus gates.py, which the retrofit
+    # track never emits. Retrofit-only on top: spec-gate-commit.sh loses its
+    # retrofit preamble, because the retrofit rules (R4, R8.A.3, R8.A.6, the
+    # allowlist now applied per file) moved into
+    # `.claude/githooks/spec-check.sh`, which the git hooks and that
+    # PreToolUse fallback both run; and steering/spec-strategy.md's
+    # promotion rule gains a step, `/spec-decompose` and the task file's
+    # `Files:` list. `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh
+    # do NOT move (2026-09-27 pivot): the rendered header is byte-identical
+    # in the 11 / 15 hook bodies that carry it, except spec-gate-commit.sh's
+    # `@@POSTURE@@` value, FAIL_CLOSED 1 -> 0 (advisory in warn mode). The
+    # AC-2-3 mini-golden and the telemetry digest do not move. Neither
+    # fixture sets `skip_decisions.R8_D_spec_versioning: skip`, so both
+    # emit spec-versioning.md; tests/test_versioning_index.py covers the
+    # skip. Measured on the emitted plans against 3d866f4, per file: the
+    # greenfield default's 8 added in both, 0 removed, the 79 / 93 kept
+    # paths in their old order, modes and kinds unchanged; action counts
+    # 79 -> 87 and 93 -> 101. 26 / 29 bodies move (service / agent):
+    # `service` moves the greenfield default's 25 plus spec-strategy.md;
+    # `agent` moves the greenfield default's 25, tdd-gate.sh, loop.sh and
+    # goal-loop.sh, plus spec-strategy.md (it emits no queue/backlog.md, the
+    # 29th body the greenfield full_autonomous moves).
+    # RE-BASELINED 2026-10-06, same exception 84 (WP3 review fix round 1;
+    # see the `default` note in tests/test_greenfield_golden.py). Measured on
+    # the emitted plans against the previous digests (8508be2f... /
+    # fde51e3d...), per file: 10 / 11 bodies move, the greenfield default's
+    # 9 (CLAUDE.md, agents integrator and reviewer, githooks dispatch and
+    # spec-check.sh, hooks spec-gate-commit, merge-back.sh, skills
+    # plan-review and spec-decompose) plus spec-strategy.md, whose
+    # promotion step 4 now says the spec and TDD gates check the file only
+    # once no legacy-allowlist line matches it (MT-4), and in `agent`
+    # tdd-gate.sh (SDKP-3); 0 added, 0 removed, order, modes and kinds
+    # unchanged, counts 87 / 101. Each is in the 3d866f4 sets above, which
+    # still hold. `_HOOK_HEADER`, its rendered bytes (posture values
+    # included), secrets-gate.sh and dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-07, same exception 84 (WP3 re-review fix round
+    # 2; see the `default` note in tests/test_greenfield_golden.py).
+    # Measured on the emitted plans against the previous digests
+    # (449b0695... / b8c8255a...), per file: 4 bodies move in each, the
+    # greenfield default's 4 (githooks dispatch and spec-check.sh, hooks
+    # spec-gate-commit, merge-back.sh) and no other; 0 added, 0 removed,
+    # order, modes and kinds unchanged, counts 87 / 101. Each is in the
+    # 3d866f4 sets above, which still hold. `_HOOK_HEADER`, its rendered
+    # bytes (posture values included), secrets-gate.sh and
+    # dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-12, same exception 84 (WP3 re-review 2 fix round
+    # 3; see the `default` note in tests/test_greenfield_golden.py).
+    # Measured on the emitted plans against the previous digests
+    # (bddefe52... / 26e94103...), per file: 3 bodies move in each, the
+    # greenfield default's 3 (githooks spec-check.sh, hooks
+    # spec-gate-commit, merge-back.sh) and no other; 0 added, 0 removed,
+    # order, modes and kinds unchanged, counts 87 / 101. Each is in the
+    # 3d866f4 sets above, which still hold. `_HOOK_HEADER`, its rendered
+    # bytes (posture values included), secrets-gate.sh and
+    # dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-13, same exception 84 (WP3 re-review 3 fix round
+    # 4; see the `default` note in tests/test_greenfield_golden.py).
+    # Measured on the emitted plans against the previous digests
+    # (065ba95d... / 706a024b...), per file: 2 bodies move in each, the
+    # greenfield default's 2 (githooks spec-check.sh, merge-back.sh) and no
+    # other; 0 added, 0 removed, order, modes and kinds unchanged, counts
+    # 87 / 101. Each is in the 3d866f4 sets above, which still hold.
+    # `_HOOK_HEADER`, its rendered bytes (posture values included),
+    # secrets-gate.sh and dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5; see
+    # the `default` note in tests/test_greenfield_golden.py). Measured on the
+    # emitted plans against the previous digests (5ba561ee... / 74c19243...),
+    # per file: 2 bodies move in each, the greenfield default's 2 (githooks
+    # spec-check.sh, merge-back.sh) and no other; 0 added, 0 removed, order,
+    # modes and kinds unchanged, counts 87 / 101. Each is in the 3d866f4 sets
+    # above, which still hold. `_HOOK_HEADER`, its rendered bytes (posture
+    # values included), secrets-gate.sh and dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 6; see the
+    # `default` note in tests/test_greenfield_golden.py). Measured on the
+    # emitted plans against the previous digests (2a32b548... / d471554a...),
+    # per file: 2 bodies move in each, the greenfield default's 2 (githooks
+    # spec-check.sh, merge-back.sh) and no other; 0 added, 0 removed, order,
+    # modes and kinds unchanged, counts 87 / 101. Each is in the 3d866f4 sets
+    # above, which still hold. `_HOOK_HEADER`, its rendered bytes (posture
+    # values included), secrets-gate.sh and dependency-gate.sh do not move.
+    # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see the
+    # `default` note in tests/test_greenfield_golden.py). Measured on the
+    # emitted plans against the previous digests (af8baafa... / 9f395d29...),
+    # per file: 2 bodies move in each, the greenfield default's 2 (githooks
+    # spec-check.sh, merge-back.sh) and no other; 0 added, 0 removed, order,
+    # modes and kinds unchanged, counts 87 / 101. Each is in the 3d866f4 sets
+    # above, which still hold. `_HOOK_HEADER`, its rendered bytes (posture
+    # values included), secrets-gate.sh and dependency-gate.sh do not move.
+    "service": "d300f962656721f13c638d8bb223ed896a60ea367399ddd88a8fd35654afab40",
+    "agent": "c89644a969c780937ede91bf768dabae860bb008668a6552c8e4ffac12808b4e",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
-EXPECTED_RETROFIT_COUNTS = {"service": 79, "agent": 93}
+# [freeze-exception no. 84, 2026-10-05] WP3 adds the greenfield default's 8
+# actions to both fixtures (spec-check.sh, dispatch, commands/test-author.md,
+# merge-back.sh, specs/README.md, steering/spec-versioning.md,
+# learnings/README.md, sessions/README.md) and removes none: 79 -> 87,
+# 93 -> 101.
+EXPECTED_RETROFIT_COUNTS = {"service": 87, "agent": 101}
 
 _RETROFIT_FIXTURES = [("service", SERVICE_RETROFIT_CFG),
                       ("agent", AGENT_RETROFIT_CFG)]
@@ -2577,6 +2695,32 @@ try:
           _r.returncode == 2 and "proposal stash" in _r.stderr
           and "Traceback" not in _r.stderr,
           f"rc={_r.returncode}\n{_r.stderr[-400:]}")
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# [WP3 fix1 INST-5] retrofit-interview synthesize, re-run over a config the
+# operator edited, keeps the keys no ANSWERS line sets (here every hooks
+# setting is one: the retrofit interview writes no `hooks` key).
+d = tempfile.mkdtemp()
+try:
+    _mkproj(d)
+    subprocess.run([sys.executable, BIN_INTERVIEW, "analyze", "-C", d],
+                   capture_output=True, text=True, timeout=60)
+    _syn = [sys.executable, BIN_INTERVIEW, "synthesize", "-C", d]
+    _r0 = subprocess.run(_syn, capture_output=True, text=True, timeout=60)
+    _cp = os.path.join(d, "bootstrap.config.yaml")
+    with open(_cp, "a") as fh:
+        fh.write('workflow:\n  ultracode: false\n'
+                 'hooks:\n  spec_gate_commit_mode: "block"\n')
+    _r = subprocess.run(_syn, capture_output=True, text=True, timeout=60)
+    _c2 = load_yaml(open(_cp).read()) if os.path.exists(_cp) else {}
+    check("INST-5 (retrofit): re-running synthesize keeps workflow.ultracode "
+          "and hooks.spec_gate_commit_mode, and says so",
+          _r0.returncode == 0 and _r.returncode == 0
+          and _c2.get("workflow") == {"ultracode": False}
+          and _c2.get("hooks") == {"spec_gate_commit_mode": "block"}
+          and "workflow.ultracode, hooks.spec_gate_commit_mode." in _r.stdout,
+          f"rc={_r.returncode}\n{_r.stdout[-400:]}\n{_c2.get('workflow')}")
 finally:
     shutil.rmtree(d, ignore_errors=True)
 

@@ -48,7 +48,11 @@ MODEL_ENV = "BOOTSTRAP_INTERVIEW_LLM_MODEL"
 # 2026-07-17; the previous dated Sonnet-4 default is retired). Hoisted to
 # a module constant so IC-4 can assert it by attribute rather than
 # grepping source text. Operators override via MODEL_ENV.
-DEFAULT_ADVISOR_MODEL = "claude-sonnet-5"
+# [WP3 / model assignment, operator decision 2026-10-05] claude-sonnet-5
+# -> claude-sonnet-5-5, the newest Sonnet. A pinned ID, because the API
+# has no moving family alias. claude-sonnet-5 is still live, so this is a
+# currency move, not a liveness fix. IC-4 asserts the same string.
+DEFAULT_ADVISOR_MODEL = "claude-sonnet-5-5"
 
 # The advisor only ever adjusts these fields, and only within the bounds the
 # deterministic layer already validates.

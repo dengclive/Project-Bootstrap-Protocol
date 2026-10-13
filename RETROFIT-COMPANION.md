@@ -119,7 +119,7 @@ Same principles as `BOOTSTRAP-COMPANION.md` §"Model Assignment Strategy" (this 
 
 | Phase, skill, or subagent | Recommended model | Why |
 |---|---|---|
-| **The retrofit wizard itself** | Opus 4.7 (xhigh effort default) | Heavy judgment work — convention reckoning, prior-art categorization, debt classification, multi-runtime variation analysis. Single highest-stakes session in the protocol. Run with `claude --model opus`. |
+| **The retrofit wizard itself** | Opus 4.7 (xhigh effort default) | Heavy judgment work — convention reckoning, prior-art categorization, debt classification, multi-runtime variation analysis. Single highest-stakes session in the protocol. Run with `claude --model opus`. *[Amended 2026-10-05, WP3: Opus 5.5 defaults to `medium` effort, so run `claude --model opus --effort xhigh`.]* |
 | **`inventory-scan`** *(retrofit, R0)* | Sonnet 4.6 | Pattern work — file-tree walking, language detection, dependency parsing. Mechanical enough that Sonnet handles cleanly; Opus is overkill. |
 | **`prior-art-audit`** *(retrofit, R0 step 1 + R8)* | Opus 4.7 | Reading existing `.claude/` agents, roles, CLAUDE.md sections, ad-hoc workflow documentation and judging "what is this trying to do, what should it become." Judgment-heavy. |
 | **`convention-categorize`** *(retrofit, R2)* | Opus 4.7 | The single highest-leverage call in the protocol. Deciding Canonical / Deprecated / Intentional Variation / Modernize for each observed pattern. A bad call here ships flawed steering for the lifetime of the project. |
@@ -131,8 +131,8 @@ Same principles as `BOOTSTRAP-COMPANION.md` §"Model Assignment Strategy" (this 
 | **`dataset-pin-test`** *(retrofit, v1.3, Data/ML archetype only)* | Sonnet 4.6 | Generates reproducibility-validation tests for a data pipeline stage — dataset version, env, seed, output checksum. |
 | **`ticket-to-spec`** *(retrofit, v1.4, conditional on R0.7 PM strategy)* | Sonnet 4.6 | Converts an existing ticket (Linear/Jira/GitHub Issues/in-repo `tickets/`) into a `requirements.md` spec stub with original-ticket frontmatter. Pattern work translating ticket format into spec format. |
 | **`migration-plan`** *(retrofit, R5/R7 if operator wants concrete plans for Deprecated items)* | Opus 4.7 | Decomposing a deprecated pattern's removal into safe, reversible steps. Judgment work. |
-| **`spec-new`, `spec-review`, `spec-decompose`, `plan-review`** | Opus 4.7 | Same as BOOTSTRAP. |
-| **`reviewer` (subagent, invokes `code-review` skill)** | Opus 4.7 (effort: high) | Same as BOOTSTRAP. |
+| **`spec-new`, `spec-review`, `spec-decompose`, `plan-review`** | Opus 4.7 | Same as BOOTSTRAP. *[Amended 2026-10-05, WP3: `spec-review` and `plan-review` recommend a Fable 5.1 session, with Opus 5.5 as the fallback, as in BOOTSTRAP.]* |
+| **`reviewer` (subagent, invokes `code-review` skill)** | Opus 4.7 (effort: high) | Same as BOOTSTRAP. *[Amended 2026-10-05, WP3: `effort: xhigh`.]* |
 | **`implementer` (subagent)** | Sonnet 4.6 | Same as BOOTSTRAP. |
 | **`test-author`, `spec-validate`, `pr-author`, `decision-log`, `checkpoint`, `resume`** | Sonnet 4.6 | Same as BOOTSTRAP. |
 | **`ack-drift`, `quiet`, `quiet-task-done`** | Haiku 4.5 | Same as BOOTSTRAP — trivial state-file writes. |
@@ -142,6 +142,15 @@ Same principles as `BOOTSTRAP-COMPANION.md` §"Model Assignment Strategy" (this 
 **Always set `model:` explicitly.** Same reasoning as BOOTSTRAP — `inherit` silently uses the calling session's model, which is rarely what you want for review and audit subagents.
 
 **Pro tier fallback (same as BOOTSTRAP):** if Opus access is metered/limited, treat the "Opus 4.7" rows as "best-available reasoning model" and fall back to Sonnet 4.6 (xhigh effort) for the high-stakes ones — `convention-categorize`, `prior-art-audit`, `code-review`. The strategy still works; it's just compressed across fewer tiers.
+
+**Model assignment amendment (2026-10-05, WP3).** The versions in this section are those of v1.x. The emitted retrofit skills and agents carry the aliases (`opus`, `sonnet`, `haiku`, `inherit`), which on first-party now resolve to Opus 5.5, Sonnet 5.5 and Haiku 4.5 (measured on Claude Code 2.1.289): read Opus 4.7 as Opus 5.5 and Sonnet 4.6 as Sonnet 5.5, here and in the cheat sheet below. Off first-party `sonnet` resolves to an older model, and on Foundry `opus` does too; the BOOTSTRAP Companion's amendment of the same date says which, and how to pin them. As in BOOTSTRAP:
+
+- `spec-review` and `plan-review` recommend a Fable 5.1 session, with Opus 5.5 as the fallback; no agent, hook or settings file names Fable.
+- The `reviewer` agent carries `effort: xhigh`, and the `implementer` has no `effort:` line, so it inherits the session's effort.
+- The wizard needs `--effort xhigh`, because Opus 5.5 defaults to `medium`.
+- Ultracode is on by default (`workflow.ultracode: true` adds `"ultracode": true` to `.claude/settings.json` unless you set that key yourself). It applies to the whole main session, Sonnet sessions included, never to a subagent, and makes sessions cost more. Unattended `claude -p` runs pass `--settings '{"ultracode": false}'`.
+
+Unlike the greenfield skills, the retrofit skills carry a `model:` frontmatter key, not a body line. On 2.1.289 such a key switches the model and effort for the whole turn when you type the skill's slash command, and did not switch them when the model invoked the skill through the Skill tool (three `claude -p` samples; interactive use not measured).
 
 ---
 
@@ -261,6 +270,8 @@ If you're retrofitting one of several projects you maintain, certain conventions
 | Don't want to configure each? | `claude --model opusplan` |
 
 *Pro tier with limited Opus access:* fall back to Sonnet 4.6 for the Opus rows.
+
+**[Amended 2026-10-05, WP3.]** On first-party, read Opus 4.7 as Opus 5.5 and Sonnet 4.6 as Sonnet 5.5; `/spec-review` and `/plan-review` recommend a Fable 5.1 session (Opus 5.5 if Fable is unavailable or Claude Code switches the model), and the `reviewer` subagent runs at `effort: xhigh`. See the model assignment amendment in the Model Assignment Strategy section.
 
 ---
 

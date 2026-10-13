@@ -29,9 +29,20 @@ config.
    test command whose "no tests yet" the test gate cannot tell from a
    failing suite; for each hook script the run leaves alone rather than
    update, so a config change will not reach it (on a tree with no
-   installer manifest the line names `--adopt`); for each security gate an
+   installer manifest the line names `--adopt`), and likewise for an
+   edited `.claude/githooks/dispatch`, `.claude/githooks/spec-check.sh` or
+   `.claude/merge-back.sh`; for a `.claude/.gitignore` the run leaves alone
+   that lacks the `/worktrees/` line, when no other ignore rule covers
+   `.claude/worktrees/`; for each git hook of the spec check the run
+   would not install (a hook another tool wrote, `core.hooksPath`, a
+   project below the repository top), saying why and what to do instead;
+   for a project below the repository top, why worktree isolation
+   `auto` resolves to none there (or what an explicit `worktree` costs)
+   and what `.claude/merge-back.sh` does there; for each security gate an
    earlier install wired that the run would remove, because the config
-   turns it off; and when the run would
+   turns it off; when `workflow.ultracode` is false but `settings.json`
+   still sets `"ultracode": true` with a value the installer did not
+   write, which it keeps; and when the run would
    re-create a `settings.json` that was renamed to `settings.json.disabled`
    to turn hooks off.
 
@@ -57,6 +68,17 @@ config.
 6. Report the create/update/unchanged/skipped counts. Remind the operator
    that local edits to generated files are preserved unless `--force` is
    passed, and that `--uninstall` cleanly reverses the install.
+
+7. Relay the `Next steps:` block the installer prints last, verbatim. It
+   is the Phase 10 handoff: it names the whole entry chain (`/spec-new`,
+   `/spec-review`, `/spec-decompose`, `/plan-review`), not `/spec-new`
+   alone, because the spec commit gate checks commits against the task
+   file `/spec-decompose` writes, not against `requirements.md`. It then
+   says to commit the spec before an implementer is dispatched and, with
+   worktree isolation, to land an approved branch with
+   `.claude/merge-back.sh <branch>`. The installer prints the block only
+   on exit 0, never under `--dry-run` or `--adopt`, and only while the
+   project has no task file under `.claude/specs/*/tasks/`.
 
 ## Why this is split from the interview
 

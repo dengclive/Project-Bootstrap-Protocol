@@ -35,6 +35,13 @@ from installer import (                          # noqa: E402
 )
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
+
+# [WP3 critic 1j] Hermetic: git never searches above the temp directory. The
+# installer now looks for the repository a project sits in (the spec check's
+# git hooks), and with TMPDIR inside some work tree (a dotfiles repository in
+# $HOME) every fixture would read as a directory inside that repository and
+# draw a stderr warning. Inherited by every subprocess this suite starts.
+os.environ["GIT_CEILING_DIRECTORIES"] = tempfile.gettempdir()
 passed = failed = 0
 
 

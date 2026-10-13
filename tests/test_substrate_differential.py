@@ -103,6 +103,11 @@ commands:
   lint: "true"
   format: "true"
   ci_local: "true"
+# [WP3 / D2] block: the rows below exercise the spec gate's REFUSAL
+# path. warn, the default WP3 ships, is pinned in
+# tests/test_spec_check.py.
+hooks:
+  spec_gate_commit_mode: block
 """
 
 TMP = tempfile.mkdtemp(prefix="substrate-diff-")
@@ -1581,6 +1586,12 @@ differential("spec-gate-commit", bash("git commit -m code"), "deny",
 
 with open(os.path.join(PROJ, ".claude", "specs", "INDEX.md"), "a") as fh:
     fh.write("covers src/auth.py here\n")
+# [WP3 / D2] Task files and INDEX.md are read from the INDEX now: an
+# unstaged mention does not count (the trace travels with the commit).
+differential("spec-gate-commit", bash("git commit -m code"), "deny",
+             "a mention in an UNSTAGED INDEX.md does not count")
+subprocess.run(["git", "-C", PROJ, "add", "-f", ".claude/specs/INDEX.md"],
+               check=True)
 differential("spec-gate-commit", bash("git commit -m code"), "allow",
              "referenced implementation file")
 
@@ -1767,6 +1778,71 @@ for _ in range(160):
         _tdd_splits.append((_fp, _sh, _sd))
 check("[tdd-gate] WP2 seeded fuzz: shell==sdk on 160 random paths",
       not _tdd_splits, repr(_tdd_splits[:5]))
+
+# [WP3 fix1 SDKP-3] A CLAUDE_PROJECT_DIR spelled through a symlink. The SDK
+# resolved the project and took paths against that alone, while the shell
+# stripped the spelling as given, so the two split both ways: the SDK
+# allowed Lk/src/x.py, which the shell denied, and denied P/src/x.py, which
+# the shell allowed. Both now try the spelling as given, then the physical
+# one. Worktree paths too (WP3's .claude/worktrees/<n>/ arm).
+_LK = os.path.join(TMP, "link-to-proj")
+os.symlink(PROJ, _LK)
+
+
+def _verdicts_cpd(gate, payload, cpd):
+    p = subprocess.run([BASH, os.path.join(HOOKS, f"{gate}.sh")],
+                       input=json.dumps(payload), capture_output=True,
+                       text=True, cwd=PROJ,
+                       env=dict(os.environ, CLAUDE_PROJECT_DIR=cpd))
+    sh = ("deny" if p.returncode == 2 else "allow" if p.returncode == 0
+          else f"rc={p.returncode}:{p.stderr.strip()[:120]}")
+    os.environ["CLAUDE_PROJECT_DIR"] = cpd
+    try:
+        sd = sdk_verdict(gate, payload)
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = PROJ
+    return sh, sd
+
+
+_WT_S = os.path.join(PROJ, ".claude", "worktrees", "agent-s1")
+os.makedirs(os.path.join(_WT_S, "src"))
+try:
+    for _cpd, _base, _rel, _want in (
+            (_LK, _LK, "src/qzsym.py", "deny"),
+            (_LK, PROJ, "src/qzsym.py", "deny"),
+            (PROJ, PROJ, "src/qzsym.py", "deny"),
+            (_LK, _LK, ".claude/worktrees/agent-s1/src/qzsym2.py", "deny"),
+            (_LK, PROJ, ".claude/worktrees/agent-s1/src/qzsym2.py", "deny")):
+        _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(_base, _rel)),
+                                 _cpd)
+        check(f"[tdd-gate] symlinked project: CLAUDE_PROJECT_DIR="
+              f"{'link' if _cpd == _LK else 'physical'}, a "
+              f"{'link' if _base == _LK else 'physical'}-spelled {_rel}: "
+              f"shell==sdk=={_want}", _sh == _sd == _want,
+              f"shell={_sh} sdk={_sd}")
+    os.makedirs(os.path.join(_WT_S, "tests"))
+    with open(os.path.join(_WT_S, "tests", "test_qzsym2.py"), "w") as _fh:
+        _fh.write("def test_x():\n    assert True\n")
+    for _base in (_LK, PROJ):
+        _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(
+            _base, ".claude/worktrees/agent-s1/src/qzsym2.py")), _LK)
+        check(f"[tdd-gate] symlinked project, the worktree's own test "
+              f"exists: a {'link' if _base == _LK else 'physical'}-spelled "
+              f"worktree write is allowed, shell==sdk",
+              _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+    # Residual (backlog): with the PHYSICAL CLAUDE_PROJECT_DIR Claude Code
+    # passes, a write spelled through a link to the project is outside it
+    # on both substrates (resolving it means resolving the file's own
+    # directory, which may not exist yet).
+    _sh, _sd = _verdicts_cpd("tdd-gate", _w(os.path.join(
+        _LK, "src", "qzsym.py")), PROJ)
+    check("[tdd-gate] residual: physical CLAUDE_PROJECT_DIR, a link-spelled "
+          "path: shell==sdk==allow (not gated on either; backlog)",
+          _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+finally:
+    shutil.rmtree(os.path.join(PROJ, ".claude", "worktrees"),
+                  ignore_errors=True)
+    os.remove(_LK)
 
 # --------------------------------------------------------------------------- #
 # issue #54 / X-36q -- the VERSIONED shell invoker, and the head SPELLINGS
@@ -2339,6 +2415,104 @@ for _c, _want in (('echo "git commit"', "allow"),
                   ("true # git commit", "allow"),
                   ('git commit -m "not; a separator"', "deny")):
     differential("spec-gate-commit", bash(_c), _want, repr(_c))
+
+# [WP3 fix2 MR-6] A merge, cherry-pick or revert concluded with --continue
+# runs git commit: below the repository top no git hook checks it, so the
+# fallback acts on it on both substrates. Other forms of those verbs do not
+# commit what the index holds, and stay out of the gate.
+for _c, _want in (("git merge --continue", "deny"),
+                  ("git -c core.editor=true merge --continue", "deny"),
+                  ("git cherry-pick --continue", "deny"),
+                  ("git revert --continue", "deny"),
+                  ("sudo git merge --continue", "deny"),
+                  ("git add -A && git merge --continue", "deny"),
+                  ("git merge --abort", "allow"),
+                  ("git merge feature", "allow"),
+                  ("git rebase --continue", "allow"),
+                  ("git cherry-pick --abort", "allow"),
+                  ('echo "git merge --continue"', "allow")):
+    differential("spec-gate-commit", bash(_c), _want, repr(_c))
+
+# [WP3 fix3 MR2-1, MR2-3] States the check judges by their own changes, on
+# both substrates: a clean merge of an unrelated history (merge-tree refused
+# it, so the check could not run: deny/deny), and a rebase stopped on a
+# conflict whose resolution the task lists (the plain rule refused the
+# teammate's file git applied: deny/deny). PROJ's harness, copied into a
+# repository of its own.
+_SQ = os.path.join(TMP, "seq")
+shutil.copytree(os.path.join(PROJ, ".claude"), os.path.join(_SQ, ".claude"))
+
+
+def _sq(*a):
+    return subprocess.run(["git", "-C", _SQ, *a], capture_output=True,
+                          text=True)
+
+
+def _sq_differential(cmd, want, label):
+    p = subprocess.run(
+        [BASH, os.path.join(_SQ, ".claude", "hooks", "spec-gate-commit.sh")],
+        input=json.dumps(bash(cmd)), capture_output=True, text=True,
+        env=dict(os.environ, CLAUDE_PROJECT_DIR=_SQ), cwd=_SQ)
+    sh = ("deny" if p.returncode == 2 else "allow" if p.returncode == 0
+          else f"rc={p.returncode}:{p.stderr.strip()[:120]}")
+    os.environ["CLAUDE_PROJECT_DIR"] = _SQ
+    try:
+        sd = sdk_verdict("spec-gate-commit", bash(cmd))
+    finally:
+        os.environ["CLAUDE_PROJECT_DIR"] = PROJ
+    check(f"[spec-gate-commit] shell==sdk=={want}: {label}",
+          sh == sd == want, f"shell={sh} sdk={sd} want={want}")
+
+
+def _sq_write(rel, text):
+    os.makedirs(os.path.dirname(os.path.join(_SQ, rel)), exist_ok=True)
+    with open(os.path.join(_SQ, rel), "w") as fh:
+        fh.write(text)
+
+
+_sq("init", "-q", "-b", "main")
+_sq("config", "user.email", "t@t")
+_sq("config", "user.name", "t")
+_sq_write(".claude/specs/f/tasks/f-T01.md", "---\nstatus: in-progress\n---\n"
+          "Files:\n- src/ok.py\n- src/shared.py\n")
+_sq_write("src/shared.py", "a\nb\nc\n")
+_sq("add", "-A")
+_sq("commit", "-qm", "base")
+_sq("checkout", "-q", "--orphan", "other")
+_sq("rm", "-rqf", ".")
+_sq_write("lib/imported.py", "i\n")
+_sq("add", "lib/imported.py")
+_sq("commit", "-qm", "import")
+_sq("checkout", "-q", "-f", "main")
+_sq("merge", "--allow-unrelated-histories", "--no-commit", "-q", "other")
+_sq_differential("git commit --no-edit", "allow",
+                 "a clean merge of an unrelated history (MR2-1)")
+_sq_write("src/evil.py", "e\n")
+_sq("add", "src/evil.py")
+_sq_differential("git commit --no-edit", "deny",
+                 "... with an unlisted edit made inside it")
+_sq("merge", "--abort")
+_sq("checkout", "-q", "-b", "feature")
+_sq_write("src/shared.py", "a\nfeature\nc\n")
+_sq_write("src/teammate.py", "t\n")
+_sq("add", "-A")
+_sq("commit", "-qm", "teammate: feature X")
+_sq("checkout", "-q", "main")
+_sq_write("src/shared.py", "a\nmain\nc\n")
+_sq("commit", "-qam", "mine")
+_sq("checkout", "-q", "feature")
+_sq("rebase", "-q", "main")
+_sq_write("src/shared.py", "a\nresolved\nc\n")
+_sq("add", "src/shared.py")
+_sq_differential("git commit --no-edit", "allow",
+                 "a rebase stopped on a conflict, its listed resolution "
+                 "staged: the teammate's src/teammate.py is not the commit's "
+                 "own (MR2-3)")
+_sq_write("src/evil.py", "e\n")
+_sq("add", "src/evil.py")
+_sq_differential("git commit --no-edit", "deny",
+                 "... with an unlisted edit made while it was stopped")
+_sq("rebase", "--abort")
 
 # The count is pinned so a row cannot be DELETED to silence it. Deleting a
 # row without fixing the defect trips this; fixing a defect trips the row
@@ -5646,6 +5820,8 @@ check("the REV5 trailbrace-rep row ran",
 # ============================================================================ #
 print("\n== [WP1] test-gate: no tests collected ==")
 from sdk_gates_template import NO_TESTS_NOTICE, NO_TESTS_RC5_RE  # noqa: E402
+from sdk_gates_template import (NO_START_DIR_NOTICE,  # noqa: E402
+                                UNITTEST_RC1_RE)
 import re as _re                                                   # noqa: E402
 
 for _c in ("pytest", "pytest -q", "py.test -x", "python -m pytest",
@@ -5882,6 +6058,190 @@ try:
               f"shell={_sh} sdk={_sd}")
     else:
         print("  SKIP  real unittest row: Python < 3.12 exits 0, not 5")
+
+    # [WP3 fix 8] unittest's missing start directory. `python3 -m unittest
+    # discover -s tests -t .` in a new project with no tests/ exits 1 with
+    # "ImportError: Start directory is not importable: 'tests'" as its last
+    # line, and test-gate blocked every commit, the spec-only ones included
+    # (smoke demo, 2026-10-13). REAL unittest: the line is unittest's own.
+    for _c in ("python3 -m unittest discover -s tests -t .",
+               "python -m unittest", "PYTHONPATH=src python3.12 -m unittest "
+               "discover tests", "uv run python3 -m unittest -v"):
+        check(f"[no-start table] accepts {_c!r}",
+              _re.fullmatch(UNITTEST_RC1_RE, _c) is not None)
+    for _c in ("pytest", "python3 -m pytest", "pytest -k unittest",
+               "python3 -m unittest && true", "make test"):
+        check(f"[no-start table] rejects {_c!r}",
+              _re.fullmatch(UNITTEST_RC1_RE, _c) is None)
+    _WANT_NS = {"systemMessage": NO_START_DIR_NOTICE,
+                "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                       "additionalContext":
+                                       NO_START_DIR_NOTICE}}
+    _proj, _mod = _nt_tree("nostart", "python3 -m unittest discover -s "
+                                      "tests -t .")
+    _ns_tests = os.path.join(_proj, "tests")
+
+    def _ns_state(files):
+        shutil.rmtree(_ns_tests, ignore_errors=True)
+        if files is not None:
+            os.makedirs(_ns_tests)
+        for _f, _t in (files or {}).items():
+            with open(os.path.join(_ns_tests, _f), "w") as fh:
+                fh.write(_t)
+
+    _ns_state(None)
+    _rc, _out, _res = _nt_both(_proj, _mod, bash("git commit -m spec"))
+    try:
+        _got = json.loads(_out)
+    except ValueError:
+        _got = None
+    check("[no-start] no tests/ yet: shell==sdk==allow, with the notice",
+          _rc == 0 and _got == _WANT_NS and _res == _WANT_NS,
+          repr((_rc, _out[:160], _res)))
+    for _lbl, _files, _want in (
+            ("tests/ with no __init__.py (unittest names its absolute "
+             "path, which exists)", {}, "deny"),
+            ("an empty tests/__init__.py (exit 5: the other arm)",
+             {"__init__.py": ""}, "allow"),
+            ("a red test", {"__init__.py": "", "test_a.py":
+                            "import unittest\nclass T(unittest.TestCase):\n"
+                            "    def test_x(self):\n        self.fail()\n"},
+             "deny"),
+            ("tests/__init__.py whose import fails", {"__init__.py":
+                                                      "import qz_no_mod\n"},
+             "deny")):
+        _ns_state(_files)
+        _sh, _sd = _nt_verdicts(*_nt_both(_proj, _mod,
+                                          bash("git commit -m x"))[::2])
+        check(f"[no-start] {_lbl}: shell==sdk=={_want}",
+              _sh == _sd == _want, f"shell={_sh} sdk={_sd}")
+    _ns_state(None)
+    # The line must be the LAST one, and the command must be unittest: a
+    # fake pytest that prints it and exits 1 is a red suite.
+    _ns_fake = os.path.join(_NT_TMP, "bin-ns")
+    os.makedirs(_ns_fake)
+    for _n, _body in (("pytest", "echo \"ImportError: Start directory is "
+                                 "not importable: 'tests'\"\n"),
+                      ("python3.99", "echo \"ImportError: Start directory "
+                                     "is not importable: 'tests'\"\n"
+                                     "echo more\n")):
+        with open(os.path.join(_ns_fake, _n), "w") as fh:
+            fh.write("#!/bin/sh\n" + _body + "exit 1\n")
+        os.chmod(os.path.join(_ns_fake, _n), 0o755)
+    _ns_path = _ns_fake + os.pathsep + os.environ.get("PATH", "")
+    _proj3, _mod3 = _nt_tree("nostart-fake", "python3.99 -m unittest "
+                                             "discover -s tests")
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj3, _mod3, bash("git commit -m x"),
+                                      _ns_path)[::2])
+    check("[no-start] the line, but NOT the last line: shell==sdk==deny",
+          _sh == _sd == "deny", f"shell={_sh} sdk={_sd}")
+    # POSITIVE CONTROL for the row above: the same fake with the line last
+    # allows, so the deny is the position's doing.
+    with open(os.path.join(_ns_fake, "python3.98"), "w") as fh:
+        fh.write("#!/bin/sh\necho first\necho \"ImportError: Start "
+                 "directory is not importable: 'tests'\"\nexit 1\n")
+    os.chmod(os.path.join(_ns_fake, "python3.98"), 0o755)
+    _proj4, _mod4 = _nt_tree("nostart-last", "python3.98 -m unittest "
+                                             "discover -s tests")
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj4, _mod4, bash("git commit -m x"),
+                                      _ns_path)[::2])
+    check("[no-start] POSITIVE CONTROL: the same line LAST allows: "
+          "shell==sdk==allow", _sh == _sd == "allow", f"shell={_sh} sdk={_sd}")
+    _proj2, _mod2 = _nt_tree("nostart-pytest", "pytest tests")
+    _sh, _sd = _nt_verdicts(*_nt_both(_proj2, _mod2, bash("git commit -m x"),
+                                      _ns_path)[::2])
+    check("[no-start] pytest exiting 1 with the line last: shell==sdk==deny "
+          "(the arm is unittest's only)", _sh == _sd == "deny",
+          f"shell={_sh} sdk={_sd}")
+    _ns_src = os.path.join(_proj, "src")
+    os.makedirs(_ns_src)
+    _r = subprocess.run(
+        [BASH, os.path.join(_proj, ".claude", "hooks", "test-gate.sh")],
+        input=json.dumps(bash("git commit -m x")), capture_output=True,
+        text=True, cwd=_ns_src, env=dict(os.environ, CLAUDE_PROJECT_DIR=_proj))
+    check("[no-start] from a subdirectory the shell BLOCKS, saying why",
+          _r.returncode == 2 and _nt_off in _r.stderr,
+          repr((_r.returncode, _r.stderr[-160:])))
+
+    # [WP3 fix 8 review M1-M5, F1] Pins on each conjunct of the rule. Each
+    # fake prints a line and exits; the test command names it, so the
+    # emitted hook and gates.py both carry the arm.
+    _NS_LINE = "ImportError: Start directory is not importable: '%s'"
+
+    def _ns_runner(name, lines, rc):
+        with open(os.path.join(_ns_fake, name), "w") as fh:
+            fh.write("#!/bin/sh\n" + "".join(
+                "printf '%s\\n' " + "'" + ln.replace("'", "'\"'\"'") + "'\n"
+                for ln in lines) + f"exit {rc}\n")
+        os.chmod(os.path.join(_ns_fake, name), 0o755)
+
+    _ns_runner("python3.96", [_NS_LINE % "tests"], 2)
+    _ns_runner("python3.95", ["X" + _NS_LINE % "tests"], 1)
+    _ns_runner("python3.94", [_NS_LINE % "tests" + " trailing"], 1)
+    _ns_runner("python3.93", [_NS_LINE % "my tests"], 1)
+    for _lbl, _cmd, _why in (
+            ("ns-rc2", "python3.96 -m unittest discover -s tests",
+             "exit 2, not 1 (M1)"),
+            ("ns-prefix", "python3.95 -m unittest discover -s tests",
+             "a prefix before the line (M2)"),
+            ("ns-suffix", "python3.94 -m unittest discover -s tests",
+             "text after the line (M2)"),
+            ("ns-scope", "true && python3.98 -m unittest discover -s tests",
+             "the line last, exit 1, but a command that does not FULLMATCH "
+             "the unittest shape (M3)"),
+            ("ns-charset", "python3.93 -m unittest discover -s tests",
+             "a path with a space, outside the charset (M5)")):
+        _pj, _md = _nt_tree(_lbl, _cmd)
+        _sh, _sd = _nt_verdicts(*_nt_both(_pj, _md, bash("git commit -m x"),
+                                          _ns_path)[::2])
+        check(f"[no-start] {_why}: shell==sdk==deny", _sh == _sd == "deny",
+              f"shell={_sh} sdk={_sd}")
+    # M4: with no capture (every mktemp fails) the probe never runs, so the
+    # arm must see the init's empty `_rnostart`, not one from the caller's
+    # environment.
+    _ns_nomk = os.path.join(_NT_TMP, "bin-nomktemp")
+    os.makedirs(_ns_nomk)
+    with open(os.path.join(_ns_nomk, "mktemp"), "w") as fh:
+        fh.write("#!/bin/sh\nexit 1\n")
+    os.chmod(os.path.join(_ns_nomk, "mktemp"), 0o755)
+    _pj, _md = _nt_tree("ns-nocap", "python3.94 -m unittest discover -s "
+                                    "tests")
+    _r = subprocess.run(
+        [BASH, os.path.join(_pj, ".claude", "hooks", "test-gate.sh")],
+        input=json.dumps(bash("git commit -m x")), capture_output=True,
+        text=True, cwd=_pj, env=dict(os.environ, CLAUDE_PROJECT_DIR=_pj,
+                                     _rnostart="qz-missing",
+                                     PATH=_ns_nomk + os.pathsep + _ns_path))
+    check("[no-start] no capture, `_rnostart` set by the caller, exit 1: the "
+          "shell still BLOCKS (M4)", _r.returncode == 2,
+          repr((_r.returncode, _r.stderr[-160:])))
+    # F1: GNU sed's `[A-Za-z]` matched non-ASCII letters in a UTF-8 locale,
+    # where Python's does not; the probe runs sed under LC_ALL=C.
+    _loc = subprocess.run(["locale", "-a"], capture_output=True,
+                          text=True).stdout.split() if shutil.which(
+                              "locale") else []
+    _utf = next((l for l in _loc if l.lower().replace("-", "")
+                 in ("en_us.utf8",)), None)
+    if _utf:
+        _ns_runner("python3.92", [_NS_LINE % "t\u00ebst"], 1)
+        _pj, _md = _nt_tree("ns-locale", "python3.92 -m unittest discover "
+                                         "-s tests")
+        _keep_lc = os.environ.get("LC_ALL")
+        os.environ["LC_ALL"] = _utf
+        try:
+            _sh, _sd = _nt_verdicts(*_nt_both(_pj, _md,
+                                              bash("git commit -m x"),
+                                              _ns_path)[::2])
+        finally:
+            if _keep_lc is None:
+                os.environ.pop("LC_ALL", None)
+            else:
+                os.environ["LC_ALL"] = _keep_lc
+        check(f"[no-start] a non-ASCII path under LC_ALL={_utf}: "
+              "shell==sdk==deny (F1)", _sh == _sd == "deny",
+              f"shell={_sh} sdk={_sd}")
+    else:
+        print("  SKIP  [no-start] locale row: no en_US.UTF-8 locale")
 finally:
     shutil.rmtree(_NT_TMP, ignore_errors=True)
 

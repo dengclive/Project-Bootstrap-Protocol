@@ -313,30 +313,25 @@ check("TD-2: the seam sentinel row names each of them",
       bool(_seam) and all(f"`{n}-<sid>`" in _seam for n in _names),
       [n for n in sorted(_names) if f"`{n}-<sid>`" not in _seam])
 
-# RR-UP-1: every test file new since c642731 is named in the entry. The
-# c642731 list is pinned here, not read with `git ls-tree c642731`: CI's
-# checkout is shallow and does not have that commit. New files are taken
-# from `git ls-files`, so an untracked local test file does not count.
-_OLD_TESTS = {
-    "test_advisor_model.py", "test_auto_run_sentinel.py",
-    "test_composition.py", "test_doc_citations.py",
-    "test_dynamic_workflow_policy.py", "test_gate_substrate.py",
-    "test_goal_evaluator_keys.py", "test_greenfield_golden.py",
-    "test_hook_behavior.py", "test_hook_tiers.py", "test_ic_gate.py",
-    "test_installer.py", "test_interview.py", "test_issue_fixes.py",
-    "test_retrofit.py", "test_root_sentinels.py", "test_sdk_gates.py",
-    "test_settings_merge.py", "test_substrate_differential.py",
-    "test_trust_ramp.py", "test_usage_limit_contract.py",
-    "test_validate_only.py", "test_wiring_verification.py",
-    "test_worktree_command_compat.py", "test_wrapper_behavior.py",
-}
+# RR-UP-1: every test file WP2 added is named in its changelog entry.
+# [WP3 critic step 0] The set is pinned at WP2's closeout (3d866f4), not
+# derived as "every tracked test file not in c642731's list": that rule
+# also counted each later work package's new suites, which their own
+# changelog entries name (measured: 44/1 once WP3's files were tracked).
+# Pinned data, not `git ls-tree`: CI's checkout is shallow. The files are
+# still taken from `git ls-files`, so each must be tracked, and an untracked
+# local test file does not count.
 _tracked = subprocess.run(
     ["git", "-C", ROOT, "ls-files", "tests/"],
     capture_output=True, text=True).stdout.split()
+_WP2_NEW = {"test_block_logging.py", "test_command_embedding.py",
+            "test_eval_gate.py", "test_hook_channels.py",
+            "test_runner_output.py", "test_shared_plumbing.py",
+            "test_wp2_records.py"}
 _new = sorted(f for f in _tracked
               if os.path.basename(f).startswith("test_")
               and f.endswith(".py") and f.count("/") == 1
-              and os.path.basename(f) not in _OLD_TESTS)
+              and os.path.basename(f) in _WP2_NEW)
 _tests = _cl[_cl.find("**Tests.**"):] if "**Tests.**" in _cl else ""
 check("RR-UP-1: git lists the tests and the new test files exist",
       len(_tracked) > 25 and len(_new) >= 7, (len(_tracked), _new))

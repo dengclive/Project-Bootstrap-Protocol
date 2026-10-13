@@ -33,9 +33,19 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 from installer import (                          # noqa: E402
     _SETTINGS_OWNED_KEYS, _SETTINGS_SHARED_KEYS, _is_ours_here, _merge_hooks,
     _merge_settings, _settings_mergeable, _resolved_hook_path,
+    _SETTINGS_CONTRIBUTED_KEYS, build_plan,
 )
+from defaults import resolve_config               # noqa: E402
+from minyaml import load_yaml                     # noqa: E402
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
+
+# [WP3 critic 1j] Hermetic: git never searches above the temp directory. The
+# installer now looks for the repository a project sits in (the spec check's
+# git hooks), and with TMPDIR inside some work tree (a dotfiles repository in
+# $HOME) every fixture would read as a directory inside that repository and
+# draw a stderr warning. Inherited by every subprocess this suite starts.
+os.environ["GIT_CEILING_DIRECTORIES"] = tempfile.gettempdir()
 passed = failed = 0
 
 
@@ -124,11 +134,20 @@ _d = tempfile.mkdtemp()
 try:
     install(_d)
     emitted = set(read(_d))
-    unclaimed = emitted - set(_SETTINGS_OWNED_KEYS) - set(_SETTINGS_SHARED_KEYS)
-    check("every top-level key we emit is owned or shared, none unclaimed",
+    # [WP3 / model assignment] A contributed key (`ultracode`) is the third
+    # decision: added only where the operator has none, never owned.
+    unclaimed = (emitted - set(_SETTINGS_OWNED_KEYS)
+                 - set(_SETTINGS_SHARED_KEYS)
+                 - set(_SETTINGS_CONTRIBUTED_KEYS))
+    check("every top-level key we emit is owned, shared or contributed, "
+          "none unclaimed",
           not unclaimed,
           f"unclaimed: {sorted(unclaimed)} - add it to _SETTINGS_OWNED_KEYS "
           f"or teach _merge_settings to share it")
+    check("[WP3] the three decisions are disjoint",
+          not (set(_SETTINGS_OWNED_KEYS) & set(_SETTINGS_SHARED_KEYS))
+          and not (set(_SETTINGS_CONTRIBUTED_KEYS)
+                   & (set(_SETTINGS_OWNED_KEYS) | set(_SETTINGS_SHARED_KEYS))))
 finally:
     shutil.rmtree(_d, ignore_errors=True)
 
@@ -1018,6 +1037,333 @@ check("pre-site manifest: their registration at THEIR site survives",
       _merged.get("SessionStart") == [{"hooks": [
           {"type": "command", "command": _OLD}]}],
       json.dumps(_merged.get("SessionStart")))
+
+# =========================================================================== #
+# [WP3 / model assignment] ultracode: on by default, contributed only where
+# the operator has no value, removed only while it is still ours
+# =========================================================================== #
+# Operator decision 2026-10-05: ultracode is ON by default for adopters,
+# with an opt-out (workflow.ultracode: false). The model-assignment
+# prototype routed it through the owned-key path and overwrote an
+# operator's own `false` (fx3); these rows pin the contributed-key path.
+print("\n-- [WP3] ultracode: contributed where absent, never displacing --")
+
+UC_OFF = SERVICE + "workflow:\n  ultracode: false\n"
+_UC_NOTE = "no install record says this installer wrote it"
+
+
+def manifest_row(root):
+    with open(os.path.join(root, ".claude", ".installer-manifest.json")) as fh:
+        m = json.load(fh)
+    return next(f for f in m["files"] if f["path"] == ".claude/settings.json")
+
+
+def _uc_case(label, fn):
+    d = tempfile.mkdtemp()
+    try:
+        fn(d)
+    except Exception as exc:          # a crash is a FAIL row, not a traceback
+        check(f"{label} (raised {type(exc).__name__}: {exc})", False)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def _fresh_default(d):
+    r = install(d)
+    check("[WP3] fresh install, default config: settings.json sets "
+          "\"ultracode\": true, recorded as contributed",
+          r.returncode == 0 and read(d).get("ultracode") is True
+          and manifest_row(d).get("contributed_keys") == {"ultracode": True},
+          r.stdout[-300:] + r.stderr[-300:])
+    r = install(d)
+    check("[WP3] re-install converges (ok, not an update)",
+          r.returncode == 0 and "ok   .claude/settings.json" in r.stdout,
+          r.stdout[-400:])
+    r = install(d, UC_OFF)
+    check("[WP3] the opt-out removes our own value from a file we wrote "
+          "wholesale",
+          r.returncode == 0 and "ultracode" not in read(d)
+          and manifest_row(d).get("contributed_keys") == {},
+          json.dumps(read(d))[:300])
+
+
+def _fresh_off(d):
+    r = install(d, UC_OFF)
+    check("[WP3] workflow.ultracode: false: no ultracode key at all, and no "
+          "note",
+          r.returncode == 0 and "ultracode" not in read(d)
+          and manifest_row(d).get("contributed_keys") == {}
+          and "ultracode" not in r.stderr, r.stderr[-300:])
+
+
+def _merged_flip(d):
+    seed(d, {"model": "sonnet"})
+    r = install(d)
+    s1 = read(d)
+    check("[WP3] merge: ours is added beside the operator's keys and "
+          "recorded, with no opt-out note",
+          r.returncode == 0 and s1.get("ultracode") is True
+          and s1.get("model") == "sonnet"
+          and manifest_row(d).get("contributed_keys") == {"ultracode": True}
+          and _UC_NOTE not in r.stderr,
+          json.dumps(s1)[:300] + r.stderr[-300:])
+    r = install(d)
+    check("[WP3] merge: a re-install is a fixed point",
+          r.returncode == 0 and "ok   .claude/settings.json" in r.stdout
+          and read(d) == s1, r.stdout[-300:])
+    r = install(d, UC_OFF)
+    s2 = read(d)
+    check("[WP3] merge: the opt-out removes our value, keeps theirs, says "
+          "nothing",
+          r.returncode == 0 and "ultracode" not in s2
+          and s2.get("model") == "sonnet" and _UC_NOTE not in r.stderr,
+          json.dumps(s2)[:300] + r.stderr[-300:])
+    install(d)
+    r = uninstall(d)
+    s3 = read(d) if os.path.exists(
+        os.path.join(d, ".claude", "settings.json")) else {}
+    check("[WP3] uninstall removes our ultracode and keeps theirs",
+          "ultracode" not in s3 and s3.get("model") == "sonnet", str(s3))
+
+
+def _theirs_false(d):
+    seed(d, {"ultracode": False, "model": "sonnet"})
+    r = install(d)
+    check("[WP3] an operator's own \"ultracode\": false is never displaced "
+          "(default config on)",
+          r.returncode == 0 and read(d).get("ultracode") is False
+          and manifest_row(d).get("contributed_keys") == {}
+          and not manifest_row(d).get("displaced_keys")
+          and "ultracode" not in r.stderr,
+          json.dumps(read(d))[:300] + r.stderr[-300:])
+    r = uninstall(d)
+    check("[WP3] ... and uninstall leaves it",
+          read(d).get("ultracode") is False, json.dumps(read(d))[:300])
+
+
+def _theirs_true(d):
+    seed(d, {"ultracode": True, "model": "sonnet"})
+    r = install(d)
+    check("[WP3] an operator's own \"ultracode\": true is kept, not claimed, "
+          "and the config agrees, so no note",
+          read(d).get("ultracode") is True
+          and manifest_row(d).get("contributed_keys") == {}
+          and _UC_NOTE not in r.stderr, r.stderr[-300:])
+    uninstall(d)
+    check("[WP3] ... so uninstall leaves it",
+          read(d).get("ultracode") is True, json.dumps(read(d))[:300])
+    seed(d, {"ultracode": True, "model": "sonnet"})
+    r = install(d, UC_OFF)
+    check("[WP3] opt-out with a value we do not own: kept, rc 0, and a "
+          "warning naming the fix",
+          r.returncode == 0 and read(d).get("ultracode") is True
+          and _UC_NOTE in r.stderr
+          and "Delete the key from .claude/settings.json" in r.stderr,
+          r.stderr[-500:])
+
+
+def _taken_over(d):
+    seed(d, {"model": "sonnet"})
+    install(d)
+    s = read(d)
+    s["ultracode"] = False
+    seed(d, s)
+    r = install(d)
+    check("[WP3] an operator who changes OUR value takes it over: kept, no "
+          "longer recorded as ours",
+          r.returncode == 0 and read(d).get("ultracode") is False
+          and manifest_row(d).get("contributed_keys") == {}, r.stderr[-300:])
+
+
+def _changed_then_uninstalled(d):
+    seed(d, {"model": "sonnet"})
+    install(d)
+    s = read(d)
+    s["ultracode"] = False
+    seed(d, s)
+    uninstall(d)
+    check("[WP3] uninstall keeps a value the operator changed from ours "
+          "since the last install",
+          read(d).get("ultracode") is False and read(d).get("model")
+          == "sonnet", json.dumps(read(d))[:300])
+
+
+def _wt_changed_then_uninstalled(d):
+    # [WP3 fix1 TP-08 (d), UC05] The worktree.baseRef we merged into the
+    # operator's file, changed by them since the last install: uninstall
+    # keeps their value, as it keeps an ultracode they changed.
+    seed(d, {"model": "sonnet"})
+    install(d)
+    s = read(d)
+    check("[WP3] (precondition) the merged worktree.baseRef is recorded as "
+          "ours", s.get("worktree") == {"baseRef": "head"}
+          and manifest_row(d).get("owned_worktree") == {"baseRef": "head"},
+          json.dumps(s)[:300])
+    s["worktree"]["baseRef"] = "fresh"
+    seed(d, s)
+    uninstall(d)
+    check("[WP3] uninstall keeps a worktree.baseRef the operator changed "
+          "from ours since the last install",
+          read(d).get("worktree") == {"baseRef": "fresh"}
+          and read(d).get("model") == "sonnet", json.dumps(read(d))[:300])
+
+
+def _fresh_clone(d):
+    seed(d, {"model": "sonnet"})
+    install(d)
+    os.remove(os.path.join(d, ".claude", ".installer-manifest.json"))
+    r = install(d, UC_OFF)
+    check("[WP3] a fresh clone (no manifest) cannot tell ours from theirs: "
+          "the value stays and the opt-out says so",
+          r.returncode == 0 and read(d).get("ultracode") is True
+          and _UC_NOTE in r.stderr, r.stderr[-500:])
+
+
+def _decline_carries(d):
+    seed(d, {"model": "sonnet"})
+    install(d)
+    good = read(d)
+    seed(d, "{ not json")
+    r = install(d)
+    check("[WP3] a declined run keeps the contributed record",
+          r.returncode == 3
+          and manifest_row(d).get("contributed_keys") == {"ultracode": True},
+          str(manifest_row(d))[:300])
+    seed(d, good)
+    r = install(d, UC_OFF)
+    check("[WP3] ... so the next run still retires our value",
+          r.returncode == 0 and "ultracode" not in read(d)
+          and _UC_NOTE not in r.stderr, json.dumps(read(d))[:300])
+
+
+for _label, _fn in (("fresh default", _fresh_default),
+                    ("fresh off", _fresh_off),
+                    ("merged flip", _merged_flip),
+                    ("theirs false", _theirs_false),
+                    ("theirs true", _theirs_true),
+                    ("taken over", _taken_over),
+                    ("changed, then uninstalled", _changed_then_uninstalled),
+                    ("baseRef changed, then uninstalled",
+                     _wt_changed_then_uninstalled),
+                    ("fresh clone", _fresh_clone),
+                    ("decline carries", _decline_carries)):
+    _uc_case(f"[WP3] ultracode case: {_label}", _fn)
+
+# Unit: the merge is type-strict, so an operator's `1` is never read as the
+# `true` we wrote (Python has 1 == True).
+_m, _, _ = _merge_settings({"ultracode": True}, {"ultracode": 1}, [], None,
+                           prev_contributed={"ultracode": True},
+                           contributed=(_c := {}))
+check("[WP3] unit: an operator's 1 is not our true (kept, not owned)",
+      _m.get("ultracode") == 1 and type(_m.get("ultracode")) is int
+      and _c == {}, f"{_m} {_c}")
+_m, _, _ = _merge_settings({}, {"ultracode": True, "model": "x"}, [], None,
+                           prev_contributed={"ultracode": True},
+                           contributed=(_c := {}))
+check("[WP3] unit: ours, recorded, config off: removed",
+      "ultracode" not in _m and _m.get("model") == "x" and _c == {}, str(_m))
+
+# A quoted "false" is a truthy string: refused, and read as off.
+_cfg, _errs = resolve_config(load_yaml(SERVICE + 'workflow:\n  ultracode: "false"\n'))
+check("[WP3] workflow.ultracode: \"false\" (quoted) is refused, and read as "
+      "off",
+      any("workflow.ultracode must be true or false" in e for e in _errs)
+      and _cfg["workflow"]["ultracode"] is False, str(_errs))
+_d = tempfile.mkdtemp()
+try:
+    _r = install(_d, SERVICE + "workflow:\n  ultracode: 1\n")
+    check("[WP3] ... and the installer refuses such a config",
+          _r.returncode != 0 and not os.path.exists(
+              os.path.join(_d, ".claude", "settings.json"))
+          and "workflow.ultracode must be true or false"
+          in _r.stdout + _r.stderr, (_r.stdout + _r.stderr)[-300:])
+finally:
+    shutil.rmtree(_d, ignore_errors=True)
+
+
+def _plan(cfg_text):
+    cfg, errs = resolve_config(load_yaml(cfg_text))
+    assert not errs, errs
+    return {a["path"]: a["body"] for a in build_plan(cfg)}
+
+
+_on, _off = _plan(SERVICE), _plan(UC_OFF)
+_LOOPS_PRE = SERVICE + ("autonomous_modes:\n  loop_mode_enabled: true\n"
+                        "  goal_supervised_mode_enabled: true\n"
+                        "  queue_mode_enabled: true\n")
+_tech_on = _on[".claude/steering/tech.md"]
+_tech_off = _off[".claude/steering/tech.md"]
+check("[WP3] tech.md, on: says on, what it costs, Sonnet too, and how to "
+      "turn it off",
+      "**Ultracode:** on (`workflow.ultracode: true`)" in _tech_on
+      and "main session, Sonnet sessions included (Haiku ignores it)"
+      in _tech_on
+      and "never for a subagent" in _tech_on
+      and "token cost no constraint, so sessions cost more" in _tech_on
+      and "It leaves effort where it was" in _tech_on
+      and "`workflow.ultracode: false` and a re-install" in _tech_on
+      and "--settings '{\"ultracode\": false}'" in _tech_on, _tech_on[-900:])
+check("[WP3] tech.md, off: says off, and how to turn it on for a session",
+      "**Ultracode:** off (`workflow.ultracode: false`)" in _tech_off
+      and "`claude --effort ultracode`" in _tech_off
+      and "**Ultracode:** on" not in _tech_off, _tech_off[-400:])
+check("[WP3] the opt-out moves exactly settings.json and tech.md",
+      sorted(p for p in _on if _on[p] != _off.get(p))
+      == [".claude/settings.json", ".claude/steering/tech.md"]
+      and sorted(_on) == sorted(_off))
+
+# Operator decision 2026-10-05: never emit switchModelsOnFlag. On Claude
+# Code 2.1.289 a type-invalid value of it (or of `model`) made Claude Code
+# skip the WHOLE project settings.json silently, every hook and deny rule
+# included (measured), and its documented type differs from the binary's.
+# `model` and effort stay the operator's (README, co-ownership).
+_unstable = {"switchModelsOnFlag", "model", "effortLevel", "modelSettings"}
+check("[WP3] tripwire: the emitted settings.json sets no model, effort or "
+      "switchModelsOnFlag key",
+      not any(_unstable & set(json.loads(_p[".claude/settings.json"]))
+              for _p in (_on, _off, _plan(_LOOPS_PRE))))
+
+with open(os.path.join(ROOT, "plugin", "commands", "bootstrap-apply.md")) as _fh:
+    _apply_md = _fh.read()
+check("[WP3] bootstrap-apply.md names the kept-ultracode warning class",
+      "when `workflow.ultracode` is false but `settings.json`\n   still sets "
+      "`\"ultracode\": true` with a value the installer did not\n   write"
+      in _apply_md)
+
+# Unattended `claude -p` turns it off, in both wrappers and both routing
+# variants (worktree on and off), in the header and the stderr hint.
+_LOOPS = SERVICE + ("autonomous_modes:\n  loop_mode_enabled: true\n"
+                    "  goal_supervised_mode_enabled: true\n")
+for _iso, _txt in (("worktree", _LOOPS),
+                   ("no worktree",
+                    _LOOPS + "workflow:\n  implementer_isolation: none\n")):
+    _p = _plan(_txt)
+    for _w in (".claude/loop.sh", ".claude/goal-loop.sh"):
+        _b = _p[_w]
+        _disp = [ln for ln in _b.splitlines()
+                 if ln.startswith("#   claude -p ")]
+        check(f"[WP3] {_w} ({_iso}): the dispatch line passes --settings "
+              f"'{{\"ultracode\": false}}'",
+              len(_disp) == 1
+              and "--settings '{\"ultracode\": false}'" in _disp[0], _disp)
+        check(f"[WP3] {_w} ({_iso}): the header says why, judge call "
+              f"included",
+              "keeps\n# ultracode off for an unattended run" in _b
+              and "(in goal-loop.sh, the judge call too)" in _b
+              and "# The flag outranks the settings files (measured over "
+              "the project file,\n# Claude Code 2.1.289)." in _b)
+        _hint = [ln for ln in _b.splitlines() if ln.startswith("echo ")
+                 and "ultracode" in ln]
+        check(f"[WP3] {_w} ({_iso}): the stderr hint passes it too",
+              len(_hint) == 1
+              and "--settings '{\\\"ultracode\\\": false}'" in _hint[0],
+              _hint)
+        _f = tempfile.NamedTemporaryFile("w", suffix=".sh", delete=False)
+        _f.write(_b)
+        _f.close()
+        _rc = subprocess.run(["bash", "-n", _f.name]).returncode
+        os.unlink(_f.name)
+        check(f"[WP3] {_w} ({_iso}): still valid bash (-n)", _rc == 0)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

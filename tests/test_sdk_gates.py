@@ -85,6 +85,11 @@ deps:
   approved:
     - requests
     - numpy
+# [WP3 / D2] block: the rows below exercise the spec gate's REFUSAL
+# path. warn, the default WP3 ships, is pinned in
+# tests/test_spec_check.py.
+hooks:
+  spec_gate_commit_mode: block
 """
 
 cfg, _errs = resolve_config(load_yaml(FULL))
@@ -546,9 +551,12 @@ subprocess.run(["git", "-C", proj, "add", "-f", "src/newfile.py"], check=True)
 os.chdir(proj)
 r = run_gate("spec-gate-commit",
              {"tool_input": {"command": "git commit -m x"}})
+# [WP3 / D2] The reason is spec-check.sh's (shell == SDK, pinned in
+# tests/test_spec_check.py): it names the files and what to edit.
 check("AC-7-1 spec-commit: no spec corpus -> deny with shell reason",
       is_deny(r) and deny_reason(r).startswith(
-          "Commit blocked: no active spec/task files exist yet."),
+          "spec check: 1 changed file is not listed in any task file's "
+          "Files: block:\n  src/newfile.py\nNo open task file exists"),
       repr(r))
 os.makedirs(os.path.join(proj, ".claude", "specs"), exist_ok=True)
 open(os.path.join(proj, ".claude", "specs", "INDEX.md"), "w").write(
@@ -557,8 +565,8 @@ r = run_gate("spec-gate-commit",
              {"tool_input": {"command": "git commit -m x"}})
 check("AC-7-1 spec-commit: unreferenced staged file -> deny naming it",
       is_deny(r) and deny_reason(r).startswith(
-          "Commit blocked: files not referenced by any active spec: "
-          "src/newfile.py"),
+          "spec check: 1 changed file is not listed in any task file's "
+          "Files: block:\n  src/newfile.py\n"),
       repr(r))
 # ENFORCED_PREFIXES: a staging set OUTSIDE the enforced prefixes is exempt
 # on this substrate exactly as it is on the shell - the bootstrap commit.
@@ -572,6 +580,9 @@ check("AC-7-1 spec-commit: docs-only staging set allowed (P1-2 port)",
 subprocess.run(["git", "-C", proj, "add", "-f", "src/newfile.py"], check=True)
 open(os.path.join(proj, ".claude", "specs", "INDEX.md"), "a").write(
     "covers src/newfile.py here\n")
+# [WP3 / D2] read from the index: the mention counts once it is staged.
+subprocess.run(["git", "-C", proj, "add", "-f", ".claude/specs/INDEX.md"],
+               check=True)
 r = run_gate("spec-gate-commit",
              {"tool_input": {"command": "git commit -m x"}})
 check("AC-7-1 spec-commit: referenced staged file -> allow", r == {})
@@ -892,8 +903,6 @@ check("fix: worktree guidance one-liner is intact (not backslash-collapsed)",
 # {pat}/{stem}-style values and the shell's two-line stderr splits)
 parity = {
     "secrets-gate": "matches never-read pattern",
-    "spec-gate-commit": "Commit blocked: files not referenced by any "
-                        "active spec:",
     "dependency-gate": "Dependency gate: not in deps.md approved list:",
     "test-gate": "Commit blocked: tests failing",
     "tdd-gate": "TDD gate: write a failing test for",
@@ -904,9 +913,22 @@ for hk, needle in parity.items():
     check(f"AC-7-5 parity [{hk}]: reason literal in shell body",
           needle in shell_body.replace("\\\n", " ").replace(" \\", " "),
           repr(needle))
+# [WP3 / D2] spec-gate-commit's reason and remedy live in spec-check.sh
+# (the shell check of record) and in the SDK port, never in the hook body;
+# and neither offers "Run /spec-new", which does not clear the gate.
+_sc_body = templates.TEMPLATES["spec_check"](cfg)
+for needle in ("not listed in any task file", "To trace them, edit ",
+               "No open task file exists (.claude/specs/<slug>/tasks/",
+               "/spec-decompose <slug> writes task files with"):
+    check(f"AC-7-5 parity [spec-gate-commit]: {needle!r} in spec-check.sh "
+          "and in gates.py", needle in _sc_body and needle in body)
+check("AC-7-5 [spec-gate-commit]: no 'Run /spec-new' remedy on either "
+      "substrate", "Run /spec-new" not in _sc_body
+      and "Run /spec-new" not in body
+      and "Run /spec-new" not in templates.TEMPLATES["hook"](
+          "spec-gate-commit", cfg))
 # the second-line guidance strings are relayed too
 for hk, needle in {
-    "spec-gate-commit": "Run /spec-new or add them to a tasks/*.md file.",
     "dependency-gate":
         "Approve in-session and update .claude/steering/deps.md.",
 }.items():

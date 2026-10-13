@@ -205,6 +205,19 @@ bootstrap-installer/
   `settings.json` is declined rather than merged: replacing it would orphan
   its target, and writing through it would push project-specific hook paths
   into a file your other projects share.
+  *Addition (WP3, 2026-10-05):* with `workflow.ultracode: true`, the
+  default, the installer also adds `"ultracode": true` to `settings.json`
+  and records that it did. A value you set there yourself, `true` or
+  `false`, is never replaced (short of `--force`), and with
+  `workflow.ultracode: false` the installer removes only a value it added.
+  Ultracode is one switch for the whole main session, Sonnet sessions
+  included, never for a subagent: the session is told to use the Workflow
+  tool on every substantive task with token cost no constraint, so sessions
+  cost more. The emitted loop wrappers say to pass
+  `--settings '{"ultracode": false}'` on unattended `claude -p` calls.
+  Re-running an interview's `synthesize` keeps a `workflow.ultracode` you
+  set in `bootstrap.config.yaml`. The Companion's model assignment
+  amendment has the details.
 - **Reversible** — `--uninstall` removes exactly what it created, including
   un-registering its hooks from a co-owned `settings.json` while leaving the
   rest of that file alone.
@@ -270,6 +283,21 @@ deterministic installer).
 - The emitted skill/command/agent bodies are faithful stubs (frontmatter +
   intent). They are correct and load, but the deep prompt engineering for
   each skill is a separate effort from the structural scaffolding.
+  *Correction (WP3, 2026-10-05):* `spec-new`, `spec-review`,
+  `spec-decompose`, `plan-review`, `spec-validate`, `decision-log` and
+  `test-author` now carry working bodies: EARS acceptance criteria with
+  `version: 1.0.0` frontmatter, task files with a `Files:` list the spec
+  check reads, a parallelism map in `plan.md`, validation at the task's
+  `spec_version` recorded in `validation.md`, a fixed decision entry
+  format, and a commit step before any implementer is dispatched. With
+  loop or goal mode on, `spec-decompose` also teaches the `loop_eligible`
+  and `goal_supervised_eligible` fields, which the v2.5.0 bullet below
+  predates. Every skill with a Companion row carries its model line, and
+  `test-author` has a command. `code-review` and `pr-author` remain stubs;
+  the reviewer agent carries the code review. The spec skills write under
+  `.claude/specs/`, which Claude Code protects: under `claude -p` its Write
+  and Edit tools are denied there (decision D5 is open), so smoke stages
+  1-2 run end to end only in an interactive session.
 - **The stub posture extends further than skills (v2.5.0 release review):**
   the emitted **drift/alarm layer is a tier-1 tool-call notice only** —
   tier-2/tier-3 escalation, the tier-3 hard block and its `.drift-tier3-*`
@@ -292,6 +320,12 @@ deterministic installer).
   threshold and that signal's value at the ack, plus half the configured
   threshold, rounded up. Tier 2, tier 3, the `.drift-tier3-*` sentinel and
   audio dispatch are still not implemented.
+  *Correction (WP3, 2026-10-05):* the greenfield `spec-decompose` now
+  teaches the five eligibility criteria and the `loop_eligible` field when
+  loop mode is on, the sixth criterion and `goal_supervised_eligible` when
+  goal mode is on, and the queue sections when queue mode is on. `CLAUDE.md`
+  still carries no loop or goal addenda, and the implementer still has no
+  mode-variant blocks (backlog I-2, WP6).
 - **Claude Code shows the model one block reason per tool call.** When two
   hooks exit 2 on the same tool call, the model receives one reason and the
   others are dropped. With prompt changes and failing tests in one
@@ -315,6 +349,94 @@ deterministic installer).
   digest guard and freezes that file against upstream fixes. To check your own
   environment: from inside `.claude/worktrees/<n>/`, run your test command's
   transport with `pwd` substituted (`docker compose exec -T app pwd`).
+- **The spec commit check runs from git hooks, and ships in warn mode (WP3,
+  2026-10-05).** The installer writes `pre-commit` and `pre-merge-commit`
+  shims into the repository's hooks directory (`.git/hooks`, shared by every
+  worktree). They run `.claude/githooks/dispatch`, which runs
+  `.claude/githooks/spec-check.sh` on the staged files of agent commits only
+  (`CLAUDECODE=1`); your own commits are never checked. A changed file under
+  `hooks.spec_gate_commit_prefixes` must be listed in some task file's
+  `Files:` block. With `hooks.spec_gate_commit_mode: warn`, the default, an
+  agent commit of an unlisted file goes through with the check's message;
+  `block` refuses it. The installer never writes over a hook it did not
+  write: with husky (`core.hooksPath`), lefthook or the pre-commit framework,
+  it leaves the hook alone and prints a `warning:` line saying what to add,
+  `if [ -f .claude/githooks/dispatch ]; then bash
+  .claude/githooks/dispatch pre-commit || exit 1; fi` (and the same for
+  `pre-merge-commit`): the guard lets a commit through on a branch from
+  before the install and once the check is turned off. It cannot tell
+  whether a line you added runs (one after an `exit` or an `exec`, or in a
+  comment, never does), so it keeps warning on each re-install and says how
+  to confirm it: commit a file under one of
+  `hooks.spec_gate_commit_prefixes` that no task file lists from a terminal
+  with `CLAUDECODE=1 git commit`, which should print `spec check` (a file
+  outside them, or one a retrofit install's legacy allowlist covers, is not
+  checked, so it prints nothing; the warning names a file the check
+  covers, asks for one when the allowlist covers every file name it tries,
+  or says that no commit can confirm the line yet). With husky 9,
+  put the line in `.husky/pre-commit`, not in `.husky/_`, which husky
+  rewrites.
+  `.git/hooks` is not versioned, so a fresh clone has no shim until you
+  re-run the installer; until then the `PreToolUse` spec-gate-commit hook
+  checks the index before each `git commit` and, when it finds an unlisted
+  file, says that the git hook is missing. Renaming `settings.json` does not
+  turn the check off: set `hooks.spec_gate_commit: false` and re-install,
+  which removes the shims the installer wrote and names any hook in this
+  repository's hooks directory (husky 9's `.husky/<hook>`), and any lefthook
+  or pre-commit framework config at the top, that still mentions
+  `.claude/githooks/dispatch`, for you to remove; a `core.hooksPath` that
+  every repository reads is left out. A commit that concludes a
+  merge is checked only on the merge's own changes: conflict resolutions
+  and edits made during the merge, judged against git's automatic merge
+  result. The commits it brings in are not checked again, and your own
+  commits never are, so merging a teammate's branch can bring in a file no
+  task file lists (backlog Z-29). In a project below the repository top (a
+  monorepo package), the installer writes no git hook, because one would run
+  for every commit in the repository; there the `PreToolUse` hook checks the
+  project's own paths against its own task files, and misses
+  `git add X && git commit` and `git commit -am`. If the repository top
+  has an install of its own, its git hook also checks the project's commits
+  against the top's prefixes and task files; the project's install says
+  so, and says to narrow the top's prefixes, when the top was installed
+  first or when the project is re-installed (backlog Z-50). *Upgrading:* an
+  install made before WP3 refused an agent commit of a file no spec named;
+  re-installing with the same config makes that commit go through with a
+  warning, and the install does not say so. Set
+  `hooks.spec_gate_commit_mode: block` before you re-install to keep
+  refusing it (backlog Z-28).
+- **Implementer branches land through `.claude/merge-back.sh` (WP3,
+  2026-10-05).** With worktree isolation, the implementer commits on its
+  worktree branch. After the reviewer approves, the main session runs
+  `.claude/merge-back.sh <branch>`: it refuses a main checkout whose tracked
+  files have uncommitted changes, merges with `--no-ff --no-commit`, runs
+  the spec check (on the merge's own changes) and the test gate on the
+  merged result, commits, and removes the worktree and the branch. Its last
+  line, `merge-back: <STATUS>`, says what happened, so do not cut its
+  output with `head`: a reader that stops early ends the run with no last
+  line and can leave the merge in progress (`--continue <branch>` then
+  concludes it); on a conflict it hands
+  the merge to the integrator agent, and `--continue <branch>` finishes it.
+  Do not merge implementer branches by hand: an agent's hand-typed
+  `git merge` that makes a merge commit runs the spec check but not the
+  test gate, and one that fast-forwards, as it does when your branch has
+  not moved since the implementer's branch point, runs no hook at all
+  (backlog Z-29, Z-33). merge-back runs your tests inside one Bash call; if
+  that call outlasts the Bash timeout, Claude Code moves it to the
+  background, where, by Claude Code's own message, it is stopped after 30
+  minutes (not measured), and a headless
+  `claude -p` session must wait for it in the same turn (backlog Z-45). In
+  a project below the repository top, merge-back runs its git steps at the
+  top, across the whole repository, and the gates in the project; there
+  implementer isolation `auto` resolves to `none`, because Claude Code
+  makes the worktree at the repository top, where the gates do not find
+  the project (backlog Z-44). The installer also writes
+  `"worktree": {"baseRef": "head"}` into
+  `settings.json`, so worktrees start from your local `HEAD` and see a spec
+  you committed but did not push. It keeps your own `"fresh"` or `null` with
+  a warning, and declines (exit 3) any other `baseRef`, because Claude Code
+  then ignores the whole file. `.claude/.gitignore` ignores `/worktrees/`;
+  if you edited that file, a re-install keeps your copy and warns when it
+  lacks the line and nothing else ignores the worktrees.
 
 ## Tests
 

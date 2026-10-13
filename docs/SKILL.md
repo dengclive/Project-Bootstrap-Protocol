@@ -1,9 +1,6 @@
 ---
 name: design-review
-description: Use when a task changes a user-facing surface — screens, components,
-  onboarding, empty/loading states, pricing, paywalls, or user-visible copy.
-  Checks the diff against .claude/steering/design.md. Advisory: flags, never
-  blocks. Interactive sessions only. Recommended: invoke from an Opus session.
+description: "Use when a task changes a user-facing surface — screens, components, onboarding, empty/loading states, pricing, paywalls, or user-visible copy. Checks the diff against .claude/steering/design.md. Advisory: flags, never blocks. Interactive sessions only. Recommended: invoke from an Opus session."
 ---
 
 # design-review

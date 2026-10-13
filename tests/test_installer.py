@@ -18,6 +18,13 @@ from minyaml import load_yaml                   # noqa: E402
 import templates as _tmpl                       # noqa: E402
 
 BIN = os.path.join(ROOT, "bin", "bootstrap-install")
+
+# [WP3 critic 1j] Hermetic: git never searches above the temp directory. The
+# installer now looks for the repository a project sits in (the spec check's
+# git hooks), and with TMPDIR inside some work tree (a dotfiles repository in
+# $HOME) every fixture would read as a directory inside that repository and
+# draw a stderr warning. Inherited by every subprocess this suite starts.
+os.environ["GIT_CEILING_DIRECTORIES"] = tempfile.gettempdir()
 passed = failed = 0
 
 
@@ -1151,8 +1158,8 @@ for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
     # to the check above and unable to fail independently of it. No pre-fold
     # plan was ever built, so the baseline delta it advertised was never
     # enforced. The absolute count IS pinned, by EXPECTED_ACTION_COUNTS in
-    # test_greenfield_golden.py (56 / 68), which is where a genuine "+1"
-    # regression surfaces.
+    # test_greenfield_golden.py, which is where a genuine "+1" regression
+    # surfaces.
     if _ledger_actions:
         _body = _ledger_actions[0]["body"]
         # Interpolated (not hardcoded) default drift thresholds 50/120/3.
@@ -1793,8 +1800,11 @@ principles:
     check("W-1c: full autonomous config is idempotent",
           "create=0 update=0" in r2.stdout)
     cl = os.path.join(d, ".claude")
+    # [WP3 / D6] merge-back.sh is a generated script too, and [WP3 / D2]
+    # so are the spec check and its git-hook entry point.
     scripts = [os.path.join(cl, s) for s in
-               ("loop.sh", "goal-loop.sh", "auto.sh")]
+               ("loop.sh", "goal-loop.sh", "auto.sh", "merge-back.sh",
+                "githooks/dispatch", "githooks/spec-check.sh")]
     scripts += [os.path.join(cl, "hooks", f)
                 for f in os.listdir(os.path.join(cl, "hooks"))
                 if f.endswith(".sh")]
@@ -1930,20 +1940,42 @@ check("AC-6-2: goal-config judge default is haiku "
 check("AC-6-2: auto-config summary-synthesis default is haiku",
       "summary_synthesis_model: haiku" in bodies[".claude/auto-config.md"]
       and "summary_synthesis_enabled" in bodies[".claude/auto-config.md"])
-check("AC-6-3: no emitted file references Fable",
-      all("fable" not in b.lower() for b in bodies.values()))
+# [WP3 model assignment] Operator decision 2026-10-05: Fable appears in
+# exactly two emitted lines, the spec-review and plan-review recommendation
+# lines, with Opus as the fallback; never in an agent, a hook or settings.
+# Narrowed to those two exact lines and no wider (requirements.md:88 says
+# "no emitted agent references Fable"): remove that line from those two
+# files, and every byte of every emitted file must still be Fable-free.
+_FABLE_REC = ("> Recommended: invoke from a Fable session (Opus if Fable is "
+              "unavailable or Claude Code switches the model).\n")
+_FABLE_OK = (".claude/skills/spec-review/SKILL.md",
+             ".claude/skills/plan-review/SKILL.md")
+check("AC-6-3: the Fable recommendation line is in spec-review and "
+      "plan-review only",
+      sorted(p for p, b in bodies.items() if _FABLE_REC in b)
+      == sorted(_FABLE_OK))
+check("AC-6-3: no other emitted text references Fable (no agent, hook or "
+      "settings)",
+      all("fable" not in (b.replace(_FABLE_REC, "") if p in _FABLE_OK
+                          else b).lower() for p, b in bodies.items()))
 # AC-6-5 (owner-reworded): effort: is ALREADY emitted and IS a documented
 # subagent-frontmatter key (verified against code.claude.com/docs/en/
 # sub-agents 2026-07-17: "Effort level when this subagent is active...
 # low|medium|high|xhigh|max"). Assert the emitted value matches the
 # Companion table (reviewer = high) and greenfield/retrofit stay consistent.
-check("AC-6-5: greenfield reviewer emits effort: high",
-      "\neffort: high\n" in agents[".claude/agents/reviewer.md"])
+# [WP3 model assignment, operator decision 2026-10-05] The reviewer's
+# effort is xhigh, not high (templates.REVIEWER_EFFORT), and the value is
+# measured sent on its requests (wp3-model-assignment verify:facts). The
+# Companion table's "effort: high" row and requirements.md AC-6-5 (c) get
+# dated amendments with the model-assignment records.
+check("AC-6-5: greenfield reviewer emits effort: xhigh",
+      "\neffort: xhigh\n" in agents[".claude/agents/reviewer.md"]
+      and "\neffort: high\n" not in agents[".claude/agents/reviewer.md"])
 _rf_reviewer = _T["retrofit_reviewer_agent"](
     {"workflow": {"reviewer_model": "opus"}})
-check("AC-6-5: retrofit reviewer consistent (model: opus + effort: high)",
+check("AC-6-5: retrofit reviewer consistent (model: opus + effort: xhigh)",
       "\nmodel: opus\n" in _rf_reviewer
-      and "\neffort: high\n" in _rf_reviewer)
+      and "\neffort: xhigh\n" in _rf_reviewer)
 check("AC-6-5: effort: appears only on the reviewer (table has no other "
       "effort annotation)",
       all("\neffort:" not in agents[p] for p in agents
@@ -2571,6 +2603,28 @@ _c_js, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
 check("I-6: tech.md states no exit-5 allowance for jest (control)",
       _RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_js)
       and "no tests" not in _tmpl.TEMPLATES["tech"](_c_emp))
+# [WP3 fix 8] And its start-directory allowance whenever test-gate carries
+# that arm (UNITTEST_RC1_RE), and only then: unittest, not pytest.
+_NS_LINE = ("A run there whose start directory does not exist yet "
+            "(unittest exits 1 saying it is not importable) is allowed too, "
+            "with a notice.")
+_c_ut, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
+                    'commands:\n  test: "python3 -m unittest discover -s '
+                    'tests -t ."\n')
+check("WP3 fix 8: tech.md states the start-directory allowance for a "
+      "unittest test command, after the exit-5 line",
+      (_RC5_LINE + "\n" + _NS_LINE) in _tmpl.TEMPLATES["tech"](_c_ut))
+_CI_NS_LINE = ("A CI local run there whose start directory does not exist "
+               "yet (unittest exits 1 saying it is not importable) lets the "
+               "push through too, with a notice.")
+check("WP3 fix 8 review C1: tech.md states ci-mirror's start-directory "
+      "allowance when CI local is empty and Test is unittest",
+      _CI_NS_LINE in _tmpl.TEMPLATES["tech"](_c_ut))
+check("WP3 fix 8 review C1: no ci-mirror start-directory line for pytest "
+      "(control)", _CI_NS_LINE not in _tmpl.TEMPLATES["tech"](_c_py))
+check("WP3 fix 8: no start-directory line for pytest or jest (control)",
+      _NS_LINE not in _tmpl.TEMPLATES["tech"](_c_py)
+      and _NS_LINE not in _tmpl.TEMPLATES["tech"](_c_js))
 # [WP2 Z-1] ci-mirror carries the same arm for the command it runs
 # (ci_local, else test), so tech.md says so on the same predicate.
 _CI_RC5_LINE = ("A CI local run at the top of the checkout that collects no "

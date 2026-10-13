@@ -940,7 +940,7 @@ tag, main and branch**:
   names that path — and the emitted `/spec-decompose` produces behaviours, not
   filenames. **The first code commit of every adopting project is blocked.**
   *(Re-measured: with `src/unreferenced.py` staged, `git commit -m x` is
-  deny/deny; a docs-only staging set allows.)*
+  deny/deny; a docs-only staging set allows.)* **[Layer 2026-10-05, WP3 (branch `feat/wp3-spec-workflow`, not yet merged): decided by D2, and no longer blocking by default there.]** `/spec-decompose` now writes task files whose `Files:` block names each file, and the check covers a path only through such a list. It ships in warn mode, so on a fresh install an agent commit staging an unlisted `src/` file goes through with the check's message (measured 2026-10-05). With `hooks.spec_gate_commit_mode: block` that commit is refused and a commit of a listed file passes (`tests/test_smoke_stages.py`). The switch to block is backlog Z-28. The measurement above stays true of the sha it names, and this layer does not by itself move the readiness verdict.
 - **J-8** — the default `never_read_paths` was deliberately not widened, so
   `~/.ssh/id_rsa` and `~/.aws/credentials` read clean out of the box.
   *(Re-measured allow/allow on both substrates, with in-project `.env` and
@@ -1134,7 +1134,7 @@ and a motivated agent needs only padding.
 6. **Widen default `never_read_paths`** to `~/.ssh/**`, `~/.aws/credentials`,
    `/etc/shadow`. **[NOT DONE — all three still read clean.]**
 7. **Resolve A-6**, or the first commit of every adopting project is blocked.
-   **[NOT DONE.]**
+   **[NOT DONE.]** **[Layer 2026-10-05, WP3 (branch, not yet merged): resolved there by D2; see the A-6 bullet in section 5.]**
 8. **Make the autonomous-mode flags honest** — either implement dispatch or
    stop shipping flags that read as ordinary booleans. **[NOT DONE —
    wrappers byte-identical to the tag.]**

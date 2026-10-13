@@ -3490,7 +3490,190 @@ EXPECTED_DIGESTS = {
         # the previous digest (e6e3d9d1...): exactly one body moves,
         # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 56.
-        "2d5b895e88ae484ca0177ecfffb904c5c605b8a8e2d7057e22b857fbecffb44e",
+        # [freeze-exception no. 84, 2026-10-05] wp3-spec-workflow.
+        # Deliberate re-baseline, not a drift. WP3 builds a spec workflow that
+        # reaches a merged commit, in one PR with no protocol version bump:
+        # D2 path traceability (installer-written git pre-commit and
+        # pre-merge-commit hooks run `.claude/githooks/spec-check.sh`,
+        # through `.claude/githooks/dispatch`, on the staged set, for agent
+        # commits only; it ships warn-only), D6
+        # (`.claude/merge-back.sh`, `worktree.baseRef` head, `/worktrees/`
+        # ignored), working bodies for spec-new, spec-review, spec-decompose,
+        # plan-review, spec-validate, decision-log and test-author, spec
+        # versioning and the INDEX schema, the agents' handoff, and the model
+        # assignment (ultracode on by default, the reviewer at xhigh).
+        # `_HOOK_HEADER`, secrets-gate.sh and dependency-gate.sh do NOT move
+        # (2026-09-27 pivot). The header's source string is byte-identical,
+        # and so is the header rendered into every hook body that carries it
+        # (11 / 15 / 11 / 11 bodies in the four fixtures here, 11 / 15 in
+        # tests/test_retrofit.py), except one `@@POSTURE@@` value:
+        # spec-gate-commit.sh's FAIL_CLOSED goes 1 -> 0, because in warn mode
+        # the gate is advisory (block mode renders 1). The AC-2-3
+        # mini-golden (tests/test_validate_only.py) and the TEL-01 telemetry
+        # digest below do not move.
+        # Measured on the emitted plans against 3d866f4, per file: 8 added
+        # (`.claude/githooks/spec-check.sh`, `.claude/githooks/dispatch`,
+        # `.claude/commands/test-author.md`, `.claude/merge-back.sh`,
+        # `.claude/specs/README.md`, `.claude/steering/spec-versioning.md`,
+        # `.claude/learnings/README.md`, `.claude/sessions/README.md`), 0
+        # removed, the 56 kept paths in their old order, modes and kinds
+        # unchanged; action count 56 -> 64. 25 bodies move: CLAUDE.md,
+        # .claude/.gitignore, settings.json, agents implementer, integrator
+        # and reviewer, commands decision-log and pr-author, hooks
+        # spec-gate-commit and spec-gate-entry, steering structure.md and
+        # tech.md, specs/INDEX.md, and 12 SKILL.md bodies (ack-drift,
+        # checkpoint, code-review, decision-log, plan-review, pr-author,
+        # resume, spec-decompose, spec-new, spec-review, spec-validate,
+        # test-author). The git hook shims the installer writes into the
+        # repository's hooks directory are not plan actions, so no digest
+        # here pins them; tests/test_git_hooks.py runs them in real git.
+        # RE-BASELINED 2026-10-06, same exception 84, once over the WP3
+        # review's fix round 1 tree. spec-check.sh checks only a merge's own
+        # changes and works project-relative below the git top level
+        # (operator decisions 2026-10-06 (1) and (2)), plus F1, F3, MT-2,
+        # SC-1 and SC-2; dispatch and the spec-gate-commit fallback treat a
+        # check bash cannot parse as "could not run" (SC-3, F2), dispatch's
+        # refusal line is neutral (SC-6), and the fallback defers to a hook
+        # that runs dispatch and says what holds where it cannot (INST-3,
+        # decision (2)); merge-back.sh takes MB-2 to MB-7, TP-01/CR-3, CR-1
+        # and decision (2); CLAUDE.md, the integrator and the reviewer take
+        # CR-1, MB-3, MB-6 and MT-5; plan-review and spec-decompose write
+        # paths from the project root. Measured on the emitted plans against
+        # the previous digest (f44f8f14...), per file: 9 bodies move,
+        # CLAUDE.md, agents integrator and reviewer, githooks dispatch and
+        # spec-check.sh, hooks spec-gate-commit, merge-back.sh, and skills
+        # plan-review and spec-decompose; 0 added, 0 removed, order, modes
+        # and kinds unchanged, count 64. Each of the 9 is in the 3d866f4 sets
+        # above, which still hold. `_HOOK_HEADER`, its rendered bytes in
+        # every hook (the posture values included), secrets-gate.sh and
+        # dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-07, same exception 84, once over the WP3
+        # re-review's fix round 2 tree. spec-check.sh ends every verdict
+        # with an end line, which dispatch and the spec-gate-commit fallback
+        # now require in place of their `bash -n` guard (CRIT-1, MR-3); it
+        # judges a merge's own changes, and a conflicted cherry-pick's or
+        # revert's, against git's automatic result where git can give one
+        # (MR-1, MR-2), words the remedy by mode (IT-4), reads stage-0 task
+        # files only (MR-5) and, below the top, also matches a legacy
+        # mention spelled from the repository top (MR-7). The fallback
+        # defers only to the installer's own executable shim, by its blob
+        # id, at the top (IT-1, IT-2, IT-5, MR-4, RG-2), and also checks a
+        # merge, cherry-pick or revert concluded with --continue (MR-6).
+        # merge-back.sh runs each gate under `set -m` again, without
+        # setsid (RG-1), stops a gate with one TERM and up to 10 s before
+        # KILL (MBR-2), ignores further signals until its last line
+        # (MBR-1), undoes a merge git was running when interrupted (MBR-3),
+        # reads a worktree's `locked` file on git before 2.31 (CRIT-2) and
+        # marks its own spec runs (IT-4). The below-top isolation texts
+        # (IT-3) do not render at the top, so they move no fixture here.
+        # Measured on the emitted plans against the previous digest
+        # (eb70e413...), per file: 4 bodies move, githooks dispatch and
+        # spec-check.sh, hooks spec-gate-commit and merge-back.sh; 0 added,
+        # 0 removed, order, modes and kinds unchanged, count 64. Each of the
+        # 4 is in the 3d866f4 sets above, which still hold. `_HOOK_HEADER`,
+        # its rendered bytes in every hook (the posture values included),
+        # secrets-gate.sh and dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-12, same exception 84, once over the WP3
+        # re-review 2's fix round 3 tree. spec-check.sh escapes in bash and
+        # runs no sed, routes a grep failure to "could not run" (EM-1), tells
+        # awk's file operands apart by ARGV, not by a -v value awk
+        # escape-processes, so a backslash in TMPDIR no longer drops a merge's
+        # kept lines (MR2-2, EM-2), checks every write it makes to TMPDIR and
+        # keeps its message out of TMPDIR (CRIT2-1), judges a merge of
+        # unrelated histories (MR2-1), a commit made while a rebase or
+        # `git am` is stopped (MR2-3), a picked or reverted merge or root
+        # commit with its own reason (MR2-4) and a --no-commit revert by name
+        # (MR2-5), drops the abort and unstage clauses in a retrofit warn week
+        # (MR2-6), and finds the project below the top from a linked
+        # worktree's git hook (CRIT2-2). The spec-gate-commit fallback names
+        # an empty core.hooksPath (HD-5) and still names what it refused when
+        # the check's message was lost (CRIT2-1). merge-back.sh ignores
+        # SIGPIPE while it stops (MBS-1), names the files when a gate changed
+        # a merged file and the abort is refused (MBS-3), and says when an
+        # interruption leaves the merge in progress (MBS-2), what a SIGKILL
+        # leaves (MBS-4) and that cleanup may be left (MBS-6). What the
+        # installer prints (HD-1 to HD-4, and HD-5's warning) and the live-run
+        # harness (RR2-2) are not plan bodies, so they move no fixture.
+        # Measured on the emitted plans against the previous digest
+        # (bbbf124d...), per file: 3 bodies move, githooks spec-check.sh,
+        # hooks spec-gate-commit and merge-back.sh, and githooks dispatch does
+        # not; 0 added, 0 removed, order, modes and kinds unchanged, count 64.
+        # Each of the 3 is in the 3d866f4 sets above, which still hold.
+        # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
+        # included), secrets-gate.sh and dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3
+        # re-review 3's fix round 4 tree. spec-check.sh's block-mode refusal
+        # for a stopped rebase says not to unstage a file the replayed commit
+        # changed and that any other file can be unstaged, and its reason for a
+        # rebase that names no commit no longer mentions a resolution
+        # (RR3-CHK-1). merge-back.sh lists at most 20 files and a count of the
+        # rest, and its remedy drops the merge with `git checkout -- :/`
+        # (MB3-1); its header no longer says the last line is always there,
+        # and its header and agent note say not to cut its output with head
+        # (CRIT3-1, = MB3-4) and name the hooks git runs before it writes the
+        # merge commit (MB3-3). What the installer prints (INST3-2, INST3-3) is
+        # not a plan body, so it moves no fixture. Measured on the emitted plans
+        # against the previous digest (495a583e...), per file: 2 bodies move,
+        # githooks spec-check.sh and merge-back.sh, and githooks dispatch and
+        # hooks spec-gate-commit do not; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 64. Each of the 2 is in the 3d866f4 sets
+        # above, which still hold. `_HOOK_HEADER`, its rendered bytes in every
+        # hook (the posture values included), secrets-gate.sh and
+        # dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3 step 7
+        # fix round 5 tree. spec-check.sh reads CHERRY_PICK_HEAD, REVERT_HEAD
+        # and REBASE_HEAD as refs (`git rev-parse -q --verify`, and only when
+        # the name resolves to itself), not as files at --git-path, so a
+        # stopped rebase or cherry-pick in a reftable repository is seen as one
+        # (R4-1, CRIT7-1). Its block-mode refusal for a stopped rebase names
+        # REBASE_HEAD and how to list its files, and a rebase that names no
+        # commit says any file can be unstaged (R4-3). merge-back.sh's "already
+        # in progress" remedy drops the merge with `git restore
+        # --ignore-unmerged --worktree -- :/`, and its header no longer says
+        # git merge --abort refuses to discard the changes (R4-4). What the
+        # installer prints (R4-2) is not a plan body, so it moves no fixture.
+        # Measured on the emitted plans against the previous digest
+        # (92f50795...), per file: 2 bodies move, githooks spec-check.sh and
+        # merge-back.sh, and githooks dispatch and hooks spec-gate-commit do
+        # not; 0 added, 0 removed, order, modes and kinds unchanged, count 64.
+        # Each of the 2 is in the 3d866f4 sets above, which still hold.
+        # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
+        # included), secrets-gate.sh and dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3 fix
+        # round 6 tree (review of fix round 5). spec-check.sh's `_seqref`
+        # never looks a head up by name: a file at --git-path is read itself
+        # and is a stop when it names a commit, and with no file only a
+        # reftable repository is asked, with `git show-ref --verify`, so a
+        # real stop beside a branch or tag named for the head is seen again
+        # (RV5-SC-1). Its stopped-rebase refusal says the commit is made if
+        # `git rev-parse HEAD REBASE_HEAD` prints one object name twice, not
+        # that an edit stop has made it (RV5-SC-2). merge-back.sh also refuses
+        # a reftable cherry-pick or revert, whose head is a ref with no file
+        # (CRIT5-1). What the installer prints (RV5-MB-2, RV5-MB-3) is not a
+        # plan body, so it moves no fixture. Measured on the emitted plans
+        # against the previous digest (f2415f0c...), per file: 2 bodies move,
+        # githooks spec-check.sh and merge-back.sh, and githooks dispatch and
+        # hooks spec-gate-commit do not; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 64. Each of the 2 is in the 3d866f4 sets
+        # above, which still hold. `_HOOK_HEADER`, its rendered bytes in every
+        # hook (the posture values included), secrets-gate.sh and
+        # dependency-gate.sh do not move.
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3 fix
+        # round 7 tree (review of fix round 6). spec-check.sh's `_seqref`
+        # chooses its read by the ref backend: a reftable repository is asked
+        # only with `git show-ref --verify`, and a file at --git-path is read
+        # only on the files backend (and on git before 2.45), so a stray head
+        # file that git ignores on reftable is no stop (CRIT6-1). merge-back.sh
+        # reads CHERRY_PICK_HEAD and REVERT_HEAD by the same rule (CRIT6-1).
+        # RV6-1 to RV6-3 and CRIT6-2 change records only, so they move no
+        # fixture. Measured on the emitted plans against the previous digest
+        # (2bdde6a5...), per file: 2 bodies move, githooks spec-check.sh and
+        # merge-back.sh, and githooks dispatch and hooks spec-gate-commit do
+        # not; 0 added, 0 removed, order, modes and kinds unchanged, count 64.
+        # Each of the 2 is in the 3d866f4 sets above, which still hold.
+        # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
+        # included), secrets-gate.sh and dependency-gate.sh do not move.
+        "c8ed0b03c03a5387d9602b2e7834c6b788279bf01d18e210f06a6337b6d1d42a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4096,7 +4279,63 @@ EXPECTED_DIGESTS = {
         # the previous digest (871d0e59...): exactly one body moves,
         # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 68.
-        "af60c15b1803938f8d305229e763ae861b3ae6fb162b73d5f23c717b2ef5c99d",
+        # [freeze-exception no. 84, 2026-10-05] wp3-spec-workflow (see the
+        # `default` note). `_HOOK_HEADER`, secrets-gate.sh and
+        # dependency-gate.sh do NOT move; the AC-2-3 mini-golden and the
+        # telemetry digest do not move. Measured on the emitted plans against
+        # 3d866f4, per file: the default fixture's 8 added, 0 removed, the 68
+        # kept paths in their old order, modes and kinds unchanged; action
+        # count 68 -> 76. 29 bodies move: the default fixture's 25, plus
+        # hooks tdd-gate (a write under `.claude/worktrees/<n>/` is gated
+        # inside that worktree), loop.sh and goal-loop.sh (the
+        # `/worktrees/` ignore rule corrected, the merge-back pointer, and
+        # `--settings '{"ultracode": false}'` on the `claude -p` line), and
+        # queue/backlog.md (fix round 1, below).
+        # RE-BASELINED 2026-10-06, same exception 84 (WP3 review fix round
+        # 1; see the `default` note). Measured on the emitted plans against
+        # the previous digest (4da267f9...), per file: 11 bodies move, the
+        # default fixture's 9, plus tdd-gate.sh (a CLAUDE_PROJECT_DIR spelled
+        # through a symlink matches a path in its physical spelling too,
+        # SDKP-3) and queue/backlog.md (its comment says the operator adds
+        # tasks from the list /spec-decompose prints, MT-3); 0 added, 0
+        # removed, order, modes and kinds unchanged, count 76. Against
+        # 3d866f4 queue/backlog.md is new to the moved set (28 -> 29 above);
+        # the other 10 were in it or among the 8 added.
+        # RE-BASELINED 2026-10-07, same exception 84 (WP3 re-review fix
+        # round 2; see the `default` note). Measured on the emitted plans
+        # against the previous digest (34f39a81...), per file: the default
+        # fixture's 4 bodies move and no other (loop.sh and goal-loop.sh
+        # change only below the repository top, IT-3); 0 added, 0 removed,
+        # order, modes and kinds unchanged, count 76. The 3d866f4 sets
+        # above still hold.
+        # RE-BASELINED 2026-10-12, same exception 84 (WP3 re-review 2 fix
+        # round 3; see the `default` note). Measured on the emitted plans
+        # against the previous digest (424a6fdc...), per file: the default
+        # fixture's 3 bodies move and no other; 0 added, 0 removed, order,
+        # modes and kinds unchanged, count 76. The 3d866f4 sets above still
+        # hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 re-review 3 fix
+        # round 4; see the `default` note). Measured on the emitted plans
+        # against the previous digest (0fcdf4e7...), per file: the default
+        # fixture's 2 bodies move and no other; 0 added, 0 removed, order,
+        # modes and kinds unchanged, count 76. The 3d866f4 sets above
+        # still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (19db6e80...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 76. The 3d866f4 sets above still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 6; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (650dc47f...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 76. The 3d866f4 sets above still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (9c5155cd...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 76. The 3d866f4 sets above still hold.
+        "6cf519998b7bb5ed7a29f6077abb3b91177fef9e2e01efdf8b5619eb75859056",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4627,7 +4866,69 @@ EXPECTED_DIGESTS = {
         # the previous digest (6e987e88...): exactly one body moves,
         # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 58.
-        "4091f7f9cb7f3f389883f725e866044294f9362f84bcdeb852801c071d46bd1c",
+        # [freeze-exception no. 84, 2026-10-05] wp3-spec-workflow (see the
+        # `default` note). `_HOOK_HEADER`, secrets-gate.sh and
+        # dependency-gate.sh do NOT move; the AC-2-3 mini-golden and the
+        # telemetry digest do not move. Measured on the emitted plans against
+        # 3d866f4, per file: 7 added, the default fixture's 8 minus
+        # `.claude/commands/test-author.md`, which is emitted only when
+        # tdd_policy is not off; 0 removed, the 58 kept paths in their old
+        # order, modes and kinds unchanged; action count 58 -> 65. 25 bodies
+        # move: the default fixture's 25 minus test-author/SKILL.md (not
+        # emitted here), plus design-review/SKILL.md, whose description
+        # moves onto one quoted line: as a multi-line plain scalar holding
+        # "Advisory: flags" it was invalid YAML, and Claude Code listed the
+        # skill with its name in place of the description (WP3 design
+        # record, S-24; docs/SKILL.md, which test_installer pins this body
+        # to, moves with it). The other two
+        # frozen design-steering artifacts, steering/design.md and
+        # commands/design-review.md, do not move.
+        # RE-BASELINED 2026-10-06, same exception 84 (WP3 review fix round
+        # 1; see the `default` note). Measured on the emitted plans against
+        # the previous digest (4bd9c679...), per file: the default fixture's
+        # 9 bodies move and no other; 0 added, 0 removed, order, modes and
+        # kinds unchanged, count 65. The three frozen design-steering
+        # artifacts do not move, and the 3d866f4 sets above still hold.
+        # RE-BASELINED 2026-10-07, same exception 84 (WP3 re-review fix
+        # round 2; see the `default` note). Measured on the emitted plans
+        # against the previous digest (93e922ec...), per file: the default
+        # fixture's 4 bodies move and no other; 0 added, 0 removed, order,
+        # modes and kinds unchanged, count 65. The three frozen
+        # design-steering artifacts do not move, and the 3d866f4 sets above
+        # still hold.
+        # RE-BASELINED 2026-10-12, same exception 84 (WP3 re-review 2 fix
+        # round 3; see the `default` note). Measured on the emitted plans
+        # against the previous digest (11a34a76...), per file: the default
+        # fixture's 3 bodies move and no other; 0 added, 0 removed, order,
+        # modes and kinds unchanged, count 65. The three frozen
+        # design-steering artifacts do not move, and the 3d866f4 sets above
+        # still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 re-review 3 fix
+        # round 4; see the `default` note). Measured on the emitted plans
+        # against the previous digest (0ab74403...), per file: the default
+        # fixture's 2 bodies move and no other; 0 added, 0 removed, order,
+        # modes and kinds unchanged, count 65. The three frozen
+        # design-steering artifacts do not move, and the 3d866f4 sets above
+        # still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (fda75e00...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. The three frozen design-steering artifacts do
+        # not move, and the 3d866f4 sets above still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 6; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (6f0b274f...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. The three frozen design-steering artifacts do
+        # not move, and the 3d866f4 sets above still hold.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (3850fa55...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. The three frozen design-steering artifacts do
+        # not move, and the 3d866f4 sets above still hold.
+        "27d2ecc806ef9925ea78c2a41ad9175337ff78cd181ff068304e1d5be3fce4a7",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -4702,7 +5003,121 @@ EXPECTED_DIGESTS = {
         # the previous digest (3f597fa4...): exactly one body moves,
         # drift-detector.sh; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 57.
-        "ed9f02cbaccec9b6161ba480e1441f9041048758d5c3d3dbd001119a318f2848",
+        # [freeze-exception no. 84, 2026-10-05] wp3-spec-workflow (see the
+        # `default` note). `_HOOK_HEADER`, secrets-gate.sh and
+        # dependency-gate.sh do NOT move; the AC-2-3 mini-golden and the
+        # telemetry digest do not move. Measured on the emitted plans against
+        # 3d866f4, per file: the default fixture's 8 added, 0 removed, the 57
+        # kept paths in their old order, modes and kinds unchanged; action
+        # count 57 -> 65. 26 bodies move: the default fixture's 25, plus
+        # `.claude/sdk_gates/gates.py`, in `_spec_gate_commit` (the
+        # PreToolUse fallback, which defers to the git hook when the marked
+        # shim is installed and reads its prefixes from config), `_tdd_gate`
+        # (the worktree path), the new `_spec_*` helpers and constants they
+        # use, and RESOLVED_CONFIG['hooks'] gaining spec_gate_commit_mode
+        # ("warn") and spec_gate_commit_prefixes. `_secrets_gate`,
+        # `_match_secret`, `_dependency_gate` and `_GATE_TIMEOUTS` do not
+        # move.
+        # RE-BASELINED 2026-10-06, same exception 84 (WP3 review fix round
+        # 1; see the `default` note). Measured on the emitted plans against
+        # the previous digest (b2b85cb8...), per file: 10 bodies move, the
+        # default fixture's 9 plus gates.py; 0 added, 0 removed, order, modes
+        # and kinds unchanged, count 65. In gates.py (top-level AST diff):
+        # `_spec_check` (a merge's own changes, project-relative paths below
+        # the git top level, task files read through one checkout-index,
+        # SDKP-1), `_spec_gate_commit` and `_spec_git_hook_installed` (the
+        # deferral to a hook that runs dispatch and the notes for where it
+        # cannot, INST-3 and decision (2)) and `_tdd_gate` (SDKP-3) change,
+        # and the helpers and notes they use are added (`_spec_git`,
+        # `_spec_pre_commit_hook`, `_spec_fallback_note`, `_spec_names`,
+        # `_spec_line`, `_spec_err`, `_spec_disp`, `_SPEC_RUNS_DISPATCH` and
+        # three `_SPEC_FALLBACK_NOTE_*`). RESOLVED_CONFIG, `_secrets_gate`,
+        # `_match_secret`, `_dependency_gate` and `_GATE_TIMEOUTS` do not
+        # move.
+        # RE-BASELINED 2026-10-07, same exception 84 (WP3 re-review fix
+        # round 2; see the `default` note). Measured on the emitted plans
+        # against the previous digest (d8b11c70...), per file: 5 bodies
+        # move, the default fixture's 4 plus gates.py; 0 added, 0 removed,
+        # order, modes and kinds unchanged, count 65. In gates.py (top-level
+        # AST diff, async functions included): `_spec_check` (the merge rule
+        # against git's automatic result, conflicted picks and reverts, the
+        # remedy by mode; MR-1, MR-2, MR-5, MR-7, IT-4), `_spec_gate_commit`
+        # (--continue, MR-6; it passes the mode on, IT-4),
+        # `_spec_git_hook_installed` (only the installer's own executable
+        # shim, by its sha256, at the top; IT-1, IT-2, IT-5, MR-4, RG-2),
+        # `_spec_fallback_note` (a hook that is not executable, IT-2) and two
+        # `_SPEC_FALLBACK_NOTE_*` change; `import hashlib`, `_spec_gitv`,
+        # `_SPEC_SHIM_SHA256` and `_SPEC_FALLBACK_NOTE_NOEXEC` are added;
+        # `_SPEC_RUNS_DISPATCH` and `_SPEC_SHIM_MARKER` are removed.
+        # RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`,
+        # `_dependency_gate` and `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-12, same exception 84 (WP3 re-review 2 fix
+        # round 3; see the `default` note). Measured on the emitted plans
+        # against the previous digest (352e43fb...), per file: 4 bodies
+        # move, the default fixture's 3 plus gates.py; 0 added, 0 removed,
+        # order, modes and kinds unchanged, count 65. In gates.py (top-level
+        # AST diff, async functions included): `_spec_check` (unrelated
+        # histories, MR2-1; a commit while a rebase or `git am` is stopped,
+        # MR2-3; a picked or reverted merge or root commit with its own
+        # reason, MR2-4; the --no-commit revert text, MR2-5) and
+        # `_spec_fallback_note` (an empty core.hooksPath, HD-5) change, and
+        # `_SPEC_FALLBACK_NOTE_HOOKS_OFF` is added; nothing is removed.
+        # RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`,
+        # `_dependency_gate` and `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 re-review 3 fix
+        # round 4; see the `default` note). Measured on the emitted plans
+        # against the previous digest (b6bd7860...), per file: 3 bodies
+        # move, the default fixture's 2 plus gates.py; 0 added, 0 removed,
+        # order, modes and kinds unchanged, count 65. In gates.py (top-level
+        # AST diff, async functions included): only `_spec_check` changes
+        # (the stopped-rebase refusal text, RR3-CHK-1); nothing is added or
+        # removed. RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`,
+        # `_dependency_gate` and `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 step 7 fix round 5;
+        # see the `default` note). Measured on the emitted plans against the
+        # previous digest (5d518c58...), per file: 3 bodies move, the default
+        # fixture's 2 plus gates.py; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. In gates.py (top-level AST diff, async functions
+        # included): only `_spec_check` changes (its nested `seq_ref` reads the
+        # three heads as refs, R4-1 and CRIT7-1; the stopped-rebase refusal
+        # text, R4-3); nothing is added or removed. RESOLVED_CONFIG,
+        # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
+        # `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 6; see the
+        # `default` note). Measured on the emitted plans against the previous
+        # digest (e9f8a102...), per file: 3 bodies move, the default fixture's
+        # 2 plus gates.py; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. In gates.py (top-level AST diff, async functions
+        # included): only `_spec_check` changes (its nested `seq_ref` reads a
+        # file at --git-path itself and asks only a reftable repository with
+        # `git show-ref --verify`, RV5-SC-1; the stopped-rebase refusal text,
+        # RV5-SC-2); nothing is added or removed. RESOLVED_CONFIG,
+        # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
+        # `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see the
+        # `default` note). Measured on the emitted plans against the previous
+        # digest (0acd6a03...), per file: 3 bodies move, the default fixture's
+        # 2 plus gates.py; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. In gates.py (top-level AST diff, async functions
+        # included): only `_spec_check` changes (its nested `seq_ref` asks
+        # `git rev-parse --show-ref-format` first, and on reftable reads only
+        # `git show-ref --verify`, CRIT6-1); nothing is added or removed.
+        # RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`, `_dependency_gate`
+        # and `_GATE_TIMEOUTS` do not move.
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 8, the
+        # test-gate defect the interactive smoke demo found: a new project
+        # with no tests/ could not commit, because unittest exits 1 on a
+        # missing start directory; with the review of fix round 8's notice
+        # text, C4). Measured on the emitted plans against the
+        # previous digest (0c60dd14...), per file: 1 body moves, gates.py;
+        # 0 added, 0 removed, order, modes and kinds unchanged, count 65; the
+        # other three fixtures do not move. In gates.py (top-level AST diff,
+        # async functions included): `_UNITTEST_RC1`, `_NO_START_DIR` and
+        # `_NO_START_DIR_NOTICE` are added and only `_test_gate` changes (its
+        # missing-start-directory arm); nothing is removed. RESOLVED_CONFIG,
+        # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
+        # `_GATE_TIMEOUTS` do not move.
+        "56b80b2639a92ed5c350a436fced9b1f9e68ba7b1ea8b76f862333443586cb07",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -4721,13 +5136,27 @@ EXPECTED_ACTION_COUNTS = {
     # three fixtures are shell, so each loses exactly that one action:
     # 57 -> 56, 69 -> 68, 59 -> 58 (design_steering is now a 55-file
     # fullstack baseline + the 3 design artifacts). Nothing is added.
-    "default": 56,
-    "full_autonomous": 68,
-    "design_steering": 58,
+    # [freeze-exception no. 84, 2026-10-05] WP3 adds 8 actions to every
+    # fixture whose tdd_policy is not off, and nothing is removed:
+    # `.claude/githooks/spec-check.sh` and `.claude/githooks/dispatch` (D2),
+    # `.claude/commands/test-author.md` (skills), `.claude/merge-back.sh`
+    # (D6), and `.claude/specs/README.md`,
+    # `.claude/steering/spec-versioning.md`, `.claude/learnings/README.md`
+    # and `.claude/sessions/README.md` (versioning). design_steering runs
+    # tdd_policy "off", which emits no test-author command, so it gains 7:
+    # 56 -> 64, 68 -> 76, 58 -> 65 (design_steering is now a 62-file
+    # fullstack baseline + the 3 design artifacts). The git hook shims the
+    # installer writes into the repository's hooks directory are not plan
+    # actions and are not counted here.
+    "default": 64,
+    "full_autonomous": 76,
+    "design_steering": 65,
     # [freeze-exception no. 82, 2026-09-28] fixture D (golden ADDITION): the
     # 56-file default + `.claude/sdk_gates/gates.py`, the one action the
     # sdk-callable substrate adds.
-    "sdk_callable": 57,
+    # [freeze-exception no. 84, 2026-10-05] the default fixture's 8 WP3
+    # actions: 57 -> 65, the 64-file default + gates.py.
+    "sdk_callable": 65,
 }
 
 
