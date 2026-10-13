@@ -3570,6 +3570,78 @@ try:
           rc == 2 and out == "src/evil.py\n" and "cherry-pick" not in err
           and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
 
+    # [WP3 fix7 CRIT6-1] The read follows the backend, as git's does. On
+    # reftable git reads the heads from its ref store only: a stray head
+    # file naming a commit is no stop to git (git status names none, and a
+    # commit lands as a plain one, the file left behind; measured, git
+    # 2.56). Read first, it exempted that commit's own changes, so an
+    # unlisted file passed. On the files backend the same file is a stop
+    # to git and to the check, as before (the rows above).
+    if GBR is None:
+        print("  SKIP  the reftable stray-head-file rows: this git cannot "
+              "init --ref-format=reftable (git 2.45 or later)")
+    else:
+        for name, kind in (("CHERRY_PICK_HEAD", "pick"),
+                           ("REVERT_HEAD", "revert")):
+            d = shimmed(GBR)
+            task(d, T1, ["src/ok.py"])
+            write(d, "src/app.py", "1\n")
+            if kind == "pick":
+                # The stray commit adds src/evil.py on another branch.
+                sh("git add -A && git commit -qm t1 && git checkout -qb "
+                   "feature && echo e > src/evil.py && git add src/evil.py "
+                   "&& git commit -qm side && git checkout -q main", d)
+                write(d, ".git/" + name,
+                      sh([GIT, "rev-parse", "feature"], d)[1])
+                stage(d, "src/evil.py")
+            else:
+                # The stray commit added src/evil.py here; reverting it is
+                # deleting the file.
+                sh("git add -A && git commit -qm t1 && echo e > src/evil.py "
+                   "&& git add src/evil.py && git commit -qm side", d)
+                write(d, ".git/" + name, sh([GIT, "rev-parse", "HEAD"], d)[1])
+                sh([GIT, "rm", "-q", "src/evil.py"], d)
+            _, st, _ = sh("git status", d)
+            check(f"(fixture) reftable: a stray {name} file names a commit, "
+                  f"and git sees no {kind} (status names none, show-ref "
+                  f"--verify finds no {name})",
+                  os.path.isfile(os.path.join(d, ".git", name))
+                  and sh([GIT, "show-ref", "--verify", "-q", name], d)[0] != 0
+                  and "cherry-pick" not in st and "revert" not in st, st)
+            rc, out, err = chk(d)
+            src_, smsg, _ = sdk_check(d)
+            check(f"reftable, a stray {name} file naming a commit, that "
+                  f"commit's file staged and unlisted: refused under the plain "
+                  f"rule, as git reads it (no stopped {kind}); shell == SDK "
+                  f"(CRIT6-1)",
+                  rc == 2 and out == "src/evil.py\n" and "This is" not in err
+                  and "unstage it (git restore --staged <path>)" in err
+                  and src_ == 2 and smsg == err.rstrip("\n"),
+                  (rc, out, err, smsg))
+            pre = sh([GIT, "rev-parse", "HEAD"], d)[1]
+            rc2, _, e2 = sh("git commit -qm x", d, env=AGENT)
+            check(f"... and an agent's git commit there (shim, dispatch, "
+                  f"check) is refused: no commit lands (CRIT6-1)",
+                  rc2 != 0 and sh([GIT, "rev-parse", "HEAD"], d)[1] == pre
+                  and "src/evil.py" in e2, (rc2, e2[-400:]))
+        d = fresh(GBR)
+        teammate(d, ["src/ok.py"])
+        sh("GIT_SEQUENCE_EDITOR=\"sed -i.b '1a break'\" git rebase -q -i "
+           "HEAD~1", d)
+        write(d, ".git/REBASE_HEAD", sh([GIT, "rev-parse", "feature"], d)[1])
+        stage(d, "src/evil.py")
+        rc, out, err = chk(d)
+        src_, smsg, _ = sdk_check(d)
+        check("reftable, a rebase stopped at break with a stray REBASE_HEAD "
+              "file naming a commit (git holds no REBASE_HEAD ref): 'git "
+              "names no commit', not the file's commit; shell == SDK "
+              "(CRIT6-1)",
+              sh([GIT, "show-ref", "--verify", "-q", "REBASE_HEAD"], d)[0]
+              != 0 and rc == 2 and out == "src/evil.py\n"
+              and REBASE_NONE in err and REBASE_KEEP not in err
+              and src_ == 2 and smsg == err.rstrip("\n"), (rc, out, err, smsg))
+        sh("git reset -q && git rebase --abort", d)
+
     print("\n-- git revert --no-commit (MR2-5) --")
     d = fresh(GB)
     task(d, T1, ["src/ok.py"])

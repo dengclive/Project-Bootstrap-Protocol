@@ -2633,6 +2633,43 @@ else:
               "CHERRY_PICK_HEAD with no stop: merged, not refused (CRIT5-1)",
               rc == 0 and last.startswith("merge-back: MERGED worktree-agent-rn"),
               out)
+        # [WP3 fix7 CRIT6-1] By the backend, as git reads them: on reftable
+        # a stray head file naming a commit is no operation to git (git
+        # merge goes ahead, and git cherry-pick --abort or git revert
+        # --abort fails, so "finish or abort it first" could not be
+        # followed; measured, git 2.56). The run merges, as git would.
+        for name, verb in (("CHERRY_PICK_HEAD", "cherry-pick"),
+                           ("REVERT_HEAD", "revert")):
+            p = fixture(init=RT)
+            impl(p, "rs", {"src/feature.py": "def feature(): return 72\n"})
+            write(os.path.join(p, ".git", name),
+                  git(p, "rev-parse", "HEAD").stdout)
+            ab = git(p, verb, "--abort")
+            fix = (ab.returncode != 0 and os.path.isfile(
+                os.path.join(p, ".git", name))
+                and git(p, "show-ref", "--verify", "-q", name).returncode != 0)
+            rc, out, last = mb(p, "worktree-agent-rs")
+            check(f"reftable, a stray {name} file naming a commit (git sees no "
+                  f"{verb}: git {verb} --abort fails): merged, not refused "
+                  f"with a remedy that cannot be followed (CRIT6-1)",
+                  fix and rc == 0
+                  and last.startswith("merge-back: MERGED worktree-agent-rs"),
+                  (fix, ab.stderr[-200:], rc, out))
+
+    # [WP3 fix7 CRIT6-1] The files backend is unchanged: any head file
+    # refuses, one git reads as a cherry-pick and one it does not.
+    for what, body in (("naming a commit (git: a cherry-pick in progress)",
+                        None), ("that names no object", "garbage\n")):
+        p = fixture()
+        impl(p, "fs", {"src/feature.py": "def feature(): return 73\n"})
+        pre = head(p)
+        write(os.path.join(p, ".git", "CHERRY_PICK_HEAD"),
+              body if body is not None else git(p, "rev-parse", "HEAD").stdout)
+        rc, out, last = mb(p, "worktree-agent-fs")
+        check(f"files backend, a CHERRY_PICK_HEAD file {what}: rc 3, still "
+              f"refused as before (CRIT6-1)",
+              rc == 3 and "a git operation (CHERRY_PICK_HEAD) is in progress "
+              "here" in last and head(p) == pre, out)
 
     print("\n== a run that outlives its Bash call (CR-1) ==")
     p = fixture()

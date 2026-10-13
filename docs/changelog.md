@@ -165,11 +165,11 @@ exception, one golden re-baseline (operator decisions, 2026-10-05). **Seam:
 stays at 3.0.0, SUSPENDED.** WP3's changes a consumer can see ride as dated
 in-version notes in `SEAM-CONTRACT-v3-0-0.md`; no §8.4 trigger fires (the
 walk is below). This entry describes WP3 as it merges: the build of
-2026-10-05 and six review fix rounds, of 2026-10-06, of 2026-10-06 to
-2026-10-07, of 2026-10-12, and three of 2026-10-13 ("Review and fix round
+2026-10-05 and seven review fix rounds, of 2026-10-06, of 2026-10-06 to
+2026-10-07, of 2026-10-12, and four of 2026-10-13 ("Review and fix round
 1", "Re-review and fix round 2", "Re-review 2 and fix round 3", "Re-review 3
-and fix round 4", "Step 7 and fix round 5" and "Review of fix round 5 and
-fix round 6" below).
+and fix round 4", "Step 7 and fix round 5", "Review of fix round 5 and
+fix round 6" and "Review of fix round 6 and fix round 7" below).
 
 **The gap.** At `3d866f4` the Phase 9 smoke stages 1-2 could not run. The
 spec commit gate refused the first code commit of every project, because
@@ -296,7 +296,14 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     branch or tag of that name beside a real stop the name is ambiguous, so
     the stop read as none, on the files backend too, and the same two
     remedies dropped a teammate's change (review of fix round 5, RV5-SC-1).
-    `MERGE_HEAD` stays a file on reftable and is still read as one. A
+    Since fix round 7 the ref backend decides which read, as it decides
+    git's: a reftable repository is asked only for the ref, and a file is
+    read only on the files backend (and on git before 2.45, which has no
+    reftable). Fix round 6 read a file first on reftable too, where git
+    ignores one, so a stray head file that named a commit exempted that
+    commit's changes and an unlisted file passed (review of fix round 6,
+    CRIT6-1). `MERGE_HEAD` stays a file on reftable and is still read as
+    one. A
     corrupt `CHERRY_PICK_HEAD` file, which git itself treats as no
     cherry-pick, now gets the plain rule, not exit 3. In
     block mode it says to fix the task file or to abort
@@ -374,7 +381,11 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     allowlist's markers as the check does, anywhere on their line and to
     the end of the file when the end marker is missing; with a space after
     the begin marker it read an empty list and named a file the check
-    exempts (RV5-MB-3). Fix round 1 printed
+    exempts (RV5-MB-3). It still reads two hand-mangled files differently
+    from the check: one with lone carriage returns for line ends, which it
+    splits and the check reads as one line, and a pattern holding a NUL
+    byte, which the check drops (review of fix round 6, RV6-3; backlog
+    Z-57 (l)). Fix round 1 printed
     a stdout note there instead (review INST-3), and with the fallback
     deferring too, the check then ran nowhere when the line did not run
     (re-review IT-1, RG-2). The warning names `.husky/<hook>` for husky 9,
@@ -609,10 +620,15 @@ integrator for conflicts only), and on the operator's rulings of 2026-10-05.
     `REVERT_HEAD` in its ref store with no file: it read a stopped revert
     whose index and work tree matched `HEAD` as none, merged, and its merge
     commit ended the revert without notice (review of fix round 5, CRIT5-1;
-    backlog Z-39 (q)). Once a revert of several commits has had its
+    backlog Z-39 (q)). Since fix round 7 it reads the two heads by the ref
+    backend, as the spec check does: on reftable a stray head file, which
+    git ignores and which `git cherry-pick --abort` cannot clear, no longer
+    refuses with a remedy nobody can follow (review of fix round 6,
+    CRIT6-1). Once a cherry-pick or revert of several commits has had its
     conflicted step concluded with `git commit`, neither head is left while
-    the revert is still in progress, and merge-back merges on either
-    backend (Z-57 (h));
+    the operation is still in progress, and merge-back merges on either
+    backend; the next `--continue` then lands the next commit on top of the
+    merge (review of fix round 6, RV6-1, CRIT6-2; Z-57 (h));
   - find a locked worktree on git before 2.31 too, through the worktree's
     `locked` file; there merge-back merged the branch and then could not
     remove the worktree (re-review CRIT-2);
@@ -895,15 +911,44 @@ reftable repository (CRIT5-1). RV5-SC-3 (at a `merge -C` conflict inside
 `git rebase --rebase-merges` the check names a merge and its abort), and
 RV5-MB-1 with CRIT5-2 (no remedy that drops a merge in progress keeps a
 change to a file the merge did not touch), are filed in Z-57, with three
-residuals fix round 6 found, among them the revert merge-back still
-misses once a step of a revert of several commits is committed (new items
-(f) to (j)). It corrected Z-54's done layer in place for the new reading
+residuals fix round 6 found, among them the operation merge-back still
+misses once a step of a cherry-pick or revert of several commits is
+committed (new items (f) to (j)). It corrected Z-54's done layer in place for the new reading
 and appended a dated layer to Z-39. The items above describe the result.
+
+**Review of fix round 6 and fix round 7 (2026-10-13).** A review of fix
+round 6's diff, a lens and a critic, reported no MAJOR, 3 MINOR and 2 INFO
+findings; the lens and the critic also listed 15 things that held. No
+verifier ran; the critic reproduced the lens's RV6-1 and kept it MINOR
+(CRIT6-2), so fix round 7 measured each finding before it acted. The
+record is `.claude/sessions/prd-minus-security/wp3-fix6-wf_6f9f8c5a-b8d.json`,
+outside the repository (fix round 6 and its review are one run); fix round
+7 ran as `wf_e5d3e1f5-29a`, which died on a network error mid-step with
+its edits in the tree, and was finished by a restart, `wf_e16cfc37-d01`,
+which audited those edits against each finding and re-ran every
+measurement, mutant and suite. Fix round 7 made the spec check and
+merge-back choose the read of the heads by the ref backend (CRIT6-1): fix
+round 6 read a file first on reftable too, where git ignores it. It
+widened the deferral of the operation merge-back misses mid-sequence to a
+cherry-pick of several commits, and qualified Z-39 (q)'s aside that a
+stopped cherry-pick was safe because `git merge` refuses by itself, which
+holds only while a `CHERRY_PICK_HEAD` that names a commit exists (RV6-1,
+CRIT6-2). RV6-2 (an
+allowlist such as `*?` exempts every file but gets the recipe that asks
+for a file it does not cover) and RV6-3 (two files the installer reads
+differently from the check) change no code and are filed as Z-57 (k) and
+(l). It appended dated layers to Z-39 and Z-54. The review of fix round 7
+(`wf_e16cfc37-d01`; record
+`.claude/sessions/prd-minus-security/wp3-fix7-wf_e5d3e1f5-29a+wf_e16cfc37-d01.json`,
+outside the repository) found no MAJOR; its three MINOR record sentences were
+corrected in place, and RV7-1 (merge-back refuses on a head file that
+names no commit, a remedy nobody can follow; it fails closed) is filed as
+Z-57 (m). The items above describe the result.
 
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.1 (`claude -p`), §3.2 (the
 `bootstrap-install` row), §3.3 (`build_hooks` and Coverage), §4.3, §6.2, §7.1,
-§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 6
+§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 7
 each re-walked the triggers against the changed tree; none fires. No
 `seam_version` bump, no file rename, and the contract stays SUSPENDED.
 
@@ -951,7 +996,7 @@ findings fix round 2 did not take (Z-51), subtree merges (Z-52), a full
 `TMPDIR` under busybox awk (Z-53), reftable repositories (Z-54, done in fix
 round 5), hook files the gate-off scan cannot tell are shared (Z-55), the
 third re-review's INFO findings fix round 4 did not take (Z-56), and CI's
-time limit, the rows CI skips and what fix rounds 5 and 6 left (Z-57).
+time limit, the rows CI skips and what fix rounds 5 to 7 left (Z-57).
 Z-21 stays held by the pivot, and Z-47, which touches
 the dependency gate's configuration, is held with it.
 
@@ -963,13 +1008,13 @@ emitted skill to; review RC-3), `lib/configemit.py`, `lib/defaults.py`,
 `lib/llm_advisor.py`, `lib/retrofit_interview.py`,
 `lib/sdk_gates_template.py`, `lib/templates.py` and
 `tests/test_installer.py`, and the six moving digests: the four plan goldens
-in `tests/test_greenfield_golden.py` (default `2bdde6a5...`, full_autonomous
-`9c5155cd...`, design_steering `3850fa55...`, sdk_callable `0acd6a03...`) and
-the two in `tests/test_retrofit.py` (service `af8baafa...`, agent
-`9f395d29...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
+in `tests/test_greenfield_golden.py` (default `c8ed0b03...`, full_autonomous
+`6cf51999...`, design_steering `27d2ecc8...`, sdk_callable `0c60dd14...`) and
+the two in `tests/test_retrofit.py` (service `d300f962...`, agent
+`c89644a9...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
 comment. `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
 (`tests/test_validate_only.py`) do not move. Measured on the emitted plans
-against `3d866f4`, per file (re-measured on the fix round 6 tree):
+against `3d866f4`, per file (re-measured on the fix round 7 tree):
 
 | Fixture | Actions | Added / removed | Bodies that move |
 |---|---|---|---|
@@ -1002,11 +1047,11 @@ are unchanged. The git-hook shims are not plan actions, so no digest pins
 them; `tests/test_git_hooks.py` runs them in real git.
 
 **Tests.** Nine new files: `tests/test_git_hooks.py` (184 checks),
-`tests/test_spec_check.py` (473), `tests/test_skill_bodies.py` (220),
+`tests/test_spec_check.py` (480), `tests/test_skill_bodies.py` (220),
 `tests/test_versioning_index.py` (165), `tests/test_wp3_agents_handoff.py`
 (197), `tests/test_smoke_stages.py` (30, 0 pending),
-`tests/test_merge_back.py` (250), `tests/test_live_run_records.py` (280) and
-`tests/test_wp3_records.py` (195), plus the live harness under `tests/live/`,
+`tests/test_merge_back.py` (254), `tests/test_live_run_records.py` (280) and
+`tests/test_wp3_records.py` (203), plus the live harness under `tests/live/`,
 which `bin/run-tests` does not run. Rows added to `test_advisor_model`,
 `test_block_logging`, `test_installer`, `test_interview`, `test_retrofit`,
 `test_sdk_gates`, `test_settings_merge`, `test_substrate_differential` and
@@ -1025,13 +1070,13 @@ terminal rows give merge-back the default SIGINT, SIGQUIT and SIGPIPE
 dispositions that a person's shell gives a foreground job, so they hold
 when the suite itself starts as a background job, and a row can see a
 closed pipe (re-review 2 MBS-5). Counts are each file's final `N passed`
-line, run alone on 2026-10-13, after fix round 6. The new suites pass under
+line, run alone on 2026-10-13, after fix round 7. The new suites pass under
 bash 3.2.57 (docker `bash:3.2`, busybox, git 2.49.1, no jq; re-run on the
-fix round 6 tree as a user that is not root, with `--init`), each with the
-count above except two. `test_spec_check` runs 458: it skips its rows
+fix round 7 tree as a user that is not root, with `--init`), each with the
+count above except two. `test_spec_check` runs 465: it skips its rows
 for a locale that is not installed, because that libc prints no setlocale
 warning, and its full-`TMPDIR` rows, because `unshare` cannot mount a
-tmpfs there. `test_merge_back` runs 247: it skips that locale row too,
+tmpfs there. `test_merge_back` runs 251: it skips that locale row too,
 and its two end-to-end exit-127 rows, because test-gate reports exit 1
 there (backlog Z-41). Run as root, `test_git_hooks` skips the 7
 rows that need a directory it cannot write. CI (GitHub's `ubuntu-24.04`
@@ -1039,7 +1084,7 @@ runner, where `unshare` cannot map a user: "write failed
 /proc/self/uid_map: Operation not permitted") skips `test_spec_check`'s
 full-`TMPDIR` rows too, and with them the CRIT2-1 fix goes untested
 there: CI ran 426 of its 435 checks at `c1dfa5d` (run 38300475211), and
-on the fix round 6 tree it runs 464 of 473 when `unshare` fails the same
+on the fix round 7 tree it runs 471 of 480 when `unshare` fails the same
 way (measured here, not on CI). `bin/run-tests` still scores the suite
 `ok`, because it prints a `SKIP` line, not the `SUITE SKIPPED:` marker
 (step 7 CI-1; backlog Z-57).

@@ -1934,11 +1934,17 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
         return f if f and exists(f) else ""
 
     async def seq_ref(name):
-        # [WP3 fix5 R4-1, CRIT7-1; fix6 RV5-SC-1] spec-check.sh's _seqref:
-        # never by name lookup (a branch or tag so named resolves too). A
-        # file at --git-path is read itself and is a stop when it names a
-        # commit; with no file, a reftable repository (the heads live in
-        # its ref store) is asked for that exact ref with show-ref --verify.
+        # [WP3 fix5 R4-1, CRIT7-1; fix6 RV5-SC-1; fix7 CRIT6-1]
+        # spec-check.sh's _seqref: never by name lookup (a branch or tag so
+        # named resolves too), and the read follows the backend, as git's
+        # does. A reftable repository (the heads live in its ref store) is
+        # asked for that exact ref with show-ref --verify, and any file
+        # there is ignored, as git ignores it; otherwise the file at
+        # --git-path is read itself and is a stop when it names a commit.
+        rc, out, _ = await git("rev-parse", "--show-ref-format")
+        if rc == 0 and _spec_line(out) == "reftable":
+            rc, out, _ = await git("show-ref", "--verify", name)
+            return _spec_line(out).split(" ", 1)[0] if rc == 0 else ""
         f = await git_path(name)
         if f:
             try:
@@ -1953,11 +1959,7 @@ async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
             rc, out, _ = await git("rev-parse", "-q", "--verify",
                                    ln + "^{commit}")
             return _spec_line(out) if rc == 0 else ""
-        rc, out, _ = await git("rev-parse", "--show-ref-format")
-        if rc != 0 or _spec_line(out) != "reftable":
-            return ""
-        rc, out, _ = await git("show-ref", "--verify", name)
-        return _spec_line(out).split(" ", 1)[0] if rc == 0 else ""
+        return ""
 
     mpar, seq, rule, pick = [], "", "", ""
     if changed is None:

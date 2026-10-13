@@ -3658,7 +3658,22 @@ EXPECTED_DIGESTS = {
         # above, which still hold. `_HOOK_HEADER`, its rendered bytes in every
         # hook (the posture values included), secrets-gate.sh and
         # dependency-gate.sh do not move.
-        "2bdde6a5278c84b59da2be15a12d5f66ff772cd4050efdf4da774961cee49f5d",
+        # RE-BASELINED 2026-10-13, same exception 84, once over the WP3 fix
+        # round 7 tree (review of fix round 6). spec-check.sh's `_seqref`
+        # chooses its read by the ref backend: a reftable repository is asked
+        # only with `git show-ref --verify`, and a file at --git-path is read
+        # only on the files backend (and on git before 2.45), so a stray head
+        # file that git ignores on reftable is no stop (CRIT6-1). merge-back.sh
+        # reads CHERRY_PICK_HEAD and REVERT_HEAD by the same rule (CRIT6-1).
+        # RV6-1 to RV6-3 and CRIT6-2 change records only, so they move no
+        # fixture. Measured on the emitted plans against the previous digest
+        # (2bdde6a5...), per file: 2 bodies move, githooks spec-check.sh and
+        # merge-back.sh, and githooks dispatch and hooks spec-gate-commit do
+        # not; 0 added, 0 removed, order, modes and kinds unchanged, count 64.
+        # Each of the 2 is in the 3d866f4 sets above, which still hold.
+        # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
+        # included), secrets-gate.sh and dependency-gate.sh do not move.
+        "c8ed0b03c03a5387d9602b2e7834c6b788279bf01d18e210f06a6337b6d1d42a",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4315,7 +4330,12 @@ EXPECTED_DIGESTS = {
         # previous digest (650dc47f...), per file: the default fixture's 2
         # bodies move and no other; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 76. The 3d866f4 sets above still hold.
-        "9c5155cdbdb23bfef191515a033982d76952c7cf5deb7c1ce3c726e7c59b3900",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (9c5155cd...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 76. The 3d866f4 sets above still hold.
+        "6cf519998b7bb5ed7a29f6077abb3b91177fef9e2e01efdf8b5619eb75859056",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4902,7 +4922,13 @@ EXPECTED_DIGESTS = {
         # bodies move and no other; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 65. The three frozen design-steering artifacts do
         # not move, and the 3d866f4 sets above still hold.
-        "3850fa55e2b8b7297e5c5c62ff5029f011abcf5e1298eb01e5989bb6f458774d",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see
+        # the `default` note). Measured on the emitted plans against the
+        # previous digest (3850fa55...), per file: the default fixture's 2
+        # bodies move and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. The three frozen design-steering artifacts do
+        # not move, and the 3d866f4 sets above still hold.
+        "27d2ecc806ef9925ea78c2a41ad9175337ff78cd181ff068304e1d5be3fce4a7",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5068,7 +5094,17 @@ EXPECTED_DIGESTS = {
         # RV5-SC-2); nothing is added or removed. RESOLVED_CONFIG,
         # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
         # `_GATE_TIMEOUTS` do not move.
-        "0acd6a03729d073ea12090da18ccc8313a0863c43cbc5400b8a8e0f3a5a494bf",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 7; see the
+        # `default` note). Measured on the emitted plans against the previous
+        # digest (0acd6a03...), per file: 3 bodies move, the default fixture's
+        # 2 plus gates.py; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 65. In gates.py (top-level AST diff, async functions
+        # included): only `_spec_check` changes (its nested `seq_ref` asks
+        # `git rev-parse --show-ref-format` first, and on reftable reads only
+        # `git show-ref --verify`, CRIT6-1); nothing is added or removed.
+        # RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`, `_dependency_gate`
+        # and `_GATE_TIMEOUTS` do not move.
+        "0c60dd141c9187eaeca0a1f353fb2392180dc0cbf08e821fdd419be961588816",
 }
 
 EXPECTED_ACTION_COUNTS = {

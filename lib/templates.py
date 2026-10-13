@@ -4316,22 +4316,26 @@ _gitv(){
 # or cherry-pick then read as none (measured, git 2.56). [WP3 fix6 RV5-SC-1]
 # Never by name lookup: rev-parse finds a branch or tag called REBASE_HEAD
 # too, and with one beside a real stop its --symbolic-full-name fails as
-# ambiguous. So a file at --git-path is read itself, and is a stop when it
-# names a commit (a file that does not is none to git either: a commit
-# then lands, measured); with no file, a reftable repository (git 2.45 or
-# later) is asked for that exact ref with show-ref --verify, which names no
-# branch or tag (measured, git 2.49 and 2.56).
+# ambiguous. [WP3 fix7 CRIT6-1] The read follows the backend, as git's
+# does: a reftable repository (git 2.45 or later) is asked for that exact
+# ref with show-ref --verify, which names no branch or tag, and any file
+# there is ignored, as git ignores it (a stray one naming a commit made a
+# plain commit read as a stop, measured, git 2.56). Otherwise (the files
+# backend, and git before 2.45, which prints the option back) the file at
+# --git-path is read itself, and is a stop when it names a commit (a file
+# that does not is none to git either: a commit then lands, measured).
 _seqref(){
   local f l
   SEQREF=""
-  f="$(git rev-parse --git-path "$1" 2>/dev/null)" || f=""
-  if [ -n "$f" ] && [ -f "$f" ]; then
+  if [ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ]; then
+    l="$(git show-ref --verify "$1" 2>/dev/null)" || l=""
+    SEQREF="${l%% *}"
+  else
+    f="$(git rev-parse --git-path "$1" 2>/dev/null)" || f=""
+    [ -n "$f" ] && [ -f "$f" ] || return 1
     { IFS= read -r l || [ -n "$l" ]; } <"$f" 2>/dev/null || l=""
     case "$l" in "ref: refs/"*) l="${l#ref: }" ;; ''|*[!0-9a-f]*) return 1 ;; esac
     SEQREF="$(git rev-parse -q --verify "$l^{commit}" 2>/dev/null)"
-  elif [ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ]; then
-    l="$(git show-ref --verify "$1" 2>/dev/null)" || l=""
-    SEQREF="${l%% *}"
   fi
   [ -n "$SEQREF" ]
 }
@@ -12802,13 +12806,18 @@ printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"c
 # CHERRY_PICK_HEAD and REVERT_HEAD in its ref store, with no file: a stopped
 # revert read as none, the merge went ahead, and its commit ended the revert
 # (measured, git 2.56). As spec-check.sh's _seqref, never by name lookup (a
-# branch so named resolves too); any file there still refuses, as before.
+# branch so named resolves too). [WP3 fix7 CRIT6-1] And by the backend, as
+# git reads them: on reftable a *_HEAD file is ignored, as git ignores it
+# (git merge goes ahead, and git cherry-pick --abort fails with no
+# operation to abort, so the remedy below could not be followed; measured,
+# git 2.56); on the files backend any file there still refuses, as before.
+_rt=0
+[ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ] && _rt=1
 for _op in CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply BISECT_LOG; do
   _f=0
-  [ -e "$(git rev-parse --git-path "$_op")" ] && _f=1
-  case "$_f:$_op" in
-    0:*_HEAD) [ "$(git rev-parse --show-ref-format 2>/dev/null)" = reftable ] \
-                && git show-ref --verify "$_op" >/dev/null 2>&1 && _f=1 ;;
+  case "$_rt:$_op" in
+    1:*_HEAD) git show-ref --verify "$_op" >/dev/null 2>&1 && _f=1 ;;
+    *) [ -e "$(git rev-parse --git-path "$_op")" ] && _f=1 ;;
   esac
   [ "$_f" = 1 ] && not_started "a git operation ($_op) is in progress here; finish or abort it first"
 done
