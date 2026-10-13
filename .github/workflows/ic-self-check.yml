@@ -18,7 +18,10 @@ on:
 jobs:
   suites:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised from 15 on 2026-10-14 (backlog Z-57 (a)): the suites step took
+    # 786 s of the 900 at 4cc5975 (run 38375982932) and 755 s on main at
+    # 042d88a, so a slow runner or WP4's suites could time the job out.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

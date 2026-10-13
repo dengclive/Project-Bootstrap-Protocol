@@ -2535,7 +2535,9 @@ check("R4-2: in a retrofit install the recipe names a prefix the legacy "
 
 # CI-1, CI-2: CI's own files. run-tests marks a suite skipped only by a
 # `SUITE SKIPPED:` line, and test_spec_check's full-TMPDIR gate prints a
-# plain SKIP line; the job's timeout is the workflow's.
+# plain SKIP line; the job's timeout is the workflow's. [2026-10-14] The
+# timeout went from 15 to 30 minutes (Z-57 (a) done layer); the 696 s
+# measurement keeps the 15-minute limit it was taken against.
 _rt_src = read("bin/run-tests")
 _sc_src = read("tests/test_spec_check.py")
 _wf = re.search(r"^\s*timeout-minutes:\s*(\d+)\s*$",
@@ -2553,10 +2555,11 @@ check("CI-1, CI-2: run-tests counts only `SUITE SKIPPED:`, the full-TMPDIR "
       and f"it runs {_n_sc - 9} of {_n_sc} when `unshare` fails the same "
       "way (measured here, not on CI)" in _TESTS3
       and "(step 7 CI-1; backlog Z-57)" in _TESTS3
-      and _tmo == 900
-      and f"took 696 s of the job's `timeout-minutes: {_tmo // 60}` "
-      f"({_tmo} s), leaving {_tmo - 696} s (run 38300475211)"
-      in _rows["Z-57"]
+      and _tmo == 1800
+      and "took 696 s of the job's `timeout-minutes: 15` "
+      "(900 s), leaving 204 s (run 38300475211)" in _rows["Z-57"]
+      and f"**[Layer 2026-10-14, (a) done.]** `timeout-minutes` is now "
+      f"{_tmo // 60} ({_tmo:,} s)" in _rows["Z-57"]
       and "(b) CI-1:" in _rows["Z-57"]
       and _rows["Z-57"].endswith("| `open` · T4 |"), (_tmo, _n_sc))
 
