@@ -2135,7 +2135,7 @@ check("section 10: the seam's WP3 note records fix round 3, and the walk "
       "Fix round 3 (2026-10-12) extends them in place" in _s10
       # [WP3 fix4] Fix round 4 re-walked it too (5f). [WP3 fix5] And
       # fix round 5 (5g). [WP3 fix6] And fix round 6 (5h).
-      and "Fix rounds 1 to 7 each re-walked the triggers" in flat(CL))
+      and "Fix rounds 1 to 8 each re-walked the triggers" in flat(CL))
 
 # --------------------------------------------------------------------------- #
 # 5f. [WP3 fix4, i2-records] The records fix round 4 corrected (re-review 3,
@@ -2379,7 +2379,7 @@ check("step 7: the changelog's paragraph gives the counts the pinned "
       # [WP3 fix6] The header and the walk count fix round 6 too (5h).
       and "the build of 2026-10-05 and seven review fix rounds" in CL
       and "\"Step 7 and fix round 5\"," in CL
-      and "Fix rounds 1 to 7 each re-walked the triggers" in CL
+      and "Fix rounds 1 to 8 each re-walked the triggers" in CL
       and "(`wp3-step7-wf_f7600f06-a5c.json`, 2026-10-13)" in _BL_LAYER5
       and "Z-57 is fix round 5's (2026-10-13)" in _BL_LAYER5
       and "fix round 5 closed Z-54" in _BL_LAYER5, _s7p[:400])
@@ -2579,9 +2579,11 @@ check("fix round 5: the seam's section 10 note says it changes no note and "
                            "ignore-unmerged", "already in progress", _wk,
                            "confirm.txt") if w in SEAM]
       # [WP3 fix6] Re-measured and re-run after fix round 6 (5h). [WP3 fix7]
-      # And after fix round 7 (5i).
-      and "(re-measured on the fix round 7 tree)" in CL
-      and "run alone on 2026-10-13, after fix round 7" in _TESTS3
+      # And after fix round 7 (5i). [WP3 fix 8] The counts after fix round 8,
+      # which moves only gates.py, a body the table already counts.
+      and "(re-measured on the fix round 7 tree; fix round 8 moves only "
+      "`gates.py`, which the table already counts)" in flat(CL)
+      and "run alone on 2026-10-13, after fix round 8" in _TESTS3
       and "re-run on the fix round 7 tree as a user that is not root"
       in _TESTS3)
 
@@ -2628,7 +2630,7 @@ check("review of fix round 5: the changelog's paragraph gives the counts the "
       and "the build of 2026-10-05 and seven review fix rounds" in CL
       and "and four of 2026-10-13" in CL
       and "\"Review of fix round 5 and fix round 6\" and" in CL
-      and "Fix rounds 1 to 7 each re-walked the triggers" in CL
+      and "Fix rounds 1 to 8 each re-walked the triggers" in CL
       and "(`wp3-fix5-wf_a43c552f-e98.json`, 2026-10-13), added items (f) to "
       "(j) to Z-57, corrected Z-54's done layer in place, and appended a "
       "dated layer to Z-39" in _BL_LAYER5
@@ -2817,13 +2819,13 @@ check("Z-57 (f) to (j): the review's deferred findings and fix round 6's "
       and "(f) RV5-SC-3:" in _rows["Z-57"]
       and "(g) RV5-MB-1, CRIT5-2:" in _rows["Z-57"]
       and f"`{_inp_cmd}` then `git merge --abort`" in _z57g
-      and "and what fix rounds 5 to 7 left." in _rows["Z-57"]
+      and "and what fix rounds 5 to 8 left." in _rows["Z-57"]
       and "Added by fix round 6 (2026-10-13), from the review of fix round "
       "5:" in _rows["Z-57"]
       and _rows["Z-57"].endswith("| `open` · T4 |")
       and "(review of fix round 5, RV5-MB-1, CRIT5-2; backlog Z-57 (g))"
       in _ITEM9
-      and "the rows CI skips and what fix rounds 5 to 7 left (Z-57)"
+      and "the rows CI skips and what fix rounds 5 to 8 left (Z-57)"
       in _deferred)
 
 # The seam's section 10 note: no note quotes a text fix round 6 changed.
@@ -2880,7 +2882,7 @@ check("review of fix round 6: the changelog's paragraph gives the counts the "
       and "the build of 2026-10-05 and seven review fix rounds" in CL
       and "and four of 2026-10-13" in CL
       and "\"Review of fix round 6 and fix round 7\" below" in CL
-      and "Fix rounds 1 to 7 each re-walked the triggers" in CL
+      and "Fix rounds 1 to 8 each re-walked the triggers" in CL
       and "(`wp3-fix6-wf_6f9f8c5a-b8d.json`, 2026-10-13), added items (k) "
       "and (l) to Z-57, widened (h), and appended dated layers to Z-39 and "
       "Z-54" in _BL_LAYER5

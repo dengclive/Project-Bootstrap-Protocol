@@ -316,6 +316,16 @@ row("S1-10", "commit gate: a directory entry covers the files under it",
 row("S1-11", "a git pre-commit hook is installed",
     os.path.isfile(os.path.join(PROJ, ".git/hooks/pre-commit")))
 
+# [WP3 fix 8] The agent's spec-only commit passes test-gate before tests/
+# exists. The configured `python3 -m unittest discover -s tests -t .` exits
+# 1 on the missing start directory, and test-gate refused this commit in
+# the interactive smoke demo (2026-10-13).
+rc_sp, out_sp, err_sp = hook("test-gate.sh", bash_payload("git commit -m spec"))
+row("S1-12a", "test-gate allows the spec-only commit before tests/ exists, "
+    "with a notice", not os.path.exists(os.path.join(PROJ, "tests"))
+    and rc_sp == 0 and "start directory" in out_sp, f"rc={rc_sp} "
+    f"{out_sp[:120]} {err_sp[-200:]}")
+
 # The operator commits the harness and the spec (Phase 10 step 4, item 1).
 git("add", "-A")
 r = git("commit", "-qm", "harness + greet spec")

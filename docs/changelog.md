@@ -784,12 +784,13 @@ observed). To keep such commits refused, set
 
 **Smoke stages 1-2.** `tests/test_smoke_stages.py` runs both stages as a
 scripted dry run: it plays the model's part with canned actions and runs
-every gate each action triggers, the git hook and merge-back included (30
+every gate each action triggers, the git hook and merge-back included (31
 rows, 0 pending). End to end with a model, the stages run only in an
 interactive session, because the spec skills write under `.claude/specs/`
 (D5). That run is the operator's, at a terminal, before WP3 merges (build
 plan section 10); its record is a session record, outside the repository.
-This entry does not depend on its outcome (review RC-4).
+This entry does not depend on its outcome (review RC-4). The operator's
+run was made on 2026-10-13 and reached a merge; see fix round 8.
 
 **Review and fix round 1 (2026-10-06).** A review of the build, ten lenses
 and a critic, reported 3 MAJOR, 51 MINOR and 42 INFO findings. Two
@@ -945,11 +946,65 @@ corrected in place, and RV7-1 (merge-back refuses on a head file that
 names no commit, a remedy nobody can follow; it fails closed) is filed as
 Z-57 (m). The items above describe the result.
 
+**Fix round 8: the interactive smoke demo (2026-10-13).** Stages 1-2 ran
+end to end in an interactive session (Claude Code 2.1.296, Opus 5.5, from
+the fix round 7 tree), with `commands.test` set to `python3 -m unittest
+discover -s tests -t .`. At the operator's request Claude Code drove the
+session through tmux, and its own approval loop answered the permission
+prompts. test-gate refused the spec-only commit at step 6: with no `tests/`
+yet, unittest exits 1, not 5, and its last line is `ImportError: Start
+directory is not importable: 'tests'`, so every commit of a new project was
+blocked. The model stopped and asked; it did not bypass the gate. Answered
+as the operator (an empty `tests/__init__.py`, untracked, which the model
+removed again before landing), the session reached a merge through
+merge-back and a `/spec-validate` pass. So stages 1-2 did not pass unaided
+on the fix round 7 tree, and the fix round 8 tree was not run
+interactively. test-gate now allows that exit 1, with a notice, on both
+substrates, when the command is `python[3[.N]] -m unittest` in the exit-5
+arm's shape (`UNITTEST_RC1_RE`), the last line of the runner's output is
+that line exactly (`NO_START_DIR_RE`), and the path it names does not exist
+where the command ran; the shell gate holds it to the top of the checkout,
+as it holds exit 5. The path is read from unittest's line, not from the
+command, because `discover` parses its arguments with argparse. A start
+directory that exists without an `__init__.py` still blocks: unittest then
+names its absolute path, which exists. `tech.md` says so for a unittest
+command. `tests/test_substrate_differential.py` runs real unittest in each
+state (no `tests/`, an empty one, an empty `__init__.py`, a red test, an
+`__init__.py` whose import fails) and fakes for the line's position, exit
+code, exact match, command shape, path characters and locale, and for
+pytest, shell == SDK; `tests/test_smoke_stages.py` row S1-12a runs
+test-gate on the spec-only commit before `tests/` exists and expects it
+allowed with the notice. The session's other deviations (it ran
+`/spec-new` and `/pr-author` itself) change no code; its record is outside
+the repository.
+
+**Review of fix round 8 (2026-10-13).** A review of fix round 8's diff
+(`wf_1a1402f7-922`: three lenses, a critic and five verifiers; record
+`.claude/sessions/prd-minus-security/wp3-fix8-wf_1a1402f7-922.json`,
+outside the repository) reported 1 MAJOR, 12 MINOR and 8 INFO findings;
+the five it verified were confirmed (four MINOR, one regraded INFO). The
+MAJOR was the critic's, unverified, and measured before it was fixed
+(C1): ci-mirror runs `commands.test` when `ci_local` is empty, the
+default, so a new project could commit but every push was blocked on the
+same exit 1. ci-mirror now carries the same arm, with its own notice, as
+it carries test-gate's exit-5 arm (WP2 Z-1). The probe's sed runs under
+`LC_ALL=C`: in a UTF-8 locale GNU sed's `[A-Za-z]` matched non-ASCII
+letters, which Python's does not (F1). The notice now says to put an
+empty `__init__.py` beside the first test, because with `-t .` a
+`tests/` without one blocks as "tests failing" even when its tests pass
+(C4). Rows now pin each conjunct the mutation lens found unpinned (M1 to
+M5). What the arm does not cover, and the three cases where it allows a
+red suite (F2, C2, C3), are filed as Z-57 (n). The records were corrected
+in place (REC8-1 to REC8-4).
+
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.1 (`claude -p`), §3.2 (the
 `bootstrap-install` row), §3.3 (`build_hooks` and Coverage), §4.3, §6.2, §7.1,
-§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 7
-each re-walked the triggers against the changed tree; none fires. No
+§7.3 (added in fix round 1) and the §10 v3.0.0 entry. Fix rounds 1 to 8
+each re-walked the triggers against the changed tree; none fires. Fix
+round 8 changes gate internals only (an allowed exit takes the existing
+allow-with-notice shape) and appended a dated descriptive correction to
+§3.3's no-tests note. No
 `seam_version` bump, no file rename, and the contract stays SUSPENDED.
 
 | §8.4 trigger | Fires? | Why |
@@ -996,7 +1051,7 @@ findings fix round 2 did not take (Z-51), subtree merges (Z-52), a full
 `TMPDIR` under busybox awk (Z-53), reftable repositories (Z-54, done in fix
 round 5), hook files the gate-off scan cannot tell are shared (Z-55), the
 third re-review's INFO findings fix round 4 did not take (Z-56), and CI's
-time limit, the rows CI skips and what fix rounds 5 to 7 left (Z-57).
+time limit, the rows CI skips and what fix rounds 5 to 8 left (Z-57).
 Z-21 stays held by the pivot, and Z-47, which touches
 the dependency gate's configuration, is held with it.
 
@@ -1009,12 +1064,13 @@ emitted skill to; review RC-3), `lib/configemit.py`, `lib/defaults.py`,
 `lib/sdk_gates_template.py`, `lib/templates.py` and
 `tests/test_installer.py`, and the six moving digests: the four plan goldens
 in `tests/test_greenfield_golden.py` (default `c8ed0b03...`, full_autonomous
-`6cf51999...`, design_steering `27d2ecc8...`, sdk_callable `0c60dd14...`) and
+`6cf51999...`, design_steering `27d2ecc8...`, sdk_callable `56b80b26...`) and
 the two in `tests/test_retrofit.py` (service `d300f962...`, agent
 `c89644a9...`). Each carries a `[freeze-exception no. 84, 2026-10-05]`
 comment. `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
 (`tests/test_validate_only.py`) do not move. Measured on the emitted plans
-against `3d866f4`, per file (re-measured on the fix round 7 tree):
+against `3d866f4`, per file (re-measured on the fix round 7 tree; fix
+round 8 moves only `gates.py`, which the table already counts):
 
 | Fixture | Actions | Added / removed | Bodies that move |
 |---|---|---|---|
@@ -1049,7 +1105,7 @@ them; `tests/test_git_hooks.py` runs them in real git.
 **Tests.** Nine new files: `tests/test_git_hooks.py` (184 checks),
 `tests/test_spec_check.py` (480), `tests/test_skill_bodies.py` (220),
 `tests/test_versioning_index.py` (165), `tests/test_wp3_agents_handoff.py`
-(197), `tests/test_smoke_stages.py` (30, 0 pending),
+(197), `tests/test_smoke_stages.py` (31, 0 pending),
 `tests/test_merge_back.py` (254), `tests/test_live_run_records.py` (280) and
 `tests/test_wp3_records.py` (203), plus the live harness under `tests/live/`,
 which `bin/run-tests` does not run. Rows added to `test_advisor_model`,
@@ -1070,10 +1126,11 @@ terminal rows give merge-back the default SIGINT, SIGQUIT and SIGPIPE
 dispositions that a person's shell gives a foreground job, so they hold
 when the suite itself starts as a background job, and a row can see a
 closed pipe (re-review 2 MBS-5). Counts are each file's final `N passed`
-line, run alone on 2026-10-13, after fix round 7. The new suites pass under
+line, run alone on 2026-10-13, after fix round 8. The new suites pass under
 bash 3.2.57 (docker `bash:3.2`, busybox, git 2.49.1, no jq; re-run on the
 fix round 7 tree as a user that is not root, with `--init`), each with the
-count above except two. `test_spec_check` runs 465: it skips its rows
+count above except three: `test_smoke_stages` ran 30 there, before fix
+round 8 added S1-12a, and fix round 8 was not run under bash 3.2. `test_spec_check` runs 465: it skips its rows
 for a locale that is not installed, because that libc prints no setlocale
 warning, and its full-`TMPDIR` rows, because `unshare` cannot mount a
 tmpfs there. `test_merge_back` runs 251: it skips that locale row too,

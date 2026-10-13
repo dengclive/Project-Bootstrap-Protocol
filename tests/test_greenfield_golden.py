@@ -5104,7 +5104,20 @@ EXPECTED_DIGESTS = {
         # `git show-ref --verify`, CRIT6-1); nothing is added or removed.
         # RESOLVED_CONFIG, `_secrets_gate`, `_match_secret`, `_dependency_gate`
         # and `_GATE_TIMEOUTS` do not move.
-        "0c60dd141c9187eaeca0a1f353fb2392180dc0cbf08e821fdd419be961588816",
+        # RE-BASELINED 2026-10-13, same exception 84 (WP3 fix round 8, the
+        # test-gate defect the interactive smoke demo found: a new project
+        # with no tests/ could not commit, because unittest exits 1 on a
+        # missing start directory; with the review of fix round 8's notice
+        # text, C4). Measured on the emitted plans against the
+        # previous digest (0c60dd14...), per file: 1 body moves, gates.py;
+        # 0 added, 0 removed, order, modes and kinds unchanged, count 65; the
+        # other three fixtures do not move. In gates.py (top-level AST diff,
+        # async functions included): `_UNITTEST_RC1`, `_NO_START_DIR` and
+        # `_NO_START_DIR_NOTICE` are added and only `_test_gate` changes (its
+        # missing-start-directory arm); nothing is removed. RESOLVED_CONFIG,
+        # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
+        # `_GATE_TIMEOUTS` do not move.
+        "56b80b2639a92ed5c350a436fced9b1f9e68ba7b1ea8b76f862333443586cb07",
 }
 
 EXPECTED_ACTION_COUNTS = {

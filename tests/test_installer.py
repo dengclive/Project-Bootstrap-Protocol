@@ -2603,6 +2603,28 @@ _c_js, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
 check("I-6: tech.md states no exit-5 allowance for jest (control)",
       _RC5_LINE not in _tmpl.TEMPLATES["tech"](_c_js)
       and "no tests" not in _tmpl.TEMPLATES["tech"](_c_emp))
+# [WP3 fix 8] And its start-directory allowance whenever test-gate carries
+# that arm (UNITTEST_RC1_RE), and only then: unittest, not pytest.
+_NS_LINE = ("A run there whose start directory does not exist yet "
+            "(unittest exits 1 saying it is not importable) is allowed too, "
+            "with a notice.")
+_c_ut, _ = cfg_from('project:\n  name: t\n  archetype: cli\n'
+                    'commands:\n  test: "python3 -m unittest discover -s '
+                    'tests -t ."\n')
+check("WP3 fix 8: tech.md states the start-directory allowance for a "
+      "unittest test command, after the exit-5 line",
+      (_RC5_LINE + "\n" + _NS_LINE) in _tmpl.TEMPLATES["tech"](_c_ut))
+_CI_NS_LINE = ("A CI local run there whose start directory does not exist "
+               "yet (unittest exits 1 saying it is not importable) lets the "
+               "push through too, with a notice.")
+check("WP3 fix 8 review C1: tech.md states ci-mirror's start-directory "
+      "allowance when CI local is empty and Test is unittest",
+      _CI_NS_LINE in _tmpl.TEMPLATES["tech"](_c_ut))
+check("WP3 fix 8 review C1: no ci-mirror start-directory line for pytest "
+      "(control)", _CI_NS_LINE not in _tmpl.TEMPLATES["tech"](_c_py))
+check("WP3 fix 8: no start-directory line for pytest or jest (control)",
+      _NS_LINE not in _tmpl.TEMPLATES["tech"](_c_py)
+      and _NS_LINE not in _tmpl.TEMPLATES["tech"](_c_js))
 # [WP2 Z-1] ci-mirror carries the same arm for the command it runs
 # (ci_local, else test), so tech.md says so on the same predicate.
 _CI_RC5_LINE = ("A CI local run at the top of the checkout that collects no "

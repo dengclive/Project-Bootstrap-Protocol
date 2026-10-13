@@ -19,6 +19,8 @@ import cmdpos                                    # round-4: THE command-position
                                                  # both substrates
 from sdk_gates_template import sdk_gates_module  # R-7 (IC-5) emitter [SR-11]
 from sdk_gates_template import NO_TESTS_NOTICE, NO_TESTS_RC5_RE  # [WP1]
+from sdk_gates_template import (NO_START_DIR_NOTICE,  # [WP3 fix 8]
+                                NO_START_DIR_RE, UNITTEST_RC1_RE)
 from sdk_gates_template import (LINT_CONTEXT_MAX,  # [WP2] shared plumbing
                                 LINT_UNSET_NOTICE, LINT_TAIL_LINES,
                                 RUNNER_NO_CAPTURE_NOTE,
@@ -177,6 +179,11 @@ def _command_contract(cfg):
             # [WP1] The same predicate that gives test-gate its exit-5 arm.
             lines.append("A run at the top of the checkout that collects "
                          "no tests (exit 5) is allowed, with a notice.")
+        if test_cmd and re.fullmatch(UNITTEST_RC1_RE, test_cmd) is not None:
+            # [WP3 fix 8] The predicate that gives it the start-directory arm.
+            lines.append("A run there whose start directory does not exist "
+                         "yet (unittest exits 1 saying it is not importable) "
+                         "is allowed too, with a notice.")
         if cfg.get("mode") == "retrofit":
             lines.append("During the retrofit rollout it only warns in the "
                          "weeks `.claude/hooks/rollout-schedule.md` marks "
@@ -199,6 +206,12 @@ def _command_contract(cfg):
             lines.append("A CI local run at the top of the checkout that "
                          "collects no tests (exit 5) lets the push through, "
                          "with a notice.")
+        if ci_cmd and re.fullmatch(UNITTEST_RC1_RE, ci_cmd) is not None:
+            # [WP3 fix 8 review C1] And its start-directory arm.
+            lines.append("A CI local run there whose start directory does "
+                         "not exist yet (unittest exits 1 saying it is not "
+                         "importable) lets the push through too, with a "
+                         "notice.")
     if "eval-gate" in hooks:
         # [WP2 / D9] Which arm the emitted gate carries, for this install.
         if (cfg["commands"].get("eval") or "").strip():
@@ -3434,6 +3447,24 @@ _NO_TESTS_JSON = json.dumps({
     "hookSpecificOutput": {"hookEventName": "PreToolUse",
                            "additionalContext": NO_TESTS_NOTICE}})
 assert "'" not in _NO_TESTS_JSON, "the JSON is emitted inside single quotes"
+# [WP3 fix 8] The missing-start-directory notice, on the same channel.
+_NO_START_JSON = json.dumps({
+    "systemMessage": NO_START_DIR_NOTICE,
+    "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                           "additionalContext": NO_START_DIR_NOTICE}})
+assert "'" not in _NO_START_JSON, "the JSON is emitted inside single quotes"
+# [WP3 fix 8 review C1] ci-mirror's, in its own words.
+_CI_NO_START_NOTICE = (
+    "ci-mirror: the start directory of the CI command does not exist, so no "
+    "tests can run and this push is allowed. Write a first test there, with "
+    "an empty __init__.py beside it. If this project already has tests, the "
+    "test runner is not finding them.")
+_CI_NO_START_JSON = json.dumps({
+    "systemMessage": _CI_NO_START_NOTICE,
+    "hookSpecificOutput": {"hookEventName": "PreToolUse",
+                           "additionalContext": _CI_NO_START_NOTICE}})
+assert "'" not in _CI_NO_START_JSON, \
+    "the JSON is emitted inside single quotes"
 # [WP2 Z-1] ci-mirror's notice. ci-mirror runs commands.ci_local, or
 # commands.test when that is empty, so a new pytest project with no
 # ci_local had every push blocked by the exit 5 that test-gate allows.
@@ -3484,6 +3515,42 @@ def _rc5_arm(hook, blocked, what, verb, notice_json):
 
 _TEST_GATE_RC5_ARM = _rc5_arm("test-gate", "Commit", "test", "commit",
                               _NO_TESTS_JSON)
+
+
+# [WP3 fix 8] The arm for unittest's missing start directory: exit 1 whose
+# last output line is sdk_gates_template.NO_START_DIR_RE, naming a path
+# that does not exist (see there for the whole rule). _runner_run's `probe`
+# sets $_rnostart to that path, read from the same tail the model is shown.
+# Held to the top of the checkout as _rc5_arm holds exit 5, so `[ -e ]`
+# reads the path where the command ran. [WP3 fix 8 review C1] One arm, two
+# gates, as _rc5_arm: ci-mirror runs commands.test when ci_local is empty,
+# so without it a new project could commit and then push nothing.
+def _no_start_arm(hook, blocked, verb, notice_json):
+    return (
+        '    elif [ "$rc" -eq 1 ] && [ -n "$_rnostart" ]'
+        ' && [ ! -e "$_rnostart" ]; then\n'
+        '      # [WP3 fix 8] unittest: the start directory does not exist yet.\n'
+        '      _tg_top="$(git rev-parse --show-toplevel 2>/dev/null'
+        ' || printf %s "${CLAUDE_PROJECT_DIR:-.}")"\n'
+        '      if [ "$(pwd -P)" != "$(cd -P -- "$_tg_top" 2>/dev/null'
+        ' && pwd -P)" ]; then\n'
+        f'        echo "{blocked} blocked: the start directory of the'
+        ' command ($_rnostart) does not exist in $(pwd), which is not the'
+        ' top of the checkout ($_tg_top). The hook runs in the session\'s'
+        ' current directory, so run cd to the top in a Bash call of its own,'
+        f' then {verb}." >&2\n'
+        f'        log "{hook} BLOCK start directory missing outside the top'
+        ' of the checkout"; exit 2\n'
+        '      fi\n'
+        f'      log "{hook} allow: start directory $_rnostart does not'
+        ' exist"\n'
+        "      printf '%s\\n' '" + notice_json + "'\n")
+
+
+_TEST_GATE_NO_START_ARM = _no_start_arm("test-gate", "Commit", "commit",
+                                        _NO_START_JSON)
+_CI_MIRROR_NO_START_ARM = _no_start_arm("ci-mirror", "Push", "push",
+                                        _CI_NO_START_JSON)
 _CI_MIRROR_RC5_ARM = _rc5_arm("ci-mirror", "Push", "CI", "push",
                               _CI_NO_TESTS_JSON)
 
@@ -3800,7 +3867,7 @@ def _user_cmd(cmd, indent, root=False):
     return f"(\n{indent}  set +u{cd}\n{indent}  {cmd}\n{indent})"
 
 
-def _runner_run(cmd, indent, hook, root=False):
+def _runner_run(cmd, indent, hook, root=False, probe=None):
     """[WP2 review SC-4, SC-5, SDK-P6] The lines that run a blocking gate's
     configured command and send its merged output to stderr, from the stale
     sweep to the cleanup. Every line after the first takes `indent`.
@@ -3846,6 +3913,15 @@ def _runner_run(cmd, indent, hook, root=False):
     RUNNER_TAIL_BYTES bytes, go to stderr: a line count alone let one long
     line through whole. The SDK's _runner_tail cuts the same bytes.
 
+    [WP3 fix 8] With `probe` (an ERE with one group), `_rnostart` is set to
+    the group when the LAST line of that same tail matches the whole ERE,
+    else to "". test-gate passes sdk_gates_template.NO_START_DIR_RE; the
+    SDK matches the same line, the tail's last. Every pipe stage reads its
+    input to the end, so no stage dies of SIGPIPE. sed runs under LC_ALL=C:
+    in a UTF-8 locale GNU sed's `[A-Za-z]` also matched non-ASCII letters,
+    which Python's does not (review F1). Without sed the probe fails, the
+    `||` leaves `_rnostart` empty, and the gate blocks (review F4).
+
     `rc` is the runner's status: the subshell is left of `||`, so errexit and
     the ERR trap leave it alone, and no pipeline (or pipefail) is involved.
     The tail and the cleanup end in `|| :`, so neither can trip the ERR
@@ -3868,11 +3944,17 @@ def _runner_run(cmd, indent, hook, root=False):
             " 2>/dev/null)\" \\\n"
             f"{indent}  || _rout=\"\"\n"
             f"{indent}rc=0\n"
+            + (f"{indent}_rnostart=\"\"\n" if probe else "") +
             f"{indent}if [ -n \"$_rout\" ]; then\n"
             f"{i2}{_user_cmd(cmd, i2, root)} >\"$_rout\" 2>&1"
             " || rc=$?\n"
             f"{i2}tail -n {RUNNER_TAIL_LINES} -- \"$_rout\" 2>/dev/null"
             f" | tail -c {RUNNER_TAIL_BYTES} >&2 || :\n"
+            + (f"{i2}_rnostart=\"$(tail -n {RUNNER_TAIL_LINES} --"
+               f" \"$_rout\" 2>/dev/null | tail -c {RUNNER_TAIL_BYTES}"
+               " | tail -n 1 | LC_ALL=C sed -nE "
+               + _sh_lit("s|^" + probe + "$|\\1|p")
+               + " 2>/dev/null)\" || _rnostart=\"\"\n" if probe else "") +
             f"{i2}rm -f -- \"$_rout\" 2>/dev/null || :\n"
             f"{indent}else\n"
             f"{i2}printf '%s\\n' {_sh_lit(RUNNER_NO_CAPTURE_NOTE)} >&2\n"
@@ -6135,8 +6217,15 @@ exit 0
         # [WP2 review SC-1, IU-1, TP-1] See _user_cmd and _sh_lit.
         # [WP2 review SC-4, SC-5] Through a file, bounded in lines and bytes:
         # see _runner_run, which emits `rc=0` too.
-        run = _runner_run(cmd, "    ", "test-gate")
+        # [WP3 fix 8] A unittest command gets the start-directory arm and
+        # the probe that feeds it; every other command's bytes are as before.
+        no_start = bool(test) and \
+            re.fullmatch(UNITTEST_RC1_RE, test) is not None
+        run = _runner_run(cmd, "    ", "test-gate",
+                          probe=NO_START_DIR_RE if no_start else None)
         rc5_arm = _TEST_GATE_RC5_ARM if no_tests else ""
+        if no_start:
+            rc5_arm += _TEST_GATE_NO_START_ARM
         return _HOOK_HEADER + f'''
 # PreToolUse git commit: block unless the configured test command passes.
 #
@@ -6307,6 +6396,10 @@ FAIL_CLOSED=0
         # actually runs here (ci_local, else test), scoped the same way.
         rc5_arm = _CI_MIRROR_RC5_ARM \
             if re.fullmatch(NO_TESTS_RC5_RE, ci) is not None else ""
+        # [WP3 fix 8 review C1] And test-gate's start-directory arm.
+        ci_no_start = re.fullmatch(UNITTEST_RC1_RE, ci) is not None
+        if ci_no_start:
+            rc5_arm += _CI_MIRROR_NO_START_ARM
         return _HOOK_HEADER + f'''
 # PreToolUse git push: run the same checks CI runs, locally.
 _read_cmd; CMD="$_CMD_R"
@@ -6316,7 +6409,8 @@ if git_verb "$NCMD" "push"; then
     # [WP2] The CI command's output goes to stderr, merged and bounded, as
     # test-gate's does (see there): at exit 2 Claude Code drops stdout, so a
     # failing check used to tell the model only "CI mirror failed".
-    {_runner_run(ci, "    ", "ci-mirror")}
+    {_runner_run(ci, "    ", "ci-mirror",
+                 probe=NO_START_DIR_RE if ci_no_start else None)}
     if [ "$rc" -eq 0 ]; then
       :
 {rc5_arm}    else

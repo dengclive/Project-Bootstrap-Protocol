@@ -66,18 +66,58 @@ _NT_WORD = r"""[^\s;&|<>()`$\\'"#]"""        # a word character, not syntax
 # the program, and the arm applied to whatever ran next - mocha, whose five
 # failures exit 5.
 _NT_PATH = r"""[^\s;&|<>()`$\\'"#=]"""
-NO_TESTS_RC5_RE = (
+_NT_HEAD = (
     r"[ \t]*"
     r"(?:[A-Za-z_][A-Za-z0-9_]*=" + _NT_WORD + r"*[ \t]+)*"
     r"(?:uv[ \t]+run[ \t]+)?"
-    r"(?:" + _NT_PATH + r"*/)?"
-    r"(?:pytest|py\.test"
-    r"|python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+(?:pytest|unittest))"
+    r"(?:" + _NT_PATH + r"*/)?")
+_NT_ARGS = (
     r"(?:[ \t]+(?:" + _NT_WORD + r"""|'[^']*'|"[^"$`\\]*")+)*"""
     r"[ \t]*")
+NO_TESTS_RC5_RE = (
+    _NT_HEAD +
+    r"(?:pytest|py\.test"
+    r"|python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+(?:pytest|unittest))" +
+    _NT_ARGS)
 NO_TESTS_NOTICE = (
     "test-gate: the test command collected no tests (exit 5), so this "
     "commit is allowed. Write a first test. If this project already has "
+    "tests, the test runner is not finding them.")
+# [WP3 fix 8] A new project has no start directory yet. `python3 -m
+# unittest discover -s tests` with no tests/ exits 1, not 5: unittest finds
+# no directory, tries the name as a module, and fails with
+# `ImportError: Start directory is not importable: 'tests'` as the last line
+# of its output (measured, Python 3.14.8). So test-gate blocked every commit
+# of a new project, the spec-only commits included (smoke demo, 2026-10-13).
+# The arm allows that exit 1, with a notice, only when ALL of these hold:
+# the command is `python[3[.N]] -m unittest` in NO_TESTS_RC5_RE's shape;
+# the last line of the runner's output (the tail both substrates hand the
+# model) is that line exactly; and the path it names does not exist,
+# relative to where the command ran. The path is read from unittest's own
+# line rather than from the command's arguments, because `discover` parses
+# them with argparse (abbreviated flags, a positional that overrides -s).
+# A start directory that exists without an `__init__.py` names its absolute
+# path, which exists, so it still blocks. The shell gate holds the arm to
+# the top of the checkout, as it does the exit-5 arm.
+# Allowed although tests exist (review of fix round 8, F2, C2, C3; backlog
+# Z-57 (n)): any name unittest can import that raises ImportError while it
+# is imported prints the same line - a `tests.py`, a dotted package in the
+# project, a `tests` package on PYTHONPATH or in site-packages - so its red
+# tests are allowed when no path of that name exists; so is a start
+# directory the command names wrongly (`-s test` with the tests in tests/);
+# and the SDK, which runs at CLAUDE_PROJECT_DIR, reads the main checkout's
+# start directory for a worktree commit, so on the first task, before main
+# has tests/, it allows the worktree's red suite (the shell denies it).
+UNITTEST_RC1_RE = (
+    _NT_HEAD +
+    r"python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+unittest" +
+    _NT_ARGS)
+NO_START_DIR_RE = (r"ImportError: Start directory is not importable: "
+                   r"'([A-Za-z0-9_./-]+)'")
+NO_START_DIR_NOTICE = (
+    "test-gate: the start directory of the test command does not exist, so "
+    "no tests can run and this commit is allowed. Write a first test there, "
+    "with an empty __init__.py beside it. If this project already has "
     "tests, the test runner is not finding them.")
 
 # [WP2] Shared constants. Each is defined ONCE, here. lib/templates.py
@@ -4175,6 +4215,17 @@ def _test_gate(config):
                     "hookSpecificOutput": {
                         "hookEventName": "PreToolUse",
                         "additionalContext": _NO_TESTS_NOTICE}}
+        if rc == 1 and _UNITTEST_RC1.fullmatch(test_cmd) and tail:
+            # [WP3 fix 8] Shell parity: unittest's start directory does not
+            # exist (see sdk_gates_template.NO_START_DIR_RE). The path is
+            # relative to proj, where the command ran.
+            m = _NO_START_DIR.fullmatch(tail[-1])
+            if m and not os.path.exists(os.path.join(str(proj),
+                                                      m.group(1))):
+                return {"systemMessage": _NO_START_DIR_NOTICE,
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "additionalContext": _NO_START_DIR_NOTICE}}
         return _deny("Commit blocked: tests failing (exit %d)." % rc
                      + detail)
     return test_gate
@@ -5049,7 +5100,14 @@ def sdk_gates_module(cfg: dict) -> str:
         "# NO_TESTS_NOTICE - the definitions the shell test-gate's exit-5\n"
         "# arm is emitted from. Do not hand-edit one copy.\n"
         "_NO_TESTS_RC5 = re.compile(%r)\n"
-        "_NO_TESTS_NOTICE = %r\n\n" % (NO_TESTS_RC5_RE, NO_TESTS_NOTICE))
+        "_NO_TESTS_NOTICE = %r\n"
+        "# [WP3 fix 8] And from UNITTEST_RC1_RE, NO_START_DIR_RE and\n"
+        "# NO_START_DIR_NOTICE, its missing-start-directory arm.\n"
+        "_UNITTEST_RC1 = re.compile(%r)\n"
+        "_NO_START_DIR = re.compile(%r)\n"
+        "_NO_START_DIR_NOTICE = %r\n\n"
+        % (NO_TESTS_RC5_RE, NO_TESTS_NOTICE, UNITTEST_RC1_RE,
+           NO_START_DIR_RE, NO_START_DIR_NOTICE))
     wp2_prelude = (
         "# [WP2] Rendered from sdk_gates_template's shared constants - the\n"
         "# definitions the shell hooks are emitted from. Do not hand-edit\n"
