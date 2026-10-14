@@ -2651,10 +2651,17 @@ EXPECTED_RETROFIT_DIGESTS = {
     # branch, NF1), and no other; 0 added, 0 removed, order, modes and
     # kinds unchanged, counts 89 / 103. Both are among the 8 / 12 above; no
     # hook body moves.
+    # [freeze-exception no. 85, 2026-10-15, fix round 2] Re-baselined in
+    # the same exception (WP4 fix round 2). Measured on the emitted plans
+    # against the previous digests (ffa3c7b6... / 0fcbe61e...), per file: 1
+    # body moves in each, skills/spec-new/SKILL.md (step 2 fetches and
+    # branches from the remote's default branch, review RR-1), and no
+    # other; 0 added, 0 removed, order, modes and kinds unchanged, counts
+    # 89 / 103. It is among the 8 / 12 above; no hook body moves.
     "service":
-        "ffa3c7b601ba8de4430dbda86f6fcf4c7655ef8e80bfddc0b109ef9b49a1bb00",
+        "01f7e7f40f1fd395c591f1b5745fcd43885a7b55f12caf33d7d5c20bd7da59d1",
     "agent":
-        "0fcbe61eef3acba122da71d46449a2527b885fab2d5a777b2eba3075b6e5a9be",
+        "b9bc6b155503eaa8d345698e7690853cadeb6db8255557d072dc8b32d09d2915",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

@@ -11,13 +11,15 @@ say (design group g5; review items 8b and 8c; ruling 12 (a)).
 2. The assumption ledger's links resolve, and the state file records where
    the protocol document is, as `protocol_doc` (g5-2b): the document next
    to the installer that ran, a plugin copy's `protocol.md` (X6), or null.
-3. Mark the bootstrap complete (g5-3). A fresh install records
-   `bootstrap_complete: false`; a re-install keeps what the AI or the
-   operator set, and never adds the key to a state file that predates it.
+3. Mark the bootstrap complete (g5-3). A first install records
+   `bootstrap_complete: false`, over a state file the protocol wrote first
+   too; a re-install keeps what the AI or the operator set, and never adds
+   the key to a state file an earlier install wrote.
 4. Next steps (g5-4, X4). While this install still owns a steering stub, a
    line before the smoke test names it and says where the docs are filled.
    The smoke test comes before real work, and the last line says how to
-   record it and mark the bootstrap complete.
+   record it and mark the bootstrap complete, until the state file records
+   each; a state file without the key, as in a fresh clone, is unknown.
 5. One lock (8b). A real apply holds the state files' sibling locks from
    before its first write to after the manifest write. A lock that another
    process holds exits EXIT_LOCKED with nothing written; a lock file that
@@ -162,8 +164,8 @@ PATCHED_MAIN = ("import sys; sys.path.insert(0, sys.argv[1]); "
                 "import installer; installer._LOCK_WAIT_S = 1; "
                 "raise SystemExit(installer.main(sys.argv[2:]))")
 LOCK_HELD = ("error: {} is held by another process (a loop wrapper or "
-             "another install); nothing was written. Re-run when it is "
-             "free.")
+             "another install); nothing but an empty lock file was "
+             "written. Re-run when it is free.")
 HINT = "Run it in a terminal of your own, or use analyze and synthesize."
 # The dated-note tags commit 6 appends to the layered docs (ED1).
 CORRECTED = "**[Corrected 2026-10-14, WP4.]**"
@@ -592,6 +594,24 @@ try:
           "still seeds bootstrap_complete: false",
           _ros.returncode == 0 and state_of(OS).get("bootstrap_complete")
           is False, (_ros.returncode, state_of(OS)))
+    # [WP4 fix round 2 / CR-1] The protocol writes the state file at each
+    # phase exit, so on the documented route it is there before the first
+    # install, which seeds the key all the same.
+    P0 = project("phase0-state")
+    os.makedirs(os.path.join(P0, ".claude"))
+    with open(os.path.join(P0, STATE), "w") as fh:
+        json.dump({"bootstrap_protocol_version": "2.8.0",
+                   "completed_phases": ["0"], "last_phase_started": "0.5"},
+                  fh)
+    _rp0 = install(P0, GATES_OFF)
+    _sp0 = state_of(P0)
+    check("[CR-1] a first install over the state file Phase 0 wrote seeds "
+          "bootstrap_complete: false, keeps the Phase 0 keys, and Next steps "
+          "offers the smoke test",
+          _rp0.returncode == 0 and _sp0.get("bootstrap_complete") is False
+          and _sp0.get("completed_phases") == ["0"]
+          and any("Smoke-test" in ln for ln in steps_of(_rp0.stdout)),
+          (_rp0.returncode, _sp0, steps_of(_rp0.stdout)))
 
     # ----------------------------------------------------------------------- #
     # 4. Next steps: the stubs line, the smoke test, the completion line
@@ -695,6 +715,129 @@ try:
           _rskip and not any("Smoke-test" in ln for ln in _rskip)
           and "record it, or ask Claude to" in _rskip[-1],
           "\n".join(_rskip))
+    # [WP4 fix round 2 / MS-7, LC-12 (a)] ... without asking again to
+    # record the smoke test: it opens "Finish RETROFIT.md R7".
+    check("[NF2] retrofit: with R6 skipped, the completion line does not ask "
+          "about the smoke test again",
+          _rskip and _rskip[-1].startswith("Finish RETROFIT.md R7, whose "
+                                           "step 5 marks the retrofit "
+                                           "complete")
+          and "smoke test" not in _rskip[-1], _rskip[-1:])
+
+    # [WP4 fix round 2 / P3, M13, M14b, MS-7] Each record on its own: the
+    # Phase 9 decision alone drops the smoke-test line and the completion
+    # line's request to record it; bootstrap_complete alone drops both
+    # lines. The stubs line says "Still to do:" once the smoke test is
+    # recorded.
+    for _label, _rec9, _done in (("skip", "skip", False),
+                                 ("run", "run", False),
+                                 ("bootstrap_complete true", None, True)):
+        _np = project("nf2-" + _label.replace(" ", "-"))
+        install(_np, GATES_OFF)
+        _st = state_of(_np)
+        _st["bootstrap_complete"] = _done
+        if _rec9:
+            _st["skippable_phase_decisions"] = {"phase_9_smoke_test": _rec9}
+        with open(os.path.join(_np, STATE), "w") as fh:
+            json.dump(_st, fh, indent=2)
+        _ns = steps_of(install(_np).stdout)
+        _stubs9 = stub_line(_ns)
+        _last9 = _ns[-1] if _ns else ""
+        check(f"[NF2] the state file records {_label} alone: no smoke-test "
+              f"line, and the stubs line says \"Still to do:\"",
+              _ns and not any("Smoke-test" in ln for ln in _ns)
+              and _stubs9.startswith("Still to do: fill in the steering "
+                                     "docs"), "\n".join(_ns))
+        if _done:
+            check(f"[NF2] {_label} alone: no completion line",
+                  not any("bootstrap_complete" in ln for ln in _ns),
+                  "\n".join(_ns))
+        else:
+            check(f"[NF2] phase_9_smoke_test {_label}, bootstrap_complete "
+                  f"false: the completion line no longer asks to record the "
+                  f"smoke test",
+                  _last9.startswith("Finish Phase 10: in "
+                                    ".claude/.bootstrap-state.json, review "
+                                    "each deferred_items entry")
+                  and _last9.endswith("set bootstrap_complete to true, or "
+                                      "ask Claude to.")
+                  and "phase_9_smoke_test" not in _last9, _last9)
+
+    # [WP4 fix round 2 / D1, LC-5] The plugin route relays the block and
+    # offers only what it offers, so a recorded smoke test is not offered
+    # again there either.
+    _apply = flat(open(os.path.join(ROOT, "plugin", "commands",
+                                    "bootstrap-apply.md")).read())
+    check("[NF2] bootstrap-apply.md step 7: the block offers the smoke test "
+          "and the completion step only until the state file records them, "
+          "and Claude offers them only when the block does",
+          "Until the state file records the Phase 9 decision (R6 on a "
+          "retrofit), the block offers the smoke test before the chain"
+          in _apply
+          and "Offer the smoke test and the completion step only when the "
+              "block does" in _apply
+          and "then offer the smoke test" not in _apply,
+          re.findall(r"Relay the `Next steps:`.{0,1600}", _apply))
+
+    # [WP4 fix round 2 / CR-1] A fresh clone of a finished project, the
+    # critic's route: the smoke spec's task file on spec/smoke, so main has
+    # no task file and the block prints; git ignores the state file, so
+    # the clone's has no bootstrap_complete, which reads as unknown.
+    if GIT:
+        _gc = ["-c", "user.email=t@e.x", "-c", "user.name=t"]
+        _genv = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+        FN = project("fc-finished")
+        install(FN, GATES_OFF)
+        for _s in STUBS:
+            with open(os.path.join(FN, _s), "a") as fh:
+                fh.write("\nFilled with the operator.\n")
+        _fn = state_of(FN)
+        _fn["bootstrap_complete"] = True
+        _fn["skippable_phase_decisions"] = {"phase_9_smoke_test": "run"}
+        with open(os.path.join(FN, STATE), "w") as fh:
+            json.dump(_fn, fh, indent=2)
+        _same = steps_of(install(FN).stdout)
+        run([GIT, "-C", FN, "add", "-A"], env=_genv)
+        run([GIT, "-C", FN, *_gc, "commit", "-q", "-m", "bootstrap"],
+            env=_genv)
+        _main = run([GIT, "-C", FN, "branch", "--show-current"],
+                    env=_genv).stdout.strip()
+        run([GIT, "-C", FN, "switch", "-q", "-c", "spec/smoke"], env=_genv)
+        os.makedirs(os.path.join(FN, ".claude", "specs", "smoke", "tasks"))
+        with open(os.path.join(FN, ".claude", "specs", "smoke", "tasks",
+                               "smoke-T01.md"), "w") as fh:
+            fh.write("---\nid: smoke-T01\nstatus: done\n---\n")
+        run([GIT, "-C", FN, "add", "-A"], env=_genv)
+        run([GIT, "-C", FN, *_gc, "commit", "-q", "-m", "smoke"], env=_genv)
+        run([GIT, "-C", FN, "switch", "-q", _main], env=_genv)
+        FNC = os.path.join(TMP, "fc-finished-clone")
+        run([GIT, "clone", "-q", FN, FNC], env=_genv)
+        _rfn = install(FNC)
+        _nfc = steps_of(_rfn.stdout)
+        check("[CR-1] the same checkout of the finished project: neither the "
+              "smoke test nor the completion line",
+              _same and not any("Smoke-test" in ln for ln in _same)
+              and not any("bootstrap_complete" in ln for ln in _same),
+              "\n".join(_same))
+        check("[CR-1] a fresh clone of it: no smoke-test line, and one line "
+              "says the state file does not record whether the bootstrap "
+              "finished, in place of the completion line",
+              _rfn.returncode == 0 and _nfc
+              and "bootstrap_complete" not in state_of(FNC)
+              and not any("Smoke-test" in ln for ln in _nfc)
+              and not any("record it, or ask Claude to" in ln for ln in _nfc)
+              and _nfc[-1].startswith("The state file, "
+                                      ".claude/.bootstrap-state.json, does "
+                                      "not record whether the bootstrap "
+                                      "finished")
+              and "If it finished, set bootstrap_complete to true there"
+                  in _nfc[-1]
+              and _nfc[-1].endswith("take the Phase 9 smoke test and finish "
+                                    "Phase 10."),
+              (_rfn.returncode, state_of(FNC), _nfc))
+    else:                          # pragma: no cover
+        print("  SKIP  git not found: the fresh-clone Next steps row (NOT "
+              "measured)")
 
     # With no protocol document beside the toolchain, protocol_doc is null
     # and the stubs line names the document by its bare file name.
@@ -1379,11 +1522,11 @@ try:
                                        "interactive")),
           (_h_iv[:200], _h_in[:200]))
     check("[g3-1] the route says the install writes the four steering docs "
-          "as stubs and Next steps names each one still a stub; a fresh "
-          "install's stubs line names the same four",
+          "as stubs and Next steps names each stub the install still owns; "
+          "a fresh install's stubs line names the same four",
           all(f"`{os.path.basename(s)}`" in _new for s in STUBS)
           and "under `.claude/steering/` as stubs, and `Next steps:` names "
-              "each one that is still a stub" in _new
+              "each stub the install still owns" in _new
           and all(s in line for s in STUBS), (_new[:300], line))
     check("[g5-4] the route's last step says what the install's last Next "
           "steps line says: record it, or ask Claude to, in the state file",
@@ -1540,7 +1683,10 @@ try:
     # archived .claude/, the files it writes are steps 3, 4, 8 and 12 and
     # step 1's report, and none of the files R0 steps 5, 6, 9, 10 and 11
     # write; RETROFIT.md's line 9 note and the README send those steps to
-    # the document.
+    # the document. [WP4 fix round 2 / RR-2] And its steps 3, 4 and 12
+    # files are first cuts that Claude completes from the document: one
+    # gap is checked here, step 3's multi-runtime group, so an analyze that
+    # fills it turns this row red and the note gets revisited.
     AZ = retro_project("analyze-scope")
     with open(os.path.join(AZ, "CLAUDE.md"), "w") as fh:
         fh.write("# Our rules\n\nKeep these.\n")
@@ -1559,19 +1705,35 @@ try:
             "regulatory-context.md", "tribal-knowledge.md",
             "traffic-sample.json"}
     _note_route = _r9[_r9.find(ROUTE_NOTE):]
+    _conv = read(AZ, ".claude/inventory/conventions.md") or ""
     check("[R1] analyze writes R0 steps 3, 4, 8 and 12 and step 1's report, "
           "and none of what steps 5, 6, 9, 10 and 11 write; the README and "
           "RETROFIT.md's note send R-1 first and those steps to the document",
           _az.returncode == 0 and set(_inv) == _steps and not _not & set(_inv)
           and "Do R-1 first, then R0 step 1." in _note_route
-          and "It does not do R0 steps 2, 5, 6, 7, 9, 10 or 11: do those "
-              "from this document, among them step 5's "
-              "`claude-md-extraction-plan.md`, which R8.E.1 uses, and the "
-              "mandatory step 10." in _note_route
-          and "Claude does the R0 steps that `analyze` doesn't (2, 5, 6, 7, "
-              "9, 10 and 11) from `RETROFIT.md`" in _rt
+          and "Do R0 steps 2, 5, 6, 7, 9, 10 and 11 from this document, "
+              "among them step 5's `claude-md-extraction-plan.md`, which "
+              "R8.E.1 uses, and the mandatory step 10." in _note_route
+          and "Claude also does the R0 steps that `analyze` doesn't (2, 5, "
+              "6, 7, 9, 10 and 11) from `RETROFIT.md`" in _rt
           and "the mandatory step 10" in _rt,
           (_az.returncode, _inv, _az.stderr[-300:]))
+    check("[R1] analyze's step 3 file is a first cut (it has no multi-runtime "
+          "group), and the README and RETROFIT.md's note say Claude "
+          "completes the first cuts from the document",
+          _conv and "multi-runtime" not in _conv.lower()
+          and "writes automated first cuts of the R0 inventory" in _note_route
+          and "`conventions.md` has none of step 3's groups, the "
+              "multi-runtime one among them" in _note_route
+          and "writes first cuts of the inventory" in _rt
+          and "Claude completes the first cuts from `RETROFIT.md`" in _rt,
+          _conv[:600])
+    check("[R1] the archive step keeps the state file R-1 wrote, in the "
+          "README and RETROFIT.md's note",
+          "except `settings.json`, `settings.local.json` and the "
+          "`.retrofit-state.json` R-1 wrote, which stay" in _note_route
+          and "and the `.retrofit-state.json` that R-1 wrote in place" in _rt,
+          _rt[:600])
     RC = project("rclaude")
     with open(os.path.join(RC, "CLAUDE.md"), "w") as fh:
         fh.write("# Our rules\n\nKeep these.\n")
@@ -1793,8 +1955,8 @@ try:
     check("[8b] the README's held-lock sentence has the code's exit code, "
           "wait and lock files",
           f"holds the lock for {getattr(installer, '_LOCK_WAIT_S', None)} "
-          f"seconds, the install exits **{EXIT_LOCKED}** and writes nothing"
-          in RMF and f"`{STATE}.lock`" in RMF and f"`{RSTATE}.lock`" in RMF,
+          f"seconds, the install exits **{EXIT_LOCKED}** and writes nothing "
+          f"but an empty lock file" in RMF and f"`{STATE}.lock`" in RMF and f"`{RSTATE}.lock`" in RMF,
           re.findall(r"Waits for a running loop.{0,400}", RMF))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)

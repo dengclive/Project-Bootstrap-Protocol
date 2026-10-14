@@ -60,11 +60,12 @@ INSTALLER_VERSION = "1.1.0"
 # whose enforcement was verified.
 EXIT_UNENFORCED = 3
 # [WP4 8b] Exit code for "another process held a state lock for the whole
-# wait, so this run wrote nothing" (_install_lock). Distinct from 2, which
-# means fix the config, and 3, which means files were written: here the
-# config is fine and the tree is as it was, so the next move is to re-run
-# once the loop wrapper or the other install has finished. 1 is
-# `--ic-checks` failing and an uncaught error, so 4 is the next free code.
+# wait, so this run wrote nothing but an empty lock file" (_install_lock).
+# Distinct from 2, which means fix the config, and 3, which means files were
+# written: here the config is fine and the tree is as it was, but for that
+# lock file, so the next move is to re-run once the loop wrapper or the
+# other install has finished. 1 is `--ic-checks` failing and an uncaught
+# error, so 4 is the next free code.
 EXIT_LOCKED = 4
 
 
@@ -794,7 +795,7 @@ def _forced_note(saved: str, *, dry: bool) -> str:
             f"{'would be saved' if dry else 'saved'} to {saved})")
 
 
-def _skip_reason(untracked: bool, unproven: bool) -> str:
+def _skip_reason(untracked: bool, unproven: bool, own: bool = False) -> str:
     """Why a planned path was left alone — said accurately.
 
     [round-6 F6] "pre-existing and not installer-generated" is a claim about
@@ -808,7 +809,13 @@ def _skip_reason(untracked: bool, unproven: bool) -> str:
     [WP4 fix round 1 / K1] `unproven` is that case, and it outlives the
     first run: a file such a run kept stays unproven while its bytes are
     the ones it kept (_apply_plan), so the reason says "had".
+
+    [WP4 fix round 2 / LC-2, RR-8] `own`: a first install kept it, so no
+    install wrote it, and it stays so while it keeps those bytes.
     """
+    if own:
+        return ("it was there before this project's first install, so it is "
+                "the project's own file")
     if unproven:
         return ("this tree had no installer manifest when an install first "
                 "kept it, so this run cannot tell your work from an earlier "
@@ -864,11 +871,16 @@ def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                # it kept. Each message about one ends with
                # _no_manifest_remedy.
                "unproven_paths": [],
+               # [WP4 fix round 2 / LC-2] The skipped paths a first install
+               # kept, the project's own files, while their bytes are the
+               # ones it kept: CLAUDE.md's warning says so on every run.
+               "own_paths": [],
                # [WP4 fix round 1 / C2, F5] Whether nothing shows an earlier
                # install: no manifest, and none of the plan's files under
-               # .claude/ on disk before this run but settings.json, which a
-               # project may own before any install (as settings.local.json,
-               # which no plan writes).
+               # .claude/ on disk before this run but those a project may own
+               # before any install: settings.json (as settings.local.json,
+               # which no plan writes) and, [WP4 fix round 2 / LC-2], its own
+               # commands, agents and skills.
                "first_install": False,
                # Paths whose tier is security-critical and which this run
                # DECLINED to write. `_hook_tier` already computes that tier
@@ -933,6 +945,8 @@ def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     summary["no_manifest"] = prev is None
     summary["first_install"] = prev is None and not any(
         a["path"].startswith(".claude/") and a["kind"] != "settings"
+        and not a["path"].startswith((".claude/commands/", ".claude/agents/",
+                                      ".claude/skills/"))
         and (root / a["path"]).exists() for a in plan)
     prev_files = {f["path"]: f for f in prev.get("files", [])} if prev else {}
     planned_paths = {a["path"] for a in plan}
@@ -992,6 +1006,11 @@ def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
             unproven = prev is None or bool(
                 known and known.get("unproven")
                 and known.get("digest") == on_disk)
+            # [WP4 fix round 2 / LC-2] The same for a file a first install
+            # kept: the project's own, while it keeps those bytes.
+            own = summary["first_install"] or bool(
+                known and known.get("own")
+                and known.get("digest") == on_disk)
             if _is_operator_content(known, on_disk):
                 if force:
                     # --force is the documented escape hatch, so it proceeds -
@@ -1026,7 +1045,9 @@ def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                     summary["skipped_paths"].append(action["path"])
                     if unproven:
                         summary["unproven_paths"].append(action["path"])
-                    reason = _skip_reason(untracked, unproven)
+                    if own:
+                        summary["own_paths"].append(action["path"])
+                    reason = _skip_reason(untracked, unproven, own)
                     print(f"  SKIP   {action['path']}  ({reason}; "
                           f"use --force to overwrite)")
                     tier = _hook_tier(action)
@@ -1041,6 +1062,8 @@ def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                            "state": "skipped-local-edit", "tier": tier}
                     if unproven:
                         row["unproven"] = True
+                    if own:
+                        row["own"] = True
                     manifest["files"].append(row)
                     continue
 
@@ -3582,9 +3605,6 @@ def _write_state(root: Path, cfg: dict, manifest: dict, *,
     proj = cfg.get("project", {})
     flags = cfg.get("autonomous_modes", {})
     state_path = root / STATE
-    # [WP4 / g5-3] Whether this write creates the file; read before
-    # anything below can.
-    fresh = not state_path.exists()
     # [WP4 ruling 12 (a)] A file that does not parse is copied aside and
     # named in a warning before this run replaces it (_read_state).
     state, raw = _read_state(root, STATE)
@@ -3680,14 +3700,15 @@ def _write_state(root: Path, cfg: dict, manifest: dict, *,
     state.setdefault("skippable_phase_decisions", {})
     # [WP4 / g5-3] Phase 10 step 2 marks the bootstrap complete, and only
     # the AI or the operator knows when that is, so the installer seeds the
-    # key false when it creates the file and never changes it after. It
-    # never adds the key to a file that exists either: that file may record
-    # a bootstrap finished before the key existed, and false would be
-    # untrue. After a parse failure the key is absent, not false, for the
-    # same reason. [WP4 fix round 1 / C2] And only on a first install: git
-    # ignores the state file, so a re-install in a fresh clone of a
-    # finished project creates it too, and false would be untrue there.
-    if fresh and first_install:
+    # key false and never changes it after. [WP4 fix round 1 / C2] Only on
+    # a first install: git ignores the state file, so a re-install in a
+    # fresh clone of a finished project creates it too, and false would be
+    # untrue there, as it would be in a file an earlier install wrote
+    # before the key existed. [WP4 fix round 2 / CR-1] On every first
+    # install, whether or not the file exists: the protocol writes it after
+    # each phase exit, so on the documented route it is there before the
+    # first install, and no bootstrap finished without one.
+    if first_install:
         state.setdefault("bootstrap_complete", False)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     _replace_state(state_path, json.dumps(state, indent=2) + "\n")
@@ -4202,8 +4223,9 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
     (_install_lock) or the parse guard's copy (_keep_unparsed). Each
     message about a file no run has proven edited (summary
     "unproven_paths") ends with _no_manifest_remedy instead of a hand fix.
-    A CLAUDE.md on a first install is the project's own, and is told so.
-    Reads the on-disk files only; writes nothing."""
+    A CLAUDE.md a first install kept (summary "own_paths") is the project's
+    own, and is told so on every run while it keeps those bytes. Reads the
+    on-disk files only; writes nothing."""
     skipped = summary.get("skipped_paths", ())
     unproven = set(summary.get("unproven_paths", ()))
     did = "would not receive" if dry else "did not receive"
@@ -4237,6 +4259,18 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
         collapsed."""
         return " ".join(re.sub(r"[`*]", "", s).split())
 
+    def _names(cell, cmd):
+        """[WP4 fix round 2 / LC-1, P4, MS-1] Whether a Test cell names
+        `cmd` as the command it is, not inside a longer one (`make
+        test-all` for `make test`): with code spans, one span is the
+        command, whitespace collapsed; with none, the cell without emphasis
+        marks is the command, or starts with it and a parenthetical note."""
+        cmd = " ".join(cmd.split())
+        spans = re.findall(r"`([^`]*)`", cell)
+        if spans:
+            return any(" ".join(sp.split()) == cmd for sp in spans)
+        return _plain(cell) == cmd or _plain(cell).startswith(cmd + " (")
+
     rel = ".claude/steering/tech.md"
     text = _read(rel) if rel in skipped else None
     if text is not None:
@@ -4255,11 +4289,11 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
             if (ln.lstrip().startswith("|") and len(cells) >= 2
                     and cells[0] == "Test"):
                 # [WP4 fix round 1 / F3] Stale only when the cell does not
-                # name the command at all: Claude fills the table in Phase
-                # 2, and a note after the command, or bold around it, is
-                # still the command. Quoted as written.
+                # name the command: Claude fills the table in Phase 2, and a
+                # note after the command, or bold around it, is still the
+                # command (_names). Quoted as written.
                 have = cells[1]
-                if want and _plain(want) not in _plain(have):
+                if want and not _names(have, want):
                     msgs.append(
                         f"{rel} was left as it is, and its Test row says "
                         f"{have}, but commands.test is `{want}`, which is "
@@ -4282,35 +4316,53 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
             f"one-stop wording, and its Agent stopping point still names two "
             f"stops (PR open, or PR merge)." + life
             + _remedy(rel, f" Keep one, as {stop_phase} asks."))
-    elif text is not None and not _has_head(text, "## Agent stopping point"):
+    elif (text is not None and not _has_head(text, "## Agent stopping point")
+          and not re.search(r"stopping point|agent stops",
+                            " ".join(text.split()).lower())):
         # [WP4 fix round 1 / F1] Before WP4 the opt-out variant had no
         # stopping point at all, and Phase 5 step 1 skips the step that
-        # names one, so a kept opt-out ci-cd.md names no stop.
+        # names one, so a kept opt-out ci-cd.md names no stop. [WP4 fix
+        # round 2 / LC-3, MS-8] Phase 5 prescribes no heading, so a stop
+        # stated under another one, or in a bold line, is still a stop.
         stop = ("the agent stops after its last commit for the task, and "
                 "never pushes" if cfg["project"].get("cicd_opt_out") else
                 "the agent stops after it opens a pull request, and a "
                 "person merges it")
         msgs.append(
             f"{rel} was left as it is (see its SKIP line), so it {did} the "
-            f"'## Agent stopping point' section, and it names no stop."
-            + life + f" This release's stop for this config: {stop}."
-            + _remedy(rel, f" Add the section, as {stop_phase} asks."))
+            f"'## Agent stopping point' section, and nothing in it says "
+            f"where the agent stops."
+            + ("" if claude_kept else " CLAUDE.md's lifecycle ends at the "
+               "stop this file should name.")
+            + f" This release's stop for this config: {stop}."
+            + _remedy(rel, " Add a section that says where the agent "
+                           "stops."))
 
     rel = "CLAUDE.md"
     text = _read(rel) if claude_kept else None
-    by_hand = " Merge them by hand from a fresh install's CLAUDE.md."
-    # [WP4 fix round 1 / F5] On a first install the kept file is the
-    # project's own, never an earlier install's: route it as the README
-    # does (RETROFIT.md R8.E.1 in retrofit), not as a missed update.
-    own = (f"{rel} was there before this first install, so it is the "
-           f"project's own file, and the install "
+
+    def by_hand(what):
+        """[WP4 fix round 2 / LC-12 (d)] "it" for one missing element."""
+        return f" Merge {what} by hand from a fresh install's CLAUDE.md."
+
+    # [WP4 fix round 1 / F5] A file a first install kept is the project's
+    # own, never an earlier install's: route it as the README does
+    # (RETROFIT.md R8.E.1 in retrofit), not as a missed update. [WP4 fix
+    # round 2 / LC-2] Keyed on the manifest's mark, not the run, so a later
+    # run says the same; and a dry run of a first install has installed
+    # nothing yet to re-install over.
+    own = (f"{rel} was there before this project's first install, so it is "
+           f"the project's own file, and the install "
            f"{'would leave' if dry else 'left'} it as it is (see its SKIP "
-           f"line). Move it aside and re-install, which creates only "
-           f"{rel}, then merge your file into the new one"
+           f"line). "
+           + ("Move it aside before you install" if dry
+              and summary.get("first_install") else
+              f"Move it aside and re-install, which creates only {rel}")
+           + ", then merge your file into the new one"
            + (", as RETROFIT.md R8.E.1 says" if retro else "")
            + ". Don't use --adopt for this: the next install would replace "
            "your file, with no backup.")
-    first = bool(summary.get("first_install"))
+    owned = rel in summary.get("own_paths", ())
     if text is not None and not retro:
         # [WP4 fix round 1 / F2] Each Phase 8 element on its own, and the
         # two that name skills only where the config installs them
@@ -4326,12 +4378,13 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
             ("`/escalate` line", not skills or "`/escalate`" in text))
             if not there]
         if missing:
-            msgs.append(own if first else (
+            msgs.append(own if owned else (
                 f"{rel} was left as it is (see its SKIP line), so it {did} "
                 f"this release's Phase 8 text, and it has no "
                 + (" or ".join([", ".join(missing[:-1]), missing[-1]])
                    if len(missing) > 1 else missing[0])
-                + "." + _remedy(rel, by_hand)))
+                + "." + _remedy(rel, by_hand("them" if len(missing) > 1
+                                             else "it"))))
     elif text is not None and retro:
         # [WP4 / scope F5] A retrofit CLAUDE.md has no Never list, so the
         # greenfield check could never be cleared by following its own
@@ -4350,10 +4403,10 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
             parts.append(f"Its urgent list still names {' and '.join(stale)},"
                          f" which this install does not write.")
         if parts:
-            msgs.append(own if first else (
+            msgs.append(own if owned else (
                 f"{rel} was left as it is (see its SKIP line), so it {did} "
                 f"this release's changes to the retrofit CLAUDE.md. "
-                + " ".join(parts) + _remedy(rel, by_hand)))
+                + " ".join(parts) + _remedy(rel, by_hand("them"))))
 
     # [WP4 / V7] The state locks _install_lock creates. A skipped
     # .claude/.gitignore (edited, or in a fresh clone) never receives a line
@@ -4487,7 +4540,16 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     `skip`) or the bootstrap is complete, and the completion line once it
     is complete (`retrofit_complete`). Line 1 names bootstrap.config.yaml,
     which a clone needs to re-install (README "Re-install after a
-    change")."""
+    change").
+
+    [WP4 fix round 2 / CR-1, MS-7] Once the Phase 9 decision is recorded,
+    the completion line no longer asks to record it. A greenfield state
+    file without bootstrap_complete is unknown, not incomplete (protocol
+    Recovery & State): a fresh clone's install re-creates the file, which
+    git ignores, and an install before WP4 never wrote the key. Then
+    neither line is offered, and one line in place of the completion line
+    says the file does not record it. A retrofit keeps its completion
+    line, which repairs a fresh clone's reset retrofit_complete."""
     specs = root / ".claude" / "specs"
     try:
         if any(specs.glob("*/tasks/*")):
@@ -4515,8 +4577,10 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
         smoked = done or _rec("skip_decisions", "R6_smoke_test") == "skip"
     else:
         done = isinstance(st, dict) and st.get("bootstrap_complete") is True
-        smoked = done or _rec("skippable_phase_decisions",
-                              "phase_9_smoke_test") in ("run", "skip")
+        decided = _rec("skippable_phase_decisions",
+                       "phase_9_smoke_test") in ("run", "skip")
+        unknown = not (isinstance(st, dict) and "bootstrap_complete" in st)
+        smoked = done or decided or unknown
     lines = [
         "Commit what the install wrote: "
         + ", ".join([".claude/"] + top)
@@ -4587,17 +4651,34 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     # [WP4 / g5-4, ruling 12 (a)] Phase 10 step 2 (RETROFIT.md R7 step 5):
     # mark it complete in the state file, by hand or by asking Claude; a
     # typo there is kept aside, not lost (_read_state).
-    lines += [] if done else [
-        "When the smoke test is done, or you skip it, finish RETROFIT.md "
-        "R7, whose step 5 marks the retrofit complete; record it, or ask "
-        "Claude to: in .claude/.retrofit-state.json, set retrofit_complete "
-        "to true and retrofit_active to false." if retro else
-        "When the smoke test is done, or you skip it, record it, or ask "
-        "Claude to: in .claude/.bootstrap-state.json, set "
-        "skippable_phase_decisions.phase_9_smoke_test to \"run\" or "
-        "\"skip\", review each deferred_items entry there (work the "
-        "bootstrap left for later), and then set bootstrap_complete to "
-        "true."]
+    if retro:
+        lines += [] if done else [
+            ("Finish" if smoked else "When the smoke test is done, or you "
+             "skip it, finish") + " RETROFIT.md R7, whose step 5 marks the "
+            "retrofit complete; record it, or ask Claude to: in "
+            ".claude/.retrofit-state.json, set retrofit_complete to true and "
+            "retrofit_active to false."]
+    elif unknown:
+        lines.append(
+            "The state file, .claude/.bootstrap-state.json, does not record "
+            "whether the bootstrap finished: a fresh clone's install "
+            "re-creates the file, because git ignores it, and an install "
+            "before this release never wrote the key. If it finished, set "
+            "bootstrap_complete to true there, or ask Claude to; if not, "
+            + ("" if decided else "take the Phase 9 smoke test and ")
+            + "finish Phase 10.")
+    elif not done:
+        lines.append(
+            "Finish Phase 10: in .claude/.bootstrap-state.json, review each "
+            "deferred_items entry (work the bootstrap left for later), and "
+            "then set bootstrap_complete to true, or ask Claude to."
+            if smoked else
+            "When the smoke test is done, or you skip it, record it, or ask "
+            "Claude to: in .claude/.bootstrap-state.json, set "
+            "skippable_phase_decisions.phase_9_smoke_test to \"run\" or "
+            "\"skip\", review each deferred_items entry there (work the "
+            "bootstrap left for later), and then set bootstrap_complete to "
+            "true.")
     return lines
 
 
@@ -4760,9 +4841,12 @@ def main(argv: list[str]) -> int:
                              force=args.force, adopt=args.adopt)
     except StateLockHeld as held:
         # [WP4 8b] Raised before the first write, so the tree is as it was.
+        # [WP4 fix round 2 / C7, R6] But for a lock file: opening one creates
+        # it, and a retrofit run opens the bootstrap lock before it waits on
+        # the retrofit one (_install_lock).
         print(f"error: {held.path} is held by another process (a loop "
-              f"wrapper or another install); nothing was written. Re-run "
-              f"when it is free.", file=sys.stderr)
+              f"wrapper or another install); nothing but an empty lock file "
+              f"was written. Re-run when it is free.", file=sys.stderr)
         return EXIT_LOCKED
     print(f"\nDone. create={summary['create']} update={summary['update']} "
           f"unchanged={summary['unchanged']} skipped={summary['skipped']} "

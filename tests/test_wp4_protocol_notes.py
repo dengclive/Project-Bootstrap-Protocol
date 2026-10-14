@@ -211,8 +211,12 @@ try:
           and st.get("last_phase_started") == 1
           and st.get("deferred_items") == {"ci_config_generation": "phase_9"},
           repr({k: st.get(k) for k in seeded}))
-    check("it adds no bootstrap_complete to a file that existed (the :404 "
-          "note)", "bootstrap_complete" not in st, repr(st.get(
+    # [WP4 fix round 2 / CR-1] A first install seeds bootstrap_complete
+    # false over the state file Phase 0 wrote, as the :404 note says: on
+    # the documented route that file is there before the first install.
+    check("on a first install over the state file Phase 0 wrote, it seeds "
+          "bootstrap_complete: false (the :404 note)",
+          st.get("bootstrap_complete") is False, repr(st.get(
               "bootstrap_complete")))
 finally:
     shutil.rmtree(_tmp, ignore_errors=True)
@@ -486,8 +490,8 @@ group("[route, D1] the protocol and RETROFIT.md route the AI through the "
             "the installer keeps your keys, except those it sets itself",
             "`protocol_doc`",
             "`product.md`, `tech.md`, `structure.md` and `ci-cd.md` are "
-            "stubs", "`Next steps:` block names each one that is still a "
-            "stub", "`bin/retrofit-interview`"]),
+            "stubs", "`Next steps:` block names each stub this install still "
+            "owns", "`bin/retrofit-interview`"]),
           (PRD, 781, "3. For each accepted hook, write the script under", D1,
            ["has already written each accepted hook and wired it into "
             "`.claude/settings.json`", "show the operator each script it "
@@ -503,8 +507,11 @@ group("[route, D1] the protocol and RETROFIT.md route the AI through the "
           (RETRO, 9, _AI + " retrofit", D1,
            ["Do R-1 first, then R0 step 1.",
             "`.claude.archived-<timestamp>/`",
-            "except `settings.json`", "`retrofit-interview analyze`",
-            "It does not do R0 steps 2, 5, 6, 7, 9, 10 or 11",
+            "except `settings.json`, `settings.local.json` and the "
+            "`.retrofit-state.json` R-1 wrote", "`retrofit-interview analyze`",
+            "writes automated first cuts of the R0 inventory",
+            "Complete the first cuts from this document",
+            "Do R0 steps 2, 5, 6, 7, 9, 10 and 11 from this document",
             "step 5's `claude-md-extraction-plan.md`, which R8.E.1 uses",
             "the mandatory step 10",
             "`retrofit-interview synthesize`",
@@ -554,7 +561,8 @@ group("[state keys] bootstrap_complete, protocol_doc and the Phase 9 "
           (PRD, 404, "For state-file migration from older protocol "
            "versions", AMEND,
            ["`completed_phases`", "`last_phase_started`",
-            "`bootstrap_complete`", "only when it creates the state file",
+            "`bootstrap_complete`", "on a first install",
+            "whether or not you wrote the state file first",
             "read that as unknown, not as incomplete", "`protocol_doc`",
             "`toolchain/protocol.md`", "`null`"]),
           (PRD, 1313, "1. Ask: \"Run the workflow as a smoke test?", AMEND,
@@ -628,21 +636,27 @@ group("[escalate, ruling 7 (c)] every escalate note names the skill and "
       "says where the record can land", [
           (PRD, 1137, "   - `ack-drift` — writes an acknowledgement", R7C,
            ["`escalate`", "`/escalate`",
-            "`.claude/sessions/.decision-pending-<session-id>`"]),
+            "`.claude/sessions/.decision-pending-<session-id>`",
+            "With `workflow.install_skills` on (the default)",
+            "with the skills off it writes no skill"]),
           (PRD, 1299, "   - When triggering the decision-required alarm, "
            "the agent writes to", R7C,
            ["`/escalate`", "`timestamp:` (from the clock), `reason:`, "
             "`about-to:` and `needs:`", "appends a later record",
             "Inside an implementer worktree"]),
           (PRD, 1303, "**Exit criteria:** `CLAUDE.md` exists, is thin",
-           AMEND, ["`/escalate`"]),
+           AMEND, ["`/escalate`", "with `workflow.install_skills` on (the "
+                   "default), session hygiene", "With it off, it has "
+                   "neither"]),
           (RETRO, 150, "- ✓ **Standard skills** — full BOOTSTRAP set:",
            R7C, ["`escalate`", "no line that points at it"]),
           (RETRO, 1330, "- `spec-new`, `spec-review`, `spec-decompose`, "
            "`plan-review`, `spec-validate`, `test-author`", R7C,
            ["`escalate`", "does not name it yet", "is unmeasured"]),
           (RETRO, 1450, "Write `CLAUDE.md` at repo root with:", AMEND,
-           ["`escalate`", "no line that points at it", "is unmeasured"]),
+           ["`escalate`", "no line that points at it", "is unmeasured",
+            "With `workflow.install_skills` on (the default)",
+            "With it off, the install writes no skill."]),
       ])
 _D5 = ("so the record lands only where Claude Code allows writes under "
        "`.claude/`; under `claude -p` the write is refused until D5 is "

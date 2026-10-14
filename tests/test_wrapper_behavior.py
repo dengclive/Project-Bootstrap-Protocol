@@ -676,11 +676,14 @@ check("deny capability: with no install lock, the wrapper's rename drops "
       repr((rc, err, st.get("goal_supervised_mode_enabled"),
             st.get("loop_in_flight"))))
 st, rc, err = interleave(INTERLEAVE_GREEN, _g_seed, "lock")
+# [WP4 fix round 2 / CR-1] The install is a first install over a state file
+# written before it, so it seeds bootstrap_complete: false, one of the
+# install's keys that must survive the wrapper's rename.
 check("with the install lock, both the wrapper's entry and the install's "
       "keys survive", rc == 0
       and st.get("goal_supervised_mode_enabled") is True
       and st.get("loop_in_flight") == _t1
-      and st.get("bootstrap_complete") is None,
+      and st.get("bootstrap_complete") is False,
       repr((rc, err, st.get("goal_supervised_mode_enabled"),
             st.get("loop_in_flight"))))
 _r_seed = {"bootstrap_protocol_version": "2.8.0",

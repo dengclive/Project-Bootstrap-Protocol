@@ -164,11 +164,14 @@ them — landing under this release identity).
 exception, one golden re-baseline (operator rulings, 2026-10-14). **Seam:
 stays at 3.0.0, SUSPENDED.** WP4's changes a consumer can see ride as dated
 in-version notes in `SEAM-CONTRACT-v3-0-0.md` §3.2 and §7.1, and a note at
-§8.4 records the walk below: no trigger fires. This entry describes WP4's
-build of 2026-10-14, nine commits on `feat/wp4-claude-md-steering-entry`
-from `0845862`. The first commit added the entry as a stub that named the
-frozen sources and the new suites, so `tests/test_wp3_records.py` stayed
-green through every commit; the last commit completed it.
+§8.4 records the walk below: no trigger fires. This entry describes WP4 as
+it merges: the build of 2026-10-14, nine commits on
+`feat/wp4-claude-md-steering-entry` from `0845862`; fix round 1 of
+2026-10-14, after the step 7 review; and fix round 2 of 2026-10-15, after
+the re-review of fix round 1. The first commit added the entry as a stub
+that named the frozen sources and the new suites, so
+`tests/test_wp3_records.py` stayed green through every commit; commit 9
+completed it.
 
 **The gap.** At `0845862` (measured on its emitted plans and its tools on
 2026-10-14), the emitted `CLAUDE.md` had none of protocol Phase 8's session
@@ -211,11 +214,21 @@ follows the protocol and runs the installer) and the operator's rulings of
   `/escalate` line, and "spec review" for `/spec-review` (fix round 1,
   review C3). Ruling 1 (a), in both modes: the "Starting a task" sentence
   gains "on a spec branch," and `/spec-new` gains a step, "Start the spec's
-  branch": on the default branch, or on another spec's branch, it runs `git
-  switch -c spec/<slug> <default>`, so each spec branches from the default
-  branch, and on a branch the operator chose it stays. Fix round 1 added the
-  `spec/*` case (review NF1): after a spec's pull request the agent is still
-  on that spec's branch, and every later spec stacked on it. Lines, from
+  branch": on the default branch, or on another spec's branch, it starts
+  `spec/<slug>` from the default branch, and on a branch the operator chose
+  it stays. With a remote, the step runs `git fetch origin` and `git switch
+  --no-track -c spec/<slug> origin/<default>`, and names `<default>` from
+  the `HEAD branch:` line of `git remote show origin`, but first stops for
+  the operator while `git log origin/<default>..<default>` lists a commit
+  the remote lacks, such as a bootstrap commit not yet pushed. With no
+  remote, or an empty one, it runs `git switch -c spec/<slug> <default>` on
+  the local default branch. Fix round 1 added the `spec/*` case (review
+  NF1): after a spec's pull request the agent is still on that spec's
+  branch, and every later spec stacked on it. Fix round 2 added the fetch
+  and the check (review RR-1): a person merges each pull request on the
+  remote and nothing updated the local default branch, so the next spec
+  started without the merged specs and its pull request conflicted. Two
+  specs in flight at once still conflict in `INDEX.md` (Z-65). Lines, from
   `0845862` to now: default 40 to 66, full_autonomous 44 to 70,
   design_steering 40 to 64, sdk_callable 40 to 66 and gates_off 40 to 62;
   retrofit service 68 and agent 80, unchanged. Over the 96-config matrix in
@@ -238,7 +251,9 @@ follows the protocol and runs the installer) and the operator's rulings of
   session id and the project directory into the skill's text, which WP2
   measured on Claude Code 2.1.288; a new assumption-ledger row says to
   re-check that on any Claude Code upgrade. The emitted `sessions/README.md`
-  row says `/escalate` writes the file. That row and the skill say the alarm
+  row says `/escalate` writes the file. The ledger row and that clause are
+  written only where the install writes the skills (fix round 2, review D2
+  and MS-3). That row and the skill say the alarm
   creates the file only where `hooks.decision_required_alarm` wires it (fix
   round 1, review C9). The skill writes under `.claude/`, so under `claude
   -p` the write is refused until D5 is decided.
@@ -248,7 +263,9 @@ follows the protocol and runs the installer) and the operator's rulings of
   step 3's set for the archetype; a retrofit install cites `RETROFIT.md` R2,
   adds R2 step 6's set, and asks R2 step 7's drift question. `ci-cd.md`
   names one stop: the agent stops after it opens a pull request, and a
-  person merges it; on the default branch, or with no remote, it stops
+  person merges it (the description is the one `/pr-author` writes, and
+  with the skills off one that links to the spec; fix round 2, review
+  MS-3); on the default branch, or with no remote, it stops
   before pushing. The opt-out variant says the agent stops after its last
   commit for the task, and a person pushes. Where `ci-mirror` is wired,
   `ci-cd.md` says it runs `commands.ci_local` (or `commands.test`) as the
@@ -266,14 +283,16 @@ follows the protocol and runs the installer) and the operator's rulings of
   (a) amends "Never batch artifacts" and "Always show before writing": the
   operator's approval of the dry-run plan covers the install's files, and
   Claude shows each hook script and agent definition in its own phase.
-  `RETROFIT.md`'s note gives the retrofit route: R-1, then R0 step 1, then
-  `retrofit-interview analyze` for the R0 steps it covers (3, 4 and 12, with
-  step 8's metrics as stubs), and R0 steps 2, 5, 6, 7, 9, 10 and 11 from the
-  document, step 5's extraction plan and the mandatory step 10 among them
-  (fix round 1, review R1). The protocol carries 25 dated WP4 notes, this
-  one included, `RETROFIT.md` 7, `RETROFIT-COMPANION.md` 1 and the Companion
-  1. Each is appended to an existing line, so no layered doc gains a line
-  (`tests/test_wp4_protocol_notes.py`).
+  `RETROFIT.md`'s note gives the retrofit route: R-1, then R0 step 1, whose
+  archive keeps the state file R-1 wrote; then `retrofit-interview
+  analyze`, which writes first cuts of the R0 steps 3, 4 and 12 files (and
+  step 8's metrics as stubs) that Claude completes from the document; and
+  R0 steps 2, 5, 6, 7, 9, 10 and 11 from the document, step 5's extraction
+  plan and the mandatory step 10 among them (fix round 1, review R1; fix
+  round 2, review RR-2 and RR-4). The protocol carries 25 dated WP4 notes,
+  this one included, `RETROFIT.md` 7, `RETROFIT-COMPANION.md` 1 and the
+  Companion 1. Each is appended to an existing line, so no layered doc gains a
+  line (`tests/test_wp4_protocol_notes.py`).
 - **Next steps and the state file (g5, X4, rulings 5 (a) and 12 (a)).** The
   installer's `Next steps:` block names each steering stub the install still
   owns ("Before the smoke test, fill in the steering docs with the operator
@@ -285,23 +304,30 @@ follows the protocol and runs the installer) and the operator's rulings of
   (`skippable_phase_decisions.phase_9_smoke_test`; in a retrofit, R6
   skipped) or a complete bootstrap, the smoke-test line drops out, and once
   it records the bootstrap complete (`bootstrap_complete`, or
-  `retrofit_complete`), so does the last line (review NF2). The state file
+  `retrofit_complete`), so does the last line (review NF2). Once the smoke
+  test is recorded, the last line no longer asks to record it. A greenfield
+  state file without `bootstrap_complete`, which a fresh clone's re-install
+  creates, reads as unknown, not incomplete: the block offers neither line,
+  and in place of the last one says that the file does not record whether
+  the bootstrap finished (fix round 2, review CR-1 and MS-7). The state file
   records `protocol_doc` on every install: the absolute path of the protocol
   beside the installer that ran (in a plugin copy, its
   `toolchain/protocol.md`), or `null`. The assumption ledger names the
   protocol once and points there. `.bootstrap-state.json` gains
-  `bootstrap_complete: false` only when a first install creates the file: no
-  installer manifest, and none of the plan's files under `.claude/` on disk
-  but `settings.json`. A re-install in a fresh clone creates the state file
-  too, since git ignores it, and leaves the key out (fix round 1, review
-  C2).
+  `bootstrap_complete: false` on a first install: no installer manifest,
+  and none of the plan's files under `.claude/` on disk but `settings.json`,
+  commands, agents and skills, whether or not the state file is there (the
+  protocol writes it at each phase exit). A re-install in a fresh clone
+  creates the state file too, since git ignores it, and leaves the key out
+  (fix round 1, review C2; fix round 2, review CR-1 and LC-2).
 - **The parse guard (ruling 12 (a)).** When `.claude/.bootstrap-state.json`
   or `.claude/.retrofit-state.json` does not parse as a JSON object, the
   install keeps its bytes as `<state>.pre-unparsed-<UTC stamp>` (`.1`, `.2`
   and so on after a collision), names the copy in a `warning:` line, and
   writes the file again from the config alone. The warning says that each
-  key the old file held was dropped or reset to an empty default, and names
-  the keys an operator sets there (fix round 1, review C1). An empty state
+  key the old file held was dropped, or reset to the config's value or an
+  empty default, and names the keys an operator most often sets there (fix
+  round 1, review C1). An empty state
   file holds no key, so it gets no copy and no warning. The emitted
   `.claude/.gitignore` ignores the copy in both modes, and a kept one is
   checked for that line (below). IC-3's one-time `.pre-2.0.0` backup stays.
@@ -310,34 +336,42 @@ follows the protocol and runs the installer) and the operator's rulings of
   `.claude/.retrofit-state.json.lock`, before its first write, and holds
   both through the manifest write. The three state writers, reconcile
   included, run inside it and write through a temporary file and a rename.
-  If another process holds a lock for 30 s, the install writes nothing and
-  exits 4 (`EXIT_LOCKED`) with "error: <lock> is held by another process (a
-  loop wrapper or another install); nothing was written. Re-run when it is
-  free." `--dry-run` takes no lock, and `--uninstall` leaves the lock files.
+  If another process holds a lock for 30 s, the install writes nothing but
+  an empty lock file and exits 4 (`EXIT_LOCKED`) with "error: <lock> is held
+  by another process (a loop wrapper or another install); nothing but an
+  empty lock file was written. Re-run when it is free." Opening a lock file
+  creates it, so a retrofit run that waits on its second lock leaves the first
+  behind (fix round 2, step 7 C7 and R6). `--dry-run` takes no lock, and
+  `--uninstall` leaves the lock files.
 - **Kept-file warnings (8a, review KEEP-1 and NF-1).** A re-install that
   keeps an edited file now says what it missed: a `tech.md` without the two
   new sections, or whose Test row does not name `commands.test`; a
-  `ci-cd.md` that still names two stops, or names none, as a pre-WP4 opt-out
-  one does; a greenfield `CLAUDE.md` without a Phase 8 element the config
-  emits (the `## Never` and `## Index` sections, the session-hygiene line,
-  the `/escalate` line), each named on its own, or a retrofit one without
-  this release's lifecycle ending or with an urgent item for a policy that
-  is off; and a `.claude/.gitignore` that does not ignore a lock file the
-  install creates or the parse guard's copy. A heading counts whatever its
-  case, by prefix, and a Test row that names the command with a note or in
-  bold is not stale (fix round 1, review F1 to F4, C6). On a tree with no
-  installer manifest (every fresh clone), each of these, the hook-script
-  warning and the exit-3 note end with the per-file remedy: move the file
-  aside and re-install, which re-creates only that file, and if it holds
-  edits, merge them back from the moved copy. That run's manifest marks each
-  file it kept as unproven, so a later re-install gives the same remedy
-  while the file keeps those bytes (K1). On a first install, a kept
-  `CLAUDE.md` is the project's own: the warning says so and gives the
-  move-aside-and-merge route, R8.E.1 in a retrofit (F5, R5). None advises
-  `--adopt` any more: it records every skipped file as the installer's, so
-  the next install replaces each steering doc you or Claude filled in, with
-  no backup. `--force --dry-run` says where a displaced file "would be
-  saved" (DOC-2).
+  `ci-cd.md` that still names two stops, or says nowhere where the agent
+  stops, as a pre-WP4 opt-out one does; a greenfield `CLAUDE.md` without a
+  Phase 8 element the config emits (the `## Never` and `## Index` sections,
+  the session-hygiene line, the `/escalate` line), each named on its own, or a
+  retrofit one without this release's lifecycle ending or with an urgent item
+  for a policy that is off; and a `.claude/.gitignore` that does not ignore a
+  lock file the install creates or the parse guard's copy. A heading counts
+  whatever its case, by prefix, and a Test row that names the command with a
+  note or in bold is not stale (fix round 1, review F1 to F4, C6). A Test row
+  that names a longer command (`make test-all` for `make test`) is stale, and
+  a stop stated under another heading or in a bold line is a stop (fix round
+  2, review LC-1 and LC-3). On a tree with no installer manifest (every fresh
+  clone), each of these, the hook-script warning and the exit-3 note end with
+  the per-file remedy: move the file aside and re-install, which re-creates
+  only that file, and if it holds edits, merge them back from the moved copy.
+  That run's manifest marks each file it kept as unproven, so a later
+  re-install gives the same remedy while the file keeps those bytes (K1). A
+  kept `CLAUDE.md` that was there before the project's first install is the
+  project's own: the warning says so, and gives the move-aside-and-merge
+  route, R8.E.1 in a retrofit (F5, R5). Since fix round 2 the manifest marks
+  it `"own": true`, so later runs say the same while it keeps those bytes, and
+  the project's own commands, agents and skills no longer hide a first install
+  (LC-2). None advises `--adopt` any more: it records every skipped file as
+  the installer's, so the next install replaces each steering doc you or
+  Claude filled in, with no backup. `--force --dry-run` says where a displaced
+  file "would be saved" (DOC-2).
 - **The interview refusal (8c).** `bootstrap-interview interactive` and
   `retrofit-interview interactive` exit 2 and write no config when stdin is
   closed, when stdin is not a terminal and no answer arrives within
@@ -365,8 +399,8 @@ follows the protocol and runs the installer) and the operator's rulings of
   the interactive interview to the operator (IA-1). The commands run
   `"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/..."`, so a plugin copied into a
   marketplace cache works on its own: `plugin/toolchain/` tracks 17 byte
-  copies, 2,232,705 bytes in all (`git ls-files plugin/toolchain`, measured
-  in fix round 1): `bin/bootstrap-install` and `bin/bootstrap-interview`
+  copies, 2,239,716 bytes in all (`git ls-files plugin/toolchain`, measured
+  in fix round 2): `bin/bootstrap-install` and `bin/bootstrap-interview`
   (mode 0755), the 14 git-tracked `lib/*.py` modules, and the protocol as
   `protocol.md` (0644). `tests/plugin_toolchain_map.py` is the one map from
   each copy to its source. `tests/test_wp4_plugin_toolchain.py` checks each
@@ -387,6 +421,9 @@ follows the protocol and runs the installer) and the operator's rulings of
   R0 steps `analyze` leaves to Claude to the retrofit route (review R1),
   says to commit `bootstrap.config.yaml` (NF3), and says that the interview
   shows nothing on a non-terminal stdin until the first answer arrives (R2).
+  Fix round 2 says that `analyze` writes first cuts Claude completes and
+  that the archive step keeps R-1's state file (RR-2, RR-4), and that a
+  held lock leaves at most an empty lock file (C7).
 
 **The install lock, measured.** These counts live here, not in the
 protocol (ED17). `tests/test_wrapper_behavior.py`, section "[WP4 8b] an
@@ -455,44 +492,52 @@ no steering-authoring command, Phase 0 to 10 entry point or merge of the
 installer's `tech.md` sections into an AI-written file (D1 (b)). Whether a
 model follows the route, runs `/escalate` at a 🔔 stop, keeps the first
 record at a second stop, and starts each spec on its own branch is
-unmeasured until the live walk. **Deferred** to backlog section Z, rows
-Z-58 to Z-64 (layer "2026-10-14, WP4"): D1 (b) and the inventory rows it
-leaves open, the plugin path's skipped environment audit among them
-(Z-58), CI config generation (Z-59, ruling 8's 8d), the interviews' `bin/`
-hint paths (Z-60, 8e), retrofit Phase 8 parity and its `/escalate` pointer
-(Z-61, with a layer on X-30a), retrofit configs that render 83 or 84 lines
-with every autonomous mode opted in (Z-62), a `RETROFIT.md` copy and
-`retrofit-interview` in the plugin before it is published (Z-63), and
-README text that predates WP4 (Z-64). Dated layers on X-30a, Z-40 and M-2
-record what WP4 changed there; M-2 is done.
+unmeasured until the live walk. Two specs in flight at once still conflict
+in `.claude/specs/INDEX.md` when the second pull request merges, and the
+person merging resolves the table (Z-65). **Deferred** to backlog section
+Z, rows Z-58 to Z-68 (layer "2026-10-14, WP4"): D1 (b) and the inventory rows
+it leaves open, the plugin path's skipped environment audit among them (Z-58),
+CI config generation (Z-59, ruling 8's 8d), the interviews' `bin/` hint paths
+(Z-60, 8e), retrofit Phase 8 parity and its `/escalate` pointer (Z-61, with a
+layer on X-30a), retrofit configs that render 83 or 84 lines with every
+autonomous mode opted in (Z-62), a `RETROFIT.md` copy and `retrofit-interview`
+in the plugin before it is published (Z-63), README text that predates WP4
+(Z-64), and, from fix round 2, the roster conflict of two specs in flight
+(Z-65), text that predates WP4 and names skills or sweeps that a skills-off or
+alarm-off install lacks (Z-66), the retrofit route's residue (Z-67) and the
+review residuals filed rather than fixed (Z-68). Dated layers on X-30a, Z-40
+and M-2 record what WP4 changed there; M-2 is done.
 
 **Freeze exception 85.** One exception covers every frozen source WP4
 touches: `lib/templates.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py`, `lib/defaults.py`, `lib/llm_advisor.py`,
 `lib/prd_heuristics.py` and `tests/test_installer.py`, and one golden
-re-baseline (commit 4), moved again in fix round 1: commit 4 moves six
-digests and adds one, each with a `[freeze-exception no. 85, 2026-10-14]`
-comment, and fix round 1 moves all seven, each with a `[freeze-exception no.
-85, 2026-10-14, fix round 1]` comment. In `tests/test_greenfield_golden.py`:
-default `d804a929...`, full_autonomous `1053fa2c...`, design_steering
-`a1c7a4bf...` and sdk_callable `8a338f89...`, and gates_off `e8966fc7...`, a
-golden addition (fixture E, the gates-off config). In
-`tests/test_retrofit.py`: service `ffa3c7b6...` and agent `0fcbe61e...`. Fix
-round 1 moves two bodies in each fixture, `ci-cd.md` and the `spec-new`
-skill, both already in the table's moved set, and no action count.
+re-baseline (commit 4), moved again in fix rounds 1 and 2: commit 4 moves
+six digests and adds one, each with a `[freeze-exception no. 85,
+2026-10-14]` comment; fix round 1 moves all seven, each with a
+`[freeze-exception no. 85, 2026-10-14, fix round 1]` comment; and fix round
+2 moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
+fix round 2]` comment. In `tests/test_greenfield_golden.py`: default
+`8acdbe3f...`, full_autonomous `559b223d...`, design_steering `39e58db5...`
+and sdk_callable `08784639...`, and gates_off `13bb6e52...`, a golden
+addition (fixture E, the gates-off config). In `tests/test_retrofit.py`:
+service `01f7e7f4...` and agent `b9bc6b15...`. Fix round 1 moves two bodies
+in each fixture, `ci-cd.md` and the `spec-new` skill, and fix round 2 one,
+the `spec-new` skill; each is already in the table's moved set, and neither
+round moves an action count.
 `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
 (`tests/test_validate_only.py`) do not move. Measured on the emitted plans
 against `0845862`, per file, with gates_off's config rendered there too:
 
 | Fixture | Actions | Added / removed | Digest | Bodies that move |
 |---|---|---|---|---|
-| default | 64 → 66 | +2 / 0 | `d804a929...` | 7 |
-| full_autonomous | 76 → 78 | +2 / 0 | `1053fa2c...` | 12: the default's 7, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
-| design_steering | 65 → 67 | +2 / 0 | `a1c7a4bf...` | 7 |
-| sdk_callable | 65 → 67 | +2 / 0 | `8a338f89...` | 7; `gates.py` does not move |
-| gates_off | 57 → 59 | +2 / 0 | `e8966fc7...` | 7 (a golden addition: 57 is its config rendered at `0845862`) |
-| retrofit service | 87 → 89 | +2 / 0 | `ffa3c7b6...` | 8: the default's 7, plus `.claude/.gitignore` |
-| retrofit agent | 101 → 103 | +2 / 0 | `0fcbe61e...` | 12: the service's 8, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
+| default | 64 → 66 | +2 / 0 | `8acdbe3f...` | 7 |
+| full_autonomous | 76 → 78 | +2 / 0 | `559b223d...` | 12: the default's 7, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
+| design_steering | 65 → 67 | +2 / 0 | `39e58db5...` | 7 |
+| sdk_callable | 65 → 67 | +2 / 0 | `08784639...` | 7; `gates.py` does not move |
+| gates_off | 57 → 59 | +2 / 0 | `13bb6e52...` | 7 (a golden addition: 57 is its config rendered at `0845862`) |
+| retrofit service | 87 → 89 | +2 / 0 | `01f7e7f4...` | 8: the default's 7, plus `.claude/.gitignore` |
+| retrofit agent | 101 → 103 | +2 / 0 | `b9bc6b15...` | 12: the service's 8, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
 
 The two added paths are `.claude/skills/escalate/SKILL.md` and
 `.claude/commands/escalate.md`. The default's 7 moved bodies are
@@ -506,30 +551,37 @@ and 15, in the table's order), `gates.py` in sdk_callable, the bytes of
 `lib/sdk_gates_template.py` and `_HOOK_HEADER`'s source string.
 
 **Tests.** Eight new suites: `tests/test_wp4_must_not_change.py` (20
-checks), `tests/test_wp4_claude_md.py` (135), `tests/test_wp4_escalate.py`
-(26), `tests/test_wp4_steering.py` (179), `tests/test_wp4_tool_path.py`
-(180), `tests/test_wp4_protocol_notes.py` (55),
+checks), `tests/test_wp4_claude_md.py` (146), `tests/test_wp4_escalate.py`
+(26), `tests/test_wp4_steering.py` (201), `tests/test_wp4_tool_path.py`
+(193), `tests/test_wp4_protocol_notes.py` (55),
 `tests/test_wp4_plugin_toolchain.py` (14) and `tests/test_wp4_records.py`
-(59). `tests/plugin_toolchain_map.py` is a helper module, not a suite: it
+(61). `tests/plugin_toolchain_map.py` is a helper module, not a suite: it
 holds the one map from each `plugin/toolchain/` copy to its source, which
 three suites read, and `bin/run-tests` runs only `test_*.py` files. Rows
 added or rewritten in `test_installer` (the manifest, the namespaced
 commands, G4-3, IA-1, GR2-03a, and G11-1 to G11-3 and G11-6 to G11-9 for the
 copies), `test_greenfield_golden` and `test_retrofit` (fixture E and the
-re-baseline, moved again in fix round 1), `test_merge_back` (the "on a spec
-branch," clause in both modes; the 80-line cap over seven fixtures;
+re-baseline, moved again in fix rounds 1 and 2), `test_merge_back` (the "on a
+spec branch," clause in both modes; the 80-line cap over seven fixtures;
 `/spec-new`'s branch rule), `test_wp3_records` (exception 84's counts and
 digests pinned as data, X2), `test_usage_limit_contract` (RC-03 pins the
 current protocol file), `test_skill_bodies` (`escalate` has no model line;
-`spec-new`'s branch step, and its `spec/*` case), `test_wrapper_behavior`
-(the four install-lock rows), `test_dynamic_workflow_policy` and
-`test_doc_citations` (one row each: a `plugin/toolchain/` file is skipped
-only while its bytes equal its source), and `test_settings_merge` and
-`test_hook_tiers` (three rows, by the operator's E4 ruling of 2026-10-14).
-Fix round 1 adds a row that fails on `ed2670e` for each behavioural fix, to
-`test_wp4_steering`, `test_wp4_tool_path`, `test_wp4_claude_md`,
-`test_wp4_escalate`, `test_wp4_plugin_toolchain` and `test_skill_bodies`.
-Counts are each file's final `N passed` line, run alone on 2026-10-14.
+`spec-new`'s branch step, its `spec/*` case, and since fix round 2 its
+commands, run against a remote), `test_wrapper_behavior` (the four
+install-lock rows; since fix round 2 one reads the `bootstrap_complete` a
+first install seeds), `test_dynamic_workflow_policy` and `test_doc_citations`
+(one row each: a `plugin/toolchain/` file is skipped only while its bytes
+equal its source), and `test_settings_merge` and `test_hook_tiers` (three
+rows, by the operator's E4 ruling of 2026-10-14). Fix round 1 adds a row that
+fails on `ed2670e` for each review finding it fixes, to `test_wp4_steering`,
+`test_wp4_tool_path`, `test_wp4_claude_md`, `test_wp4_escalate`,
+`test_wp4_plugin_toolchain` and `test_skill_bodies`. Fix round 2 adds a row
+that fails on `a500c3e` for each review finding it fixes in the code or the
+text, to `test_wp4_steering`, `test_wp4_tool_path`, `test_wp4_claude_md`,
+`test_wp4_protocol_notes`, `test_wp4_records`, `test_skill_bodies`,
+`test_merge_back` and `test_wrapper_behavior`, and for each pin gap the
+re-review found (P1 to P3, P6 and P7) a row that the gap's mutant fails.
+Counts are each file's final `N passed` line, run alone on 2026-10-15.
 
 Suite: N checks, 0 failed; M suites
 

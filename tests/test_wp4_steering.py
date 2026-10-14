@@ -31,6 +31,13 @@ sections, and ci-cd.md's one agent stopping point.
    note or bold is not stale (F3); a kept ci-cd.md with no stop is named
    (F1); a kept .gitignore is checked for the parse guard's copy too (F4);
    and a CLAUDE.md a first install keeps is the project's own (F5).
+7. [WP4 fix round 2] What the re-review found in 8a: a Test row naming a
+   longer command is stale (F3); a stop stated under another heading or in
+   a bold line is a stop (F1); the project's own CLAUDE.md is named so on
+   every run, and its own commands do not hide a first install (F5); the
+   pins the re-review found missing, each with the mutant it kills (K1's
+   later run, the skills-off exemptions, the heading's word boundary and
+   whitespace, the dry-run wording).
 
 Run: python3 tests/test_wp4_steering.py
 """
@@ -585,7 +592,7 @@ try:
               "section." in wc[0]
           and not any(e in wc[0] for e in ("session-hygiene", "'## Index'",
                                            "`/escalate`"))
-          and "Merge them by hand from a fresh install's CLAUDE.md." in wc[0],
+          and "Merge it by hand from a fresh install's CLAUDE.md." in wc[0],
           rg.stderr[-1200:])
     wk = warns(rg, CICD)
     check("ci-cd.md and CLAUDE.md both kept: the ci-cd.md warning makes no "
@@ -862,18 +869,22 @@ try:
     write(f1, CICD, OLD_OPTOUT + "\nA note the team added.\n")
     r1 = run(f1)
     w1 = warns(r1, CICD)
-    check("[F1] opt-out ci-cd.md from before WP4, kept: one warning says it "
-          "names no stop, and that the agent stops after its last commit and "
-          "never pushes",
+    # [WP4 fix round 2 / LC-12 (b), RR-7] Worded so the lifecycle clause
+    # does not contradict "names no stop", and with no Phase 5 citation:
+    # its opt-out path skips the step that names a stop.
+    check("[F1] opt-out ci-cd.md from before WP4, kept: one warning says "
+          "nothing in it says where the agent stops, and that the agent stops "
+          "after its last commit and never pushes",
           r1.returncode == 0 and len(w1) == 1
-          and "'## Agent stopping point' section, and it names no stop."
-              in w1[0]
+          and "'## Agent stopping point' section, and nothing in it says "
+              "where the agent stops." in w1[0]
           and "the agent stops after its last commit for the task, and never "
               "pushes" in w1[0]
-          and "CLAUDE.md's lifecycle now ends at the stop this file names."
+          and "CLAUDE.md's lifecycle ends at the stop this file should name."
               in w1[0]
-          and w1[0].endswith("Add the section, as Bootstrap Protocol Phase 5 "
-                             "asks."), w1)
+          and "names no stop" not in w1[0] and "Phase 5" not in w1[0]
+          and w1[0].endswith("Add a section that says where the agent "
+                             "stops."), w1)
     write(f1, CICD, OLD_OPTOUT + "\n## Agent Stopping Point\n\nThe agent "
           "stops after its last commit. A person pushes.\n")
     r1b = run(f1)
@@ -943,8 +954,8 @@ try:
               f"move-aside-and-merge route"
               + (", as RETROFIT.md R8.E.1 says" if r8 else ""),
               r5.returncode == 0 and len(w5) == 1
-              and "was there before this first install, so it is the "
-                  "project's own file" in w5[0]
+              and "was there before this project's first install, so it is "
+                  "the project's own file" in w5[0]
               and "Move it aside and re-install, which creates only "
                   "CLAUDE.md, then merge your file into the new one" in w5[0]
               and ("as RETROFIT.md R8.E.1 says" in w5[0]) == r8
@@ -960,6 +971,212 @@ try:
           in warns(k1runs[0], "CLAUDE.md")[0]
           if warns(k1runs[0], "CLAUDE.md") else False,
           warns(k1runs[0], "CLAUDE.md"))
+
+    # ---- 7. Fix round 2: the re-review's 8a findings ------------------- #
+    print("\n== 7. fix round 2: what the re-review found in 8a ==")
+
+    # [F3 / LC-1, P4, MS-1] A Test row whose command contains the configured
+    # one inside a longer command still names another command. A cell with
+    # code spans names the command only when one span is it, whitespace
+    # collapsed; so the split cell "`pytest` `-q`" warns too: neither span
+    # is the command, and the implementer copies a span.
+    for n, (label, cmd, cell) in enumerate((
+            ("make test-all for make test", "make test", "`make test-all`"),
+            ("pytest -q --cov for pytest -q", "pytest -q",
+             "`pytest -q --cov`"),
+            ("pnpm test for npm test", "npm test", "`pnpm test`"),
+            ("the command split over two code spans", "pytest -q",
+             "`pytest` `-q`"))):
+        f3 = proj(f"f3-superset-{n}",
+                  CFG.replace('test: "true"', f'test: "{cmd}"'))
+        run(f3)
+        write(f3, TECH, TEST_ROW.sub(f"| Test      | {cell} |",
+                                     read(f3, TECH)) + "\nFilled.\n")
+        r3 = run(f3)
+        w3 = warns(r3, TECH)
+        check(f"[F3] Test row naming {label}: one warning, the cell quoted "
+              f"as written", r3.returncode == 0 and skip_line(r3.stdout, TECH)
+              and len(w3) == 1
+              and f"its Test row says {cell}, but commands.test is `{cmd}`"
+              in w3[0], w3)
+    # With no code span, the cell is the command, or the command and a
+    # parenthetical note.
+    for cell, stale in (("pytest -q (from the repo root)", False),
+                        ("pytest -q --cov", True)):
+        write(f2, TECH, TEST_ROW.sub(f"| Test      | {cell} |", fresh_tech)
+              + "\nFilled.\n")
+        r3 = run(f2)
+        check(f"[F3] Test row with no code span, {cell!r}: "
+              + ("one warning" if stale else "no warning"),
+              r3.returncode == 0 and skip_line(r3.stdout, TECH)
+              and len(warns(r3, TECH)) == stale, warns(r3, TECH))
+    write(f2, TECH, fresh_tech)
+
+    # [F1 / LC-3, MS-8] Phase 5 prescribes no heading: a stop stated under
+    # another heading, in a bold line or under `###` is still a stop.
+    STOP_SECTION = re.compile(r"^## Agent stopping point\n.*", re.S | re.M)
+    for n, (label, edit) in enumerate((
+            ("under '## Where the agent stops'", lambda t: STOP_SECTION.sub(
+                "## Where the agent stops\n\nThe agent stops after it opens "
+                "a pull request. A person merges it.\n", t)),
+            ("as a bold line", lambda t: STOP_SECTION.sub(
+                "**Agent stopping point:** the pull request. A person merges "
+                "it.\n", t)),
+            ("under '### Agent stopping point'", lambda t: t.replace(
+                "## Agent stopping point", "### Agent stopping point")))):
+        f1s = proj(f"f1-stop-{n}")
+        run(f1s)
+        write(f1s, CICD, edit(read(f1s, CICD)))
+        r1s = run(f1s)
+        check(f"[F1] ci-cd.md kept with its stop stated {label}: no warning",
+              r1s.returncode == 0 and skip_line(r1s.stdout, CICD)
+              and warns(r1s, CICD) == [], warns(r1s, CICD))
+    # [P6] The pre-WP4 opt-out ci-cd.md in a fresh clone: the per-file
+    # remedy, not the hand fix.
+    f1c = proj("f1-optout-clone", OCFG)
+    run(f1c)
+    write(f1c, CICD, OLD_OPTOUT)
+    os.remove(os.path.join(f1c, MANIFEST))
+    r1c = run(f1c)
+    w1c = warns(r1c, CICD)
+    check("[F1] the pre-WP4 opt-out ci-cd.md on a tree with no manifest: the "
+          "warning ends with the per-file remedy, not the hand fix",
+          r1c.returncode == 0 and len(w1c) == 1
+          and w1c[0].endswith(no_manifest(CICD))
+          and "Add a section" not in w1c[0], w1c)
+
+    # [F5 / LC-2, MS-5, RR-8] The project's own CLAUDE.md is named so on
+    # every run while it keeps the bytes the first install kept, and its
+    # SKIP line says so too.
+    OWN_MD = "# My project, from /init\n\nUse pnpm.\n"
+    f5o = proj("f5-own-runs")
+    write(f5o, "CLAUDE.md", OWN_MD)
+    f5runs = [run(f5o) for _ in range(3)]
+    f5w = [warns(r, "CLAUDE.md") for r in f5runs]
+    check("[F5] three installs over the project's own CLAUDE.md: the same "
+          "warning each run, which calls it the project's own",
+          all(r.returncode == 0 for r in f5runs)
+          and all(len(w) == 1 for w in f5w) and f5w[0] == f5w[1] == f5w[2]
+          and "was there before this project's first install, so it is the "
+              "project's own file" in f5w[0][0]
+          and "did not receive" not in f5w[2][0]
+          and "If nobody edited it" not in f5w[2][0]
+          if all(f5w) else False, f5w)
+    check("[F5] ... and its SKIP line says so each run",
+          all("it was there before this project's first install, so it is "
+              "the project's own file" in skip_reason(r.stdout, "CLAUDE.md")
+              for r in f5runs), [skip_reason(r.stdout, "CLAUDE.md")
+                                 for r in f5runs])
+    # A project's own command at a plan path does not hide the first install.
+    f5c = proj("f5-own-command")
+    write(f5c, "CLAUDE.md", OWN_MD)
+    os.makedirs(os.path.join(f5c, ".claude", "commands"))
+    write(f5c, ".claude/commands/code-review.md", "Review my way.\n")
+    r5c = run(f5c)
+    w5c = warns(r5c, "CLAUDE.md")
+    st5c = read(f5c, ".claude/.bootstrap-state.json") or "{}"
+    check("[F5] the project's own .claude/commands/code-review.md and "
+          "CLAUDE.md: still a first install (bootstrap_complete false, the "
+          "own-file warning)",
+          r5c.returncode == 0
+          and '"bootstrap_complete": false' in st5c
+          and len(w5c) == 1
+          and "the project's own file" in w5c[0], (w5c, st5c[-300:]))
+    f5d = proj("f5-own-dry")
+    write(f5d, "CLAUDE.md", OWN_MD)
+    r5d = run(f5d, "--dry-run")
+    w5d = warns(r5d, "CLAUDE.md")
+    check("[F5] --dry-run of a first install over the project's own "
+          "CLAUDE.md: it would leave it, and the route is to move it aside "
+          "before installing, then merge it into the new one",
+          r5d.returncode == 0 and len(w5d) == 1
+          and "the install would leave it as it is" in w5d[0]
+          and "Move it aside before you install, then merge your file into "
+              "the new one." in w5d[0]
+          and "re-install" not in w5d[0], w5d)
+
+    # [LC-12 (d)] "it" for one missing element, "them" for more.
+    check("[F2] the hand remedy says 'Merge it' for one missing element and "
+          "'Merge them' for three",
+          we_ and we_[0].endswith("Merge it by hand from a fresh install's "
+                                  "CLAUDE.md.")
+          and wo and wo[0].endswith("Merge them by hand from a fresh "
+                                    "install's CLAUDE.md."), (we_, wo))
+
+    # [K1 / P1] A later re-install of a fresh clone: the hook-script
+    # warning and the exit-3 note keep the per-file remedy (main()).
+    k1h = proj("k1-hooks-later")
+    run(k1h)
+    os.remove(os.path.join(k1h, MANIFEST))
+    write(k1h, "bootstrap.config.yaml",
+          CFG.replace('test: "true"', 'test: "pytest -q"')
+          + "secrets:\n  never_read_paths:\n    - \".env*\"\n"
+            "    - \"private/**\"\n")
+    k1hr = [run(k1h) for _ in range(2)]
+    TG, SG = ".claude/hooks/test-gate.sh", ".claude/hooks/secrets-gate.sh"
+    wtg = warns(k1hr[1], TG)
+    sec = k1hr[1].stderr[k1hr[1].stderr.find("security-critical files were "
+                                             "NOT written"):]
+    check("[K1] a fresh clone with a changed commands.test and "
+          "never_read_paths, re-installed twice: on run 2 the test-gate.sh "
+          "warning ends with the per-file remedy",
+          [r.returncode for r in k1hr] == [3, 3] and len(wtg) == 1
+          and wtg[0].endswith(no_manifest(TG))
+          and "kept your local edits" not in k1hr[1].stderr, wtg)
+    check("[K1] ... and the exit-3 block names secrets-gate.sh with the "
+          "per-file remedy",
+          f"- {SG}" in sec and no_manifest(SG) in sec
+          and sec.find(no_manifest(SG)) < sec.find("Exiting 3"),
+          sec[:1500])
+
+    # [F2 / P2] With the skills off, CLAUDE.md has no session-hygiene or
+    # /escalate line, and a kept one is not asked for them.
+    SCFG = CFG + "workflow:\n  install_skills: false\n"
+    f2s = proj("f2-skills-off", SCFG)
+    run(f2s)
+    md_off = read(f2s, "CLAUDE.md")
+    write(f2s, "CLAUDE.md", md_off + "\nA project rule.\n")
+    r2s = run(f2s)
+    check("[F2] skills off, CLAUDE.md edited and kept: no CLAUDE.md warning",
+          r2s.returncode == 0 and skip_line(r2s.stdout, "CLAUDE.md")
+          and warns(r2s, "CLAUDE.md") == [], warns(r2s, "CLAUDE.md"))
+    write(f2s, "CLAUDE.md", re.sub(r"^## Index.*?(?=^## )", "", md_off,
+                                   flags=re.S | re.M))
+    r2t = run(f2s)
+    w2t = warns(r2t, "CLAUDE.md")
+    check("[F2] skills off, kept CLAUDE.md without its index: the warning "
+          "names only the Index section",
+          r2t.returncode == 0 and len(w2t) == 1
+          and "and it has no '## Index' section." in w2t[0]
+          and "session-hygiene" not in w2t[0] and "/escalate" not in w2t[0],
+          w2t)
+
+    # [F2 / P7] A heading's prefix ends at a word boundary, and whitespace
+    # inside it is collapsed.
+    write(f2, "CLAUDE.md", re.sub(r"^## Index[^\n]*", "## Indexing notes",
+                                  fresh_md, flags=re.M))
+    rix = run(f2)
+    wix = warns(rix, "CLAUDE.md")
+    check("[F2] CLAUDE.md kept with '## Indexing notes' for its index: the "
+          "warning names the Index section",
+          rix.returncode == 0 and len(wix) == 1
+          and "it has no '## Index' section." in wix[0], wix)
+    write(f2, "CLAUDE.md", fresh_md.replace("## Never\n",
+                                            "## Nevertheless\n"))
+    rnl = run(f2)
+    wnl = warns(rnl, "CLAUDE.md")
+    check("[F2] CLAUDE.md kept with '## Nevertheless' for its Never list: "
+          "the warning names the Never section",
+          rnl.returncode == 0 and len(wnl) == 1
+          and "it has no '## Never' section." in wnl[0], wnl)
+    write(f2, "CLAUDE.md", fresh_md)
+    write(f2, TECH, fresh_tech.replace("## Do Not Touch", "##  Do Not Touch")
+          + "\nFilled.\n")
+    rdn = run(f2)
+    check("[F2] tech.md kept with '##  Do Not Touch' (two spaces): no "
+          "warning", rdn.returncode == 0 and skip_line(rdn.stdout, TECH)
+          and warns(rdn, TECH) == [], warns(rdn, TECH))
+    write(f2, TECH, fresh_tech)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

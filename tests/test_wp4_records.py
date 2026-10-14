@@ -8,7 +8,7 @@ protocol-doc-snapshot-retire row.
 
   1. Freeze exception 85. Its seven action counts and seven digests are
      pinned below as LITERALS, the values commit 4's re-baseline set and
-     fix round 1's re-baseline moved (its digests only). This
+     fix rounds 1 and 2 moved (their digests only). This
      suite never reads the golden suites' EXPECTED_* tables: a row that
      reads a live table moves with the next re-baseline and turns red while
      its record stays true (X2; review freeze F10). The changelog's table
@@ -116,27 +116,27 @@ check("the changelog's WP4 entry is found, above the WP3 entry", bool(CL))
 # Pinned as data: the values commit 4 (9ba6699) wrote into
 # EXPECTED_ACTION_COUNTS and EXPECTED_DIGESTS (tests/test_greenfield_golden.py)
 # and EXPECTED_RETROFIT_COUNTS and EXPECTED_RETROFIT_DIGESTS
-# (tests/test_retrofit.py), with the digests fix round 1 re-baselined in the
-# same exception (the counts did not move). Never read from those tables
-# (freeze F10).
+# (tests/test_retrofit.py), with the digests fix rounds 1 and 2 re-baselined
+# in the same exception (the counts did not move). Never read from those
+# tables (freeze F10).
 _COUNTS = {"default": 66, "full_autonomous": 78, "design_steering": 67,
            "sdk_callable": 67, "gates_off": 59, "retrofit service": 89,
            "retrofit agent": 103}
 _DIGESTS = {
     "default":
-        "d804a92944a1e4a74d40903aa7d33478f557c20f443a8773779737a27ca78d64",
+        "8acdbe3fcd9495929265a4dd6975c8c92cfc606e71d4ac08e459fc25b8c1f399",
     "full_autonomous":
-        "1053fa2ce9ce55cfa92ebc7bc045ffd3fe62f4e47a2061f779a7dd1dac1e292e",
+        "559b223d28973f16ca008ba0c06374630daa589573164711cebb5ecdba0f4a8e",
     "design_steering":
-        "a1c7a4bf86aed89304e7a9c6919c2b4ae3ce29c3c2465f9ee0ad1841e44d0a82",
+        "39e58db571a82bbb61c0b7f09e4e435de3b2dbe9573cc0a5b1fe3beaafa90373",
     "sdk_callable":
-        "8a338f89f0c731b4f92afd8b46bfe5d044ab15f3afa05baadb0bec428c28666b",
+        "0878463901e8aed7e9365a8ef6af2a98265181d7173fd5c159d8fe3b223b56f2",
     "gates_off":
-        "e8966fc79a46055a7866d08066e5157a0f7c33422d180c08695b7274c0c49a54",
+        "13bb6e528af058d50dccfda941e0c3304cefcbd0d81de26e701f82ad1aa5aac1",
     "retrofit service":
-        "ffa3c7b601ba8de4430dbda86f6fcf4c7655ef8e80bfddc0b109ef9b49a1bb00",
+        "01f7e7f40f1fd395c591f1b5745fcd43885a7b55f12caf33d7d5c20bd7da59d1",
     "retrofit agent":
-        "0fcbe61eef3acba122da71d46449a2527b885fab2d5a777b2eba3075b6e5a9be",
+        "b9bc6b155503eaa8d345698e7690853cadeb6db8255557d072dc8b32d09d2915",
 }
 _FIXTURES = r"(default|full_autonomous|design_steering|sdk_callable|" \
             r"gates_off|retrofit service|retrofit agent)"
@@ -231,7 +231,8 @@ _src = read("lib/installer.py")
 # reads as main() prints it.
 _src_joined = re.sub(r'"\s*\n\s*f?"', "", _src)
 _held = ("is held by another process (a loop wrapper or another install); "
-         "nothing was written. Re-run when it is free.")
+         "nothing but an empty lock file was written. Re-run when it is "
+         "free.")
 check(f"section 3.2 (10): the held-lock exit code is installer.EXIT_LOCKED "
       f"({getattr(installer, 'EXIT_LOCKED', None)}), after "
       f"installer._LOCK_WAIT_S ({getattr(installer, '_LOCK_WAIT_S', None)} s)"
@@ -379,9 +380,10 @@ check("section 8.4: the walk's note is there: no trigger fires, no bump, "
 # --------------------------------------------------------------------------- #
 print("\n=== 4. The backlog and the queue ===")
 BL = read("docs/deferred-backlog.md")
-_NEW = ("Z-58", "Z-59", "Z-60", "Z-61", "Z-62", "Z-63", "Z-64")
+_NEW = ("Z-58", "Z-59", "Z-60", "Z-61", "Z-62", "Z-63", "Z-64", "Z-65",
+        "Z-66", "Z-67", "Z-68")
 _rows = {r: row(BL, r) for r in _NEW + ("X-30a", "Z-40", "M-2")}
-check("the backlog has rows Z-58 to Z-64", all(_rows[r] for r in _NEW),
+check("the backlog has rows Z-58 to Z-68", all(_rows[r] for r in _NEW),
       [r for r, v in _rows.items() if not v])
 check("Z-58 is D1 (b), a decision row, and lists the inventory rows it "
       "leaves open, the plugin path's environment audit among them",
@@ -450,6 +452,24 @@ check("M-2: the emitted audio-alerts.config cites the current protocol, and "
 check("the backlog's section Z has the WP4 layer naming Z-58 to Z-64",
       "**Layer 2026-10-14, WP4 (branch `feat/wp4-claude-md-steering-entry`)"
       ".**" in BL and "Z-58 to Z-64 are WP4 residue" in BL)
+# [WP4 fix round 2] The re-review's residue: each row names its finding ids.
+check("Z-65 to Z-68 are fix round 2's, the layer names them, and each row "
+      "names the findings it files",
+      "Z-65 to Z-68 are WP4 fix round 2's" in BL
+      and "CR-3" in _rows["Z-65"] and "`INDEX.md`" in _rows["Z-65"]
+      and all(i in _rows["Z-66"] for i in ("D2", "RR-10", "MS-3"))
+      and _rows["Z-67"].startswith("| Z-67 | RETROFIT-ONLY")
+      and all(i in _rows["Z-67"] for i in ("RR-4", "RR-2", "CR-4", "MS-9",
+                                            "MS-11"))
+      and all(i in _rows["Z-68"] for i in (
+          "missed/MS-6", "missed/MS-10", "missed/F6", "correctness/C8",
+          "records/R3", "counts/F2", "counts/F5", "counts/F6", "counts/F7",
+          "LC-12 (e)", "LC-12 (f)", "macOS")),
+      {r: _rows[r][:120] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
+check("X-30a's WP4 layer says greenfield is done only with the skills on",
+      "Greenfield, with `workflow.install_skills` on (the default): done."
+      in _rows["X-30a"] and "Greenfield with the skills off: still open"
+      in _rows["X-30a"], _rows["X-30a"][-900:])
 
 Q = read(".claude/readiness-queue.md")
 _qrow = cut(Q, "- **[ready] protocol-doc-snapshot-retire**",

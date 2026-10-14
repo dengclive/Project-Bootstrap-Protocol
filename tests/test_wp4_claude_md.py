@@ -189,6 +189,43 @@ for label, (cfg, plan) in PLANS.items():
           f"install writes ({len(named)} named)",
           not absent and (bool(named) == cfg["workflow"]["install_skills"]),
           {"named": named, "absent": absent})
+# [WP4 fix round 2 / MS-3, D2] The same for every other .md that WP4 wrote
+# or changed. The sessions README's /ack-drift, /checkpoint, /quiet and
+# /resume rows predate WP4 (backlog Z-66), so they are left out here.
+WP4_MD = {".claude/steering/tech.md": (), ".claude/steering/ci-cd.md": (),
+          ".claude/steering/assumption-ledger.md": (),
+          ".claude/sessions/README.md": ("/ack-drift", "/checkpoint",
+                                         "/quiet", "/resume"),
+          ".claude/skills/spec-new/SKILL.md": (),
+          ".claude/skills/escalate/SKILL.md": (),
+          ".claude/commands/escalate.md": ()}
+for label, (cfg, plan) in PLANS.items():
+    absent = {}
+    for path, pre in WP4_MD.items():
+        if path not in plan:
+            continue
+        named = (set(re.findall(r"`(/[a-z][\w-]*)", plan[path]["body"]))
+                 - {"/clear"} - set(pre))
+        missing = sorted(n for n in named
+                         if f".claude/skills/{n[1:]}/SKILL.md" not in plan)
+        if missing:
+            absent[path] = missing
+    check(f"{label}: every slash command the other .md files WP4 wrote or "
+          f"changed name is a skill this install writes", not absent, absent)
+_off = PLANS["skills off"][1]
+check("skills off: ci-cd.md's stop names no /pr-author, the ledger has no "
+      "skill-body substitution row, and the sessions README says only the "
+      "alarm writes the decision record",
+      "a description that links to the spec" in flat(
+          _off[".claude/steering/ci-cd.md"]["body"])
+      and "/pr-author" not in _off[".claude/steering/ci-cd.md"]["body"]
+      and "Skill-body substitution" not in
+      _off[".claude/steering/assumption-ledger.md"]["body"]
+      and "| `.decision-pending-<id>` | the decision-required alarm creates "
+          "it, refreshes its mtime and deletes it after 7 days |"
+      in _off[".claude/sessions/README.md"]["body"],
+      [ln for ln in _off[".claude/sessions/README.md"]["body"].splitlines()
+       if "decision-pending" in ln])
 check("skills off: CLAUDE.md has no session-hygiene line and no /escalate "
       "line, and its blank lines stay single",
       "Session hygiene" not in md_of(PLANS["skills off"][1])

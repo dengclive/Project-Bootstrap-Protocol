@@ -95,8 +95,9 @@ stubs, and Claude then fills them in with you.
    thin `CLAUDE.md` and the state file, and ends with a `Next steps:` block.
 6. Claude runs Phases 1 to 8 on the installed files. The install writes
    `product.md`, `tech.md`, `structure.md` and `ci-cd.md` under
-   `.claude/steering/` as stubs, and `Next steps:` names each one that is
-   still a stub. Claude fills them in with you and shows you each file.
+   `.claude/steering/` as stubs, and `Next steps:` names each stub the
+   install still owns. Claude fills them in with you and shows you each
+   file.
 7. Claude offers the Phase 9 smoke test, then the Phase 10 handoff. The last
    line of `Next steps:` says how to record the smoke test and mark the
    bootstrap complete in `.claude/.bootstrap-state.json`: record it, or ask
@@ -117,13 +118,17 @@ instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
    ask Claude: "Read `$T/RETROFIT.md` and retrofit this project."
 2. Claude does R-1 first, then R0 step 1. When that step archives an
    existing `.claude/` to `.claude.archived-<timestamp>/`, Claude leaves
-   `settings.json` and `settings.local.json` in place: the installer merges
-   its hook wiring into your `settings.json`, and it never writes
-   `settings.local.json`.
+   `settings.json`, `settings.local.json` and the `.retrofit-state.json`
+   that R-1 wrote in place: the installer merges its hook wiring into your
+   `settings.json`, it never writes `settings.local.json`, and R0.5 extends
+   R-1's state file.
 3. Claude runs `python3 "$T/bin/retrofit-interview" analyze`, which scans
-   the code, writes an inventory under `.claude/inventory/` (R0 steps 3, 4
-   and 12, and step 8's metrics as stubs), and writes its proposals and open
-   questions to `bootstrap.interview.md`. Claude does the R0 steps that
+   the code, writes first cuts of the inventory under `.claude/inventory/`
+   (the files of R0 steps 3, 4 and 12, and step 8's metrics as stubs), and
+   writes its proposals and open questions to `bootstrap.interview.md`.
+   Claude completes the first cuts from `RETROFIT.md`: step 3's convention
+   groups, step 4's product summary, and step 12's documentation,
+   PR-template and issue-tracker checks. Claude also does the R0 steps that
    `analyze` doesn't (2, 5, 6, 7, 9, 10 and 11) from `RETROFIT.md`, among
    them step 5's extraction plan for your `CLAUDE.md` and the mandatory step
    10. Claude resolves the proposals with you one question at a time, then
@@ -427,8 +432,8 @@ bootstrap-installer/
 - **Waits for a running loop** — before its first write, an install locks
   `.claude/.bootstrap-state.json.lock` (and, on a retrofit,
   `.claude/.retrofit-state.json.lock`). If a loop wrapper or another install
-  holds the lock for 30 seconds, the install exits **4** and writes nothing;
-  re-run it once the other process has finished.
+  holds the lock for 30 seconds, the install exits **4** and writes nothing
+  but an empty lock file; re-run it once the other process has finished.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
 - **Faithful to Bootstrap-Protocol-v2-8-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle

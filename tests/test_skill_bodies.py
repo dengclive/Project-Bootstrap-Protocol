@@ -23,6 +23,11 @@ What these checks pin, and why each matters:
      steps, the roster refresh, the classifier fields the wrappers grep for,
      the clock rule, the per-skill model lines. Gate sentences follow the
      resolved hook set, so each is pinned both ways (wired and not wired).
+  4. [WP4 fix round 2] spec-new step 2's commands, taken from the EMITTED
+     body and run against a bare remote: the default branch's name comes
+     from the step's own lookup in a repository whose remote was added by
+     hand, and a spec started after a person merged the previous one on the
+     remote starts from that merge, without tracking it.
 
 Run: python3 tests/test_skill_bodies.py
 """
@@ -505,26 +510,44 @@ for _label, _body in (("greenfield", _sn),
           f"branch, after the slug and before the first write",
           has(_body, "If you are on the default branch, or on another "
                      "spec's branch (`spec/*`), create this spec's branch "
-                     "from the default branch and switch to it: `git switch "
-                     "-c spec/<slug> <default>`")
+                     "from the default branch and switch to it:")
           and -1 < _body.find("## 1. Resolve the slug") < _br
           < _body.find("## 4. Write `requirements.md`"),
           _body[_br:_br + 400] if _br >= 0 else _body[:400])
     # [WP4 fix round 1 / NF1] After a spec's pull request the agent is
     # still on that spec's branch. "Otherwise stay on the current branch"
     # put the next spec, and every later one, on it.
+    # [WP4 fix round 2 / RR-1, LC-4] With a remote, from the remote's
+    # default branch, fetched and not tracked; its name from `git remote
+    # show origin`, which needs no refs/remotes/origin/HEAD, after a `git log`
+    # that stops the step while the remote lacks local default-branch
+    # commits; with no remote or an empty one, the local default branch.
+    # Section 5 runs the commands.
     check(f"spec-new ({_label}): on another spec's branch (spec/*), the new "
           f"spec branches from the default branch, not from that spec; only "
           f"a branch the operator chose keeps it, and the step says how to "
           f"find the default branch's name",
           has(_body, "or on another spec's branch (`spec/*`)")
-          and has(_body, "`git switch -c spec/<slug> <default>`")
-          and has(_body, "`git symbolic-ref --short refs/remotes/origin/HEAD` "
-                         "prints it after `origin/`")
+          and has(_body, "With a remote, run `git fetch origin`, then "
+                         "`git log --oneline origin/<default>..<default>`.")
+          and has(_body, "If the log lists a commit, the remote lacks work "
+                         "on the local default branch, such as a bootstrap "
+                         "commit not yet pushed: stop and ask the operator "
+                         "to push it first. Otherwise run "
+                         "`git switch --no-track -c spec/<slug> "
+                         "origin/<default>`.")
+          and has(_body, "`<default>` is the name on the `HEAD branch:` line "
+                         "of `git remote show origin`.")
+          and has(_body, "With no remote, or when that line says "
+                         "`(unknown)` (an empty remote), run `git switch -c "
+                         "spec/<slug> <default>`, where `<default>` is the "
+                         "local default branch. If that branch isn't clear, "
+                         "ask the operator.")
           and has(_body, "On any other branch, one the operator chose, stay "
                          "on it.")
+          and not has(_body, "symbolic-ref")
           and not has(_body, "Otherwise stay on the current branch."),
-          _body[_br:_br + 700] if _br >= 0 else _body[:400])
+          _body[_br:_br + 1100] if _br >= 0 else _body[:400])
 
 print("\n== spec-decompose ==")
 _sd = skill(_g, "spec-decompose") or ""
@@ -973,6 +996,122 @@ else:
             put(stem_t, True)
             check("stem example: the stem-named test the body names satisfies "
                   "the emitted tdd-gate (rc 0)", tdd_rc() == 0)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------- #
+# 5. spec-new step 2's commands, taken from the emitted body and run
+# --------------------------------------------------------------------------- #
+# [WP4 fix round 2 / RR-1, LC-4, P5, MS-2] A person merges each pull request
+# on the remote, so a spec branched from the local default branch lacked
+# the merged specs; and `git symbolic-ref` found no default branch in a
+# repository whose remote was added by hand and pushed to. A branch from
+# the remote's default branch also lacked a bootstrap commit not yet
+# pushed, so the step's `git log` stops it then. The commands are the
+# step's own code spans, with <slug> and <default> filled in.
+print("\n== spec-new step 2's commands, run ==")
+_step2 = _sn[_sn.find("## 2. Start the spec's branch"):
+             _sn.find("## 3. Read the source")]
+_remote = next((ln for ln in re.split(r"\n(?=- )", _step2)
+                if ln.startswith("- With a remote")), "")
+_spans = re.findall(r"`([^`]+)`", _remote)
+_lookup = next((c for c in _spans if c.startswith("git remote ")), "")
+_cmds = [c for c in _spans if c.startswith("git ") and c != _lookup]
+check("step 2's remote bullet gives a lookup and three commands, in order: "
+      "the fetch, the unpushed-commit check, the switch",
+      bool(_lookup) and len(_cmds) == 3 and "fetch" in _cmds[0]
+      and _cmds[1].startswith("git log ") and "switch" in _cmds[2],
+      (_lookup, _cmds))
+if not shutil.which("git"):
+    print("  SKIP  git missing")
+else:
+    tmp = tempfile.mkdtemp(prefix="skill-bodies-branch-")
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=tmp,
+               GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t",
+               GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t")
+    env.pop("CLAUDECODE", None)
+
+    def g(cwd, *args):
+        return subprocess.run(["git", *args], cwd=cwd, env=env,
+                              capture_output=True, text=True)
+
+    def default_of(cwd):
+        """The name the step's lookup prints on its `HEAD branch:` line."""
+        if not _lookup:
+            return None
+        out = subprocess.run(_lookup.split(), cwd=cwd, env=env,
+                             capture_output=True, text=True).stdout
+        return next((ln.split(":", 1)[1].strip() for ln in out.splitlines()
+                     if ln.strip().startswith("HEAD branch:")), None)
+
+    try:
+        origin = os.path.join(tmp, "origin.git")
+        agent = os.path.join(tmp, "agent")
+        g(tmp, "init", "-q", "--bare", "-b", "main", origin)
+        g(tmp, "init", "-q", "-b", "main", agent)
+        with open(os.path.join(agent, "INDEX.md"), "w") as fh:
+            fh.write("| first | planned |\n")
+        g(agent, "add", "-A")
+        g(agent, "commit", "-q", "-m", "bootstrap")
+        g(agent, "remote", "add", "origin", origin)
+        g(agent, "push", "-q", "-u", "origin", "main")
+        # (b) git init, remote add and push -u, the usual greenfield setup.
+        _d = default_of(agent)
+        check("(b) in a repository made with git init, remote add and push -u "
+              "(no refs/remotes/origin/HEAD), the step's lookup names main",
+              _d == "main"
+              and g(agent, "symbolic-ref", "-q",
+                    "refs/remotes/origin/HEAD").returncode != 0, _d)
+        # The first spec, merged on the remote by a person.
+        g(agent, "switch", "-q", "-c", "spec/first")
+        with open(os.path.join(agent, "first.py"), "w") as fh:
+            fh.write("x = 1\n")
+        g(agent, "add", "-A")
+        g(agent, "commit", "-q", "-m", "first")
+        g(agent, "push", "-q", "-u", "origin", "spec/first")
+        person = os.path.join(tmp, "person")
+        g(tmp, "clone", "-q", origin, person)
+        g(person, "merge", "-q", "--no-ff", "-m", "Merge spec/first",
+          "origin/spec/first")
+        g(person, "push", "-q", "origin", "main")
+        merged = g(person, "rev-parse", "HEAD").stdout.strip()
+        # (a) The agent, still on spec/first, starts the next spec.
+        def run_step(slug, cmds):
+            return [g(agent, *c.replace("<slug>", slug)
+                      .replace("<default>", _d or "main").split()[1:])
+                    for c in cmds]
+
+        _ran = run_step("second", _cmds)
+        _anc = g(agent, "merge-base", "--is-ancestor", merged,
+                 "spec/second").returncode
+        _up = g(agent, "rev-parse", "--abbrev-ref", "spec/second@{upstream}")
+        check("(a) on spec/first after a person merged it on the remote, the "
+              "step's commands start spec/second from the merged default "
+              "branch, without tracking it; the unpushed-commit check lists "
+              "nothing",
+              len(_ran) == 3 and all(r.returncode == 0 for r in _ran)
+              and _ran[1].stdout.strip() == ""
+              and g(agent, "branch", "--show-current").stdout.strip()
+              == "spec/second" and _anc == 0 and _up.returncode != 0
+              and os.path.exists(os.path.join(agent, "first.py")),
+              ([(r.returncode, r.stdout[-200:], r.stderr[-200:])
+                for r in _ran], _anc, _up.stdout, _up.stderr[-200:]))
+        # (c) A commit on the local default branch that was never pushed,
+        # such as the bootstrap's: a branch from the remote's default
+        # branch would lack it, so the check lists it and the step stops.
+        g(agent, "switch", "-q", "main")
+        with open(os.path.join(agent, "CLAUDE.md"), "w") as fh:
+            fh.write("# demo\n")
+        g(agent, "add", "-A")
+        g(agent, "commit", "-q", "-m", "unpushed bootstrap")
+        _chk = run_step("third", _cmds[:2])
+        check("(c) with a commit on the local default branch the remote "
+              "lacks, the step's unpushed-commit check lists it",
+              all(r.returncode == 0 for r in _chk)
+              and "unpushed bootstrap" in _chk[1].stdout,
+              [(r.returncode, r.stdout[-200:], r.stderr[-200:])
+               for r in _chk])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
