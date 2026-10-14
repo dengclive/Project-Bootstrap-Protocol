@@ -2,7 +2,7 @@
 description: Apply bootstrap.config.yaml deterministically (creates the full .claude/ harness). Runs the installer; no interview.
 ---
 
-# /bootstrap-apply
+# /bootstrap-protocol:bootstrap-apply
 
 Run the **deterministic installer** against the `bootstrap.config.yaml` in the
 project root. This is the mechanical layer — it makes no decisions, asks no
@@ -12,8 +12,9 @@ config.
 ## What to do
 
 1. Confirm `bootstrap.config.yaml` exists in the project root. If it does not,
-   tell the operator to run `/bootstrap-interview` first (that command is the
-   decision layer; it produces the config this command consumes).
+   tell the operator to run `/bootstrap-protocol:bootstrap-interview` first
+   (that command is the decision layer; it produces the config this command
+   consumes).
 
 2. Show the plan first (never write blind):
 
@@ -84,8 +85,8 @@ config.
 
 The Bootstrap Protocol has two layers. The **interview** (archetype, PRD tier,
 principles, secrets paths, TDD policy, MCP choices) genuinely needs a human and
-lives in `/bootstrap-interview`. The **scaffolding** (hook scripts,
-settings.json wiring, skill/command/agent files, queue scaffolding, state
-file) is fully determined by those answers and lives here. Keeping them
+lives in `/bootstrap-protocol:bootstrap-interview`. The **scaffolding** (hook
+scripts, settings.json wiring, skill/command/agent files, queue scaffolding,
+state file) is fully determined by those answers and lives here. Keeping them
 separate makes the mechanical half reproducible, diffable, and reversible —
 properties an interactive wizard cannot offer.

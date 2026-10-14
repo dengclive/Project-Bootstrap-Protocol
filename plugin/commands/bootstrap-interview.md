@@ -2,12 +2,14 @@
 description: Conduct the Bootstrap Protocol interview and emit bootstrap.config.yaml (the decision layer; no files are scaffolded here).
 ---
 
-# /bootstrap-interview
+# /bootstrap-protocol:bootstrap-interview
 
-Conduct the **decision layer** of the Project Bootstrap Protocol. The only
-output is a validated `bootstrap.config.yaml`. You do **not** create any
-`.claude/` files here — that is `/bootstrap-apply`'s job, and keeping it
-separate is what makes the scaffolding reproducible.
+Conduct the **decision layer** of the Project Bootstrap Protocol. The
+output is a validated `bootstrap.config.yaml`, plus a PRD at
+`docs/prd/<name>.md` when the operator doesn't have one at the required tier
+yet. You do **not** create any `.claude/` files here — that is
+`/bootstrap-protocol:bootstrap-apply`'s job, and keeping it separate is what
+makes the scaffolding reproducible.
 
 There is now a tool that does the mechanical part of this for you:
 `bin/bootstrap-interview`. It reads a PRD and **proposes** a complete, valid
@@ -18,9 +20,20 @@ project's test/lint/format commands; and it validates its own output with
 
 ## Preferred path: drive the tool
 
-1. Confirm a PRD exists (ask the operator for its path; if there is none, the
-   PRD must be written first — that is genuine human judgement the tool does
-   not attempt).
+1. Get a PRD at the required tier. Ask the operator for its path, and read
+   it. The tool reads a PRD but doesn't write one. You write it with the
+   operator, as Phase 0 step 8 of the protocol says:
+
+   - **No PRD**, because the operator has notes or just an idea: propose the
+     archetype and its required PRD tier (Phase 0 steps 3 and 7). Run the
+     PRD interview at that tier, write `docs/prd/<name>.md`, and get the
+     operator's confirmation before you go on.
+   - **A PRD below the required tier**: run a gap interview, and write the
+     upgraded PRD to `docs/prd/<name>.md`.
+   - **A PRD at the required tier**: go on to step 2.
+
+   The protocol's Project Archetypes section lists each archetype's required
+   tier and what each tier holds. Ask one question at a time. Don't batch.
 
 2. Run the deterministic two-pass flow so the operator can review every
    proposed decision before anything is committed:
@@ -51,9 +64,9 @@ project's test/lint/format commands; and it validates its own output with
 
 ## Fallback: conduct it by hand
 
-If the tool cannot run (no PRD, or the operator wants to drive every decision
-conversationally), conduct the interview phases from `Bootstrap-Protocol-v2-0-0.md` that
-produce *decisions* (not files):
+If the tool can't run, or the operator wants to drive every decision
+conversationally, get the PRD as step 1 says, and then conduct these
+interview phases of the protocol. They produce *decisions*, not files:
 
 - **Phase 0** — classify the project (archetype, shell, PRD tier, CI/CD
   opt-out) and capture the three autonomous-mode opt-in flags. Enforce the
@@ -86,7 +99,7 @@ If validation reports errors, fix them with the operator before finishing.
 
 ## Handoff
 
-Tell the operator the config is ready and that running `/bootstrap-apply`
-will scaffold the entire harness deterministically — and that re-running it
-later after editing the config converges the tree without clobbering their
-local edits to generated files.
+Tell the operator the config is ready and that running
+`/bootstrap-protocol:bootstrap-apply` will scaffold the entire harness
+deterministically — and that re-running it later after editing the config
+converges the tree without clobbering their local edits to generated files.

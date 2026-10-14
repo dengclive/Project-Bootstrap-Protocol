@@ -1917,6 +1917,32 @@ check("[WP4] PL-5: plugin.json license is Apache-2.0, as LICENSE says",
 check("[WP4] PL-5: plugin.json repository and homepage name the GitHub "
       "repository",
       _pj.get("repository") == _REPO_URL and _pj.get("homepage") == _REPO_URL)
+# [WP4] With the manifest read, Claude Code namespaces the commands under the
+# plugin's name. Measured on 2.1.296: `/bootstrap-apply` alone "did not run";
+# only `/bootstrap-protocol:bootstrap-apply` expands.
+_cmd_dir = os.path.join(_PLUGIN_DIR, "commands")
+_bare = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _bare += [f"{_fn}:{_n}" for _n, _ln in enumerate(_fh, 1)
+                  if _re_pl.search(r"(?<![\w:-])/bootstrap-(?:interview|apply)"
+                                   r"\b", _ln)]
+_ns = "%s:" % _pj.get("name", "?")
+check("[WP4] PL-4: the commands name each other with the plugin's namespace "
+      f"(bare: {_bare})", _bare == [] and all(
+          _ns + "bootstrap-" in open(os.path.join(_cmd_dir, f),
+                                     encoding="utf-8").read()
+          for f in os.listdir(_cmd_dir)))
+# [WP4, g4-3] Phase 0 step 8 has the AI write the PRD with the operator when
+# none exists at the archetype's tier. The command used to say the PRD "must
+# be written first" and that the tool "does not attempt" it, which sent the
+# AI away from the step the protocol gives it.
+_iv_txt = open(os.path.join(_cmd_dir, "bootstrap-interview.md"),
+               encoding="utf-8").read()
+check("[WP4] G4-3: the interview command has the AI write a missing PRD, as "
+      "Phase 0 step 8 says",
+      "Phase 0 step 8" in _iv_txt and "docs/prd/<name>.md" in _iv_txt
+      and "must be written first" not in _iv_txt)
 
 # [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
 # and the PRD version header were not, and both went stale — the README at
