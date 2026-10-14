@@ -30,7 +30,8 @@ config.
    test command whose "no tests yet" the test gate cannot tell from a
    failing suite; for each hook script the run leaves alone rather than
    update, so a config change will not reach it (on a tree with no
-   installer manifest the line names `--adopt`), and likewise for an
+   installer manifest the line says to move that one file aside and
+   re-install, and not to use `--adopt`), and likewise for an
    edited `.claude/githooks/dispatch`, `.claude/githooks/spec-check.sh` or
    `.claude/merge-back.sh`; for a `.claude/.gitignore` the run leaves alone
    that lacks the `/worktrees/` line, when no other ignore rule covers
@@ -59,7 +60,9 @@ config.
    The stdout counts look like a success in that case, so read stderr and
    surface it verbatim; do not tell the operator the install succeeded.
    (Exit 2 is a config refusal — nothing was written; an unparseable
-   config names its file and line. Exit 0 is the only outcome
+   config names its file and line. Exit 4 means a loop wrapper or another
+   install held the state lock, so nothing was written: re-run when it is
+   free. Exit 0 is the only outcome
    whose enforcement was verified.) On exit 0, still surface every
    `warning:` line on stderr, verbatim: the apply repeats the dry run's,
    and names each of the operator's own hook commands that begins
@@ -79,7 +82,14 @@ config.
    worktree isolation, to land an approved branch with
    `.claude/merge-back.sh <branch>`. The installer prints the block only
    on exit 0, never under `--dry-run` or `--adopt`, and only while the
-   project has no task file under `.claude/specs/*/tasks/`.
+   project has no task file under `.claude/specs/*/tasks/`. Before the
+   chain, the block offers the Phase 9 smoke test (R6 on a retrofit), and
+   its last line says how to record the smoke test and mark the bootstrap
+   complete in the state file. While a steering doc is still the
+   installer's stub, a line before the smoke test names it and the phases
+   that fill it in. Fill in the steering docs that line names with the
+   operator first, then offer the smoke test, and mark the bootstrap
+   complete only after the smoke test ran or the operator skipped it.
 
 ## Why this is split from the interview
 

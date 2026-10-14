@@ -58,9 +58,16 @@ project's test/lint/format commands; and it validates its own output with
    This emits `bootstrap.config.yaml` and validates it. If validation fails,
    resolve it with the operator and re-run — never hand off an invalid config.
 
-   For an operator who prefers a live Q&A instead of editing a file, use
-   `bootstrap-interview interactive --prd <PRD-PATH>` — same proposals, asked
-   one question at a time over the terminal.
+   For an operator who prefers a live Q&A to editing a file, give them this
+   command to run in a terminal of their own: the same proposals, asked one
+   question at a time. Don't run it yourself: it reads the answers from the
+   keyboard. With no terminal it refuses and writes no config, and input
+   that ends early takes the proposed default for every later question and
+   says so.
+
+   ```
+   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview interactive --prd <PRD-PATH>
+   ```
 
 ## Fallback: conduct it by hand
 

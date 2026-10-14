@@ -968,7 +968,7 @@ def resolve_config(raw: dict) -> tuple[dict, list[str]]:
         errors.append(
             "autonomous_modes.queue_mode_enabled requires at least one of "
             "loop_mode_enabled or goal_supervised_mode_enabled "
-            "(Bootstrap-Protocol-v2-0-0.md Phase 9.7 / skip policy).")
+            "(Bootstrap-Protocol-v2-8-0.md Phase 9.7 / skip policy).")
 
     # ---- Principles: fill starter set if empty (Phase 4) ------------------ #
     if not cfg["principles"]["ranked"]:

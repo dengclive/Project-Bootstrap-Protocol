@@ -991,8 +991,10 @@ try:
     leftovers = []
     for base, _, files in os.walk(d):
         for f in files:
+            # [WP4 8b] The state lock stays with the state file: the
+            # install took it, and it holds no content.
             if f in ("bootstrap.config.yaml", ".installer-manifest.json",
-                     ".bootstrap-state.json"):
+                     ".bootstrap-state.json", ".bootstrap-state.json.lock"):
                 continue
             leftovers.append(os.path.join(base, f))
     check("L-1b: clean uninstall removes all generated content files",
@@ -1956,6 +1958,22 @@ check("[WP4] G4-3: the interview command has the AI write a missing PRD, as "
       "Phase 0 step 8 says",
       "Phase 0 step 8" in _iv_txt and "docs/prd/<name>.md" in _iv_txt
       and "must be written first" not in _iv_txt)
+# [WP4, IA-1] `bootstrap-interview interactive` reads its answers from the
+# keyboard. Run through the Bash tool before 8c, stdin was /dev/null and it
+# took every proposal and wrote the config, rc 0 (measured). Since 8c it
+# refuses with no terminal and no answer, and input that ends early takes
+# the remaining defaults with a warning. The command hands it to the
+# operator, and gives the AI that reason, not the old one.
+_iv_flat = " ".join(_iv_txt.split())
+check("[WP4] IA-1: the interactive interview is the operator's to run in a "
+      "terminal of their own, never the AI's, with 8c's reason",
+      "interactive --prd" in _iv_flat and "Don't run it yourself" in _iv_flat
+      and "terminal of their own" in _iv_flat
+      and "refuses and writes no config" in _iv_flat
+      and "input that ends early" in _iv_flat
+      and "accepts every proposal" not in _iv_flat
+      and "${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview interactive"
+      in _iv_flat)
 
 # [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
 # and the PRD version header were not, and both went stale — the README at

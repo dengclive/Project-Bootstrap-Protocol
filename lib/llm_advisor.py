@@ -184,7 +184,7 @@ def _merge(det: dict, parsed: dict, notices: list[str]) -> dict:
             out["archetype"]["open_question"] = {
                 "id": "archetype",
                 "prompt": ("LLM was not confident on the archetype. Which "
-                           "Bootstrap-Protocol-v2-0-0.md archetype fits?"),
+                           "Bootstrap-Protocol-v2-8-0.md archetype fits?"),
                 "options": sorted(ARCHETYPES),
                 "default": av,
             }

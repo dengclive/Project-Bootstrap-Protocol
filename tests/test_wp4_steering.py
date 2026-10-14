@@ -15,13 +15,25 @@ sections, and ci-cd.md's one agent stopping point.
 2. ci-cd.md states one stopping point per variant (Phase 5 exit criterion).
 2b. CLAUDE.md's lifecycle points at that stop rather than restating it, so
    no other emitted file names a stop.
+3. [WP4 commit 5] A re-install never overwrites the AI's sections: same
+   config, a changed config, an uninstall, and a doc written before the
+   first install. A kept tech.md or ci-cd.md that lacks what this release
+   added, or whose Test row is stale, says so once on stderr (8a).
+5. [WP4 commit 5, 8a] The other kept-file warnings: a greenfield CLAUDE.md
+   with no `## Never` section; a retrofit CLAUDE.md keyed on retrofit's own
+   WP4 changes, never on a Never list; a kept .claude/.gitignore that does
+   not ignore the state lock; and, on a tree with no installer manifest
+   (a fresh clone), the per-file remedy instead of `--adopt`.
 
 Run: python3 tests/test_wp4_steering.py
 """
 import ast
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
@@ -337,6 +349,351 @@ for label, plan in (("with CI/CD", p_ci), ("opted out", p_out),
                     if p != CICD and STOP_WORDS.search(b))
     check(f"{label}: no emitted file but ci-cd.md states a stopping point",
           others == [], str(others))
+
+# --------------------------------------------------------------------------- #
+# 3. A re-install keeps what the AI wrote
+# --------------------------------------------------------------------------- #
+print("\n== 3. re-install preserves the AI's sections ==")
+INSTALL = os.path.join(ROOT, "bin", "bootstrap-install")
+MANIFEST = ".claude/.installer-manifest.json"
+GIT = shutil.which("git")
+TMP = tempfile.mkdtemp(prefix="wp4-steer-")
+CFG = ("project:\n  name: p\n  archetype: fullstack\n"
+       "principles:\n  tdd_policy: encouraged\n"
+       "commands:\n  test: \"true\"\n  lint: \"true\"\n")
+AI_DNT = ("## Do Not Touch\n\n- `src/billing/**`: payment provider "
+          "contract, frozen until v2.\n\nIf a task needs to change a path "
+          "listed here, stop and ask the operator first.\n")
+AI_STOP = ("## Agent stopping point\n\nThe agent stops after the pull "
+           "request's CI turns green. A person merges it.\n")
+TWO_STOPS = ("## Agent stopping point\n\nThe agent's last action is **PR "
+             "open** (or PR merge). The agent never deploys.\n")
+
+
+def run(d, *extra):
+    return subprocess.run([sys.executable, INSTALL, "-C", d] + list(extra),
+                          capture_output=True, text=True,
+                          env=dict(os.environ, NO_COLOR="1"))
+
+
+def ai_writes(d):
+    """What the AI does in Phases 2 and 5: replace the scaffolds."""
+    tp, cp = os.path.join(d, TECH), os.path.join(d, CICD)
+    t = open(tp).read()
+    t = re.sub(r"## Do Not Touch\n.*?(?=## Documentation Policy)",
+               AI_DNT + "\n", t, flags=re.S)
+    open(tp, "w").write(t)
+    c = open(cp).read()
+    c = re.sub(r"## Agent stopping point\n.*\Z", AI_STOP, c, flags=re.S)
+    open(cp, "w").write(c)
+    return t, c
+
+
+def read(d, rel):
+    try:
+        return open(os.path.join(d, rel)).read()
+    except OSError:
+        return None
+
+
+def write(d, rel, text):
+    with open(os.path.join(d, rel), "w") as fh:
+        fh.write(text)
+
+
+def steering_warnings(r):
+    return [ln for ln in r.stderr.splitlines()
+            if ln.startswith("warning: .claude/steering/")]
+
+
+def warns(r, path):
+    """The `warning:` lines about one path."""
+    return [ln for ln in r.stderr.splitlines()
+            if ln.startswith(f"warning: {path} ")]
+
+
+def skip_line(out, path):
+    return any(ln.strip().startswith("SKIP") and path in ln
+               for ln in out.splitlines())
+
+
+def no_manifest(rel):
+    """[WP4 / KEEP-1] The per-file remedy on a tree with no manifest."""
+    return (f"This tree has no installer manifest, so the installer can't "
+            f"tell whether {rel} was edited. If nobody edited it, move it "
+            f"aside and re-install; that re-creates only {rel}. If it holds "
+            f"edits, merge the change by hand. Don't use --adopt for this: "
+            f"it records every skipped file as the installer's, so the next "
+            f"install replaces each steering doc you or Claude filled in, "
+            f"with no backup.")
+
+
+def proj(name, cfg_text=CFG):
+    d = os.path.join(TMP, name)
+    os.makedirs(d)
+    if GIT:
+        subprocess.run([GIT, "init", "-q", d], check=True)
+    write(d, "bootstrap.config.yaml", cfg_text)
+    return d
+
+
+try:
+    d = os.path.join(TMP, "install-first")
+    os.makedirs(d)
+    cfg = os.path.join(d, "bootstrap.config.yaml")
+    open(cfg, "w").write(CFG)
+    r0 = run(d)
+    check("install-first: the install exits 0 and writes the scaffolds",
+          r0.returncode == 0
+          and "TODO: not yet approved" in (read(d, TECH) or ""),
+          r0.stdout[-600:] + r0.stderr[-600:])
+    want_t, want_c = ai_writes(d)
+    r1 = run(d)
+    check("same config: re-install exits 0, SKIPs both, keeps the AI's text",
+          r1.returncode == 0 and skip_line(r1.stdout, TECH)
+          and skip_line(r1.stdout, CICD)
+          and read(d, TECH) == want_t
+          and read(d, CICD) == want_c,
+          r1.stdout[-800:])
+    open(cfg, "w").write(CFG.replace('test: "true"', 'test: "pytest -q"'))
+    r2 = run(d)
+    t2 = read(d, TECH) or ""
+    check("changed config: re-install still keeps the AI's tech.md (its "
+          "command table stays as written: the cost of D1 (c))",
+          r2.returncode == 0 and t2 == want_t and "pytest -q" not in t2
+          and skip_line(r2.stdout, TECH), r2.stdout[-800:])
+    hook = read(d, ".claude/hooks/test-gate.sh") or ""
+    check("changed config: the test gate itself runs the new command",
+          "pytest -q" in hook)
+    r3 = run(d, "--uninstall")
+    check("uninstall keeps the AI's tech.md and ci-cd.md",
+          r3.returncode == 0
+          and read(d, TECH) == want_t
+          and read(d, CICD) == want_c,
+          r3.stdout[-600:])
+
+    d = os.path.join(TMP, "ai-first")
+    os.makedirs(os.path.join(d, ".claude/steering"))
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(CFG)
+    mine_t = "# Technical Steering\n\n" + AI_DNT
+    open(os.path.join(d, TECH), "w").write(mine_t)
+    r4 = run(d)
+    check("AI-first (written before any install): the install exits 0 and "
+          "keeps it",
+          r4.returncode == 0 and skip_line(r4.stdout, TECH)
+          and read(d, TECH) == mine_t,
+          r4.stdout[-600:])
+
+    d = os.path.join(TMP, "unedited")
+    os.makedirs(d)
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(CFG)
+    run(d)
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(
+        CFG.replace('test: "true"', 'test: "pytest -q"'))
+    r5 = run(d)
+    t5 = read(d, TECH) or ""
+    check("unedited scaffold: a re-install updates tech.md (the installer "
+          "still owns it until the AI writes in it)",
+          r5.returncode == 0 and "| Test      | `pytest -q` |" in t5
+          and "TODO: not yet approved" in t5, r5.stdout[-600:])
+    check("unedited scaffold: no steering warning",
+          steering_warnings(r5) == [], r5.stderr[-600:])
+
+    # ---- 4. What a kept doc missed is said, once, on stderr ------------- #
+    print("\n== 4. a kept tech.md or ci-cd.md says what it missed ==")
+
+    d = os.path.join(TMP, "old-docs")
+    os.makedirs(d)
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(CFG)
+    run(d)
+    # An earlier install's docs, kept by an AI that edited them: no WP4
+    # section in tech.md, and the two-stop sentence in ci-cd.md.
+    t = read(d, TECH)
+    open(os.path.join(d, TECH), "w").write(
+        t.split("\n## Do Not Touch", 1)[0] + "\n## Stack\n\nPython.\n")
+    c = read(d, CICD)
+    open(os.path.join(d, CICD), "w").write(
+        c.split("## Agent stopping point", 1)[0] + TWO_STOPS)
+    r6 = run(d)
+    w6 = steering_warnings(r6)
+    check("old docs kept: one warning names both missing tech.md sections, "
+          "one names the two-stop ci-cd.md, rc 0",
+          r6.returncode == 0 and len(w6) == 2
+          and "'## Do Not Touch', '## Documentation Policy'" in w6[0]
+          and "still names two stops" in w6[1], "\n".join(w6))
+
+    d = os.path.join(TMP, "filled")
+    os.makedirs(d)
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(CFG)
+    run(d)
+    ai_writes(d)
+    r7 = run(d)
+    check("filled by the AI, same config: kept, and no steering warning",
+          r7.returncode == 0 and steering_warnings(r7) == []
+          and skip_line(r7.stdout, TECH), r7.stderr[-600:])
+    open(os.path.join(d, "bootstrap.config.yaml"), "w").write(
+        CFG.replace('test: "true"', 'test: "pytest -q"'))
+    r8 = run(d)
+    w8 = steering_warnings(r8)
+    check("filled, commands.test changed: one warning names the stale Test "
+          "row and the command the gates run",
+          r8.returncode == 0 and len(w8) == 1
+          and "its Test row says `true`, but commands.test is `pytest -q`"
+          in w8[0], "\n".join(w8))
+
+    # ---- 5. The other kept files, and a tree with no manifest (8a) ------ #
+    print("\n== 5. a kept CLAUDE.md or .claude/.gitignore; a fresh clone ==")
+    # [V7] The clause that CLAUDE.md's lifecycle ends at ci-cd.md's stop is
+    # true only when this run wrote CLAUDE.md.
+    check("ci-cd.md kept, CLAUDE.md written: the warning says CLAUDE.md's "
+          "lifecycle now ends at the stop ci-cd.md names",
+          len(w6) == 2 and "CLAUDE.md's lifecycle now ends at the stop this "
+          "file names" in w6[1], "\n".join(w6))
+
+    g = proj("g-claude")
+    run(g)
+    write(g, "CLAUDE.md", re.sub(r"^## Never\n.*?(?=^## )", "",
+                                 read(g, "CLAUDE.md"), flags=re.S | re.M))
+    write(g, CICD, read(g, CICD).split("## Agent stopping point", 1)[0]
+          + TWO_STOPS)
+    rg = run(g)
+    wc = warns(rg, "CLAUDE.md")
+    check("greenfield CLAUDE.md kept with no `## Never` section: one warning "
+          "lists the Never list, session hygiene, the steering index and the "
+          "/escalate line",
+          rg.returncode == 0 and len(wc) == 1
+          and "(the Never list, session hygiene, the steering index and the "
+              "`/escalate` line)" in wc[0]
+          and "'## Never'" in wc[0]
+          and "Merge them by hand from a fresh install's CLAUDE.md." in wc[0],
+          rg.stderr[-1200:])
+    wk = warns(rg, CICD)
+    check("ci-cd.md and CLAUDE.md both kept: the ci-cd.md warning makes no "
+          "claim about CLAUDE.md's lifecycle",
+          len(wk) == 1 and "still names two stops" in wk[0]
+          and "CLAUDE.md" not in wk[0]
+          and "Keep one, as Bootstrap Protocol Phase 5 asks." in wk[0],
+          "\n".join(wk))
+
+    RCFG = _RETRO_BASE
+    rd = proj("r-claude", RCFG)
+    run(rd)
+    fresh = read(rd, "CLAUDE.md")
+    write(rd, "CLAUDE.md", fresh.replace(" -> stop as `ci-cd.md` says.", "."))
+    rr = run(rd)
+    wr = warns(rr, "CLAUDE.md")
+    check("retrofit CLAUDE.md kept without this release's lifecycle ending: "
+          "one warning names it, and says nothing of a Never list",
+          rr.returncode == 0 and len(wr) == 1
+          and "-> stop as `ci-cd.md` says." in wr[0]
+          and "Never" not in wr[0] and "Phase 8" not in wr[0], "\n".join(wr))
+    write(rd, "CLAUDE.md", fresh + "\nA project rule the operator added.\n")
+    rr2 = run(rd)
+    check("retrofit CLAUDE.md kept as a fresh install's plus one line (what "
+          "the warning asks for): no CLAUDE.md warning",
+          rr2.returncode == 0 and skip_line(rr2.stdout, "CLAUDE.md")
+          and warns(rr2, "CLAUDE.md") == [], rr2.stderr[-800:])
+
+    RCFG_OFF = (RCFG.replace("secrets:\n  enabled: true",
+                             "secrets:\n  enabled: false")
+                .replace("deps:\n  enabled: true", "deps:\n  enabled: false"))
+    ro = proj("r-off", RCFG_OFF)
+    run(ro)
+    fresh_off = read(ro, "CLAUDE.md")
+    write(ro, "CLAUDE.md", fresh_off.replace(
+        "1. **🔔** A Do Not Touch path needs access or modification.",
+        "1. **🔔** A do-not-touch / never-read path needs access or "
+        "modification.").replace(
+        "4. **🔔** Implementation reveals",
+        "4. **🔔** A dependency not on the `deps.md` approved list is "
+        "needed.\n5. **🔔** Implementation reveals"))
+    rof = run(ro)
+    wo = warns(rof, "CLAUDE.md")
+    check("retrofit, gates off: a kept CLAUDE.md whose urgent list still "
+          "names `deps.md` and never-read paths gets one warning naming them",
+          rof.returncode == 0 and len(wo) == 1 and "`deps.md`" in wo[0]
+          and "never-read" in wo[0] and "-> stop as" not in wo[0]
+          and "Never" not in wo[0], rof.stderr[-1000:])
+
+    gi = read(rd, ".claude/.gitignore")
+    write(rd, ".claude/.gitignore",
+          gi.replace(".retrofit-state.json.lock\n", ""))
+    rgi = run(rd)
+    wg = warns(rgi, ".claude/.gitignore")
+    check("retrofit .claude/.gitignore kept without the lock line: one "
+          "warning names `.retrofit-state.json.lock` and the line to add",
+          not GIT or (rgi.returncode == 0 and len(wg) == 1
+                      and "`.retrofit-state.json.lock`" in wg[0]
+                      and "Add that line to .claude/.gitignore." in wg[0]),
+          rgi.stderr[-800:])
+    gg = proj("g-gitignore")
+    run(gg)
+    write(gg, ".claude/.gitignore",
+          read(gg, ".claude/.gitignore") + "scratch/\n")
+    rgg = run(gg)
+    check("greenfield .claude/.gitignore kept with its lock line: no lock "
+          "warning", rgg.returncode == 0 and skip_line(rgg.stdout,
+                                                       ".claude/.gitignore")
+          and warns(rgg, ".claude/.gitignore") == [], rgg.stderr[-600:])
+
+    # [KEEP-1, NF-1] A fresh clone: the manifest is gitignored, so every
+    # file is unproven. --adopt would record the filled product.md as the
+    # installer's and the next install would replace it, with no backup.
+    fc = proj("clone")
+    run(fc)
+    PRODUCT = ".claude/steering/product.md"
+    write(fc, PRODUCT, read(fc, PRODUCT) + "\nFilled by Claude.\n")
+    filled = read(fc, PRODUCT)
+    write(fc, CICD, read(fc, CICD).split("## Agent stopping point", 1)[0]
+          + TWO_STOPS)
+    os.remove(os.path.join(fc, MANIFEST))
+    rc1 = run(fc)
+    wf = warns(rc1, CICD)
+    check("fresh clone, stale ci-cd.md: the warning gives the per-file "
+          "remedy (move it aside and re-install), never --adopt",
+          rc1.returncode == 0 and len(wf) == 1
+          and no_manifest(CICD) in wf[0], "\n".join(wf))
+    check("fresh clone: no stderr line advises --adopt; each line that "
+          "names it says not to use it",
+          all("Don't use --adopt for this" in ln
+              for ln in rc1.stderr.splitlines() if "--adopt" in ln)
+          and "run with --adopt" not in rc1.stderr, rc1.stderr[-1200:])
+    os.rename(os.path.join(fc, CICD), os.path.join(fc, CICD + ".mine"))
+    rc2 = run(fc)
+    check("following it: the re-install creates only ci-cd.md and keeps the "
+          "filled product.md",
+          rc2.returncode == 0
+          and "CREATE .claude/steering/ci-cd.md" in rc2.stdout
+          and "create=1 " in rc2.stdout and read(fc, PRODUCT) == filled,
+          rc2.stdout[-600:])
+
+    hk = proj("hook-clone")
+    run(hk)
+    write(hk, ".claude/hooks/test-gate.sh",
+          read(hk, ".claude/hooks/test-gate.sh")
+          + "# an earlier install's bytes\n")
+    os.remove(os.path.join(hk, MANIFEST))
+    rh = run(hk)
+    wh = warns(rh, ".claude/hooks/test-gate.sh")
+    check("fresh clone, kept hook script: the existing warning uses the same "
+          "per-file remedy, and no longer sends anyone to --adopt",
+          rh.returncode == 0 and len(wh) == 1
+          and no_manifest(".claude/hooks/test-gate.sh") in wh[0]
+          and "run with --adopt" not in rh.stderr, rh.stderr[-1000:])
+
+    sg = proj("secrets-clone")
+    run(sg)
+    write(sg, ".claude/hooks/secrets-gate.sh",
+          read(sg, ".claude/hooks/secrets-gate.sh") + "# a local line\n")
+    os.remove(os.path.join(sg, MANIFEST))
+    rs = run(sg)
+    check("fresh clone, kept security gate (exit 3): the note gives the "
+          "per-file remedy instead of `--adopt` and a re-run",
+          rs.returncode == 3
+          and no_manifest(".claude/hooks/secrets-gate.sh") in rs.stderr
+          and "records them as ours" not in rs.stderr, rs.stderr[-1200:])
+finally:
+    shutil.rmtree(TMP, ignore_errors=True)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

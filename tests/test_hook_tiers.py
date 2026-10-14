@@ -223,8 +223,10 @@ try:
               f"warning: {rel}" in r.stderr
               and "kept your local edits" not in r.stderr, r.stderr[-500:])
         check("D4 no-manifest: the warning names the missing manifest and "
-              "offers --adopt",
-              "no installer manifest" in r.stderr and "--adopt" in r.stderr,
+              "gives the per-file remedy, not --adopt",
+              "no installer manifest" in r.stderr
+              and "move it aside and re-install" in r.stderr
+              and "Don't use --adopt for this" in r.stderr,
               r.stderr[-500:])
         ra = subprocess.run([sys.executable, BIN, "-C", d, "--adopt"],
                             capture_output=True, text=True)

@@ -18,6 +18,7 @@ included for the same reason.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -26,13 +27,15 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from minyaml import key_line, load_yaml, YAMLError   # stdlib-only YAML subset
 from templates import (  # all file bodies live here
     TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES,
-    INDEX_COLUMNS, SPEC_START_CHAIN, SPEC_TASK_FILE, SPEC_VERSIONING_PATH,
+    INDEX_COLUMNS, PROTOCOL_DOC, SPEC_START_CHAIN, SPEC_TASK_FILE,
+    SPEC_VERSIONING_PATH,
     _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
 
@@ -56,6 +59,13 @@ INSTALLER_VERSION = "1.1.0"
 # disk is live but the gates in it are not wired. 0 is reserved for an install
 # whose enforcement was verified.
 EXIT_UNENFORCED = 3
+# [WP4 8b] Exit code for "another process held a state lock for the whole
+# wait, so this run wrote nothing" (_install_lock). Distinct from 2, which
+# means fix the config, and 3, which means files were written: here the
+# config is fine and the tree is as it was, so the next move is to re-run
+# once the loop wrapper or the other install has finished. 1 is
+# `--ic-checks` failing and an uncaught error, so 4 is the next free code.
+EXIT_LOCKED = 4
 
 
 # TEL-01 (v2.4.0 fold): `telemetry_export_enabled` is a top-level flag that
@@ -775,6 +785,15 @@ def _save_forced_copy(bak_root: Path, root: Path, rel: str, text: str,
     return str(dest.relative_to(root))
 
 
+def _forced_note(saved: str, *, dry: bool) -> str:
+    """[WP4 / DOC-2] The UPDATE line's note for a file --force displaced.
+    `--force --dry-run` is how an operator previews what --force would
+    replace, and it saves nothing (_save_forced_copy), so a dry run says
+    where the copy would go, not that it went there."""
+    return (f"  (forced; previous version "
+            f"{'would be saved' if dry else 'saved'} to {saved})")
+
+
 def _skip_reason(untracked: bool, no_manifest: bool) -> str:
     """Why a planned path was left alone — said accurately.
 
@@ -805,6 +824,21 @@ def _classify(root: Path, action: dict) -> str:
 
 def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                dry: bool, force: bool, adopt: bool = False) -> dict:
+    """[WP4 8b] A real apply (not --dry-run) runs under _install_lock, from
+    before its first write to after the manifest write, so a loop wrapper's
+    state update and an install never interleave, and a run that cannot get
+    the lock writes nothing (StateLockHeld; main() exits EXIT_LOCKED). The
+    three state writers run inside it and take no lock of their own."""
+    if dry:
+        return _apply_plan(root, plan, cfg, dry=dry, force=force,
+                           adopt=adopt)
+    with _install_lock(root, cfg):
+        return _apply_plan(root, plan, cfg, dry=dry, force=force,
+                           adopt=adopt)
+
+
+def _apply_plan(root: Path, plan: list[dict], cfg: dict, *,
+                dry: bool, force: bool, adopt: bool = False) -> dict:
     manifest = {
         "installer_version": INSTALLER_VERSION,
         "protocol_version": PROTOCOL_VERSION,
@@ -939,7 +973,7 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
                     saved = _save_forced_copy(bak_root, root, action["path"],
                                               disk_text, dry=dry)
                     summary["backups"].append(saved)
-                    note = f"  (forced; previous version saved to {saved})"
+                    note = _forced_note(saved, dry=dry)
                 elif adopt:
                     # [round-6 F6] The non-destructive escape. The manifest is
                     # gitignored, so a clone carries the whole tree and none
@@ -1101,6 +1135,10 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
         # D6 / C1: single cfg["mode"] dispatch at the state-write site.
         # _write_state is AST-byte-identical; _write_retrofit_state is a
         # sibling. Greenfield path is point-equivalent to the prior code.
+        # [WP4] No longer byte-identical: both writers read through the
+        # parse guard (_read_state) and write through _replace_state, and
+        # they run, with reconcile above and the manifest write below,
+        # inside apply_plan's _install_lock.
         if cfg.get("mode") == "retrofit":
             _write_retrofit_state(root, cfg, manifest)
         else:
@@ -1896,7 +1934,7 @@ def _apply_settings_json(root: Path, action: dict, manifest: dict,
             saved = _save_forced_copy(bak_root, root, action["path"], text,
                                       dry=dry)
             summary["backups"].append(saved)
-            note = f"  (forced; previous version saved to {saved})"
+            note = _forced_note(saved, dry=dry)
         summary["update"] += 1
         print(f"  UPDATE {action['path']}{note}")
         if not dry:
@@ -2786,7 +2824,7 @@ def _apply_git_hooks(root: Path, plan: list[dict], manifest: dict,
                         path if not os.path.isabs(path)
                         else "git-hooks/" + target.name, text, dry=dry)
                     summary["backups"].append(saved)
-                    note += f"  (forced; previous version saved to {saved})"
+                    note += _forced_note(saved, dry=dry)
                     verdict = "update"
                 elif adopt:
                     summary["adopted"] += 1
@@ -3313,13 +3351,171 @@ def _below_top_notes(root: Path, cfg: dict) -> list[str]:
     return [msg]
 
 
+# --------------------------------------------------------------------------- #
+# State files: one lock per apply, one parse guard, one replace
+# --------------------------------------------------------------------------- #
+# [WP4 8b] How long a real apply polls for a state lock that another process
+# holds before it gives up (EXIT_LOCKED). A module constant so the tests can
+# patch it; 30 s sits well inside the 120 s an agent's Bash tool allows a
+# command, so the refusal reaches the agent instead of a timeout.
+_LOCK_WAIT_S = 30
+_LOCK_POLL_S = 0.1
+
+
+class StateLockHeld(Exception):
+    """[WP4 8b] A state lock stayed held for _LOCK_WAIT_S. `.path` is the
+    lock, relative to the project."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        self.path = path
+
+
+@contextlib.contextmanager
+def _install_lock(root: Path, cfg: dict):
+    """[WP4 8b] The emitted wrappers' state-update idiom, held for a whole
+    apply: `flock` on each state file's sibling `<state>.lock` (the
+    wrappers' `exec 9>"$STATE.lock"`), never on the state file itself,
+    because the rename in _replace_state swaps the file, so a second writer
+    would lock the new one while the first still held the old. An install
+    now waits for a wrapper's update instead of interleaving with it.
+
+    Taken once, before the first write, and held through the manifest write,
+    so a timeout writes nothing; opening a lock file creates it, empty, and
+    the emitted .claude/.gitignore covers it. It holds
+    .bootstrap-state.json.lock in both modes (reconcile writes that file on
+    a retrofit install too) and then, in retrofit mode,
+    .retrofit-state.json.lock, always in that order. Each lock is polled
+    with LOCK_NB until _LOCK_WAIT_S pass, then StateLockHeld. The writers
+    take no lock of their own: a second flock on the same file from this
+    process would fail with EAGAIN, so a nested lock would make the install
+    wait on itself. --uninstall leaves the lock files. No fcntl (Windows):
+    no lock, as before."""
+    try:
+        import fcntl
+    except ImportError:            # pragma: no cover - not POSIX
+        yield
+        return
+    names = [STATE] + ([RETROFIT_STATE] if cfg.get("mode") == "retrofit"
+                       else [])
+    with contextlib.ExitStack() as held:
+        for name in names:
+            lock = root / f"{name}.lock"
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            fh = held.enter_context(open(lock, "a"))
+            deadline = time.monotonic() + _LOCK_WAIT_S
+            while True:
+                try:
+                    fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise StateLockHeld(f"{name}.lock") from None
+                    time.sleep(_LOCK_POLL_S)
+        # Closing each file (ExitStack, last first) releases its lock.
+        yield
+
+
+def _replace_state(state_path: Path, text: str) -> None:
+    """[WP4 8b] Write `<state>.tmp`, fsync it, and rename it over the state
+    file, so a reader never sees a half-written state file."""
+    tmp = state_path.with_name(state_path.name + ".tmp")
+    with open(tmp, "w") as fh:
+        fh.write(text)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, state_path)
+
+
+def _read_state(root: Path, rel: str) -> tuple[dict, str | None]:
+    """[WP4 ruling 12 (a)] The parse guard both state writers call. Returns
+    (state, raw): the file's JSON object, or {} when the file is absent or
+    holds none, and the text read (None when the file is absent, unreadable
+    or not UTF-8), which _write_state's IC-3 backup takes.
+
+    A state file that did not parse used to be replaced at exit 0 with no
+    word, so one typo in a hand edit (Next steps asks for one) dropped every
+    key it held. Now its bytes are kept first, in a copy beside it named
+    `<state>.pre-unparsed-<UTC stamp>` (see _keep_unparsed), which the
+    emitted .claude/.gitignore covers with its `<state>.pre-*` line, and a
+    `warning:` line names the copy. The run then carries on with an empty
+    state, as before. A file that parses to something other than an object
+    (a list, null) counts as unparsed: the writers need keys, and it used
+    to raise a traceback after every other file was written. An empty file
+    holds no key to restore, so it gets no copy, as IC-3 makes no backup of
+    one. The caller holds _install_lock, so nothing changes the file
+    between this read and the writer's rename."""
+    path = root / rel
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return {}, None
+    try:
+        raw = data.decode()
+    except UnicodeDecodeError:
+        raw = None
+    if raw is not None:
+        try:
+            state = json.loads(raw)
+        except (ValueError, RecursionError):
+            state = None
+        if isinstance(state, dict):
+            return state, raw
+    if not data.strip():
+        return {}, raw
+    copy = _keep_unparsed(path, data).relative_to(root).as_posix()
+    _warn(f"{rel} does not parse as a JSON object, so this run kept a copy "
+          f"of it at {copy} and wrote a new {rel} from the config. The keys "
+          f"only the old file held were dropped; restore the ones you need "
+          f"from that copy.")
+    return {}, raw
+
+
+def _keep_unparsed(path: Path, data: bytes) -> Path:
+    """[WP4 ruling 12 (a)] Copy a state file's bytes to
+    `<name>.pre-unparsed-<UTC stamp>`, adding `.1`, `.2` and so on when that
+    name is taken (two failures in one second). Opened with "x", so a copy
+    is never overwritten, the way _save_forced_copy never clobbers a backup."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base = path.with_name(f"{path.name}.pre-unparsed-{stamp}")
+    dest, n = base, 1
+    while True:
+        try:
+            with open(dest, "xb") as fh:
+                fh.write(data)
+            return dest
+        except FileExistsError:
+            dest = base.with_name(f"{base.name}.{n}")
+            n += 1
+
+
+def _protocol_doc_path() -> str | None:
+    """[WP4 / g5-2b] The protocol document beside this installer, or None.
+    The assumption ledger names the document but no install ships it, so
+    the state file records where it is on the machine that ran the install.
+    [WP4 / X6] A plugin copy carries the document as toolchain/protocol.md,
+    beside toolchain/lib, so that name is the fallback."""
+    base = Path(__file__).resolve().parent.parent
+    for doc in (base / PROTOCOL_DOC, base / "protocol.md"):
+        if doc.is_file():
+            return str(doc)
+    return None
+
+
 def _reconcile_orphaned_substrate(root: Path) -> None:
     """Downgrade a greenfield state file's gate_substrate to "shell" when
     the SDK gate module it refers to is no longer emitted (e.g. a
     greenfield sdk-callable install re-applied in retrofit mode, whose
     separate .retrofit-state.json never touches .bootstrap-state.json).
     Without this the state advertises "sdk-callable" while gates.py has
-    been stale-deleted from disk - a silent enforcement gap."""
+    been stale-deleted from disk - a silent enforcement gap.
+
+    [WP4 8b / X7] It runs inside apply_plan's _install_lock and writes
+    through _replace_state. Unlocked, it wrote in place while a wrapper
+    could be between its read and its rename, and in retrofit mode, where
+    no later write re-stamps this file, the wrapper's rename undid the
+    downgrade. A file that does not parse is left for _write_state's parse
+    guard (greenfield); a retrofit install does not rewrite it."""
     sp = root / STATE
     if not sp.exists():
         return
@@ -3327,9 +3523,9 @@ def _reconcile_orphaned_substrate(root: Path) -> None:
         st = json.loads(sp.read_text())
     except Exception:
         return
-    if st.get("gate_substrate") == "sdk-callable":
+    if isinstance(st, dict) and st.get("gate_substrate") == "sdk-callable":
         st["gate_substrate"] = "shell"
-        sp.write_text(json.dumps(st, indent=2) + "\n")
+        _replace_state(sp, json.dumps(st, indent=2) + "\n")
         print('WARNING: .bootstrap-state.json advertised gate_substrate '
               '"sdk-callable" but the SDK gate module is no longer emitted '
               'by this install; reconciled to "shell".', file=sys.stderr)
@@ -3343,18 +3539,12 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     proj = cfg.get("project", {})
     flags = cfg.get("autonomous_modes", {})
     state_path = root / STATE
-    state: dict = {}
-    raw = None
-    if state_path.exists():
-        try:
-            raw = state_path.read_text()
-        except Exception:
-            raw = None
-        if raw is not None:
-            try:
-                state = json.loads(raw)
-            except Exception:
-                state = {}
+    # [WP4 / g5-3] Whether this write creates the file; read before
+    # anything below can.
+    fresh = not state_path.exists()
+    # [WP4 ruling 12 (a)] A file that does not parse is copied aside and
+    # named in a warning before this run replaces it (_read_state).
+    state, raw = _read_state(root, STATE)
     # --- IC-3 migration (Companion "Migration notes"): any pre-2.0.0 state
     # file - INCLUDING one too corrupt to parse, exactly the case a backup
     # exists for - is backed up once before being rewritten. The backup is
@@ -3395,6 +3585,11 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],
         "deterministic_install": True,
+        # [WP4 / g5-2b] Where the protocol document is on this machine (the
+        # assumption ledger points here), or null. Refreshed on every
+        # install. An absolute path with the home directory in it, so it
+        # stays in this gitignored file.
+        "protocol_doc": _protocol_doc_path(),
         # --- Bootstrap-Protocol-v2-0-0.md Phase 0 required classification fields ---
         "archetype": proj.get("archetype"),
         "prd_path": proj.get("prd_path"),
@@ -3440,8 +3635,17 @@ def _write_state(root: Path, cfg: dict, manifest: dict) -> None:
     state.setdefault("queue_runs_history", [])
     state.setdefault("deferred_items", {})
     state.setdefault("skippable_phase_decisions", {})
+    # [WP4 / g5-3] Phase 10 step 2 marks the bootstrap complete, and only
+    # the AI or the operator knows when that is, so the installer seeds the
+    # key false when it creates the file and never changes it after. It
+    # never adds the key to a file that exists either: that file may record
+    # a bootstrap finished before the key existed, and false would be
+    # untrue. After a parse failure the key is absent, not false, for the
+    # same reason.
+    if fresh:
+        state.setdefault("bootstrap_complete", False)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    _replace_state(state_path, json.dumps(state, indent=2) + "\n")
 
 
 def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
@@ -3484,12 +3688,11 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
     am = r.get("autonomous_modes", {})
 
     state_path = root / RETROFIT_STATE
-    state: dict = {}
-    if state_path.exists():
-        try:
-            state = json.loads(state_path.read_text())
-        except Exception:
-            state = {}
+    # [WP4 ruling 12 (a)] The same parse guard as _write_state. RETROFIT.md
+    # R7 step 5 asks for a hand edit of this file, and a typo there used to
+    # put retrofit_active back to true at exit 0, with no word and no copy,
+    # so the retrofit wrappers refused to run (review STATE-1).
+    state, _ = _read_state(root, RETROFIT_STATE)
 
     # B5 rule: *_enabled MUST be false at retrofit time. The wizard
     # scaffolds but never enables; if a stale state file has them true,
@@ -3534,6 +3737,8 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
         # written here for the same reasons as the greenfield writer.
         "gate_substrate": "shell",
         "retrofit_protocol_version": RETROFIT_PROTOCOL_VERSION,
+        # [WP4 / g5-2b] As in _write_state: the ledger points here.
+        "protocol_doc": _protocol_doc_path(),
         "installed_by": f"bootstrap-installer {INSTALLER_VERSION}",
         "installed_at": manifest["generated_at"],
         "deterministic_install": True,
@@ -3591,7 +3796,7 @@ def _write_retrofit_state(root: Path, cfg: dict, manifest: dict) -> None:
             f"bug if you see this warning.", file=sys.stderr)
 
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(state, indent=2) + "\n")
+    _replace_state(state_path, json.dumps(state, indent=2) + "\n")
 
 
 def _load_manifest(root: Path) -> dict | None:
@@ -3910,6 +4115,166 @@ def _worktrees_ignore_warning(root: Path, summary: dict,
             f"{rel}.")
 
 
+def _no_manifest_remedy(rel: str) -> str:
+    """[WP4 / KEEP-1, NF-1] What to do about one file that a tree with no
+    installer manifest kept. The manifest is gitignored, so a fresh clone
+    has none and every file an earlier install wrote reads as unproven. The
+    advice was --adopt and a re-install, but --adopt records EVERY skipped
+    file as the installer's, so the next install replaced each steering doc
+    Claude had filled in, with no backup (measured). Moving the one file
+    aside and re-installing re-creates only that file (measured: create=1,
+    the filled docs kept). Every warning about a file such a tree kept ends
+    with this."""
+    return (f"This tree has no installer manifest, so the installer can't "
+            f"tell whether {rel} was edited. If nobody edited it, move it "
+            f"aside and re-install; that re-creates only {rel}. If it holds "
+            f"edits, merge the change by hand. Don't use --adopt for this: "
+            f"it records every skipped file as the installer's, so the next "
+            f"install replaces each steering doc you or Claude filled in, "
+            f"with no backup.")
+
+
+def _steering_warnings(root: Path, summary: dict, cfg: dict,
+                       dry: bool = False) -> list[str]:
+    """[WP4 8a] tech.md, ci-cd.md and CLAUDE.md are the AI's once it writes
+    in them (Phases 2, 5 and 8; D1 (c)), so the hand-edit guard skips them
+    and a re-install never delivers what WP4 added. That is correct, but the
+    SKIP line alone does not say what was missed. For each one skipped,
+    return a message only when the file on disk lacks what this release
+    added, or when tech.md's Test row names a command the gates no longer
+    run (the implementer and the integrator read the Test command from
+    tech.md). CLAUDE.md is keyed by mode: greenfield on the `## Never`
+    section, and retrofit, which has no Never list (ruling 4 (a)), on its
+    own WP4 changes (the lifecycle's last step and, with a gate off, the
+    shared urgent list). One more for a skipped .claude/.gitignore that
+    does not ignore a state lock this install takes (_install_lock). On a
+    tree with no installer manifest each message ends with
+    _no_manifest_remedy instead of a hand fix. Reads the on-disk files
+    only; writes nothing."""
+    skipped = summary.get("skipped_paths", ())
+    unproven = bool(summary.get("no_manifest"))
+    did = "would not receive" if dry else "did not receive"
+    retro = cfg.get("mode") == "retrofit"
+    # Where each mode's protocol asks for what tech.md and ci-cd.md missed.
+    tech_phase = "RETROFIT.md R2" if retro else "Bootstrap Protocol Phase 2"
+    stop_phase = ("RETROFIT.md R8.F" if retro
+                  else "Bootstrap Protocol Phase 5")
+    msgs = []
+
+    def _read(rel):
+        try:
+            return (root / rel).read_text(errors="replace")
+        except OSError:
+            return None
+
+    def _heads(text):
+        return {ln.strip() for ln in text.splitlines() if ln.startswith("## ")}
+
+    rel = ".claude/steering/tech.md"
+    text = _read(rel) if rel in skipped else None
+    if text is not None:
+        missing = [h for h in ("## Do Not Touch", "## Documentation Policy")
+                   if h not in _heads(text)]
+        if missing:
+            msgs.append(
+                f"{rel} was left as it is (see its SKIP line), so it {did} "
+                f"the section(s) {', '.join(repr(h) for h in missing)}, and "
+                f"it has none. {tech_phase} asks for both; CLAUDE.md's first "
+                f"urgent escalation names the Do Not Touch list."
+                + (" " + _no_manifest_remedy(rel) if unproven else ""))
+        want = (cfg["commands"].get("test") or "").strip()
+        for ln in text.splitlines():
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if (ln.lstrip().startswith("|") and len(cells) >= 2
+                    and cells[0] == "Test"):
+                have = cells[1].strip("`").strip()
+                if want and have != want:
+                    msgs.append(
+                        f"{rel} was left as it is, and its Test row says "
+                        f"`{have}`, but commands.test is `{want}`, which is "
+                        f"what the gates run. The implementer and the "
+                        f"integrator read the Test command from {rel}"
+                        + (". " + _no_manifest_remedy(rel) if unproven
+                           else ": update that row."))
+                break
+
+    claude_kept = "CLAUDE.md" in skipped
+    rel = ".claude/steering/ci-cd.md"
+    text = _read(rel) if rel in skipped else None
+    if text is not None and "(or PR merge)" in text:
+        # [WP4 / V7] The lifecycle clause holds only if this run wrote
+        # CLAUDE.md; a kept CLAUDE.md is whatever it was.
+        msgs.append(
+            f"{rel} was left as it is (see its SKIP line), so it {did} the "
+            f"one-stop wording, and its Agent stopping point still names two "
+            f"stops (PR open, or PR merge)."
+            + ("" if claude_kept else " CLAUDE.md's lifecycle now ends at "
+               "the stop this file names.")
+            + (" " + _no_manifest_remedy(rel) if unproven else
+               f" Keep one, as {stop_phase} asks."))
+
+    rel = "CLAUDE.md"
+    text = _read(rel) if claude_kept else None
+    by_hand = " Merge them by hand from a fresh install's CLAUDE.md."
+    if text is not None and not retro and "## Never" not in _heads(text):
+        msgs.append(
+            f"{rel} was left as it is (see its SKIP line), so it {did} this "
+            f"release's Phase 8 text (the Never list, session hygiene, the "
+            f"steering index and the `/escalate` line), and it has no "
+            f"'## Never' section."
+            + (" " + _no_manifest_remedy(rel) if unproven else by_hand))
+    elif text is not None and retro:
+        # [WP4 / scope F5] A retrofit CLAUDE.md has no Never list, so the
+        # greenfield check could never be cleared by following its own
+        # advice. Key on what WP4 changed in this one instead.
+        parts = []
+        if "-> stop as `ci-cd.md` says." not in " ".join(text.split()):
+            parts.append("Its lifecycle does not end with '-> stop as "
+                         "`ci-cd.md` says.'")
+        stale = []
+        if (not cfg["deps"]["enabled"]
+                and "`deps.md` approved list" in text):
+            stale.append("`deps.md`")
+        if not cfg["secrets"]["enabled"] and "never-read path" in text:
+            stale.append("never-read paths (`secrets.md`)")
+        if stale:
+            parts.append(f"Its urgent list still names {' and '.join(stale)},"
+                         f" which this install does not write.")
+        if parts:
+            msgs.append(
+                f"{rel} was left as it is (see its SKIP line), so it {did} "
+                f"this release's changes to the retrofit CLAUDE.md. "
+                + " ".join(parts)
+                + (" " + _no_manifest_remedy(rel) if unproven else by_hand))
+
+    # [WP4 / V7] The state locks _install_lock creates. A skipped
+    # .claude/.gitignore (edited, or in a fresh clone) never receives a line
+    # this release added, and the retrofit one gained
+    # `.retrofit-state.json.lock` in WP4; without it, `git add .claude/`
+    # (Next steps, line 1) stages the empty lock. Outside a repository there
+    # is nothing to stage.
+    rel = ".claude/.gitignore"
+    if rel in skipped:
+        bare = []
+        for name in [STATE] + ([RETROFIT_STATE] if retro else []):
+            r = _git_out(root, "check-ignore", "-q", "--no-index",
+                         f"{name}.lock")
+            if r is not None and r[0] == 1:
+                bare.append(f"{name}.lock")
+        if bare:
+            one = len(bare) == 1
+            msgs.append(
+                f"{rel} was left as it is (see its SKIP line), so it {did} "
+                f"the line{'' if one else 's'} "
+                + " and ".join(f"`{Path(p).name}`" for p in bare)
+                + f", and no other ignore rule covers {' or '.join(bare)}, "
+                f"which every install now creates. `git add .claude/` "
+                f"stages {'it' if one else 'them'}."
+                + (" " + _no_manifest_remedy(rel) if unproven else
+                   f" Add {'that line' if one else 'those lines'} to {rel}."))
+    return msgs
+
+
 def _empty_command_warnings(cfg: dict) -> list[str]:
     """[I-10] One message per empty command in cfg["_command_warnings"].
     What it says depends on whether the hook that runs the command is in
@@ -3940,6 +4305,32 @@ def _empty_command_warnings(cfg: dict) -> list[str]:
     return msgs
 
 
+# [WP4 / X4] The steering docs Phases 1 to 8 (RETROFIT.md R1 to R5.5, and
+# R8.F) have the AI fill in with the operator, which the installer writes as
+# stubs.
+_STEERING_STUBS = tuple(".claude/steering/" + n for n in
+                        ("product.md", "tech.md", "structure.md", "ci-cd.md"))
+
+
+def _unfilled_steering(root: Path) -> list[str]:
+    """[WP4 / X4] The steering stubs this install still owns: in the
+    manifest this run wrote, unchanged on disk, and not a skipped local
+    edit. A skip records the on-disk digest (_is_operator_content, case 3),
+    so digest equality alone would call a filled doc a stub, and the
+    previous run's manifest has no entry on a first install."""
+    m = _load_manifest(root)
+    files = m.get("files", []) if isinstance(m, dict) else []
+    known = {e.get("path"): e for e in files if isinstance(e, dict)}
+    out = []
+    for rel in _STEERING_STUBS:
+        try:
+            on_disk = _digest((root / rel).read_text())
+        except (OSError, ValueError):
+            continue
+        if rel in known and not _is_operator_content(known[rel], on_disk):
+            out.append(rel)
+    return out
+
 
 def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     """[WP3 agents-handoff, item 10] The Phase 10 handoff's "next three
@@ -3960,7 +4351,14 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     branch with .claude/merge-back.sh (D6). The first line names every
     path the plan writes outside .claude/ (CLAUDE.md, and the root
     .gitignore block when a wrapper is emitted), not .claude/ alone.
-    `paths` is the plan's paths; None builds the plan from `cfg`."""
+    `paths` is the plan's paths; None builds the plan from `cfg`.
+
+    [WP4 / g5-4, X4] Before real work, the Phase 9 smoke test (RETROFIT.md
+    R6), and last, how to record it and mark the bootstrap complete. That
+    pair would send Claude from the install to the smoke test and then to
+    bootstrap_complete over stub steering docs, so while this install still
+    owns a stub (_unfilled_steering), a line before the smoke test names it
+    and the phases that fill it in."""
     specs = root / ".claude" / "specs"
     try:
         if any(specs.glob("*/tasks/*")):
@@ -3972,12 +4370,40 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     # A file at the root by name, anything deeper by its top directory.
     top = sorted({p.split("/", 1)[0] + ("/" if "/" in p else "")
                   for p in paths if not p.startswith(".claude/")})
+    retro = cfg.get("mode") == "retrofit"
     lines = [
         "Commit what the install wrote: "
         + ", ".join([".claude/"] + top)
         + " (and docs/prd/, if you wrote a PRD).",
-        f"Start real work with {SPEC_START_CHAIN}.",
     ]
+    stubs = _unfilled_steering(root)
+    if stubs:
+        # The protocol at the path the state file records (a plugin copy's
+        # toolchain/protocol.md included), or its bare name when there is
+        # none: the project has no copy of it.
+        doc = _protocol_doc_path() or PROTOCOL_DOC
+        where = ("RETROFIT.md R1 to R5.5, and R8.F for ci-cd.md" if retro
+                 else f"Phases 1 to 8 of {doc}")
+        one = len(stubs) == 1
+        lines.append(
+            f"Before the smoke test, fill in the steering docs with the "
+            f"operator ({where}): "
+            + (stubs[0] if one else ", ".join(stubs[:-1]) + " and "
+               + stubs[-1])
+            + (" is still the installer's stub." if one else
+               " are still the installer's stubs."))
+    # The smoke test is the first feature taken through the steps below,
+    # so it reuses them.
+    lines.append(
+        "Smoke-test the harness first (RETROFIT.md R6, optional but "
+        "recommended): take a small change to an existing module through "
+        "the steps below, run /spec-validate on its task, and check each "
+        "output." if retro else
+        "Smoke-test the harness first (Phase 9, optional but recommended): "
+        "take your smallest feature, or the .claude/specs/INDEX.md row "
+        "marked `suggested first`, through the steps below, run "
+        "/spec-validate on its task, and check each output.")
+    lines.append(f"Start real work with {SPEC_START_CHAIN}.")
     task = (f"/spec-decompose writes {SPEC_TASK_FILE} with a Files: list.")
     gate = "spec-gate-commit" in cfg.get("_resolved_hooks", ())
     if gate:
@@ -4011,6 +4437,20 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
         lines.append("Pass the commit the implementer started from to the "
                      "reviewer agent. The implementer commits on the "
                      "current branch, so there is nothing to merge back.")
+    # [WP4 / g5-4, ruling 12 (a)] Phase 10 step 2 (RETROFIT.md R7 step 5):
+    # mark it complete in the state file, by hand or by asking Claude; a
+    # typo there is kept aside, not lost (_read_state).
+    lines.append(
+        "When the smoke test is done, or you skip it, finish RETROFIT.md "
+        "R7, whose step 5 marks the retrofit complete; record it, or ask "
+        "Claude to: in .claude/.retrofit-state.json, set retrofit_complete "
+        "to true and retrofit_active to false." if retro else
+        "When the smoke test is done, or you skip it, record it, or ask "
+        "Claude to: in .claude/.bootstrap-state.json, set "
+        "skippable_phase_decisions.phase_9_smoke_test to \"run\" or "
+        "\"skip\", review each deferred_items entry there (work the "
+        "bootstrap left for later), and then set bootstrap_complete to "
+        "true.")
     return lines
 
 
@@ -4026,13 +4466,19 @@ def main(argv: list[str]) -> int:
                     help="Show the plan; write nothing.")
     ap.add_argument("--force", action="store_true",
                     help="Overwrite files even if locally modified.")
+    # [WP4 / NF-1] The help said to re-run normally after --adopt. That
+    # re-run replaces every adopted file, and --adopt adopts every file the
+    # run would skip, so on a fresh clone it reverted each steering doc
+    # Claude had filled in, with no backup (measured).
     ap.add_argument("--adopt", action="store_true",
-                    help="Record files at planned paths as installer-owned "
-                         "WITHOUT writing them. For a tree whose manifest "
-                         "is gone (it is gitignored, so a fresh clone has "
-                         "none) and whose files are an earlier install's "
-                         "artifacts rather than your work. Nothing is "
-                         "overwritten; re-run normally afterwards.")
+                    help="Record every file this run would skip as "
+                         "installer-owned, WITHOUT writing it. The next "
+                         "ordinary install then replaces each of them, with "
+                         "no backup, including any steering doc you or "
+                         "Claude filled in. To refresh one stale file in a "
+                         "fresh clone (the manifest is gitignored, so a "
+                         "clone has none), move that file aside and "
+                         "re-install instead.")
     ap.add_argument("--uninstall", action="store_true",
                     help="Remove everything the installer created.")
     ap.add_argument("--print-config", action="store_true",
@@ -4162,17 +4608,35 @@ def main(argv: list[str]) -> int:
     print(f"Target: {root}")
     print(f"{'DRY RUN - ' if args.dry_run else ''}{len(plan)} files planned\n")
 
-    summary = apply_plan(root, plan, cfg, dry=args.dry_run,
-                          force=args.force, adopt=args.adopt)
+    try:
+        summary = apply_plan(root, plan, cfg, dry=args.dry_run,
+                             force=args.force, adopt=args.adopt)
+    except StateLockHeld as held:
+        # [WP4 8b] Raised before the first write, so the tree is as it was.
+        print(f"error: {held.path} is held by another process (a loop "
+              f"wrapper or another install); nothing was written. Re-run "
+              f"when it is free.", file=sys.stderr)
+        return EXIT_LOCKED
     print(f"\nDone. create={summary['create']} update={summary['update']} "
           f"unchanged={summary['unchanged']} skipped={summary['skipped']} "
           f"removed={summary['removed']}"
           + (f" adopted={summary['adopted']}" if summary["adopted"] else ""))
     if summary["adopted"]:
+        # [WP4 / NF-1] Said what the re-run does: it replaces every adopted
+        # file, a steering doc someone filled in included.
         print(f"\n--adopt recorded {summary['adopted']} file(s) as "
               f"installer-owned and wrote none of them. Re-run without "
-              f"--adopt to bring them up to date.")
-    if summary["backups"]:
+              f"--adopt to bring them up to date; that replaces each of "
+              f"them, with no backup.")
+    if summary["backups"] and args.dry_run:
+        # [WP4 / DOC-2] The preview --force --dry-run gives saves nothing,
+        # so it says what --force would do, not what it did.
+        print(f"\n--force would displace {len(summary['backups'])} file(s) "
+              f"the installer did not author. Their current versions would "
+              f"be saved to:")
+        for saved in summary["backups"]:
+            print(f"  {saved}")
+    elif summary["backups"]:
         print(f"\n--force displaced {len(summary['backups'])} file(s) the "
               f"installer did not author. Previous versions:")
         for saved in summary["backups"]:
@@ -4214,6 +4678,9 @@ def main(argv: list[str]) -> int:
     # as _skip_reason words the SKIP line: on a tree with no manifest (every
     # fresh clone, since the manifest is gitignored) the file is as likely an
     # earlier install's as the operator's, and --adopt is the remedy for that.
+    # [WP4 / NF-1] Not any more: --adopt adopts every skipped file, the
+    # filled steering docs included, so that case now gets the per-file
+    # remedy every kept-file warning shares (_no_manifest_remedy).
     would = "would not update" if args.dry_run else "did not update"
     force = ("pass --force to overwrite (it saves the current file to "
              ".claude/.installer-backups/ first)")
@@ -4223,6 +4690,10 @@ def main(argv: list[str]) -> int:
     wt_msg = _worktrees_ignore_warning(root, summary, dry=args.dry_run)
     if wt_msg:
         _warn(wt_msg)
+    # [WP4 8a] What a kept tech.md, ci-cd.md, CLAUDE.md or .gitignore did
+    # not receive. rc stays 0.
+    for msg in _steering_warnings(root, summary, cfg, dry=args.dry_run):
+        _warn(msg)
     for skipped in summary["skipped_hooks"]:
         path = skipped["path"]
         if path in _CONFIG_BEARING_SCRIPTS:
@@ -4232,12 +4703,8 @@ def main(argv: list[str]) -> int:
             embeds = ("a config change it embeds (a command, a path list) "
                       "does NOT reach it.")
         if skipped["untracked"] and summary["no_manifest"]:
-            _warn(f"{path}: this tree has no installer manifest, so this run "
-                  f"{would} it and cannot tell whether it is your work or an "
-                  f"earlier install's: {embeds} If it is an earlier "
-                  f"install's file, run with --adopt, which records it as "
-                  f"the installer's and writes nothing, then re-install. If "
-                  f"it is your work, merge the change by hand, or {force}.")
+            _warn(f"{path} was left as it is, so this run {would} it: "
+                  f"{embeds} {_no_manifest_remedy(path)}")
         elif skipped["untracked"]:
             _warn(f"{path} was not written by this installer, so this run "
                   f"{would} it: {embeds} Merge the change by hand, or "
@@ -4362,13 +4829,16 @@ def main(argv: list[str]) -> int:
         # [round-6 F6] Without this, --force is the only remedy on offer, and
         # its warning describes destroying the operator's work - which on a
         # manifest-less tree is very often not what those files are.
+        # [WP4 / NF-1] The remedy it offered, `--adopt` and a re-run, also
+        # replaced every steering doc the clone's owner had filled in, so it
+        # gives the per-file one instead.
         if summary["no_manifest"]:
-            print("This tree has NO installer manifest. It is gitignored, so "
-                  "a fresh clone carries every file this installer wrote and "
-                  "no record that it wrote them, which is why they read as "
-                  "yours. If they are an earlier install's artifacts rather "
-                  "than your work, `--adopt` records them as ours and writes "
-                  "nothing; re-run normally afterwards.", file=sys.stderr)
+            print("The manifest is gitignored, so a fresh clone carries "
+                  "every file this installer wrote and no record that it "
+                  "wrote them, which is why they read as yours.",
+                  file=sys.stderr)
+            for entry in summary["skipped_security"]:
+                print(_no_manifest_remedy(entry["path"]), file=sys.stderr)
 
     for msg in unstartable_hooks(root):
         _warn(msg)
