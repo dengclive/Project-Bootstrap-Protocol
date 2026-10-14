@@ -1863,8 +1863,19 @@ check("AC-A0-1: installer and templates PROTOCOL_VERSION agree",
 # PR5-04/05), and the v2.2.0 bump omitted it again (caught only in review).
 # Both misses happened despite the changelog recording plugin.json as part of
 # the release set, so the convention alone is not the control.
-_PLUGIN_JSON = os.path.join(ROOT, "plugin", "plugin.json")
-check("AC-A0-1: plugin/plugin.json exists", os.path.exists(_PLUGIN_JSON))
+# [WP4] Claude Code reads a plugin manifest only at .claude-plugin/plugin.json
+# under the plugin root, and `author` is an object. At plugin/plugin.json the
+# manifest was never read, so the row that checked that path passed while the
+# file did nothing: `claude plugin validate plugin` said "No manifest found in
+# directory" (Claude Code 2.1.299), and --plugin-dir loaded the plugin as
+# `plugin@inline`, version "unknown" (2.1.296).
+_PLUGIN_DIR = os.path.join(ROOT, "plugin")
+_PLUGIN_JSON = os.path.join(_PLUGIN_DIR, ".claude-plugin", "plugin.json")
+_pj = {}
+check("AC-A0-1: plugin/.claude-plugin/plugin.json exists",
+      os.path.exists(_PLUGIN_JSON))
+check("[WP4] PL-1: no second manifest at plugin/plugin.json",
+      not os.path.exists(os.path.join(_PLUGIN_DIR, "plugin.json")))
 if os.path.exists(_PLUGIN_JSON):
     _pj = _json.load(open(_PLUGIN_JSON))
     check("AC-A0-1: plugin.json version tracks PROTOCOL_VERSION",
@@ -1873,6 +1884,39 @@ if os.path.exists(_PLUGIN_JSON):
     # 2.2.0 bump also had to hand-edit; pin it so prose and field cannot skew.
     check("AC-A0-1: plugin.json description names the current version",
           f"v{_installer_mod.PROTOCOL_VERSION}" in _pj.get("description", ""))
+_author = _pj.get("author")
+check("[WP4] PL-2: plugin.json author is an object with a non-empty name",
+      isinstance(_author, dict) and isinstance(_author.get("name"), str)
+      and _author["name"].strip() != ""
+      and set(_author) <= {"name", "email", "url"})
+# [WP4] The manifest is public: the plugin's details show it. The standing
+# rule is that no email address is ever published, and author.email is a key
+# Claude Code accepts, so nothing else would stop one being added.
+import re as _re_pl                                          # noqa: E402
+check("[WP4] PL-2: plugin.json publishes no email address",
+      not (isinstance(_author, dict) and "email" in _author)
+      and not _re_pl.search(r"[\w.+-]+@[\w-]+\.[\w.]+",
+                        open(_PLUGIN_JSON).read()
+                        if os.path.exists(_PLUGIN_JSON) else ""))
+_cpaths = []
+for _k in ("commands", "agents", "skills", "hooks", "outputStyles"):
+    _v = _pj.get(_k)
+    _cpaths += [_v] if isinstance(_v, str) else [
+        x for x in (_v if isinstance(_v, list) else []) if isinstance(x, str)]
+check("[WP4] PL-3: every component path starts with ./ and exists in plugin/",
+      bool(_cpaths) and all(
+          p.startswith("./") and ".." not in p.split("/")
+          and os.path.exists(os.path.join(_PLUGIN_DIR, p)) for p in _cpaths))
+# [WP4, operator ruling 2026-10-14] The license is the repository's
+# (readiness C-1 adopted Apache-2.0), and both URLs name the public
+# repository instead of the old example.invalid placeholder.
+_REPO_URL = "https://github.com/dengclive/Project-Bootstrap-Protocol"
+check("[WP4] PL-5: plugin.json license is Apache-2.0, as LICENSE says",
+      _pj.get("license") == "Apache-2.0"
+      and "Apache License" in open(os.path.join(ROOT, "LICENSE")).read(600))
+check("[WP4] PL-5: plugin.json repository and homepage name the GitHub "
+      "repository",
+      _pj.get("repository") == _REPO_URL and _pj.get("homepage") == _REPO_URL)
 
 # [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
 # and the PRD version header were not, and both went stale — the README at
