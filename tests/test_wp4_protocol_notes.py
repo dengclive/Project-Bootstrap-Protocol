@@ -33,7 +33,8 @@ it adds (ED1).
   E. Two scoped text guards: no shipped doc or emitted source names
      CLAUDE_CODE_SESSION_ID (ruling 7 (c) replaced that printf with the
      escalate skill), and no live doc says "accepts every" (the interviews
-     refuse instead, since 8c).
+     refuse instead, since 8c), README.md above its review history
+     included (commit 8).
 
 Run: python3 tests/test_wp4_protocol_notes.py
 """
@@ -803,14 +804,22 @@ _id_hits = hits(_ID_SCOPE, re.compile(CODE_ID))
 check("no shipped doc or emitted source names CLAUDE_CODE_SESSION_ID "
       f"({len(scope_files(_ID_SCOPE))} files scanned)",
       not _id_hits and len(scope_files(_ID_SCOPE)) >= 9, _id_hits)
-# README.md is out of scope until commit 8 rewrites it and adds it here:
-# its interactive paragraph predates the 8c refusal (it does not say
-# "accepts every" on this branch, but it does not describe the refusal).
+_AE = re.compile(r"accepts\s+every", re.I)
 _AE_SCOPE = (PRD, COMP, RETRO, RCOMP, "plugin")
-_ae_hits = hits(_AE_SCOPE, re.compile(r"accepts every", re.I))
+_ae_hits = hits(_AE_SCOPE, _AE)
+# README.md counts above its review history only: a history entry may quote
+# what an interview did when the entry was written. Flattened, so a phrase
+# wrapped across two lines is found too.
+_readme = read("README.md")
+_rh = _readme.find("\n## Review history\n")
+_readme_live = _readme[:_rh] if _rh >= 0 else _readme
+_ae_hits += [f"README.md (above its review history): {m.group(0)!r}"
+             for m in _AE.finditer(" ".join(_readme_live.split()))]
 check("no live doc says 'accepts every' (the interviews refuse instead) "
-      f"({len(scope_files(_AE_SCOPE))} files scanned)",
-      not _ae_hits and len(scope_files(_AE_SCOPE)) >= 7, _ae_hits)
+      f"({len(scope_files(_AE_SCOPE))} files scanned, and README.md above "
+      f"its review history)",
+      not _ae_hits and len(scope_files(_AE_SCOPE)) >= 7 and _rh > 0,
+      _ae_hits or _rh)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)

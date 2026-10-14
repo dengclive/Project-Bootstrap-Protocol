@@ -31,12 +31,27 @@ say (design group g5; review items 8b and 8c; ruling 12 (a)).
    included); a full pipe runs with no delay; input that ends early warns,
    and the config header names the values that took their defaults.
 8. `--force --dry-run` says where the backups would be saved (DOC-2).
+9. The README (commit 8, rewritten from the design critic's rows). Getting
+   started comes first, after the banner, and the introduction keeps its
+   own heading (X1); the banner's dated correction sends readers to `main`,
+   and the tag it names predates the route; no old protocol file name. Each
+   claim the new text makes is paired with the code where a row can check
+   it: the route's tools and flags, the steering stubs and the Next steps
+   lines (g3-1), the parse-guard copy, the `.claude/` approval sentence
+   (X9), the per-file remedy measured in a fresh clone and no --adopt or
+   --force advice (KEEP-1, NF-1), the conditional --force --dry-run
+   (DOC-2), the retrofit route and RETROFIT.md's note, the plugin's
+   manifest, prefixed commands, toolchain copies and sync commands (read
+   from tests/plugin_toolchain_map.py), the interviews' refusal and
+   BOOTSTRAP_PROMPT_TIMEOUT, the held-lock exit code, and the dated
+   correction on the I-1 history entry.
 
 Doc rows (commit 6): the protocol's filename note, and RETROFIT.md and
 RETROFIT-COMPANION.md naming the current protocol file, in section 1; g3's
 two EOF TRUTH rows, inverted and paired with the For-the-AI notes that now
 say the interviews refuse, in section 7. tests/test_wp4_protocol_notes.py
-pins every other dated WP4 note and the docs' line counts.
+pins every other dated WP4 note and the docs' line counts, and keeps
+"accepts every" out of the README above its review history.
 
 The interleave measurements with a loop wrapper are in
 tests/test_wrapper_behavior.py, behind its flock skip.
@@ -66,7 +81,10 @@ from defaults import resolve_config               # noqa: E402
 from installer import build_plan                  # noqa: E402
 from minyaml import load_yaml                     # noqa: E402
 
-INSTALL = os.path.join(ROOT, "bin", "bootstrap-install")
+sys.path.insert(0, HERE)
+import plugin_toolchain_map as PTM                # noqa: E402
+
+INSTALL =os.path.join(ROOT, "bin", "bootstrap-install")
 INTERVIEW = os.path.join(ROOT, "bin", "bootstrap-interview")
 RETRO_INTERVIEW = os.path.join(ROOT, "bin", "retrofit-interview")
 SAMPLE_PRD = os.path.join(ROOT, "examples", "sample-prd.md")
@@ -222,6 +240,48 @@ def ignored(proj, rel):
 
 def warnings_of(r):
     return [ln for ln in r.stderr.splitlines() if ln.startswith("warning: ")]
+
+
+README = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+
+
+def flat(text):
+    return " ".join(text.split())
+
+
+def md_headings(text):
+    """(level, title, line index) of each ATX heading outside fenced code."""
+    out, fence = [], False
+    for i, ln in enumerate(text.split("\n")):
+        if ln.startswith("```"):
+            fence = not fence
+            continue
+        m = None if fence else re.match(r"(#{1,6}) (.+)$", ln)
+        if m:
+            out.append((len(m.group(1)), m.group(2).strip(), i))
+    return out
+
+
+def md_section(text, title):
+    """The lines under the one heading `title`, up to the next heading of
+    its level or higher; "" unless that heading is there exactly once."""
+    lines = text.split("\n")
+    heads = md_headings(text)
+    hits = [(lv, i) for lv, t, i in heads if t == title]
+    if len(hits) != 1:
+        return ""
+    lv, i = hits[0]
+    end = next((j for lv2, _, j in heads if j > i and lv2 <= lv), len(lines))
+    return "\n".join(lines[i + 1:end])
+
+
+def slug(title):
+    """GitHub's anchor for a heading (duplicate suffixes left out)."""
+    return re.sub(r"[^\w\- ]", "", title.lower()).replace(" ", "-")
+
+
+def sentences(text):
+    return re.split(r"(?<=\.)\s+", flat(text))
 
 
 try:
@@ -874,6 +934,7 @@ try:
                   "says so" in note
               and "accepts every" not in note.lower(),
               (r and r.returncode, note[:600]))
+    _silent, _partial = {}, {}            # read again by section 9
     for tool, argv, d, cfg in tools("silent"):
         t0 = time.monotonic()
         p = subprocess.Popen(argv, stdin=subprocess.PIPE,
@@ -889,6 +950,7 @@ try:
         err = p.stderr.read()
         p.stdout.close()
         p.stderr.close()
+        _silent[tool] = (p.returncode, err, not os.path.exists(cfg))
         check(f"[{tool}] an open pipe that never answers, "
               f"BOOTSTRAP_PROMPT_TIMEOUT=1: rc 2 in about 1 s, no config, "
               f"no inventory", p.returncode == 2 and 1.0 <= el < 10
@@ -917,6 +979,7 @@ try:
         named = [k.strip() for k in m.group(1).split(",")] if m else []
         first = ("prd_path" if tool == "bootstrap-interview"
                  else "principles_ranked")
+        _partial[tool] = (r.returncode, warnings_of(r), named)
         check(f"[{tool}] input that ends after 3 answers: rc 0, and one "
               f"warning: line says so",
               r.returncode == 0
@@ -961,6 +1024,481 @@ try:
           and os.path.isdir(os.path.join(D, ".claude",
                                          ".installer-backups")),
           _ff.stdout[-600:])
+
+    # ----------------------------------------------------------------------- #
+    # 9. The README (commit 8)
+    # ----------------------------------------------------------------------- #
+    print("\n== 9. the README ==")
+    # The live text is everything above the review history; a history entry
+    # may quote what was true when it was written.
+    _cut = README.find("\n## Review history\n")
+    RM = README[:_cut] if _cut >= 0 else README
+    RMF = flat(RM)
+    _lines = README.split("\n")
+    _heads = md_headings(RM)
+    _h2 = [t for lv, t, _ in _heads if lv == 2]
+    _gs = next((i for lv, t, i in _heads if t == "Getting started"), -1)
+    _intro = next((i for i, ln in enumerate(_lines)
+                   if ln.startswith("This answers the question")), -1)
+    _above = [h for h in _heads if h[2] < _intro]
+    _two = next((i for lv, t, i in _heads if t == "The two layers"), -1)
+    check("[X1] '## Getting started' is the first section, right after the "
+          "banner; the introduction follows it under its own '## ' heading, "
+          "before '## The two layers'",
+          _h2[:1] == ["Getting started"]
+          and all(ln.startswith(">") for ln in _lines[1:_gs] if ln.strip())
+          and -1 < _gs < _intro < _two and _above
+          and _above[-1][0] == 2 and _above[-1][1] != "Getting started",
+          (_h2[:3], _gs, _intro, _above[-1:] if _above else None))
+    _slugs = {slug(t) for _, t, _ in md_headings(README)}
+    _links = re.findall(r"\]\(#([^)]+)\)", README)
+    check("every #anchor link in the README names a heading, and the README "
+          "links Getting started",
+          _links and "getting-started" in _links
+          and all(a in _slugs for a in _links),
+          sorted(set(a for a in _links if a not in _slugs)))
+
+    # [Plan item 8; D1 (c)] The banner keeps the pin it had (AC-A0-1 in
+    # tests/test_installer.py pins those words) and a dated correction
+    # sends readers of Getting started to `main`.
+    _banner = "\n".join(_lines[:_gs]) if _gs > 0 else ""
+    _corr = next((ln for ln in _banner.split("\n")
+                  if "*Correction (WP4, 2026-10-14):*" in ln), "")
+    _bflat = flat(_banner.replace("\n>", "\n"))
+    _tag = re.search(r"The `(v\d+\.\d+\.\d+)` tag predates that route",
+                     _bflat)
+    _pv = templates.PROTOCOL_VERSION
+    check("[banner] the release and pin lines stay, and a dated correction "
+          "inside the banner says Getting started needs a clone of `main`, "
+          "because the release tag predates the route",
+          _corr.startswith("> ") and f"Current release: v{_pv}." in _banner
+          and f"pin the annotated git tag `v{_pv}`" in _banner
+          and "*Correction (WP4, 2026-10-14):* to follow [Getting started]"
+              "(#getting-started), use a clone of `main`." in _bflat
+          and _tag is not None and _tag.group(1) == f"v{_pv}", _bflat[:900])
+    _tagname = _tag.group(1) if _tag else f"v{_pv}"
+    _have_tag = GIT and run([GIT, "-C", ROOT, "rev-parse", "-q", "--verify",
+                             f"refs/tags/{_tagname}^{{commit}}"]
+                            ).returncode == 0
+    if _have_tag:
+        _tag_inst = run([GIT, "-C", ROOT, "show",
+                         f"{_tagname}:lib/installer.py"])
+        _tag_doc = run([GIT, "-C", ROOT, "cat-file", "-e",
+                        f"{_tagname}:{PROTOCOL_DOC}"])
+        check(f"[banner, TRUTH] at the {_tagname} tag the installer prints "
+              f"no Next steps block and {PROTOCOL_DOC} does not exist, as "
+              f"the correction says",
+              _tag_inst.returncode == 0
+              and "Next steps:" not in _tag_inst.stdout
+              and _tag_doc.returncode != 0,
+              (_tag_inst.returncode, _tag_doc.returncode))
+    else:
+        print(f"  SKIP  [banner, TRUTH] no {_tagname} tag in this clone (a "
+              f"shallow CI checkout fetches none): NOT measured")
+    _HIST = ("carries seven",
+             "Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin")
+    _old = [f"README.md:{i}: {ln.strip()[:90]}"
+            for i, ln in enumerate(RM.split("\n"), 1)
+            if set(NAME_RE.findall(ln)) - CURRENT
+            and not any(h in ln for h in _HIST)]
+    check("[g5-1c] above its review history the README names no old "
+          "protocol file, except where two lines quote history", not _old,
+          "\n        ".join(_old))
+    check("[g5-1c] the banner no longer says the current file name is "
+          "v2-6-0, and dates the rename as the protocol's filename note does",
+          "Why the filename says `v2-6-0`" not in RM
+          and "\n> v2-6-0 pair now." not in RM
+          and "This pair was cut as `v2-6-0` and renamed `v2-8-0` on "
+              "2026-08-14" in _bflat
+          and "Since 2026-08-14 this file is named `v2-8-0`" in _prd_text,
+          _bflat[:300])
+
+    # [D1 (c), g3-1] The new-project route, in order, against the tools.
+    _new = flat(md_section(README, "Bootstrap a new project"))
+    _order = [f"Read `$T/{PROTOCOL_DOC}` and bootstrap this project.",
+              '`python3 "$T/bin/bootstrap-interview" analyze --prd <your '
+              'PRD>`', "the ANSWERS block of `bootstrap.interview.md`",
+              '`python3 "$T/bin/bootstrap-interview" synthesize`',
+              '`python3 "$T/bin/bootstrap-install" --dry-run`',
+              'Claude runs `python3 "$T/bin/bootstrap-install"`',
+              "Claude runs Phases 1 to 8", "Phase 9 smoke test"]
+    _pos = [_new.find(p) for p in _order]
+    check("[D1 (c)] Getting started's new-project steps name the current "
+          "protocol, analyze, the ANSWERS block, synthesize, the dry run, "
+          "the install, Phases 1 to 8 and the smoke test, in that order",
+          -1 not in _pos and _pos == sorted(_pos),
+          [p for p, at in zip(_order, _pos) if at < 0] or _pos)
+    _h_iv = run([sys.executable, INTERVIEW, "--help"]).stdout
+    _h_an = run([sys.executable, INTERVIEW, "analyze", "--help"]).stdout
+    _h_ia = run([sys.executable, INTERVIEW, "interactive", "--help"]).stdout
+    _h_in = run([sys.executable, INSTALL, "--help"]).stdout
+    _h_ri = run([sys.executable, RETRO_INTERVIEW, "--help"]).stdout
+    check("[D1 (c), TRUTH] every subcommand and flag the README's routes "
+          "name is one the tools accept",
+          all(c in _h_iv for c in ("analyze", "synthesize", "interactive"))
+          and "--prd" in _h_an and "--prd" in _h_ia
+          and all(f in _h_in for f in ("--dry-run", "--force", "--adopt"))
+          and all(c in _h_ri for c in ("analyze", "synthesize",
+                                       "interactive")),
+          (_h_iv[:200], _h_in[:200]))
+    check("[g3-1] the route says the install writes the four steering docs "
+          "as stubs and Next steps names each one still a stub; a fresh "
+          "install's stubs line names the same four",
+          all(f"`{os.path.basename(s)}`" in _new for s in STUBS)
+          and "under `.claude/steering/` as stubs, and `Next steps:` names "
+              "each one that is still a stub" in _new
+          and all(s in line for s in STUBS), (_new[:300], line))
+    check("[g5-4] the route's last step says what the install's last Next "
+          "steps line says: record it, or ask Claude to, in the state file",
+          "`.claude/.bootstrap-state.json`: record it, or ask Claude to."
+          in _new and "record it, or ask Claude to" in last
+          and ".claude/.bootstrap-state.json" in last, last)
+    check("[ruling 12 (a)] the README names the parse guard's copy as the "
+          "guard writes it, and the warning that names it",
+          "`.claude/.bootstrap-state.json.pre-unparsed-<UTC stamp>`" in RMF
+          and "prints a `warning:` line that names the copy" in RMF
+          and "Restore them from the copy." in RMF
+          and bool(_c1) and re.fullmatch(
+              r"\.bootstrap-state\.json\.pre-unparsed-\d{8}T\d{6}Z", _c1[0])
+          and bool(_w1) and "restore" in _w1[0], (_c1, _w1))
+
+    # [X9, build F5] Approvals under .claude/, and claude -p.
+    _ap = flat(md_section(README, "Approve Claude's writes under `.claude/`"))
+    _esc = next((a["body"] for a in PLANS["default"][1]
+                 if a["path"] == ".claude/skills/escalate/SKILL.md"), "")
+    check("[X9] Claude Code asks for each write under .claude/ in an "
+          "interactive session, denies Write and Edit there under claude -p, "
+          "and D5 is open; the protocol's route note says the same",
+          all(p in _ap for p in (
+              "Run the route in an interactive session.",
+              "asks you to approve each of those writes, so expect to "
+              "approve the steering docs one at a time",
+              "Under `claude -p`, Claude Code denies Claude's Write and Edit "
+              "tools there", "decision D5, which is open"))
+          and "as it does under `claude -p` until D5 is decided" in _prd_text,
+          _ap[:600])
+    check("[build F5] the README puts the escalate record under the same "
+          "rule, and the skill writes it under .claude/sessions/",
+          "the `escalate` skill writes under `.claude/sessions/`" in _ap
+          and "/.claude/sessions/.decision-pending-" in _esc, _ap[-300:])
+
+    # [KEEP-1, NF-1, DOC-2] One skipped file: the per-file remedy, measured
+    # in a real fresh clone (git ignores the manifest and the state file).
+    _ri = flat(md_section(README, "Re-install after a change"))
+    check("[KEEP-1] the README gives the per-file remedy and says why not "
+          "--adopt", all(p in _ri for p in (
+              "move that file aside and re-install: the install re-creates "
+              "only that file", "This works in a fresh clone too",
+              "Don't use `--adopt` for this: it records every skipped file "
+              "as the installer's, so the next install replaces each "
+              "steering doc you or Claude filled in, with no backup.")),
+          _ri[:700])
+    _adopt = [s for s in sentences(RM) if "--adopt" in s]
+    check("[KEEP-1, NF-1] no --adopt advice above the review history: each "
+          "sentence that names --adopt says what it costs (no backup)",
+          _adopt and all("with no backup" in s for s in _adopt)
+          and not any(p in RMF for p in (
+              "Re-run normally afterwards", "--adopt` and a re-install",
+              "--adopt then", "run with `--adopt`", "with --adopt and")),
+          [s for s in _adopt if "with no backup" not in s])
+    _force = [s for s in sentences(RM)
+              if re.search(r"(?:^|\s)(?:[Rr]uns?|[Uu]ses?|[Pp]ass(?:es)?)\s[^.]*?"
+                           r"`(?:bootstrap-install\s+)?--force`", s)
+              and "--dry-run" not in s and not s.startswith("Don't")]
+    check("no --force advice above the review history", not _force
+          and not any(p in RMF for p in (
+              "run `bootstrap-install --force`", "run it again with "
+              "`--force`", "with `--force` before")), _force)
+    _fdry = [s for s in sentences(RM) if "--force --dry-run" in s]
+    check("[DOC-2] each README sentence about --force --dry-run speaks in "
+          "the conditional, as the installer now prints it",
+          _fdry and all("would" in s for s in _fdry)
+          and "would be saved to" in _ri
+          and "previous version would be saved to" in _fd.stdout
+          and "--force would displace" in _fd.stdout,
+          _fdry)
+
+    if GIT:
+        _gc = ["-c", "user.email=t@e.x", "-c", "user.name=t"]
+        K = project("clone-src")
+        install(K, GATES_OFF)
+        with open(os.path.join(K, STUBS[0]), "a") as fh:
+            fh.write("\nFilled by Claude with the operator.\n")
+        with open(os.path.join(K, STUBS[3]), "a") as fh:
+            fh.write("\nA stale line an earlier install wrote.\n")
+        run([GIT, "-C", K, "add", "-A"])
+        # A person's commit: the installed spec check reads only agent
+        # commits (CLAUDECODE=1), so leave that out of the environment.
+        run([GIT, "-C", K, *_gc, "commit", "-q", "-m", "filled"],
+            env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"})
+        _filled = read(K, STUBS[0])
+        _plan_ci = next(a["body"] for a in PLANS["gates_off"][1]
+                        if a["path"] == STUBS[3])
+        _plan_pr = next(a["body"] for a in PLANS["gates_off"][1]
+                        if a["path"] == STUBS[0])
+
+        def fresh_clone(name):
+            d = os.path.join(TMP, name)
+            run([GIT, "clone", "-q", K, d])
+            return d
+
+        K2 = fresh_clone("clone-move")
+        _k_bare = not os.path.exists(os.path.join(
+            K2, ".claude", ".installer-manifest.json"))
+        _k_first = install(K2)
+        os.rename(os.path.join(K2, STUBS[3]),
+                  os.path.join(K2, STUBS[3] + ".mine"))
+        _k_move = install(K2)
+        check("[KEEP-1, TRUTH] fresh clone (no manifest): moving one stale "
+              "file aside and re-installing re-creates only that file and "
+              "keeps the filled doc",
+              _k_bare and f"SKIP   {STUBS[3]}" in _k_first.stdout
+              and _k_move.returncode == 0
+              and f"CREATE {STUBS[3]}" in _k_move.stdout
+              and "Done. create=1 " in _k_move.stdout
+              and read(K2, STUBS[3]) == _plan_ci
+              and read(K2, STUBS[0]) == _filled,
+              (_k_first.stdout[-500:], _k_move.stdout[-500:]))
+        K3 = fresh_clone("clone-adopt")
+        _k_adopt = install(K3, None, "--adopt")
+        _k_after = install(K3)
+        check("[KEEP-1, TRUTH] fresh clone: --adopt and then a re-install "
+              "replace the filled doc, with no backup, as the README warns",
+              _k_adopt.returncode == 0 and f"ADOPT  {STUBS[0]}"
+              in _k_adopt.stdout and _k_after.returncode == 0
+              and read(K3, STUBS[0]) == _plan_pr != _filled
+              and not os.path.exists(os.path.join(K3, ".claude",
+                                                  ".installer-backups")),
+              (_k_adopt.stdout[-400:], _k_after.stdout[-400:]))
+    else:                          # pragma: no cover
+        print("  SKIP  git not found: the fresh-clone rows (NOT measured)")
+
+    # [Plan item 5] The retrofit route, as RETROFIT.md's :9 note gives it.
+    _rt = flat(md_section(README, "Retrofit an existing project"))
+    with open(os.path.join(ROOT, "RETROFIT.md"), encoding="utf-8") as fh:
+        _r9 = fh.read().split("\n")[8]
+    _both = ("`.claude.archived-<timestamp>/`", "`settings.local.json`",
+             "that file aside", "it creates only `CLAUDE.md`", "R8.E.1",
+             "R8.F for `ci-cd.md`")
+    check("[item 5] the README's retrofit route has the archive step, the "
+          "move-aside route for CLAUDE.md and R8.F, as RETROFIT.md's line 9 "
+          "note does, and no --force",
+          all(p in _rt and p in _r9 for p in _both)
+          and all(p in _rt for p in (
+              "Read `$T/RETROFIT.md` and retrofit this project.",
+              "R0 step 1 first",
+              '`python3 "$T/bin/retrofit-interview" analyze`',
+              '`python3 "$T/bin/retrofit-interview" synthesize`',
+              "R1 to R5.5", "R6 smoke test", "R7 handoff"))
+          and "--force" not in _rt,
+          [p for p in _both if p not in _rt or p not in _r9] or _rt[:500])
+    RC = project("rclaude")
+    with open(os.path.join(RC, "CLAUDE.md"), "w") as fh:
+        fh.write("# Our rules\n\nKeep these.\n")
+    _rc1 = install(RC, RETRO)
+    _rc_kept = read(RC, "CLAUDE.md")
+    os.rename(os.path.join(RC, "CLAUDE.md"),
+              os.path.join(RC, "CLAUDE.md.ours"))
+    _rc2 = install(RC)
+    check("[item 5, TRUTH] retrofit: a root CLAUDE.md that was there is "
+          "skipped and kept; moved aside, a re-install creates only CLAUDE.md",
+          _rc1.returncode == 0 and "SKIP   CLAUDE.md" in _rc1.stdout
+          and _rc_kept == "# Our rules\n\nKeep these.\n"
+          and _rc2.returncode == 0 and "CREATE CLAUDE.md" in _rc2.stdout
+          and "Done. create=1 " in _rc2.stdout,
+          (_rc1.stdout[-300:], _rc2.stdout[-400:]))
+
+    # [Plan item 6] The plugin paragraph.
+    _pl = md_section(README, "The plugin")
+    _plf = flat(_pl)
+    _manifest = os.path.join(ROOT, "plugin", ".claude-plugin", "plugin.json")
+    check("[g4-1a] the README names the manifest where Claude Code reads it, "
+          "which exists, and no plugin/plugin.json",
+          "`plugin/.claude-plugin/plugin.json`" in _plf
+          and os.path.isfile(_manifest)
+          and not re.search(r"(?<![\w.-])plugin/plugin\.json", RM),
+          re.findall(r".{30}plugin/plugin\.json", RM))
+    _wyg = md_section(README, "What you get")
+    check("[g4-1a] What you get lists .claude-plugin/plugin.json and "
+          "toolchain/ under plugin/",
+          "\n    .claude-plugin/plugin.json" in _wyg
+          and "\n    toolchain/" in _wyg
+          and not re.search(r"^\s+plugin\.json", _wyg, re.M), _wyg[-500:])
+    with open(_manifest, encoding="utf-8") as fh:
+        _pname = json.load(fh)["name"]
+    _stems = sorted(f[:-3] for f in os.listdir(os.path.join(
+        ROOT, "plugin", "commands")) if f.endswith(".md"))
+    _want = {f"/{_pname}:{s}" for s in _stems}
+    _named = set(re.findall(r"`(/[\w-]+:[\w-]+)`", RM))
+    _bare = re.findall(r"(?<![\w:/-])/bootstrap-(?:interview|apply)\b", RM)
+    check("[g4-1a, ruling 10] the README names each plugin command with the "
+          "manifest's name as its prefix, both in The plugin, and no bare "
+          "command name", _named == _want
+          and all(f"`{c}`" in _plf for c in _want) and not _bare,
+          (sorted(_named), sorted(_want), _bare))
+    _cmd_py = [ln.strip() for f in _stems for ln in open(os.path.join(
+        ROOT, "plugin", "commands", f + ".md"), encoding="utf-8")
+        if "python3" in ln and "/bin/" in ln]
+    _kinds = {("bin" if c.startswith(f"{PTM.TOOLCHAIN}/bin/") else
+               "lib" if c.startswith(f"{PTM.TOOLCHAIN}/lib/") else c)
+              for c in PTM.copy_map()}
+    check("[ruling 2 (b)] the README says the commands run the copies under "
+          "plugin/toolchain/ (the two tools, every lib/*.py, protocol.md), "
+          "not the checkout's bin/; the commands and the map agree",
+          all(f"`bin/{t}`" in _plf for t in PTM.BIN_TOOLS)
+          and "`plugin/toolchain/`" in _plf and "every `lib/*.py` module" in
+          _plf and "`protocol.md`" in _plf
+          and "They don't run the checkout's `bin/`" in _plf
+          and _kinds == {"bin", "lib", f"{PTM.TOOLCHAIN}/protocol.md"}
+          and _cmd_py and all('"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/' in ln
+                              and "/../bin" not in ln for ln in _cmd_py),
+          (_kinds, _cmd_py))
+    _tc_bin = sorted(c for c in PTM.copy_map()
+                     if c.startswith(f"{PTM.TOOLCHAIN}/bin/"))
+    check("[review build F14] the README says the plugin has no retrofit "
+          "command and no copy of bin/retrofit-interview: the map copies "
+          "only the two tools to toolchain/bin/, and no command names "
+          "retrofit-interview",
+          "The plugin has no retrofit command, and it doesn't copy "
+          "`bin/retrofit-interview`" in _plf
+          and _tc_bin == sorted(f"{PTM.TOOLCHAIN}/bin/{t}"
+                                for t in PTM.BIN_TOOLS)
+          and not any("retrofit" in c for c in _tc_bin)
+          and not any("retrofit" in s for s in _stems)
+          and not any("retrofit-interview" in open(os.path.join(
+              ROOT, "plugin", "commands", s + ".md"),
+              encoding="utf-8").read() for s in _stems), (_tc_bin, _stems))
+    _mk = run([GIT, "-C", ROOT, "ls-files"]).stdout if GIT else ""
+    check("[ruling 2 (b)] no marketplace file, as the README says, which "
+          "loads the plugin with --plugin-dir instead",
+          "no marketplace file (`marketplace.json`) yet" in _plf
+          and 'claude --plugin-dir "$T/plugin"' in _pl
+          and bool(_mk) and "marketplace.json" not in _mk, _plf[-500:])
+    _blocks = re.findall(r"```\w*\n(.*?)```", _pl, re.S)
+    check("[COPY-3] the identity suite stands in for review of "
+          "plugin/toolchain/, and the README's two re-sync commands are the "
+          "ones the suite prints (tests/plugin_toolchain_map.py)",
+          "`tests/test_wp4_plugin_toolchain.py` checks each copy's bytes and "
+          "exec bit against its source, so it stands in for a review of "
+          "`plugin/toolchain/`" in _plf
+          and os.path.isfile(os.path.join(HERE,
+                                          "test_wp4_plugin_toolchain.py"))
+          and any(b.strip("\n").split("\n") == [PTM.SYNC, PTM.STAGE]
+                  for b in _blocks), _blocks)
+    # The stubs line a plugin copy prints names the copy's protocol.md.
+    shutil.copy(_doc, os.path.join(TC, "protocol.md"))
+    try:
+        PC = project("plugin-copy")
+        with open(os.path.join(PC, "bootstrap.config.yaml"), "w") as fh:
+            fh.write(GATES_OFF)
+        _pc = run([sys.executable, "-c",
+                   "import sys; sys.path.insert(0, sys.argv[1]); "
+                   "import installer; "
+                   "raise SystemExit(installer.main(sys.argv[2:]))",
+                   os.path.join(TC, "lib"), "-C", PC])
+    finally:
+        os.remove(os.path.join(TC, "protocol.md"))
+    _pcl = stub_line(steps_of(_pc.stdout))
+    check("[X6] from a plugin copy, Next steps sends Claude to Phases 1 to "
+          "8 of the copy's protocol.md, as the README says",
+          "`Next steps:` sends Claude to Phases 1 to 8 of that "
+          "`protocol.md`" in _plf and _pc.returncode == 0
+          and "(Phases 1 to 8 of "
+              + os.path.join(os.path.realpath(TC), "protocol.md") + ")"
+          in _pcl, (_pc.returncode, _pcl, _pc.stderr[-300:]))
+
+    # [Plan item 7; 8c] The interviews' refusal and BOOTSTRAP_PROMPT_TIMEOUT.
+    _lv = flat(md_section(README, "Answer the interview live"))
+    _dflt = re.search(r"`BOOTSTRAP_PROMPT_TIMEOUT` seconds \(default "
+                      r"(\d+)\)", _lv)
+
+    class _Pipe:
+        """A stdin that is not a terminal and has a descriptor."""
+        def isatty(self):
+            return False
+
+        def fileno(self):
+            return 0
+
+    _waits = []
+
+    def _no_answer(rlist, wlist, xlist, timeout):
+        _waits.append(timeout)
+        return [], [], []
+
+    _real = (IV.select.select, sys.stdin,
+             os.environ.get("BOOTSTRAP_PROMPT_TIMEOUT"))
+    try:
+        IV.select.select, sys.stdin = _no_answer, _Pipe()
+        os.environ.pop("BOOTSTRAP_PROMPT_TIMEOUT", None)
+        _msg_default = IV._stdin_refusal("bootstrap-interview") or ""
+        os.environ["BOOTSTRAP_PROMPT_TIMEOUT"] = "7"
+        _msg_env = IV._stdin_refusal("bootstrap-interview") or ""
+    finally:
+        IV.select.select, sys.stdin = _real[0], _real[1]
+        if _real[2] is None:
+            os.environ.pop("BOOTSTRAP_PROMPT_TIMEOUT", None)
+        else:
+            os.environ["BOOTSTRAP_PROMPT_TIMEOUT"] = _real[2]
+    check("[8c, IV-1] the README's variable and default are the ones the "
+          "interviews read: unset, the wait is 30 s; set to 7, it is 7 s",
+          _dflt is not None and _waits == [float(_dflt.group(1)), 7.0]
+          and f"within {_dflt.group(1)} s" in _msg_default
+          and "within 7 s" in _msg_env, (_waits, _msg_default, _msg_env))
+    check("[8c] the README's refusal cases and exit code are the code's: "
+          "rc 2 and 'no config written' for both interviews, at end of "
+          "input and with no answer in time",
+          all(p in _lv for p in (
+              "It exits 2 and writes no config when stdin is closed, when "
+              "stdin ends before the first answer, or when stdin isn't a "
+              "terminal and no answer arrives within",
+              "Claude doesn't run it for you",
+              "`retrofit-interview interactive` works the same way"))
+          and "no config written" in IV._closed_refusal("x")
+          and "no config written" in _msg_default
+          and len(_eof) == 2 and all(r.returncode == 2
+                                     for r, _, _ in _eof.values())
+          and len(_silent) == 2 and all(rc == 2 and none
+                                        for rc, _, none in _silent.values()),
+          (_lv[:400], {t: v[0] for t, v in _silent.items()}))
+    check("[8c] input that ends after the first answer: the README's warning "
+          "and header claims hold for both interviews",
+          "the tool prints a `warning:` line, and the config's header names "
+          "the values that took their defaults" in _lv
+          and len(_partial) == 2 and all(
+              rc == 0 and len(w) == 1 and named
+              for rc, w, named in _partial.values()), _partial)
+    _bullet = next((b for b in README.split("\n\n")
+                    if b.startswith("- **`interactive`**")
+                    or "\n- **`interactive`**" in b), "")
+    _bullet = flat(_bullet[_bullet.find("- **`interactive`**"):])
+    check("[8c] the decision-layer section's interactive bullet names the "
+          "refusal and links the live-interview section",
+          "nothing is written until the config validates" in _bullet
+          and "With no answer to read, it exits 2 and writes no config"
+          in _bullet and "[Answer the interview live]"
+                         "(#answer-the-interview-live)" in _bullet, _bullet)
+    _hist = README[_cut:] if _cut >= 0 else ""
+    _i1 = _hist[_hist.find("- **I-1 (High)**"):]
+    _i1 = flat(_i1[:_i1.find("\n- **", 1)])
+    check("[scope F4] the I-1 history entry keeps its text and carries a "
+          "dated correction: the refusal, the variable, and partial input "
+          "that still takes the fallbacks with a warning",
+          _i1.startswith("- **I-1 (High)** — `run_interactive`'s `_ask` "
+                         "returns the proposed default on EOF")
+          and "*Correction (WP4, 2026-10-14):*" in _i1
+          and all(p in _i1.split("*Correction (WP4, 2026-10-14):*")[-1]
+                  for p in ("exits 2 and writes no config",
+                            "`BOOTSTRAP_PROMPT_TIMEOUT`", "`warning:`",
+                            "still takes the fallbacks above")), _i1[-700:])
+
+    # [8b] The held-lock exit code.
+    check("[8b] the README's held-lock sentence has the code's exit code, "
+          "wait and lock files",
+          f"holds the lock for {getattr(installer, '_LOCK_WAIT_S', None)} "
+          f"seconds, the install exits **{EXIT_LOCKED}** and writes nothing"
+          in RMF and f"`{STATE}.lock`" in RMF and f"`{RSTATE}.lock`" in RMF,
+          re.findall(r"Waits for a running loop.{0,400}", RMF))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
