@@ -1972,8 +1972,99 @@ check("[WP4] IA-1: the interactive interview is the operator's to run in a "
       and "refuses and writes no config" in _iv_flat
       and "input that ends early" in _iv_flat
       and "accepts every proposal" not in _iv_flat
-      and "${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview interactive"
-      in _iv_flat)
+      and '"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-interview" '
+      'interactive' in _iv_flat)
+
+# [WP4, G11] A plugin installed from a git-hosted marketplace is COPIED into
+# the plugin cache, and files outside the plugin directory are not copied.
+# Measured on Claude Code 2.1.296: `${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-
+# install` expanded to <cache>/bootstrap-protocol/bootstrap-protocol/2.8.0/
+# ../bin/bootstrap-install, which does not exist (python3 exit 2). The
+# commands now run the copies under plugin/toolchain/ (ruling 2 (b)).
+# tests/test_wp4_plugin_toolchain.py keeps each copy equal to its source and
+# fails on any symlink under plugin/, which replaces the link-era G11-4,
+# G11-5 and MK-1 (there is no marketplace file).
+_refs = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _refs += [(_fn, _m) for _m in _re_pl.findall(
+            r"\$\{?CLAUDE_PLUGIN_ROOT\}?[\"']?(/[^\s\"'`]*)", _fh.read())]
+check("[WP4] G11-1: the commands reference ${CLAUDE_PLUGIN_ROOT} paths "
+      f"(non-vacuity: {len(_refs)})", len(_refs) >= 7)
+_pd_real = os.path.realpath(_PLUGIN_DIR)
+_out = [f"{_fn}: {_r}" for _fn, _r in _refs
+        if not os.path.normpath(_pd_real + _r).startswith(_pd_real + os.sep)]
+check("[WP4] G11-2: no command path leaves the plugin root, in any spelling "
+      f"(out: {_out})", _out == [])
+# Every line that runs a tool, not only those that name the plugin root: a
+# line that runs bin/... from the project names no plugin path to quote.
+_shell_lines = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _shell_lines += [f"{_fn}: {_ln.strip()}" for _ln in _fh
+                         if _ln.lstrip().startswith("python3 ")]
+_unquoted = [_ln for _ln in _shell_lines
+             if not _re_pl.search(r'"\$\{CLAUDE_PLUGIN_ROOT\}/[^"\s]+"', _ln)
+             or _re_pl.search(r'(?<!")\$\{?CLAUDE_PLUGIN_ROOT', _ln)]
+check("[WP4] G11-8: every shell line quotes its ${CLAUDE_PLUGIN_ROOT} path, "
+      f"so a plugin root with a space stays one word ({len(_shell_lines)} "
+      f"lines; unquoted: {_unquoted})",
+      len(_shell_lines) >= 6 and _unquoted == [])
+_tc_doc = os.path.join(_PLUGIN_DIR, "toolchain", "protocol.md")
+check("[WP4] G11-6: plugin/toolchain/protocol.md equals "
+      f"{_tmpl.PROTOCOL_DOC}, byte for byte",
+      os.path.isfile(_tc_doc) and not os.path.islink(_tc_doc)
+      and open(_tc_doc, "rb").read()
+      == open(os.path.join(ROOT, _tmpl.PROTOCOL_DOC), "rb").read())
+# Behaviour: `cp -r` plugin/ outside the repository, into the plugin cache's
+# layout, and run what the commands run from that copy: the interview's two
+# passes, the installer's dry run and the install. `cp -r` keeps a link as a
+# link, so a path that leaves plugin/ is missing here, as in the cache.
+_cp = tempfile.mkdtemp()
+_missing_in_copy = ["(copy not made)"]
+_g11_7 = _g11_9 = None
+try:
+    _root = os.path.join(_cp, "cache", "bootstrap-protocol",
+                         "bootstrap-protocol", "2.8.0")
+    os.makedirs(os.path.dirname(_root))
+    subprocess.run(["cp", "-r", _PLUGIN_DIR, _root], check=True)
+    _missing_in_copy = [f"{_fn}: {_r}" for _fn, _r in _refs
+                        if not os.path.isfile(_root + _r)]
+    _tc = os.path.join(_root, "toolchain")
+    _proj = os.path.join(_cp, "proj")
+    os.makedirs(os.path.join(_proj, "docs", "prd"))
+    _prd_copy = os.path.join(_proj, "docs", "prd", "sample.md")
+    shutil.copyfile(os.path.join(ROOT, "examples", "sample-prd.md"),
+                    _prd_copy)
+    _env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    _g11_7 = [subprocess.run([sys.executable, os.path.join(_tc, "bin", _t)]
+                             + _a, cwd=_proj, capture_output=True, text=True,
+                             env=_env).returncode
+              for _t, _a in (("bootstrap-interview",
+                              ["analyze", "--prd", _prd_copy]),
+                             ("bootstrap-interview", ["synthesize"]),
+                             ("bootstrap-install", ["--dry-run"]),
+                             ("bootstrap-install", []))]
+    _sp = os.path.join(_proj, ".claude", ".bootstrap-state.json")
+    _doc_rec = (_json.load(open(_sp)).get("protocol_doc")
+                if os.path.isfile(_sp) else "(no state file)")
+    # The installer records a resolved path; show it under the copy's name.
+    _g11_9 = (str(_doc_rec).replace(os.path.realpath(_root), "<copy>"),
+              isinstance(_doc_rec, str) and os.path.realpath(_doc_rec)
+              == os.path.realpath(os.path.join(_tc, "protocol.md")))
+except (OSError, subprocess.CalledProcessError, ValueError) as _e:
+    print(f"    G11 copy setup raised {_e!r}"[:400])
+finally:
+    shutil.rmtree(_cp, ignore_errors=True)
+check("[WP4] G11-3: every ${CLAUDE_PLUGIN_ROOT} path a command names exists "
+      f"in plugin/, as `cp -r` copies it (missing: {_missing_in_copy})",
+      _missing_in_copy == [])
+check("[WP4] G11-7: from a `cp -r` copy of plugin/ outside the repository, "
+      "analyze, synthesize, the dry run and the install all exit 0 "
+      f"(got {_g11_7})", _g11_7 == [0, 0, 0, 0])
+check("[WP4] G11-9: the install from that copy records protocol_doc as the "
+      f"copy's toolchain/protocol.md (got {_g11_9 and _g11_9[0]!r})",
+      bool(_g11_9 and _g11_9[1]))
 
 # [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
 # and the PRD version header were not, and both went stale — the README at

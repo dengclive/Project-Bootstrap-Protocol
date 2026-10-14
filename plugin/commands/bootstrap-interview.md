@@ -11,6 +11,9 @@ yet. You do **not** create any `.claude/` files here — that is
 `/bootstrap-protocol:bootstrap-apply`'s job, and keeping it separate is what
 makes the scaffolding reproducible.
 
+The protocol document is at `${CLAUDE_PLUGIN_ROOT}/toolchain/protocol.md`.
+The phases and steps this command names are the phases and steps in it.
+
 There is now a tool that does the mechanical part of this for you:
 `bin/bootstrap-interview`. It reads a PRD and **proposes** a complete, valid
 config with a written rationale for every non-obvious choice, for the operator
@@ -39,7 +42,7 @@ project's test/lint/format commands; and it validates its own output with
    proposed decision before anything is committed:
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview analyze \
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-interview" analyze \
      --prd <PRD-PATH>
    ```
 
@@ -52,7 +55,7 @@ project's test/lint/format commands; and it validates its own output with
    override = edit the value). Then:
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview synthesize
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-interview" synthesize
    ```
 
    This emits `bootstrap.config.yaml` and validates it. If validation fails,
@@ -66,7 +69,7 @@ project's test/lint/format commands; and it validates its own output with
    says so.
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-interview interactive --prd <PRD-PATH>
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-interview" interactive --prd <PRD-PATH>
    ```
 
 ## Fallback: conduct it by hand
@@ -99,7 +102,7 @@ moving on.
 Whichever path was used, the config must validate:
 
 ```
-python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install --print-config
+python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-install" --print-config
 ```
 
 If validation reports errors, fix them with the operator before finishing.

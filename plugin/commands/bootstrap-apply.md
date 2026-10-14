@@ -19,7 +19,7 @@ config.
 2. Show the plan first (never write blind):
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install --dry-run
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-install" --dry-run
    ```
 
 3. Summarize the plan for the operator: archetype, autonomous-mode flags,
@@ -51,7 +51,7 @@ config.
 4. On operator approval, apply:
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-install"
    ```
 
 5. **Check the exit code before reporting anything.** Exit 3 means files were
