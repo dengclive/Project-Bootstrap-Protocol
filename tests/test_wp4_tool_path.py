@@ -32,6 +32,12 @@ say (design group g5; review items 8b and 8c; ruling 12 (a)).
    and the config header names the values that took their defaults.
 8. `--force --dry-run` says where the backups would be saved (DOC-2).
 
+Doc rows (commit 6): the protocol's filename note, and RETROFIT.md and
+RETROFIT-COMPANION.md naming the current protocol file, in section 1; g3's
+two EOF TRUTH rows, inverted and paired with the For-the-AI notes that now
+say the interviews refuse, in section 7. tests/test_wp4_protocol_notes.py
+pins every other dated WP4 note and the docs' line counts.
+
 The interleave measurements with a loop wrapper are in
 tests/test_wrapper_behavior.py, behind its flock skip.
 
@@ -136,6 +142,9 @@ LOCK_HELD = ("error: {} is held by another process (a loop wrapper or "
              "another install); nothing was written. Re-run when it is "
              "free.")
 HINT = "Run it in a terminal of your own, or use analyze and synthesize."
+# The dated-note tags commit 6 appends to the layered docs (ED1).
+CORRECTED = "**[Corrected 2026-10-14, WP4.]**"
+ROUTE_NOTE = "**[Amended 2026-10-14, WP4 / D1.]**"
 TMP = tempfile.mkdtemp(prefix="wp4-tool-")
 
 
@@ -330,6 +339,28 @@ try:
     check("[g5-1b] the LLM advisor's open archetype question cites the "
           "current protocol file", PROTOCOL_DOC in _oq
           and set(NAME_RE.findall(_oq)) == {PROTOCOL_DOC}, _oq)
+
+    # [g5-1c, commit 6] The layered docs name the current file in dated
+    # notes appended to an existing line, so no cited line number moves.
+    _prd_lines = (open(_doc, encoding="utf-8").read().split("\n")
+                  if os.path.isfile(_doc) else [])
+    _rename = [ln for ln in _prd_lines
+               if "Since 2026-08-14 this file is named `v2-8-0`" in ln]
+    check("[g5-1c] the protocol's filename note carries a dated note on the "
+          "v2-8-0 rename", len(_rename) == 1
+          and _rename[0].startswith("> code MINOR (two new configuration "
+                                    "keys) served by this one. "
+                                    + CORRECTED), _rename)
+    _line3 = {}
+    for _f in ("RETROFIT.md", "RETROFIT-COMPANION.md"):
+        with open(os.path.join(ROOT, _f), encoding="utf-8") as fh:
+            _l3 = fh.read().split("\n")[2]
+        _line3[_f] = _l3[_l3.find(CORRECTED):] if CORRECTED in _l3 else ""
+    check("[g5-1c] RETROFIT.md and RETROFIT-COMPANION.md map BOOTSTRAP.md to "
+          "the current pair in a dated note on line 3",
+          all(n and "`BOOTSTRAP.md`" in n and f"`{PROTOCOL_DOC}`" in n
+              and f"`{PROTOCOL_COMPANION}`" in n for n in _line3.values()),
+          _line3)
 
     # ----------------------------------------------------------------------- #
     # 2. The assumption ledger's links resolve; protocol_doc
@@ -797,8 +828,10 @@ try:
               (r.returncode, r.stderr[-400:]))
     if not BASH:                   # pragma: no cover
         print("  SKIP  bash not found: the closed-fd rows (NOT measured)")
+    _eof = {}
     for tool, argv, d, cfg in tools("devnull"):
         r = run(argv, stdin=subprocess.DEVNULL, timeout=60)
+        _eof[tool] = (r, d, cfg)
         check(f"[{tool}] stdin is /dev/null (the Bash tool's, with no "
               f"redirect): rc 2, no config and no inventory",
               r.returncode == 2
@@ -806,6 +839,41 @@ try:
                   f"no config written. {HINT}" in r.stderr
               and not os.path.exists(cfg) and no_inventory(d),
               (r.returncode, r.stderr[-400:]))
+
+    # [g3 EOF TRUTH rows, inverted; review scope F4, DOC-1] g3's records
+    # pinned "interactive at end of input writes a config of defaults with
+    # rc 0", the reason its route notes kept Claude off the command. Since
+    # 8c both interviews refuse. Each /dev/null run above (stdin at end of
+    # file) is paired here with the For-the-AI note that now says so: the
+    # protocol's (its line 283) and RETROFIT.md's (its line 9).
+    def for_the_ai_note(rel, verb):
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+            hits = [ln for ln in fh.read().split("\n") if ln.startswith(
+                "> **For the AI:** When the operator opens this file and "
+                "asks you to " + verb)]
+        ln = hits[0] if len(hits) == 1 else ""
+        return ln[ln.find(ROUTE_NOTE):] if ROUTE_NOTE in ln else ""
+
+    for tool, rel, verb, says in (
+            ("bootstrap-interview", PROTOCOL_DOC, "bootstrap",
+             "with no terminal, it writes no config and exits 2"),
+            ("retrofit-interview", "RETROFIT.md", "retrofit",
+             "with no terminal, it writes no config and no inventory and "
+             "exits 2")):
+        r, d, cfg = _eof.get(tool, (None, TMP, os.path.join(TMP, "-")))
+        note = for_the_ai_note(rel, verb)
+        check(f"[g3 EOF TRUTH, inverted] {tool} interactive with stdin at "
+              f"end of file exits 2 and writes no config"
+              + (" and no .claude/inventory/" if verb == "retrofit" else "")
+              + f", as {rel}'s For-the-AI note says",
+              r is not None and r.returncode == 2 and not os.path.exists(cfg)
+              and no_inventory(d)
+              and f"Don't run `{tool} interactive` yourself" in note
+              and says in note
+              and "input that ends early takes the remaining defaults and "
+                  "says so" in note
+              and "accepts every" not in note.lower(),
+              (r and r.returncode, note[:600]))
     for tool, argv, d, cfg in tools("silent"):
         t0 = time.monotonic()
         p = subprocess.Popen(argv, stdin=subprocess.PIPE,
