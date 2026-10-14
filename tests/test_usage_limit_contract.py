@@ -266,13 +266,25 @@ check("neg: auto-config.md carries no usage_limit_* key",
 # a release-integrity break, not a doc nit). Hook citations deliberately
 # stay at v2-0-0 (freeze-exception no. 15) and are NOT asserted here.
 # --------------------------------------------------------------------------- #
+# [WP4 / g5] Re-pointed again, v2-2-0 -> the current document
+# (templates.PROTOCOL_DOC). The rule is the same: the citation names a file
+# that exists at the repository root, and no other protocol file name. The
+# old form checked for v2-2-0 and against v2-0-0 only, so it passed loop.sh
+# and goal-loop.sh while each still cited Bootstrap-Protocol-v2-4-0.md
+# twice (their trajectory-retention and loop-final blocks, through WP3).
+import templates as _tmpl                       # noqa: E402
+# Read through getattr so a tree without the constants fails these rows
+# rather than stopping the suite (the red-first run on WP4's base).
+_DOC = getattr(_tmpl, "PROTOCOL_DOC", "<templates.PROTOCOL_DOC missing>")
+_COMP = getattr(_tmpl, "PROTOCOL_COMPANION",
+                "<templates.PROTOCOL_COMPANION missing>")
+_NAME = re.compile(r"Bootstrap-Protocol-(?:Companion-)?v\d+-\d+-\d+\.md")
 for rel in ("loop.sh", "goal-loop.sh", LOOP_CFG, GOAL_CFG, "auto.sh"):
-    has(f"RC-03[{rel}]: cites Bootstrap-Protocol-v2-2-0.md", rel,
-        "Bootstrap-Protocol-v2-2-0.md")
-    check(f"RC-03[{rel}]: no stale v2-0-0 citation",
-          "v2-0-0" not in body(rel))
-for _doc in ("Bootstrap-Protocol-v2-2-0.md",
-             "Bootstrap-Protocol-Companion-v2-2-0.md"):
+    has(f"RC-03[{rel}]: cites the current protocol document", rel, _DOC)
+    check(f"RC-03[{rel}]: no other protocol file name",
+          set(_NAME.findall(body(rel))) == {_DOC},
+          sorted(set(_NAME.findall(body(rel)))))
+for _doc in (_DOC, _COMP):
     check(f"RC-03: cited spec doc exists at repo root: {_doc}",
           os.path.isfile(os.path.join(ROOT, _doc)))
 

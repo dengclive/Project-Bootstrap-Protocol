@@ -2619,8 +2619,31 @@ EXPECTED_RETROFIT_DIGESTS = {
     # modes and kinds unchanged, counts 87 / 101. Each is in the 3d866f4 sets
     # above, which still hold. `_HOOK_HEADER`, its rendered bytes (posture
     # values included), secrets-gate.sh and dependency-gate.sh do not move.
-    "service": "d300f962656721f13c638d8bb223ed896a60ea367399ddd88a8fd35654afab40",
-    "agent": "c89644a969c780937ede91bf768dabae860bb008668a6552c8e4ffac12808b4e",
+    # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
+    # Same change as the greenfield columns (see the `default` note in
+    # tests/test_greenfield_golden.py). Retrofit-only on top: the retrofit
+    # CLAUDE.md builds urgent items 1-5 with the greenfield helper, so item
+    # 1 reads "A Do Not Touch or never-read path" and, with a policy off,
+    # the deps.md item or the never-read wording goes (X3); it carries no
+    # `/escalate` line (the agent fixture renders exactly 80 lines); its
+    # lifecycle ends "stop as `ci-cd.md` says", and its "Starting a task"
+    # sentence gains "on a spec branch,". tech.md's scaffolds cite
+    # RETROFIT.md R2 and suggest Phase 2 step 3's set plus R2 step 6's, and
+    # its Documentation Policy asks R2 step 7's drift question (X11).
+    # .claude/.gitignore gains `.retrofit-state.json.lock` and
+    # `.retrofit-state.json.pre-*`. `_HOOK_HEADER`, every hook body,
+    # secrets-gate.sh and dependency-gate.sh do NOT move. Measured on the
+    # emitted plans against 8bc362b, per file: 2 added in both (the
+    # escalate skill and command: the overlay keeps `_skills()` and
+    # `_commands()`), 0 removed, the 87 / 101 kept paths in their old order,
+    # modes and kinds unchanged; action counts 87 -> 89 and 101 -> 103.
+    # 8 / 12 bodies move (service / agent): CLAUDE.md, steering tech.md,
+    # ci-cd.md and assumption-ledger.md, hooks/audio-alerts.config,
+    # sessions/README.md, skills/spec-new/SKILL.md and .claude/.gitignore,
+    # plus, in `agent`, loop.sh, goal-loop.sh, loop-config.md and
+    # goal-config.md. CLAUDE.md stays at 68 / 80 lines.
+    "service": "52f49a5790d0b486de37cefb9c368771d588731335aa3d5d5b20779c80fc4c35",
+    "agent": "2fc9e993ec238914fbfe106c3cabca4fc58a274f89ebc9c49bc1e8230ab53551",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.
@@ -2629,7 +2652,10 @@ EXPECTED_RETROFIT_DIGESTS = {
 # merge-back.sh, specs/README.md, steering/spec-versioning.md,
 # learnings/README.md, sessions/README.md) and removes none: 79 -> 87,
 # 93 -> 101.
-EXPECTED_RETROFIT_COUNTS = {"service": 87, "agent": 101}
+# [freeze-exception no. 85, 2026-10-14] WP4 adds the escalate skill and
+# command to both fixtures (the overlay keeps `_skills()` and `_commands()`)
+# and removes none: 87 -> 89, 101 -> 103.
+EXPECTED_RETROFIT_COUNTS = {"service": 89, "agent": 103}
 
 _RETROFIT_FIXTURES = [("service", SERVICE_RETROFIT_CFG),
                       ("agent", AGENT_RETROFIT_CFG)]

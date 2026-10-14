@@ -251,11 +251,29 @@ for label, text, retro in (("greenfield", CFG, False),
     # (operator ruling 2026-10-05), and the background case (d6 rebuild
     # verifier, MAJOR).
     _flat = " ".join(_cmd.split())
-    check(f"{label}: CLAUDE.md starts a task: status in-progress, then the "
-          f"spec and INDEX.md committed, before dispatch",
-          "Starting a task: set `status: in-progress` in its task file, "
-          "commit `.claude/specs/<slug>/` and `.claude/specs/INDEX.md`, then "
-          "dispatch it." in _flat, _land)
+    # [WP4 / ruling 1 (a)] The sentence starts "on a spec branch," in both
+    # modes: each spec starts on its own branch (/spec-new creates it), so
+    # merge-back lands a task there, not on the default branch.
+    check(f"{label}: CLAUDE.md starts a task: on a spec branch, status "
+          f"in-progress, then the spec and INDEX.md committed, before "
+          f"dispatch",
+          "Starting a task: on a spec branch, set `status: in-progress` in "
+          "its task file, commit `.claude/specs/<slug>/` and "
+          "`.claude/specs/INDEX.md`, then dispatch it." in _flat, _land)
+    # The clause itself, exactly as long as the retrofit-agent fixture's 80
+    # lines allow (19 characters there take it to 81, review build N1).
+    _clause = _land.split("Starting a task: ", 1)[-1][:18]
+    check(f"{label}: the clause right after \"Starting a task: \" is \"on a "
+          f"spec branch, \" (18 characters)",
+          "Starting a task: " in _land and _clause == "on a spec branch, ",
+          repr(_clause))
+    _sn = " ".join(
+        plan_of(text)[".claude/skills/spec-new/SKILL.md"]["body"].split())
+    check(f"{label}: /spec-new creates the spec branch the clause names, from "
+          f"the default branch only",
+          "If you are on the default branch, create the spec's branch and "
+          "switch to it: `git switch -c spec/<slug>`." in _sn
+          and "Otherwise stay on the current branch." in _sn, _sn[:900])
     # [WP3 fix1 MB-3, MB-8] Done once the branch merged, whichever line
     # says so (MERGED, CLEANUP MERGED, ALREADY-MERGED naming the merge).
     check(f"{label}: CLAUDE.md sets done once the branch merged, and with "
@@ -271,10 +289,11 @@ for label, text, retro in (("greenfield", CFG, False),
           "If it goes to the background, wait for that line in this turn "
           "and commit nothing: ending the turn can stop it." in _flat
           and "await its notification" not in _flat, _land)
+    # [WP4 / g2] The lifecycle now ends at ci-cd.md's one stop.
     check(f"{label}: the lifecycle names the reviewer agent as code-review "
           f"and merge-back as the landing step",
           "-> code-review (the reviewer agent) -> merge-back -> "
-          "spec-validate -> pr-author." in _flat)
+          "spec-validate -> pr-author -> stop as `ci-cd.md` says." in _flat)
 check("CLAUDE.md does not depend on the isolation decision",
       P_ON["CLAUDE.md"]["body"] == P_OFF["CLAUDE.md"]["body"])
 # [WP3 critic 5a] The gate sentence says only what merge-back runs: the
@@ -305,15 +324,17 @@ check("greenfield CLAUDE.md names no rollout week; retrofit's says the "
 
 
 def _golden_fixture_texts():
-    """The six golden fixtures' config texts, read (by AST, never by
+    """The seven golden fixtures' config texts, read (by AST, never by
     running the suites) from tests/test_greenfield_golden.py and
-    tests/test_retrofit.py, so a fixture edit there is measured here."""
+    tests/test_retrofit.py, so a fixture edit there is measured here.
+    [freeze-exception no. 85, 2026-10-14] FIXTURE_GATES_OFF is the seventh
+    (fixture E, WP4's gates-off config)."""
     import ast
     env = {"FIXTURE_DEFAULT": open(os.path.join(
         ROOT, "bootstrap.config.yaml")).read()}
     for f, names in (("test_greenfield_golden.py",
                       ("FIXTURE_FULL_AUTONOMOUS", "FIXTURE_DESIGN_STEERING",
-                       "FIXTURE_SDK_CALLABLE")),
+                       "FIXTURE_SDK_CALLABLE", "FIXTURE_GATES_OFF")),
                      ("test_retrofit.py",
                       ("SERVICE_RETROFIT_CFG", "AGENT_RETROFIT_CFG"))):
         path = os.path.join(HERE, f)
@@ -332,8 +353,8 @@ def _golden_fixture_texts():
 _fx = _golden_fixture_texts()
 _md_lines = {k: plan_of(v)["CLAUDE.md"]["body"].count("\n")
              for k, v in sorted(_fx.items())}
-check("CLAUDE.md stays at 80 lines or fewer in all six golden fixtures",
-      len(_md_lines) == 6 and max(_md_lines.values()) <= 80, str(_md_lines))
+check("CLAUDE.md stays at 80 lines or fewer in all seven golden fixtures",
+      len(_md_lines) == 7 and max(_md_lines.values()) <= 80, str(_md_lines))
 _full = plan_of(CFG + "autonomous_modes:\n  loop_mode_enabled: true\n")
 _loop = _full[".claude/loop.sh"]["body"]
 check("loop.sh: the #57512 claim is corrected, not repeated",

@@ -1145,6 +1145,7 @@ finally:
 # literal here — the absolute count is pinned by test_greenfield_golden.py).
 # ---------------------------------------------------------------------------
 _LEDGER_PATH = ".claude/steering/assumption-ledger.md"
+import re as _re_gr                                      # noqa: E402
 for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
     _c, _ = cfg_from(_fix)
     _plan = build_plan(_c)
@@ -1165,9 +1166,19 @@ for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
         # Interpolated (not hardcoded) default drift thresholds 50/120/3.
         check(f"GR2-03a[{_fix_name}]: ledger interpolates drift thresholds",
               "50 tool calls / 120 min / 3 file reads" in _body)
-        # Links to the v2.4.0 doc, not restating it as a second authority.
-        check(f"GR2-03a[{_fix_name}]: ledger cites Bootstrap-Protocol-v2-4-0",
-              "Bootstrap-Protocol-v2-4-0.md" in _body)
+        # Links to the protocol document, not restating it as a second
+        # authority. [WP4 / g5] The current document, by templates'
+        # PROTOCOL_DOC, and no other protocol file name. Through WP3 this
+        # row asked for Bootstrap-Protocol-v2-4-0.md, so it passed a ledger
+        # that sent the adopter to a superseded protocol file no install
+        # contains, beside two links to v2-8-0.
+        _names = set(_re_gr.findall(
+            r"Bootstrap-Protocol-(?:Companion-)?v\d+-\d+-\d+\.md", _body))
+        _pdoc = getattr(_tmpl, "PROTOCOL_DOC", None)
+        check(f"GR2-03a[{_fix_name}]: ledger cites the current protocol doc, "
+              f"and no other protocol file",
+              _pdoc is not None and f"`{_pdoc}`" in _body
+              and _names == {_pdoc})
 
 # Determinism: the seeded ledger body carries no timestamp/randomness, so two
 # independent resolves produce byte-identical bodies (and the whole plan digest
@@ -1191,9 +1202,11 @@ _cbody = [a for a in build_plan(_cc)
 check("GR2-03a: customized drift threshold flows into the ledger",
       "77 tool calls" in _cbody)
 
-# v2.4.0 spec-doc existence (RC-03 class): the assumption-ledger / telemetry
-# bodies and GR2-01/02 prose added by this fold cite Bootstrap-Protocol-v2-4-0
-# — the cited docs must exist at repo root so the citations are not dangling.
+# v2.4.0 spec-doc existence (RC-03 class). [WP4 / g5] No emitted body cites
+# the v2.4.0 pair any more: emitted citations name templates.PROTOCOL_DOC,
+# and RC-03 (tests/test_usage_limit_contract.py) checks that file exists.
+# These rows keep the frozen pair the changelog's history cites, until
+# protocol-doc-snapshot-retire decides its fate.
 for _doc in ("Bootstrap-Protocol-v2-4-0.md",
              "Bootstrap-Protocol-Companion-v2-4-0.md"):
     check(f"v2.4.0: cited spec doc exists at repo root: {_doc}",

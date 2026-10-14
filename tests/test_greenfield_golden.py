@@ -118,6 +118,24 @@ commands:
 # install writes.
 FIXTURE_SDK_CALLABLE = 'gate_substrate: "sdk-callable"\n' + FIXTURE_DEFAULT
 
+# Fixture E: [freeze-exception no. 85, 2026-10-14] the gates-off config WP4
+# builds for: the build plan's section 1 switches (secrets, deps and the
+# commit spec gate off, isolation none) with "true" for every command it sets,
+# byte for byte the literal tests/test_wp4_must_not_change.py pins its hook
+# bodies with. No other fixture turns the secrets and dependency policies
+# off, so before WP4 no digest covered the bodies that follow them: the
+# gates-off CLAUDE.md, and a plan with no secrets.md, deps.md, secrets,
+# dependency or spec-gate-commit hook, and no `.claude/githooks/` scripts.
+# Its digest is a deliberate golden ADDITION, NOT a re-baseline.
+FIXTURE_GATES_OFF = """project: {name: "demo", archetype: "fullstack", shell: "bash"}
+principles: {tdd_policy: encouraged}
+secrets: {enabled: false}
+deps: {enabled: false}
+hooks: {secrets_gate: false, dependency_gate: false, spec_gate_commit: false}
+commands: {test: "true", lint: "true", format: "true", ci_local: "true"}
+workflow: {implementer_isolation: "none"}
+"""
+
 
 # --------------------------------------------------------------------------- #
 # Digest
@@ -3673,7 +3691,35 @@ EXPECTED_DIGESTS = {
         # Each of the 2 is in the 3d866f4 sets above, which still hold.
         # `_HOOK_HEADER`, its rendered bytes in every hook (the posture values
         # included), secrets-gate.sh and dependency-gate.sh do not move.
-        "c8ed0b03c03a5387d9602b2e7834c6b788279bf01d18e210f06a6337b6d1d42a",
+        # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
+        # Deliberate re-baseline, not a drift. WP4 writes the CLAUDE.md and
+        # steering text the protocol asks for and the install can make true,
+        # in one PR with no protocol version bump: CLAUDE.md's steering index,
+        # specs, learnings and sessions references, a TDD-adaptive lifecycle
+        # that ends "stop as `ci-cd.md` says", session hygiene, a Never list,
+        # and bell-marked urgent items keyed on the secrets and deps
+        # policies, followed by one line that sends the agent to the new
+        # `/escalate` skill (ruling 7 (c)); each spec on its own branch
+        # (ruling 1 (a): "on a spec branch," in CLAUDE.md, and /spec-new's
+        # new step 2); tech.md's Do Not Touch and Documentation Policy
+        # scaffolds; one stopping point in ci-cd.md; an assumption ledger that
+        # links `PROTOCOL_DOC` and gains a skill-body substitution row; the
+        # sessions README's `/escalate` row; and current protocol file names
+        # in audio-alerts.config (and, in full_autonomous, in the wrappers,
+        # their configs and auto.sh).
+        # `_HOOK_HEADER`, every `.claude/hooks/*.sh` body, secrets-gate.sh,
+        # dependency-gate.sh and gates.py do NOT move (2026-09-27 pivot;
+        # tests/test_wp4_must_not_change.py pins each at 0845862). The AC-2-3
+        # mini-golden (tests/test_validate_only.py) and the TEL-01 telemetry
+        # digest below do not move.
+        # Measured on the emitted plans against 8bc362b (whose lib/ is
+        # 0845862's), per file: 2 added (`.claude/skills/escalate/SKILL.md`,
+        # `.claude/commands/escalate.md`), 0 removed, the 64 kept paths in
+        # their old order, modes and kinds unchanged; action count 64 -> 66.
+        # 7 bodies move: CLAUDE.md, steering tech.md, ci-cd.md and
+        # assumption-ledger.md, hooks/audio-alerts.config, sessions/README.md
+        # and skills/spec-new/SKILL.md. CLAUDE.md goes from 40 to 66 lines.
+        "6cc855432be851669bef4763586e4b16ca223b74a3f05f596f292cd106dd5ffb",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4335,7 +4381,18 @@ EXPECTED_DIGESTS = {
         # previous digest (9c5155cd...), per file: the default fixture's 2
         # bodies move and no other; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 76. The 3d866f4 sets above still hold.
-        "6cf519998b7bb5ed7a29f6077abb3b91177fef9e2e01efdf8b5619eb75859056",
+        # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry
+        # (see the `default` note). Measured on the emitted plans against
+        # 8bc362b, per file: the default fixture's 2 added, 0 removed, the 76
+        # kept paths in their old order, modes and kinds unchanged; action
+        # count 76 -> 78. 12 bodies move: the default fixture's 7, plus
+        # loop.sh and goal-loop.sh (current protocol file names, and claim
+        # steps 2.2-2.4 say to flock the sibling `$STATE.lock`, never the
+        # state file), loop-config.md, goal-config.md and auto.sh (current
+        # protocol file names). Every hook body, `_HOOK_HEADER`,
+        # secrets-gate.sh and dependency-gate.sh do NOT move. CLAUDE.md goes
+        # from 44 to 70 lines.
+        "43cf6a9981579054104d4cd8d29b065a6fe7a16d64663fcd289ed9dc12f59aef",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4928,7 +4985,14 @@ EXPECTED_DIGESTS = {
         # bodies move and no other; 0 added, 0 removed, order, modes and kinds
         # unchanged, count 65. The three frozen design-steering artifacts do
         # not move, and the 3d866f4 sets above still hold.
-        "27d2ecc806ef9925ea78c2a41ad9175337ff78cd181ff068304e1d5be3fce4a7",
+        # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry
+        # (see the `default` note). Measured on the emitted plans against
+        # 8bc362b, per file: the default fixture's 2 added, 0 removed, the 65
+        # kept paths in their old order, modes and kinds unchanged; action
+        # count 65 -> 67. The default fixture's 7 bodies move and no other:
+        # the three design-steering artifacts and every hook body do not.
+        # CLAUDE.md goes from 40 to 64 lines.
+        "7ca1bd01a7f7c39c46dc89724e9a92144c151d570766a8db000dc48e89894311",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5117,7 +5181,26 @@ EXPECTED_DIGESTS = {
         # missing-start-directory arm); nothing is removed. RESOLVED_CONFIG,
         # `_secrets_gate`, `_match_secret`, `_dependency_gate` and
         # `_GATE_TIMEOUTS` do not move.
-        "56b80b2639a92ed5c350a436fced9b1f9e68ba7b1ea8b76f862333443586cb07",
+        # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry
+        # (see the `default` note). Measured on the emitted plans against
+        # 8bc362b, per file: the default fixture's 2 added, 0 removed, the 65
+        # kept paths in their old order, modes and kinds unchanged; action
+        # count 65 -> 67. The default fixture's 7 bodies move and no other:
+        # `.claude/sdk_gates/gates.py` and every hook body do not move
+        # (tests/test_wp4_must_not_change.py pins them at 0845862).
+        "77dcd1b05f85552f01acb7b2f1267b34d1592d99e4b6198c53ff20b83acbd938",
+    # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
+    # Deliberate golden ADDITION (not a re-baseline): fixture E, the
+    # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
+    # There is no previous digest. Rendered at 8bc362b, the same config
+    # gives 57 actions; measured against that plan, per file: the default
+    # fixture's 2 added, 0 removed, the 57 kept paths in their old order,
+    # modes and kinds unchanged; action count 59. The default fixture's 7
+    # bodies move and no other; its 8 hook bodies are the ones
+    # tests/test_wp4_must_not_change.py pins at 0845862. CLAUDE.md goes
+    # from 40 to 62 lines.
+    "gates_off":
+        "b4b60ac30ce0e12b4ed90e8a7e1b1283d56d675e025406d16af05e50b3de8e4a",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -5148,15 +5231,27 @@ EXPECTED_ACTION_COUNTS = {
     # fullstack baseline + the 3 design artifacts). The git hook shims the
     # installer writes into the repository's hooks directory are not plan
     # actions and are not counted here.
-    "default": 64,
-    "full_autonomous": 76,
-    "design_steering": 65,
+    # [freeze-exception no. 85, 2026-10-14] WP4 adds 2 actions to every
+    # fixture, `.claude/skills/escalate/SKILL.md` and
+    # `.claude/commands/escalate.md` (ruling 7 (c)), and removes none:
+    # 64 -> 66, 76 -> 78, 65 -> 67.
+    "default": 66,
+    "full_autonomous": 78,
+    "design_steering": 67,
     # [freeze-exception no. 82, 2026-09-28] fixture D (golden ADDITION): the
     # 56-file default + `.claude/sdk_gates/gates.py`, the one action the
     # sdk-callable substrate adds.
     # [freeze-exception no. 84, 2026-10-05] the default fixture's 8 WP3
     # actions: 57 -> 65, the 64-file default + gates.py.
-    "sdk_callable": 65,
+    # [freeze-exception no. 85, 2026-10-14] the 2 escalate actions:
+    # 65 -> 67.
+    "sdk_callable": 67,
+    # [freeze-exception no. 85, 2026-10-14] fixture E (golden ADDITION):
+    # the default fixture's 66 actions less the seven its switches turn off
+    # (steering deps.md and secrets.md, hooks spec-gate-commit, secrets-gate
+    # and dependency-gate, githooks spec-check.sh and dispatch). 57 on
+    # 0845862, the 2 escalate actions added: 59.
+    "gates_off": 59,
 }
 
 
@@ -5210,6 +5305,7 @@ run_fixture("default", FIXTURE_DEFAULT)
 run_fixture("full_autonomous", FIXTURE_FULL_AUTONOMOUS)
 run_fixture("design_steering", FIXTURE_DESIGN_STEERING)
 run_fixture("sdk_callable", FIXTURE_SDK_CALLABLE)
+run_fixture("gates_off", FIXTURE_GATES_OFF)
 
 # Fixture D is only a gates.py pin while its plan really carries gates.py
 # and the shell fixtures really do not (non-vacuity, both directions).
@@ -5220,6 +5316,21 @@ check("golden[default]: the shell plan carries no gates.py (so fixture D is "
       "the only pin on it)",
       ".claude/sdk_gates/gates.py"
       not in [a["path"] for a in plan_actions(FIXTURE_DEFAULT)[1]])
+
+# [freeze-exception no. 85, 2026-10-14] Fixture E pins the gates-off plan
+# only while it really is one, and the default really is not (non-vacuity,
+# both directions): no secrets, deps, spec-gate-commit or githooks path.
+_GATES_OFF_MARKS = ("secrets", "deps.md", "dependency-gate",
+                    "spec-gate-commit", ".claude/githooks/")
+_off_paths = [a["path"] for a in plan_actions(FIXTURE_GATES_OFF)[1]]
+_def_paths = [a["path"] for a in plan_actions(FIXTURE_DEFAULT)[1]]
+for _mark in _GATES_OFF_MARKS:
+    _hits = [p for p in _off_paths if _mark in p]
+    check(f"golden[gates_off]: no {_mark} path in the plan", not _hits,
+          f"    {_hits}")
+check("golden[default]: the default plan carries every one of them (so "
+      "fixture E is the only gates-off pin)",
+      all(any(_mark in p for p in _def_paths) for _mark in _GATES_OFF_MARKS))
 
 
 # --------------------------------------------------------------------------- #
@@ -5282,7 +5393,8 @@ if os.environ.get("GOLDEN_UPDATE") != "1":
     for label, fixt in [("default", FIXTURE_DEFAULT),
                         ("full_autonomous", FIXTURE_FULL_AUTONOMOUS),
                         ("design_steering", FIXTURE_DESIGN_STEERING),
-                        ("sdk_callable", FIXTURE_SDK_CALLABLE)]:
+                        ("sdk_callable", FIXTURE_SDK_CALLABLE),
+                        ("gates_off", FIXTURE_GATES_OFF)]:
         _, p1 = plan_actions(fixt)
         _, p2 = plan_actions(fixt)
         check(f"determinism[{label}]: two passes produce identical digests",

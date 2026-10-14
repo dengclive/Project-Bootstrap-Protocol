@@ -266,7 +266,9 @@ for name, tail in _EXPECT.items():
     b = skill(_g, name) or ""
     check(f"{name}: carries its model line ({tail[:-1]})",
           f"\n> Recommended: invoke from {tail}\n" in b)
-for name in ("quiet", "quiet-task-done"):
+# [WP4 / ruling 7 (c)] escalate has no Companion row either, and a model line
+# would need one: a new line in a layered doc (review ESC-5).
+for name in ("quiet", "quiet-task-done", "escalate"):
     check(f"{name}: no model line (no Companion row)",
           "Recommended:" not in (skill(_g, name) or "x Recommended:"))
 _fable_hits = sorted(p for p, v in _g.items() if "fable" in v.lower())
@@ -491,6 +493,22 @@ check("spec-new: commits the spec and the roster before any dispatch "
       "(critic 2c)", has(_sn, _COMMIT))
 check("spec-new: next step is /spec-review",
       has(_sn, "Next step: `/spec-review <slug>`."))
+# [WP4 / ruling 1 (a)] Each spec starts on its own branch, in both modes:
+# from the default branch only, once the slug is resolved (the branch is
+# named from it), and before the first write, so the spec's commit and its
+# tasks' merges land on the spec branch.
+for _label, _body in (("greenfield", _sn),
+                      ("retrofit", skill(_PLANS["retrofit-loop"],
+                                         "spec-new") or "")):
+    _br = _body.find("## 2. Start the spec's branch")
+    check(f"spec-new ({_label}): starts the spec's branch from the default "
+          f"branch, after the slug and before the first write",
+          has(_body, "If you are on the default branch, create the spec's "
+                     "branch and switch to it: `git switch -c spec/<slug>`.")
+          and has(_body, "Otherwise stay on the current branch.")
+          and -1 < _body.find("## 1. Resolve the slug") < _br
+          < _body.find("## 4. Write `requirements.md`"),
+          _body[_br:_br + 400] if _br >= 0 else _body[:400])
 
 print("\n== spec-decompose ==")
 _sd = skill(_g, "spec-decompose") or ""
