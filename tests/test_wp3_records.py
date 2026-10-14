@@ -2,9 +2,9 @@
 """[WP3 records] WP3's records say what the code does.
 
 Each row DERIVES the fact from the code (a resolved config, an emitted plan,
-a real install, a parsed golden table) and then checks the record that
-states it, so a record that drifts from the code fails here, not in the next
-review. The records are the tracked ones WP3 wrote: the changelog's WP3
+a real install, a golden fixture read with ast) and then checks the record
+that states it, so a record that drifts from the code fails here, not in the
+next review. The records are the tracked ones WP3 wrote: the changelog's WP3
 entry, the backlog's WP3 layers and rows Z-28 to Z-57, the seam contract's
 dated WP3 notes, the PRD, Companion, RETROFIT.md and README notes, the
 readiness layer on A-6, and the commented keys in bootstrap.config.yaml.
@@ -12,7 +12,8 @@ readiness layer on A-6, and the commented keys in bootstrap.config.yaml.
   - the mode WP3 ships (warn), its posture (FAIL_CLOSED 0, block renders 1),
     and the advisory-hook count the PRD note states;
   - the freeze-exception 84 table: counts and digest prefixes against the
-    golden suites' own tables, the added paths against the emitted plan;
+    golden suites' tables as exception 84 left them (pinned as data), the
+    added paths against the emitted plan;
   - the seam notes: the git_hook manifest rows, owned_worktree and
     contributed_keys from a real install, exit 3 for an invalid
     worktree.baseRef, the exit-2 config refusals, RESOLVED_CONFIG["hooks"],
@@ -166,28 +167,42 @@ check("the entry states that posture: FAIL_CLOSED goes from 1 to 0, block "
       "`FAIL_CLOSED` goes from 1 to 0" in CL
       and "(block mode renders 1)" in CL)
 
-# The freeze-exception 84 table, against the golden suites' own tables.
-_COUNTS = dict(assigned_literal("tests/test_greenfield_golden.py",
-                                "EXPECTED_ACTION_COUNTS") or {})
-_rc = assigned_literal("tests/test_retrofit.py",
-                       "EXPECTED_RETROFIT_COUNTS") or {}
-_COUNTS.update({"retrofit " + k: v for k, v in _rc.items()})
-_DIGESTS = dict(assigned_literal("tests/test_greenfield_golden.py",
-                                 "EXPECTED_DIGESTS") or {})
-_rd = assigned_literal("tests/test_retrofit.py",
-                       "EXPECTED_RETROFIT_DIGESTS") or {}
-_DIGESTS.update({"retrofit " + k: v for k, v in _rd.items()})
+# The freeze-exception 84 table, against the golden tables as exception 84
+# left them. [WP4 commit 1, X2] Pinned as data: the values of
+# EXPECTED_ACTION_COUNTS, EXPECTED_DIGESTS, EXPECTED_RETROFIT_COUNTS and
+# EXPECTED_RETROFIT_DIGESTS at 0845862, WP4's base. Read live, a later
+# exception's re-baseline turns 8 of these rows red while the record stays
+# true: on a copy with every digest moved, +2 actions per fixture and a
+# seventh fixture key, 195 passed, 8 failed; with the pins, 203 passed,
+# 0 failed.
+_COUNTS = {"default": 64, "full_autonomous": 76, "design_steering": 65,
+           "sdk_callable": 65, "retrofit service": 87,
+           "retrofit agent": 101}
+_DIGESTS = {
+    "default":
+        "c8ed0b03c03a5387d9602b2e7834c6b788279bf01d18e210f06a6337b6d1d42a",
+    "full_autonomous":
+        "6cf519998b7bb5ed7a29f6077abb3b91177fef9e2e01efdf8b5619eb75859056",
+    "design_steering":
+        "27d2ecc806ef9925ea78c2a41ad9175337ff78cd181ff068304e1d5be3fce4a7",
+    "sdk_callable":
+        "56b80b2639a92ed5c350a436fced9b1f9e68ba7b1ea8b76f862333443586cb07",
+    "retrofit service":
+        "d300f962656721f13c638d8bb223ed896a60ea367399ddd88a8fd35654afab40",
+    "retrofit agent":
+        "c89644a969c780937ede91bf768dabae860bb008668a6552c8e4ffac12808b4e",
+}
 _ROWS = {m.group(1): (int(m.group(2)), int(m.group(3)), int(m.group(4)))
          for m in re.finditer(
              r"^\| (default|full_autonomous|design_steering|sdk_callable|"
              r"retrofit service|retrofit agent) \| (\d+) → (\d+) \| "
              r"\+(\d+) / 0 \|", _CL_RAW, re.M)}
-check("the freeze table has a row for each of the six fixtures, and the "
-      "golden tables have six counts",
+check("the freeze table has a row for each of the six fixtures exception "
+      "84 measured",
       len(_ROWS) == 6 and set(_ROWS) == set(_COUNTS), (_ROWS, _COUNTS))
 for _fx, (_old, _new, _add) in sorted(_ROWS.items()):
-    check(f"freeze table, {_fx}: {_new} actions as the golden suite pins, "
-          f"and +{_add} is the difference",
+    check(f"freeze table, {_fx}: {_new} actions, as the golden suite pinned "
+          f"them at exception 84, and +{_add} is the difference",
           _COUNTS.get(_fx) == _new and _new - _old == _add,
           (_fx, _old, _new, _add, _COUNTS.get(_fx)))
 _FRZ = cut(CL, "**Freeze exception 84.**", "**Tests.**")
@@ -197,7 +212,7 @@ _named = dict(re.findall(r"(default|full_autonomous|design_steering|"
 _named = {("retrofit " + k if k in ("service", "agent") else k): v
           for k, v in _named.items()}
 check("the entry names a digest prefix for each of the six fixtures, as "
-      "the golden suites pin them",
+      "the golden suites pinned them at exception 84",
       len(_named) == 6 and all(
           _DIGESTS.get(k, "")[:8] == v for k, v in _named.items()),
       {k: (v, _DIGESTS.get(k, "")[:8]) for k, v in _named.items()})

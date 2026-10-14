@@ -158,6 +158,26 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — CLAUDE.md, steering and the entry path (WP4) (2026-10-14)
+
+**No version bump** (freeze exception **85**). WP4's first commit adds this
+entry as a stub, and its last commit completes it. The stub already names the
+frozen sources and the new suites, so that `tests/test_wp3_records.py` stays
+green through every commit in between.
+
+**Freeze exception 85.** One exception covers every frozen source WP4
+touches: `lib/templates.py`, `lib/installer.py`, `lib/interview.py`,
+`lib/retrofit_interview.py`, `lib/defaults.py`, `lib/llm_advisor.py`,
+`lib/prd_heuristics.py` and `tests/test_installer.py`. WP4's last commit adds
+the action counts and digest prefixes that the golden re-baseline sets.
+
+**Tests.** New suites: `tests/test_wp4_must_not_change.py`,
+`tests/test_wp4_claude_md.py`, `tests/test_wp4_escalate.py`,
+`tests/test_wp4_steering.py`, `tests/test_wp4_tool_path.py`,
+`tests/test_wp4_protocol_notes.py`, `tests/test_wp4_plugin_toolchain.py` and
+`tests/test_wp4_records.py`. `tests/plugin_toolchain_map.py` is a helper
+module, not a suite.
+
 ## Post-2.8.0 — a spec workflow that reaches a merged commit (WP3) (2026-10-05)
 
 **No version bump** (fix, not surface; freeze exception **84**). One PR, one
