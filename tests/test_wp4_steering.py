@@ -24,6 +24,13 @@ sections, and ci-cd.md's one agent stopping point.
    WP4 changes, never on a Never list; a kept .claude/.gitignore that does
    not ignore the state lock; and, on a tree with no installer manifest
    (a fresh clone), the per-file remedy instead of `--adopt`.
+6. [WP4 fix round 1] What the step 7 review found in 8a: a file a fresh
+   clone kept keeps its remedy on later re-installs (K1); headings match
+   by prefix, whatever their case (F2), and a greenfield CLAUDE.md is
+   checked per Phase 8 element; a Test row that names the command with a
+   note or bold is not stale (F3); a kept ci-cd.md with no stop is named
+   (F1); a kept .gitignore is checked for the parse guard's copy too (F4);
+   and a CLAUDE.md a first install keeps is the project's own (F5).
 
 Run: python3 tests/test_wp4_steering.py
 """
@@ -323,10 +330,18 @@ check("opted out: the agent stops after its last commit and never pushes",
 check("opted out: ci-mirror is not wired, so no push check is claimed",
       "ci-mirror" not in p_out[CICD]
       and ".claude/hooks/ci-mirror.sh" not in p_out, p_out[CICD])
-check("with CI/CD: the push-check sentence points at tech.md, which says "
-      "what ci-mirror runs (the old 'these same checks' claim is gone)",
-      "runs the checks `.claude/steering/tech.md` names" in flat(p_ci[CICD])
+# [WP4 fix round 1 / R9] The hook runs the commands the config held at
+# install time and never reads tech.md, so the sentence names the config.
+check("with CI/CD: the push-check sentence names the config's commands, as "
+      "of the last install, and how to change them; tech.md's table says "
+      "the same (the old 'these same checks' and 'the checks tech.md "
+      "names' claims are gone)",
+      "the `ci-mirror` hook runs `commands.ci_local`, or `commands.test` "
+      "when that is empty, as `bootstrap.config.yaml` held them at the "
+      "last install" in flat(p_ci[CICD])
+      and "change the config and re-install" in flat(p_ci[CICD])
       and "these same checks" not in p_ci[CICD]
+      and "tech.md` names" not in flat(p_ci[CICD])
       and "`ci-mirror` runs CI local before every push" in p_ci[TECH],
       p_ci[CICD])
 check("ci-mirror off: ci-cd.md says no hook checks a push",
@@ -418,14 +433,17 @@ def skip_line(out, path):
 
 
 def no_manifest(rel):
-    """[WP4 / KEEP-1] The per-file remedy on a tree with no manifest."""
-    return (f"This tree has no installer manifest, so the installer can't "
-            f"tell whether {rel} was edited. If nobody edited it, move it "
-            f"aside and re-install; that re-creates only {rel}. If it holds "
-            f"edits, merge the change by hand. Don't use --adopt for this: "
-            f"it records every skipped file as the installer's, so the next "
-            f"install replaces each steering doc you or Claude filled in, "
-            f"with no backup.")
+    """[WP4 / KEEP-1] The per-file remedy on a tree with no manifest.
+    [WP4 fix round 1 / K1, F5] "had", since a later run says it too, and
+    the edited branch is the README's move-aside route."""
+    return (f"This tree had no installer manifest when an install first "
+            f"kept {rel}, so the installer can't tell whether it was edited. "
+            f"If nobody edited it, move it aside and re-install; that "
+            f"re-creates only {rel}. If it holds edits, move it aside, "
+            f"re-install, then merge your edits back from the moved copy. "
+            f"Don't use --adopt for this: it records every skipped file as "
+            f"the installer's, so the next install replaces each steering "
+            f"doc you or Claude filled in, with no backup.")
 
 
 def proj(name, cfg_text=CFG):
@@ -558,13 +576,15 @@ try:
           + TWO_STOPS)
     rg = run(g)
     wc = warns(rg, "CLAUDE.md")
+    # [WP4 fix round 1 / F2] Per element: only the Never section is gone,
+    # so only it is named.
     check("greenfield CLAUDE.md kept with no `## Never` section: one warning "
-          "lists the Never list, session hygiene, the steering index and the "
-          "/escalate line",
+          "names that section, and none of the Phase 8 elements still there",
           rg.returncode == 0 and len(wc) == 1
-          and "(the Never list, session hygiene, the steering index and the "
-              "`/escalate` line)" in wc[0]
-          and "'## Never'" in wc[0]
+          and "this release's Phase 8 text, and it has no '## Never' "
+              "section." in wc[0]
+          and not any(e in wc[0] for e in ("session-hygiene", "'## Index'",
+                                           "`/escalate`"))
           and "Merge them by hand from a fresh install's CLAUDE.md." in wc[0],
           rg.stderr[-1200:])
     wk = warns(rg, CICD)
@@ -692,6 +712,254 @@ try:
           rs.returncode == 3
           and no_manifest(".claude/hooks/secrets-gate.sh") in rs.stderr
           and "records them as ours" not in rs.stderr, rs.stderr[-1200:])
+
+    # ---- 6. Fix round 1: the step 7 review's 8a findings --------------- #
+    print("\n== 6. fix round 1: kept files the review found misread ==")
+    STRIP_NEVER = re.compile(r"^## Never\n.*?(?=^## )", re.S | re.M)
+    HYGIENE = re.compile(r"^\*\*Session hygiene:\*\*.*?\n\n", re.S | re.M)
+    ESCALATE = "Before you stop for a 🔔 item, run `/escalate` to record why.\n"
+
+    def skip_reason(out, path):
+        return next((ln.split("(", 1)[1] for ln in out.splitlines()
+                     if ln.strip().startswith("SKIP") and path in ln), "")
+
+    def old_docs(d):
+        """An earlier install's three docs: tech.md without the WP4
+        sections, ci-cd.md with two stops, CLAUDE.md with no Never list."""
+        write(d, TECH, read(d, TECH).split("\n## Do Not Touch", 1)[0]
+              + "\n## Stack\n\nPython.\n")
+        write(d, CICD, read(d, CICD).split("## Agent stopping point", 1)[0]
+              + TWO_STOPS)
+        write(d, "CLAUDE.md", STRIP_NEVER.sub("", read(d, "CLAUDE.md")))
+
+    # [K1] A fresh clone's re-install wrote a manifest that recorded the
+    # kept files as local edits, so the second re-install called them
+    # "locally modified" and sent CLAUDE.md to a hand merge.
+    k1 = proj("k1-clone")
+    run(k1)
+    old_docs(k1)
+    os.remove(os.path.join(k1, MANIFEST))
+    k1runs = [run(k1) for _ in range(3)]
+    for rel in (TECH, CICD, "CLAUDE.md"):
+        per_run = [warns(r, rel) for r in k1runs]
+        check(f"[K1] fresh clone, three re-installs: {rel}'s warning ends "
+              f"with the per-file remedy every time, and says the same each "
+              f"run",
+              all(r.returncode == 0 for r in k1runs)
+              and all(len(w) == 1 and w[0].endswith(no_manifest(rel))
+                      for w in per_run)
+              and per_run[0] == per_run[1] == per_run[2],
+              [w[0][-300:] if w else None for w in per_run])
+        check(f"[K1] ... and {rel}'s SKIP line gives the same reason each "
+              f"run, never 'locally modified'",
+              len({skip_reason(r.stdout, rel) for r in k1runs}) == 1
+              and "locally modified" not in skip_reason(k1runs[2].stdout,
+                                                        rel)
+              and "had no installer manifest" in skip_reason(
+                  k1runs[2].stdout, rel),
+              [skip_reason(r.stdout, rel) for r in k1runs])
+    _k1steps = [r.stdout[r.stdout.find("Next steps:"):] for r in k1runs]
+    check("[K1] ... and Next steps is the same each run",
+          "Next steps:" in _k1steps[0]
+          and _k1steps[0] == _k1steps[1] == _k1steps[2], _k1steps[2][:600])
+    # A file someone edits after that is proven edited: the hand fix.
+    write(k1, CICD, read(k1, CICD) + "\nA line the team added.\n")
+    k1e = run(k1)
+    we = warns(k1e, CICD)
+    check("[K1] edited after the first re-install: ci-cd.md is a local edit "
+          "now, and its warning gives the hand fix",
+          k1e.returncode == 0 and "locally modified" in skip_reason(
+              k1e.stdout, CICD)
+          and len(we) == 1 and no_manifest(CICD) not in we[0]
+          and we[0].endswith("Keep one, as Bootstrap Protocol Phase 5 asks."),
+          we)
+    check("[K1] ... while the files nobody touched keep the remedy",
+          all(len(warns(k1e, rel)) == 1
+              and warns(k1e, rel)[0].endswith(no_manifest(rel))
+              for rel in (TECH, "CLAUDE.md")), k1e.stderr[-800:])
+
+    # [F2] Headings match by prefix, whatever their case or a suffix.
+    PCFG = CFG.replace('test: "true"', 'test: "pytest -q"')
+    f2 = proj("f2", PCFG)
+    run(f2)
+    fresh_tech, fresh_md = read(f2, TECH), read(f2, "CLAUDE.md")
+    for label, text in (
+            ("sentence case", fresh_tech.replace(
+                "## Do Not Touch", "## Do not touch").replace(
+                "## Documentation Policy", "## Documentation policy")),
+            ("a suffix", fresh_tech.replace(
+                "## Do Not Touch", "## Do Not Touch (paths agents never "
+                "edit)"))):
+        write(f2, TECH, text + "\nFilled.\n")
+        rt = run(f2)
+        check(f"[F2] tech.md kept with its two headings in {label}: no "
+              f"warning", rt.returncode == 0 and skip_line(rt.stdout, TECH)
+              and warns(rt, TECH) == [], warns(rt, TECH))
+    write(f2, TECH, fresh_tech)
+    write(f2, "CLAUDE.md", fresh_md.replace("## Never\n",
+                                            "## Never do these\n"))
+    rn = run(f2)
+    check("[F2] CLAUDE.md kept with its Never heading renamed '## Never do "
+          "these': no warning", rn.returncode == 0
+          and skip_line(rn.stdout, "CLAUDE.md")
+          and warns(rn, "CLAUDE.md") == [], warns(rn, "CLAUDE.md"))
+    # The other direction: an adopter's own `## Never` does not stand for
+    # the index, session hygiene and the /escalate line.
+    own_never = re.sub(r"^## Index.*?(?=^## )", "",
+                       HYGIENE.sub("", fresh_md.replace(ESCALATE, "")),
+                       flags=re.S | re.M)
+    write(f2, "CLAUDE.md", own_never)
+    ro = run(f2)
+    wo = warns(ro, "CLAUDE.md")
+    check("[F2] CLAUDE.md kept with a `## Never` section but no index, "
+          "session hygiene or /escalate line: one warning names those three, "
+          "and not the Never section",
+          ro.returncode == 0 and len(wo) == 1
+          and "it has no session-hygiene line, '## Index' section or "
+              "`/escalate` line." in wo[0]
+          and "'## Never'" not in wo[0], wo)
+    write(f2, "CLAUDE.md", fresh_md.replace(ESCALATE, ""))
+    re_ = run(f2)
+    we_ = warns(re_, "CLAUDE.md")
+    check("[F2] CLAUDE.md kept without only the /escalate line: the warning "
+          "names only that line",
+          re_.returncode == 0 and len(we_) == 1
+          and "it has no `/escalate` line." in we_[0], we_)
+    write(f2, "CLAUDE.md", fresh_md)
+
+    # [F3] A Test row that names the command with a note, or in bold, is
+    # not stale; one that names another command still is, quoted as written.
+    TEST_ROW = re.compile(r"^\| Test +\|.*\|$", re.M)
+    for label, cell, stale in (
+            ("a note after it", "`pytest -q` (from the repo root; CI runs "
+             "the same)", False),
+            ("bold", "**`pytest -q`**", False),
+            ("another command", "`make test`", True)):
+        write(f2, TECH, TEST_ROW.sub(f"| Test      | {cell} |", fresh_tech))
+        r3 = run(f2)
+        w3 = warns(r3, TECH)
+        if stale:
+            check(f"[F3] Test row naming {label}: one warning, the cell "
+                  f"quoted as written", r3.returncode == 0 and len(w3) == 1
+                  and f"its Test row says {cell}, but commands.test is "
+                      f"`pytest -q`" in w3[0], w3)
+        else:
+            check(f"[F3] Test row naming the command with {label}: no "
+                  f"warning", r3.returncode == 0
+                  and skip_line(r3.stdout, TECH) and w3 == [], w3)
+    write(f2, TECH, fresh_tech)
+
+    # [F1] Before WP4 the opt-out ci-cd.md had no stopping point at all
+    # (its body, rendered by 0845862's build_plan, below).
+    OLD_OPTOUT = ("# CI/CD Steering\n\n**No CI/CD** (operator opted out in "
+                  "Phase 0).\n\nThe agent still runs the test command "
+                  "locally:\n`true`\n\nPlaceholder for future CI addition. "
+                  "Re-run the wizard's CI setup to populate.\n")
+    OCFG = CFG.replace("archetype: fullstack\n",
+                       "archetype: fullstack\n  cicd_opt_out: true\n")
+    f1 = proj("f1-optout", OCFG)
+    run(f1)
+    write(f1, CICD, OLD_OPTOUT + "\nA note the team added.\n")
+    r1 = run(f1)
+    w1 = warns(r1, CICD)
+    check("[F1] opt-out ci-cd.md from before WP4, kept: one warning says it "
+          "names no stop, and that the agent stops after its last commit and "
+          "never pushes",
+          r1.returncode == 0 and len(w1) == 1
+          and "'## Agent stopping point' section, and it names no stop."
+              in w1[0]
+          and "the agent stops after its last commit for the task, and never "
+              "pushes" in w1[0]
+          and "CLAUDE.md's lifecycle now ends at the stop this file names."
+              in w1[0]
+          and w1[0].endswith("Add the section, as Bootstrap Protocol Phase 5 "
+                             "asks."), w1)
+    write(f1, CICD, OLD_OPTOUT + "\n## Agent Stopping Point\n\nThe agent "
+          "stops after its last commit. A person pushes.\n")
+    r1b = run(f1)
+    check("[F1] opt-out ci-cd.md kept with its own stop under a title-case "
+          "heading: no warning", r1b.returncode == 0
+          and skip_line(r1b.stdout, CICD) and warns(r1b, CICD) == [],
+          warns(r1b, CICD))
+    f1d = proj("f1-default")
+    run(f1d)
+    write(f1d, CICD, read(f1d, CICD).split("## Agent stopping point", 1)[0])
+    r1d = run(f1d)
+    w1d = warns(r1d, CICD)
+    check("[F1] ci-cd.md kept with no stopping-point section, CI/CD on: the "
+          "warning gives this config's stop, the pull request",
+          r1d.returncode == 0 and len(w1d) == 1
+          and "the agent stops after it opens a pull request, and a person "
+              "merges it" in w1d[0], w1d)
+
+    # [F4] The parse guard's copy is ignored only through the
+    # `<state>.pre-*` lines, which a kept retrofit .gitignore from before
+    # WP4 lacks with the lock line.
+    if GIT:
+        f4 = proj("f4-retro", RCFG)
+        run(f4)
+        write(f4, ".claude/.gitignore", read(f4, ".claude/.gitignore")
+              .replace(".retrofit-state.json.lock\n", "")
+              .replace(".retrofit-state.json.pre-*\n", ""))
+        r4 = run(f4)
+        w4 = warns(r4, ".claude/.gitignore")
+        check("[F4] retrofit .claude/.gitignore kept without both WP4 lines: "
+              "one warning names both, the lock and the parse guard's copy",
+              r4.returncode == 0 and len(w4) == 1
+              and "the lines `.retrofit-state.json.lock` and "
+                  "`.retrofit-state.json.pre-*`" in w4[0]
+              and "the copy the install keeps of a state file that does not "
+                  "parse" in w4[0]
+              and w4[0].endswith("Add those lines to .claude/.gitignore."),
+              w4)
+        f4g = proj("f4-green")
+        run(f4g)
+        write(f4g, ".claude/.gitignore", read(f4g, ".claude/.gitignore")
+              .replace(".bootstrap-state.json.pre-*\n", ""))
+        r4g = run(f4g)
+        w4g = warns(r4g, ".claude/.gitignore")
+        check("[F4] greenfield .claude/.gitignore kept without the pre-* "
+              "line: one warning names it, and not the lock",
+              r4g.returncode == 0 and len(w4g) == 1
+              and "the line `.bootstrap-state.json.pre-*`" in w4g[0]
+              and ".lock`" not in w4g[0]
+              and w4g[0].endswith("Add that line to .claude/.gitignore."),
+              w4g)
+    else:                          # pragma: no cover
+        print("  SKIP  git not found: the .gitignore rows (NOT measured)")
+
+    # [F5] On a first install, a CLAUDE.md that was there is the project's
+    # own, and the route is to move it aside, re-install, and merge it into
+    # the new file (RETROFIT.md R8.E.1 in retrofit).
+    for label, cfg_text, r8 in (("greenfield", CFG, False),
+                                ("retrofit", RCFG, True)):
+        f5 = proj("f5-" + label, cfg_text)
+        write(f5, "CLAUDE.md", "# My project\n\nUse pnpm. Never push to "
+              "main.\n")
+        r5 = run(f5)
+        w5 = warns(r5, "CLAUDE.md")
+        check(f"[F5] {label} first install over the project's own CLAUDE.md: "
+              f"the warning calls it the project's own and gives the "
+              f"move-aside-and-merge route"
+              + (", as RETROFIT.md R8.E.1 says" if r8 else ""),
+              r5.returncode == 0 and len(w5) == 1
+              and "was there before this first install, so it is the "
+                  "project's own file" in w5[0]
+              and "Move it aside and re-install, which creates only "
+                  "CLAUDE.md, then merge your file into the new one" in w5[0]
+              and ("as RETROFIT.md R8.E.1 says" in w5[0]) == r8
+              and "did not receive" not in w5[0]
+              and "merge the change by hand" not in w5[0], w5)
+    check("[F5] a fresh clone's CLAUDE.md (an earlier install's) keeps the "
+          "missed-update wording and the remedy, whose edited branch is the "
+          "move-aside route",
+          "did not receive this release's Phase 8 text"
+          in warns(k1runs[0], "CLAUDE.md")[0]
+          and "If it holds edits, move it aside, re-install, then merge your "
+              "edits back from the moved copy."
+          in warns(k1runs[0], "CLAUDE.md")[0]
+          if warns(k1runs[0], "CLAUDE.md") else False,
+          warns(k1runs[0], "CLAUDE.md"))
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

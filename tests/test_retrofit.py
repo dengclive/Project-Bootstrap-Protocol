@@ -2642,8 +2642,19 @@ EXPECTED_RETROFIT_DIGESTS = {
     # sessions/README.md, skills/spec-new/SKILL.md and .claude/.gitignore,
     # plus, in `agent`, loop.sh, goal-loop.sh, loop-config.md and
     # goal-config.md. CLAUDE.md stays at 68 / 80 lines.
-    "service": "52f49a5790d0b486de37cefb9c368771d588731335aa3d5d5b20779c80fc4c35",
-    "agent": "2fc9e993ec238914fbfe106c3cabca4fc58a274f89ebc9c49bc1e8230ab53551",
+    # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined in
+    # the same exception (WP4 fix round 1). Measured on the emitted plans
+    # against the previous digests (52f49a57... / 2fc9e993...), per file:
+    # 2 bodies move in each, steering ci-cd.md (its push-check sentence
+    # names the config's commands, review R9) and skills/spec-new/SKILL.md
+    # (step 2 also branches from the default branch on another spec's
+    # branch, NF1), and no other; 0 added, 0 removed, order, modes and
+    # kinds unchanged, counts 89 / 103. Both are among the 8 / 12 above; no
+    # hook body moves.
+    "service":
+        "ffa3c7b601ba8de4430dbda86f6fcf4c7655ef8e80bfddc0b109ef9b49a1bb00",
+    "agent":
+        "0fcbe61eef3acba122da71d46449a2527b885fab2d5a777b2eba3075b6e5a9be",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

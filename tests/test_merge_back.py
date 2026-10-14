@@ -269,11 +269,15 @@ for label, text, retro in (("greenfield", CFG, False),
           repr(_clause))
     _sn = " ".join(
         plan_of(text)[".claude/skills/spec-new/SKILL.md"]["body"].split())
+    # [WP4 fix round 1 / NF1] From another spec's branch too, so a spec
+    # never lands on the previous spec's branch.
     check(f"{label}: /spec-new creates the spec branch the clause names, from "
-          f"the default branch only",
-          "If you are on the default branch, create the spec's branch and "
-          "switch to it: `git switch -c spec/<slug>`." in _sn
-          and "Otherwise stay on the current branch." in _sn, _sn[:900])
+          f"the default branch, also when on another spec's branch",
+          "If you are on the default branch, or on another spec's branch "
+          "(`spec/*`), create this spec's branch from the default branch and "
+          "switch to it: `git switch -c spec/<slug> <default>`" in _sn
+          and "On any other branch, one the operator chose, stay on it."
+          in _sn, _sn[:900])
     # [WP3 fix1 MB-3, MB-8] Done once the branch merged, whichever line
     # says so (MERGED, CLEANUP MERGED, ALREADY-MERGED naming the merge).
     check(f"{label}: CLAUDE.md sets done once the branch merged, and with "

@@ -47,7 +47,7 @@ def check(name, cond, detail=""):
 
 def cfg_text(tdd="encouraged", sec=True, deps=True, design=False, tel=False,
              modes=False, drift=True, tdd_gate=None, cicd_opt_out=False,
-             arch="service"):
+             arch="service", skills=True, commands=True):
     t = (f"project:\n  name: g1\n  archetype: {arch}\n"
          f"  cicd_opt_out: {str(cicd_opt_out).lower()}\n"
          f"principles:\n  tdd_policy: \"{tdd}\"\n"
@@ -62,6 +62,9 @@ def cfg_text(tdd="encouraged", sec=True, deps=True, design=False, tel=False,
          f"hooks:\n  drift_detector: {str(drift).lower()}\n")
     if tdd_gate is not None:
         t += f"  tdd_gate: {str(tdd_gate).lower()}\n"
+    if not (skills and commands):
+        t += (f"workflow:\n  install_skills: {str(skills).lower()}\n"
+              f"  install_commands: {str(commands).lower()}\n")
     return t + 'commands:\n  test: "pytest -q"\n  lint: "ruff check ."\n'
 
 
@@ -95,6 +98,9 @@ CONFIGS = {
     "telemetry on": cfg_text(tel=True),
     "ci/cd opted out": cfg_text(cicd_opt_out=True),
     "all modes, tdd required": cfg_text(tdd="required", modes=True),
+    # [WP4 fix round 1 / C3] workflow.install_skills and install_commands.
+    "skills off": cfg_text(skills=False),
+    "commands off": cfg_text(commands=False),
 }
 PLANS = {k: plan_of(v) for k, v in CONFIGS.items()}
 
@@ -160,6 +166,8 @@ for label, (cfg, plan) in PLANS.items():
 print("\n=== Session hygiene (a Phase 8 exit criterion) ===")
 for label, (cfg, plan) in PLANS.items():
     md = flat(md_of(plan))
+    if not cfg["workflow"]["install_skills"]:
+        continue
     check(f"{label}: /checkpoint before /clear, /resume after",
           "`/checkpoint` before `/clear`" in md and "`/resume`" in md)
 _, _nodrift = plan_of(cfg_text(drift=False))
@@ -169,6 +177,28 @@ check("drift detector off: neither the detector nor /ack-drift is named",
       "drift detector" not in md_of(_nodrift)
       and "/ack-drift" not in md_of(_nodrift))
 
+# [WP4 fix round 1 / C3] Each slash command CLAUDE.md names is a skill the
+# install writes (its command, where written, only invokes the skill), so
+# with the skills off CLAUDE.md names none; /clear is Claude Code's own.
+for label, (cfg, plan) in PLANS.items():
+    md = md_of(plan)
+    named = sorted(set(re.findall(r"`(/[a-z][\w-]*)", md)) - {"/clear"})
+    absent = [n for n in named
+              if f".claude/skills/{n[1:]}/SKILL.md" not in plan]
+    check(f"{label}: every slash command CLAUDE.md names is a skill this "
+          f"install writes ({len(named)} named)",
+          not absent and (bool(named) == cfg["workflow"]["install_skills"]),
+          {"named": named, "absent": absent})
+check("skills off: CLAUDE.md has no session-hygiene line and no /escalate "
+      "line, and its blank lines stay single",
+      "Session hygiene" not in md_of(PLANS["skills off"][1])
+      and "/escalate" not in md_of(PLANS["skills off"][1])
+      and "\n\n\n" not in md_of(PLANS["skills off"][1]),
+      md_of(PLANS["skills off"][1])[-1200:])
+check("commands off, skills on: CLAUDE.md is the default-like one, byte for "
+      "byte", md_of(PLANS["commands off"][1])
+      == md_of(PLANS["default-like"][1]))
+
 # --------------------------------------------------------------------------- #
 print("\n=== The Never list ===")
 for label, (cfg, plan) in PLANS.items():
@@ -177,8 +207,10 @@ for label, (cfg, plan) in PLANS.items():
     # tests." also read as a ban on committing a doc or a config change.
     check(f"{label}: the three universal rules",
           "Rewrite or delete a test to make it pass." in nv
-          and "`/spec-review`" in nv and "Commit code without its tests." in nv,
-          nv)
+          and ("Implement a spec that has not passed `/spec-review`." in nv
+               if cfg["workflow"]["install_skills"] else
+               "Implement a spec that has not passed spec review." in nv)
+          and "Commit code without its tests." in nv, nv)
     check(f"{label}: Do Not Touch points at tech.md; never-read at "
           f"secrets.md only when it is written",
           "Do Not Touch path (`tech.md`)" in nv

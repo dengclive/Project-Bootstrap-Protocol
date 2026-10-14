@@ -33,6 +33,7 @@ Re-sync after editing a source, then stage the result:
 """
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -63,10 +64,11 @@ def check(name, cond, detail=""):
 def sync(root):
     """Rewrite plugin/toolchain/ under `root` from the map: copy each source's
     bytes, set its mode, and delete every other file there, links and
-    bytecode included. Returns (written, removed)."""
+    bytecode included. Returns (written, moded, removed): moded lists the
+    copies whose mode it reset [WP4 fix round 1 / C12]."""
     m = PTM.copy_map(root)
     top = PTM.path_of(root, PTM.TOOLCHAIN)
-    written, removed = [], []
+    written, moded, removed = [], [], []
     if os.path.islink(top):
         os.unlink(top)
         removed.append(PTM.TOOLCHAIN)
@@ -99,8 +101,23 @@ def sync(root):
                 os.unlink(dst)
             shutil.copyfile(PTM.path_of(root, src), dst)
             written.append(copy)
+        elif stat.S_IMODE(os.stat(dst).st_mode) != mode:
+            moded.append(copy)
         os.chmod(dst, mode)
-    return written, removed
+    return written, moded, removed
+
+
+def sync_report(root):
+    """--sync's output for `root`: a line per copy it wrote or whose mode it
+    reset and per file it removed, then the summary."""
+    written, moded, removed = sync(root)
+    return ([f"  wrote    {p}" for p in written]
+            + [f"  mode     {p}" for p in moded]
+            + [f"  removed  {p}" for p in removed]
+            + [f"{PTM.TOOLCHAIN}/ matches the map: "
+               f"{len(PTM.copy_map(root))} copies, {len(written)} written, "
+               f"{len(moded)} mode(s) reset, {len(removed)} removed. Stage it "
+               f"with: {PTM.STAGE}"])
 
 
 def index_modes(root):
@@ -155,14 +172,7 @@ ROWS = {
 
 
 if sys.argv[1:] == ["--sync"]:
-    _written, _removed = sync(ROOT)
-    for _p in _written:
-        print(f"  wrote    {_p}")
-    for _p in _removed:
-        print(f"  removed  {_p}")
-    print(f"{PTM.TOOLCHAIN}/ matches the map: {len(PTM.copy_map(ROOT))} "
-          f"copies, {len(_written)} written, {len(_removed)} removed. "
-          f"Stage it with: {PTM.STAGE}")
+    print("\n".join(sync_report(ROOT)))
     sys.exit(0)
 
 
@@ -224,7 +234,7 @@ try:
                     symlinks=True,
                     ignore=shutil.ignore_patterns("toolchain", "__pycache__"))
     git(S, "add", ".gitignore", *_sources)
-    _w, _ = sync(S)
+    _w, _, _ = sync(S)
     git(S, "add", "-A", "plugin")
     # The staging command the hint and --sync print, run as printed.
     _stage = PTM.STAGE.split()[1:]
@@ -279,7 +289,7 @@ try:
           and PTM.toolchain_kind(_linked, S) == "stray", mismatches(S))
 
     _src_before = open(PTM.path_of(S, "lib/defaults.py"), "rb").read()
-    _w, _r = sync(S)
+    _report = sync_report(S)
     git(S, *_stage)
     check("--sync repairs all four, and the printed staging command stages "
           "the repair: it rewrites the changed copy, resets the mode, deletes "
@@ -291,7 +301,18 @@ try:
           and not os.path.islink(PTM.path_of(S, _linked))
           and open(PTM.path_of(S, "lib/defaults.py"), "rb").read()
           == _src_before,
-          (mismatches(S), _w, _r))
+          (mismatches(S), _report))
+    # [WP4 fix round 1 / C12] The mode reset is said, and counted, like the
+    # other repairs: it was the one --sync made without a word.
+    check("--sync's report names each repair: the rewritten copy, the mode "
+          "it reset, and the stray and the bytecode it removed, and the "
+          "summary counts the mode reset",
+          f"  wrote    {_lib_copy}" in _report
+          and f"  mode     {_bin_copy}" in _report
+          and f"  removed  {_stray}" in _report
+          and any(ln.startswith("  removed  ") and "__pycache__" in ln
+                  for ln in _report)
+          and ", 1 mode(s) reset, " in _report[-1], _report)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

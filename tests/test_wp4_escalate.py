@@ -177,6 +177,28 @@ check("sessions README: `/escalate` writes the record; the alarm creates, "
       "| `.decision-pending-<id>` | `/escalate` writes it; the "
       "decision-required alarm creates it, refreshes its mtime and deletes "
       "it after 7 days |" in _readme)
+# [WP4 fix round 1 / C9] With hooks.decision_required_alarm false nothing
+# creates or sweeps the file, so neither text says the alarm does.
+_cfg_text = _FX["FIXTURE_DEFAULT"]
+assert "  decision_required_alarm: true\n" in _cfg_text
+_noalarm = plan_of(_cfg_text.replace("  decision_required_alarm: true\n",
+                                     "  decision_required_alarm: false\n"))
+_na_skill = _noalarm.get(SKILL, {}).get("body", "")
+_na_readme = _noalarm[".claude/sessions/README.md"]["body"]
+check("alarm off: no alarm script, and neither the skill nor the sessions "
+      "README says the alarm creates or sweeps the record file",
+      ALARM not in _noalarm and _na_skill
+      and "decision-required alarm" not in _na_skill
+      and "| `.decision-pending-<id>` | `/escalate` writes it |" in _na_readme
+      and "decision-required alarm creates" not in _na_readme,
+      (_na_skill[:900], [ln for ln in _na_readme.splitlines()
+                         if "decision-pending" in ln]))
+check("alarm off: step 5 still reads first and creates a missing file with "
+      "the Write tool; alarm on, the skill is unchanged",
+      "5. Read the file with the Read tool first. If it does not exist, "
+      "create it with the Write tool." in " ".join(_na_skill.split())
+      and "the decision-required alarm creates it on any permission prompt"
+      in " ".join(body.split()), _na_skill[:900])
 _ledger = DEFAULT[".claude/steering/assumption-ledger.md"]["body"]
 _row = next((ln for ln in _ledger.splitlines()
              if ln.startswith("| Skill-body substitution")), "")

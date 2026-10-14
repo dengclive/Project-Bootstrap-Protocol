@@ -3719,7 +3719,16 @@ EXPECTED_DIGESTS = {
         # 7 bodies move: CLAUDE.md, steering tech.md, ci-cd.md and
         # assumption-ledger.md, hooks/audio-alerts.config, sessions/README.md
         # and skills/spec-new/SKILL.md. CLAUDE.md goes from 40 to 66 lines.
-        "6cc855432be851669bef4763586e4b16ca223b74a3f05f596f292cd106dd5ffb",
+        # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined
+        # in the same exception (WP4 fix round 1). Measured on the emitted
+        # plans against the previous digest (6cc85543...), per file: 2
+        # bodies move, steering ci-cd.md (its push-check sentence names the
+        # config's commands, review R9) and skills/spec-new/SKILL.md (step 2
+        # also branches from the default branch on another spec's branch,
+        # NF1), and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 66. Both are among the moved bodies above; no hook
+        # body moves.
+        "d804a92944a1e4a74d40903aa7d33478f557c20f443a8773779737a27ca78d64",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4392,7 +4401,16 @@ EXPECTED_DIGESTS = {
         # protocol file names). Every hook body, `_HOOK_HEADER`,
         # secrets-gate.sh and dependency-gate.sh do NOT move. CLAUDE.md goes
         # from 44 to 70 lines.
-        "43cf6a9981579054104d4cd8d29b065a6fe7a16d64663fcd289ed9dc12f59aef",
+        # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined
+        # in the same exception (WP4 fix round 1). Measured on the emitted
+        # plans against the previous digest (43cf6a99...), per file: 2
+        # bodies move, steering ci-cd.md (its push-check sentence names the
+        # config's commands, review R9) and skills/spec-new/SKILL.md (step 2
+        # also branches from the default branch on another spec's branch,
+        # NF1), and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 78. Both are among the moved bodies above; no hook
+        # body moves.
+        "1053fa2ce9ce55cfa92ebc7bc045ffd3fe62f4e47a2061f779a7dd1dac1e292e",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -4992,7 +5010,16 @@ EXPECTED_DIGESTS = {
         # count 65 -> 67. The default fixture's 7 bodies move and no other:
         # the three design-steering artifacts and every hook body do not.
         # CLAUDE.md goes from 40 to 64 lines.
-        "7ca1bd01a7f7c39c46dc89724e9a92144c151d570766a8db000dc48e89894311",
+        # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined
+        # in the same exception (WP4 fix round 1). Measured on the emitted
+        # plans against the previous digest (7ca1bd01...), per file: 2
+        # bodies move, steering ci-cd.md (its push-check sentence names the
+        # config's commands, review R9) and skills/spec-new/SKILL.md (step 2
+        # also branches from the default branch on another spec's branch,
+        # NF1), and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 67. Both are among the moved bodies above; no hook
+        # body moves.
+        "a1c7a4bf86aed89304e7a9c6919c2b4ae3ce29c3c2465f9ee0ad1841e44d0a82",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5188,7 +5215,16 @@ EXPECTED_DIGESTS = {
         # count 65 -> 67. The default fixture's 7 bodies move and no other:
         # `.claude/sdk_gates/gates.py` and every hook body do not move
         # (tests/test_wp4_must_not_change.py pins them at 0845862).
-        "77dcd1b05f85552f01acb7b2f1267b34d1592d99e4b6198c53ff20b83acbd938",
+        # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined
+        # in the same exception (WP4 fix round 1). Measured on the emitted
+        # plans against the previous digest (77dcd1b0...), per file: 2
+        # bodies move, steering ci-cd.md (its push-check sentence names the
+        # config's commands, review R9) and skills/spec-new/SKILL.md (step 2
+        # also branches from the default branch on another spec's branch,
+        # NF1), and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 67. Both are among the moved bodies above; no hook
+        # body moves.
+        "8a338f89f0c731b4f92afd8b46bfe5d044ab15f3afa05baadb0bec428c28666b",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5200,7 +5236,16 @@ EXPECTED_DIGESTS = {
     # tests/test_wp4_must_not_change.py pins at 0845862. CLAUDE.md goes
     # from 40 to 62 lines.
     "gates_off":
-        "b4b60ac30ce0e12b4ed90e8a7e1b1283d56d675e025406d16af05e50b3de8e4a",
+        # [freeze-exception no. 85, 2026-10-14, fix round 1] Re-baselined
+        # in the same exception (WP4 fix round 1). Measured on the emitted
+        # plans against the previous digest (b4b60ac3...), per file: 2
+        # bodies move, steering ci-cd.md (its push-check sentence names the
+        # config's commands, review R9) and skills/spec-new/SKILL.md (step 2
+        # also branches from the default branch on another spec's branch,
+        # NF1), and no other; 0 added, 0 removed, order, modes and kinds
+        # unchanged, count 59. Both are among the 7 above; no hook
+        # body moves.
+        "e8966fc79a46055a7866d08066e5157a0f7c33422d180c08695b7274c0c49a54",
 }
 
 EXPECTED_ACTION_COUNTS = {

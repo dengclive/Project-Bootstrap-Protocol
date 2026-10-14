@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import math
 import os
 import select
 import subprocess
@@ -1009,6 +1010,10 @@ def _wp1_absent(k: str, lines: list[str]):
 # [WP4 8c] Both interviews' `interactive` refusals end with this.
 _TERMINAL_HINT = ("Run it in a terminal of your own, or use analyze and "
                   "synthesize.")
+# [WP4 fix round 1 / C5] The longest wait BOOTSTRAP_PROMPT_TIMEOUT can ask
+# for, in seconds: 2**31 - 1 (68 years) fits every platform's select()
+# timeout, a 32-bit timeval's included.
+_MAX_PROMPT_WAIT = float(2 ** 31 - 1)
 
 
 def _closed_refusal(tool: str) -> str:
@@ -1047,6 +1052,13 @@ def _stdin_refusal(tool: str) -> str | None:
         limit = float(os.environ.get("BOOTSTRAP_PROMPT_TIMEOUT", "30"))
     except ValueError:
         limit = 30.0
+    # [WP4 fix round 1 / C5] A negative, infinite or NaN value (1e400 reads
+    # as infinity) made select() raise, which the handler below takes for a
+    # stream it cannot wait on, so a silent pipe hung with no refusal. Those
+    # take the default, and a large value is capped where select() can wait.
+    if not (math.isfinite(limit) and limit >= 0):
+        limit = 30.0
+    limit = min(limit, _MAX_PROMPT_WAIT)
     try:
         ready, _, _ = select.select([stdin], [], [], limit)
     except (OSError, ValueError, OverflowError):
@@ -1097,9 +1109,10 @@ def _defaulted_note(read: int, keys: list[str]) -> str:
 class _EOF:
     """Sticky end-of-input flag shared across prompts in one interview.
 
-    Once stdin is exhausted, every subsequent `_ask` returns its default and
-    sets `.hit`. Validated loops check this so they fall back to a known-good
-    value instead of re-prompting an exhausted stream forever (review finding
+    Once stdin is exhausted, every subsequent `_ask` returns its default
+    without reading, and sets `.hit`. Validated loops check this so they
+    fall back to a known-good value instead of re-prompting an exhausted
+    stream forever (review finding
     I-1: a validated loop whose proposed default is itself invalid - e.g. the
     PRD-tier default after an archetype override raises the floor above it -
     would otherwise spin infinitely on piped/scripted stdin).
@@ -1117,7 +1130,11 @@ def _ask(prompt: str, default: str, *, instream, outstream,
          eof: "_EOF | None" = None, key: str | None = None) -> str:
     outstream.write(prompt + f"\n  [default: {default}] > ")
     outstream.flush()
-    line = instream.readline()
+    # [WP4 fix round 1 / C4] A terminal's end of input is not sticky: after
+    # Ctrl-D the next readline waits for more, so the interview went on and
+    # the warning and header then named answers that were given. Once the
+    # input has ended, no prompt reads again.
+    line = "" if eof is not None and eof.hit else instream.readline()
     if line == "":  # EOF
         if eof is not None:
             eof.hit = True

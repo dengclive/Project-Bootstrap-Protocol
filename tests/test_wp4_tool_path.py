@@ -62,11 +62,16 @@ import hashlib
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
+try:
+    import pty
+except ImportError:                    # pragma: no cover - not POSIX
+    pty = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -526,6 +531,17 @@ try:
           and st2.get("completed_phases") == ["0", "0.5", "1", "9", "10"]
           and st2.get("skippable_phase_decisions")
           == {"phase_9_smoke_test": "run"}, st2)
+    # [WP4 fix round 1 / NF2] What the state file records is not offered
+    # again: Claude relays the block and offers what it says.
+    _ns2 = steps_of(R2.stdout)
+    check("[NF2] once the state file records the Phase 9 decision and "
+          "bootstrap_complete, Next steps offers neither the smoke test nor "
+          "the completion line",
+          R2.returncode == 0 and _ns2
+          and not any("Smoke-test" in ln for ln in _ns2)
+          and not any("record it, or ask Claude to" in ln for ln in _ns2)
+          and any(templates.SPEC_START_CHAIN in ln for ln in _ns2),
+          "\n".join(_ns2))
     # A state file written before the key existed: a re-install must not
     # claim that the bootstrap is incomplete.
     st2.pop("bootstrap_complete", None)
@@ -540,6 +556,42 @@ try:
           "retrofit_complete instead)",
           "bootstrap_complete" not in state_of(RP, RSTATE)
           and state_of(RP, RSTATE).get("retrofit_complete") is False)
+    # [WP4 fix round 1 / C2] Git ignores the state file, so a re-install in
+    # a fresh clone creates it too; false there would call a finished
+    # project incomplete. Seeded only on a first install: no manifest, and
+    # none of the plan's .claude/ files there but settings.json.
+    if GIT:
+        _gc = ["-c", "user.email=t@e.x", "-c", "user.name=t"]
+        FS = project("finished")
+        install(FS, GATES_OFF)
+        _fs = state_of(FS)
+        _fs["bootstrap_complete"] = True
+        with open(os.path.join(FS, STATE), "w") as fh:
+            json.dump(_fs, fh, indent=2)
+        run([GIT, "-C", FS, "add", "-A"])
+        run([GIT, "-C", FS, *_gc, "commit", "-q", "-m", "done"],
+            env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"})
+        FC = os.path.join(TMP, "finished-clone")
+        run([GIT, "clone", "-q", FS, FC])
+        _fc_bare = not os.path.exists(os.path.join(FC, STATE))
+        _rfc = install(FC)
+        check("[C2] a fresh clone of a finished project (no state file, no "
+              "manifest): the re-install leaves bootstrap_complete absent, "
+              "not false",
+              _fc_bare and _rfc.returncode == 0
+              and os.path.exists(os.path.join(FC, STATE))
+              and "bootstrap_complete" not in state_of(FC), state_of(FC))
+    else:                          # pragma: no cover
+        print("  SKIP  git not found: the fresh-clone row (NOT measured)")
+    OS = project("own-settings")
+    os.makedirs(os.path.join(OS, ".claude"))
+    with open(os.path.join(OS, ".claude", "settings.json"), "w") as fh:
+        fh.write('{"env": {"MINE": "1"}}\n')
+    _ros = install(OS, GATES_OFF)
+    check("[C2] a first install over the project's own .claude/settings.json "
+          "still seeds bootstrap_complete: false",
+          _ros.returncode == 0 and state_of(OS).get("bootstrap_complete")
+          is False, (_ros.returncode, state_of(OS)))
 
     # ----------------------------------------------------------------------- #
     # 4. Next steps: the stubs line, the smoke test, the completion line
@@ -614,6 +666,35 @@ try:
           and ".claude/.retrofit-state.json" in _rlast
           and "record it, or ask Claude to" in _rlast
           and not any("Phase 9" in ln for ln in _rns), "\n".join(_rns))
+    # [WP4 fix round 1 / NF3] A clone re-installs from the config, so line
+    # 1 has it committed too (a clone without it: "config not found").
+    check("[NF3] line 1 says to commit bootstrap.config.yaml, which a clone "
+          "needs to re-install, in both modes",
+          all(ln and ln[0].startswith("Commit what the install wrote: ")
+              and ln[0].endswith("Commit bootstrap.config.yaml with them: a "
+                                 "clone needs it to re-install.")
+              for ln in (ns, _rns)), (ns[:1], _rns[:1]))
+    # [WP4 fix round 1 / NF2] Retrofit: R6's skip drops the smoke test, and
+    # retrofit_complete drops the completion line too.
+    _rst = state_of(RP, RSTATE)
+    _rst["retrofit_complete"] = True
+    _rst["retrofit_active"] = False
+    with open(os.path.join(RP, RSTATE), "w") as fh:
+        json.dump(_rst, fh, indent=2)
+    _rdone = steps_of(install(RP).stdout)
+    _rskip = steps_of(install(project("rp-r6skip"), RETRO.replace(
+        "  r08_committed: true\n", "  r08_committed: true\n"
+        "  skip_decisions:\n    R6_smoke_test: skip\n")).stdout)
+    check("[NF2] retrofit: with retrofit_complete true, Next steps offers "
+          "neither R6 nor the R7 completion line",
+          _rdone and not any("R6" in ln for ln in _rdone)
+          and not any("record it, or ask Claude to" in ln for ln in _rdone),
+          "\n".join(_rdone))
+    check("[NF2] retrofit: with R6 skipped in the config, no smoke-test line, "
+          "and the completion line stays",
+          _rskip and not any("Smoke-test" in ln for ln in _rskip)
+          and "record it, or ask Claude to" in _rskip[-1],
+          "\n".join(_rskip))
 
     # With no protocol document beside the toolchain, protocol_doc is null
     # and the stubs line names the document by its bare file name.
@@ -839,6 +920,26 @@ try:
     check("retrofit: git ignores the copy (the retrofit .gitignore's "
           "`.retrofit-state.json.pre-*` line)",
           bool(GIT) and _rc and ignored(RG, ".claude/" + _rc[0]), _rc)
+    # [WP4 fix round 1 / C1] The rewrite resets keys both files hold, not
+    # only the ones the old file alone held, and the warning says so.
+    _rgst = state_of(RG, RSTATE)
+    _gw = [w for w in warnings_of(_g1) if "pre-unparsed" in w]
+    check("[C1] the warning says the new file holds only the config's values "
+          "and empty defaults, so keys were dropped or reset, and names the "
+          "operator's runtime keys, in each mode; retrofit_active and "
+          "retrofit_complete were in fact reset",
+          _gw and _rw
+          and all("holds only the config's values and empty defaults, so "
+                  "every key the old one held was dropped or reset" in w[0]
+                  for w in (_gw, _rw))
+          and all(f"`{k}`" in _gw[0] for k in (
+              "bootstrap_complete", "completed_phases",
+              "skippable_phase_decisions", "deferred_items"))
+          and "`retrofit_active` and `retrofit_complete`" in _rw[0]
+          and _rgst.get("retrofit_active") is True
+          and _rgst.get("retrofit_complete") is False,
+          (_gw, _rw, {k: _rgst.get(k) for k in ("retrofit_active",
+                                                 "retrofit_complete")}))
 
     # ----------------------------------------------------------------------- #
     # 7. The interactive interviews (8c)
@@ -993,6 +1094,142 @@ try:
               and not {"project_name", "archetype"} & set(named)
               and "input ended after 3 answer(s)" in head.lower()
               and "Every value here was shown" not in head, head)
+
+    # [WP4 fix round 1 / C4] In a terminal. A tty's end of input is not
+    # sticky: after Ctrl-D the next read waits for more, so Ctrl-D at the
+    # first prompt wrote a config, and Ctrl-D later gave a warning and a
+    # header that named answers the operator then typed. Each row types on a
+    # pseudo-terminal, as a person at a keyboard does.
+    def named_defaults(body):
+        head = " ".join(ln[1:].strip() for ln in body.splitlines()
+                        if ln.startswith("#"))
+        m = re.search(r"took their proposed default without being "
+                      r"answered: (.*?)\.(?: |$)", head)
+        return [k.strip() for k in m.group(1).split(",")] if m else []
+
+    def on_pty(argv, keys):
+        """Run `argv` with a pseudo-terminal for stdin and stdout. `keys`
+        maps a prompt's number (1-based) to the bytes typed at it; every
+        other prompt gets Enter. Returns (rc, stderr, prompts seen)."""
+        m, s = pty.openpty()
+        p = subprocess.Popen(argv, stdin=s, stdout=s, stderr=subprocess.PIPE,
+                             close_fds=True)
+        os.close(s)
+        buf, seen, t0 = b"", 0, time.monotonic()
+        while time.monotonic() - t0 < 120:
+            r, _, _ = select.select([m], [], [], 0.1)
+            if r:
+                try:
+                    buf += os.read(m, 65536)
+                except OSError:          # the child closed the terminal
+                    r = None
+            while seen < buf.count(b"] > "):
+                seen += 1
+                try:
+                    os.write(m, keys.get(seen, b"\r"))
+                except OSError:
+                    pass
+            if p.poll() is not None and not r:
+                break
+        if p.poll() is None:
+            p.kill()
+        err = p.communicate()[1].decode(errors="replace")
+        os.close(m)
+        return p.returncode, err, seen
+
+    if pty is None:                # pragma: no cover - not POSIX
+        print("  SKIP  pty not available: the terminal rows (NOT measured)")
+    for tool, argv, d, cfg in (tools("tty1") if pty else ()):
+        rc, err, seen = on_pty(argv, {1: b"\x04"})
+        check(f"[{tool}] in a terminal, Ctrl-D at the first prompt: rc 2, "
+              f"the zero-answer refusal, no config",
+              rc == 2
+              and f"error: {tool} interactive: stdin is empty or closed; "
+                  f"no config written. {HINT}" in err
+              and not os.path.exists(cfg), (rc, seen, err[-400:]))
+    for (tool, argv, d, cfg), (_t, pargv, _pd, pcfg) in (
+            zip(tools("tty2"), tools("pipe1")) if pty else ()):
+        rc, err, seen = on_pty(argv, {2: b"\x04", 3: b"an override\r"})
+        body = open(cfg).read() if os.path.exists(cfg) else ""
+        pr = run(pargv, input="\n", timeout=120)
+        pbody = open(pcfg).read() if os.path.exists(pcfg) else ""
+        check(f"[{tool}] in a terminal, Ctrl-D at the second prompt ends the "
+              f"input: nothing typed later is read, the warning counts one "
+              f"answer, and the header names every later question's key, as "
+              f"a pipe that ends after one answer does",
+              rc == 0 and pr.returncode == 0
+              and f"warning: {tool} interactive: input ended after 1 "
+                  f"answer(s);" in err
+              and "an override" not in body
+              and len(named_defaults(body)) > 1
+              and named_defaults(body) == named_defaults(pbody),
+              (rc, seen, err[-300:], named_defaults(body),
+               named_defaults(pbody)))
+
+    # [WP4 fix round 1 / C5] BOOTSTRAP_PROMPT_TIMEOUT values that parse as
+    # floats but select() cannot take (negative, infinite, NaN; 1e400 reads
+    # as infinity) skipped the refusal, so a silent pipe hung. They take the
+    # default now. All run at once: each waits out the default 30 s.
+    _odd = ("-1", "inf", "nan", "1e400")
+    _procs = []
+    for val in _odd:
+        for tool, argv, d, cfg in tools("odd" + val.replace(".", "")):
+            _procs.append((val, tool, cfg, time.monotonic(), subprocess.Popen(
+                argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE, text=True, env=env_t(val))))
+    for val, tool, cfg, t0, p in _procs:
+        try:
+            p.wait(timeout=max(1, 50 - (time.monotonic() - t0)))
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+        el = time.monotonic() - t0
+        p.stdin.close()
+        err = p.stderr.read()
+        p.stderr.close()
+        check(f"[{tool}] BOOTSTRAP_PROMPT_TIMEOUT={val}, a pipe that never "
+              f"answers: rc 2 after the default 30 s, no config",
+              p.returncode == 2 and 29 <= el < 50
+              and "no answer arrived within 30 s" in err
+              and not os.path.exists(cfg),
+              (p.returncode, f"{el:.2f} s", err[-300:]))
+
+    # The wait each value asks select() for, without waiting: "abc" and ""
+    # still fall back to 30, "0" still refuses at once, and a huge value is
+    # capped where select() can still wait.
+    class _SilentPipe:
+        def isatty(self):
+            return False
+
+        def fileno(self):
+            return 0
+
+    _asked = {}
+
+    def _record(rlist, wlist, xlist, timeout):
+        _asked[_val] = timeout
+        return [], [], []
+
+    _saved = (IV.select.select, sys.stdin,
+              os.environ.get("BOOTSTRAP_PROMPT_TIMEOUT"))
+    try:
+        IV.select.select, sys.stdin = _record, _SilentPipe()
+        for _val in ("abc", "", "0", "-1", "inf", "nan", "1e400", "1e12"):
+            os.environ["BOOTSTRAP_PROMPT_TIMEOUT"] = _val
+            IV._stdin_refusal("bootstrap-interview")
+    finally:
+        IV.select.select, sys.stdin = _saved[0], _saved[1]
+        if _saved[2] is None:
+            os.environ.pop("BOOTSTRAP_PROMPT_TIMEOUT", None)
+        else:
+            os.environ["BOOTSTRAP_PROMPT_TIMEOUT"] = _saved[2]
+    _cap = getattr(IV, "_MAX_PROMPT_WAIT", None)
+    check("the wait select() is given: 'abc', '' and the four odd values "
+          "30 s, '0' none, and 1e12 capped below select()'s limit",
+          all(_asked.get(v) == 30.0 for v in ("abc", "", "-1", "inf", "nan",
+                                              "1e400"))
+          and _asked.get("0") == 0.0 and _cap is not None
+          and _asked.get("1e12") == _cap == 2.0 ** 31 - 1, _asked)
 
     # ----------------------------------------------------------------------- #
     # 8. --force --dry-run says what would be saved (DOC-2)
@@ -1185,6 +1422,12 @@ try:
     # [KEEP-1, NF-1, DOC-2] One skipped file: the per-file remedy, measured
     # in a real fresh clone (git ignores the manifest and the state file).
     _ri = flat(md_section(README, "Re-install after a change"))
+    check("[NF3] the README says to commit bootstrap.config.yaml, because "
+          "a clone needs it to re-install, as Next steps line 1 does",
+          "Commit `bootstrap.config.yaml`, because a clone needs it to "
+          "re-install." in _ri
+          and "Commit bootstrap.config.yaml with them: a clone needs it to "
+              "re-install." in (ns[0] if ns else ""), _ri[:500])
     check("[KEEP-1] the README gives the per-file remedy and says why not "
           "--adopt", all(p in _ri for p in (
               "move that file aside and re-install: the install re-creates "
@@ -1286,12 +1529,49 @@ try:
           all(p in _rt and p in _r9 for p in _both)
           and all(p in _rt for p in (
               "Read `$T/RETROFIT.md` and retrofit this project.",
-              "R0 step 1 first",
+              "Claude does R-1 first, then R0 step 1.",
               '`python3 "$T/bin/retrofit-interview" analyze`',
               '`python3 "$T/bin/retrofit-interview" synthesize`',
               "R1 to R5.5", "R6 smoke test", "R7 handoff"))
           and "--force" not in _rt,
           [p for p in _both if p not in _rt or p not in _r9] or _rt[:500])
+    # [WP4 fix round 1 / R1] The route does R-1 first, and analyze does only
+    # part of R0: measured here on a project with a root CLAUDE.md and an
+    # archived .claude/, the files it writes are steps 3, 4, 8 and 12 and
+    # step 1's report, and none of the files R0 steps 5, 6, 9, 10 and 11
+    # write; RETROFIT.md's line 9 note and the README send those steps to
+    # the document.
+    AZ = retro_project("analyze-scope")
+    with open(os.path.join(AZ, "CLAUDE.md"), "w") as fh:
+        fh.write("# Our rules\n\nKeep these.\n")
+    os.makedirs(os.path.join(AZ, ".claude.archived-20261014T000000Z"))
+    with open(os.path.join(AZ, ".claude.archived-20261014T000000Z",
+                           "notes.md"), "w") as fh:
+        fh.write("An old convention.\n")
+    _az = run([sys.executable, RETRO_INTERVIEW, "analyze", "-C", AZ])
+    _inv_dir = os.path.join(AZ, ".claude", "inventory")
+    _inv = sorted(os.listdir(_inv_dir)) if os.path.isdir(_inv_dir) else []
+    _steps = {"structure.md", "languages.md", "dependencies.md", "testing.md",
+              "git-history.md", "conventions.md", "product-signals.md",
+              "pm-tooling-signals.md", "existing-claude.md",
+              "baseline-metrics.md"}
+    _not = {"claude-md-extraction-plan.md", "prior-art.md",
+            "regulatory-context.md", "tribal-knowledge.md",
+            "traffic-sample.json"}
+    _note_route = _r9[_r9.find(ROUTE_NOTE):]
+    check("[R1] analyze writes R0 steps 3, 4, 8 and 12 and step 1's report, "
+          "and none of what steps 5, 6, 9, 10 and 11 write; the README and "
+          "RETROFIT.md's note send R-1 first and those steps to the document",
+          _az.returncode == 0 and set(_inv) == _steps and not _not & set(_inv)
+          and "Do R-1 first, then R0 step 1." in _note_route
+          and "It does not do R0 steps 2, 5, 6, 7, 9, 10 or 11: do those "
+              "from this document, among them step 5's "
+              "`claude-md-extraction-plan.md`, which R8.E.1 uses, and the "
+              "mandatory step 10." in _note_route
+          and "Claude does the R0 steps that `analyze` doesn't (2, 5, 6, 7, "
+              "9, 10 and 11) from `RETROFIT.md`" in _rt
+          and "the mandatory step 10" in _rt,
+          (_az.returncode, _inv, _az.stderr[-300:]))
     RC = project("rclaude")
     with open(os.path.join(RC, "CLAUDE.md"), "w") as fh:
         fh.write("# Our rules\n\nKeep these.\n")
@@ -1461,6 +1741,23 @@ try:
           and len(_silent) == 2 and all(rc == 2 and none
                                         for rc, _, none in _silent.values()),
           (_lv[:400], {t: v[0] for t, v in _silent.items()}))
+    # [WP4 fix round 1 / R2] The refusal check waits for the first byte
+    # before the banner, so on a non-terminal stdin nothing shows until the
+    # first answer arrives; the README says to type it blind.
+    _pb = subprocess.Popen([sys.executable, INTERVIEW, "interactive", "--prd",
+                            SAMPLE_PRD, "-o", os.path.join(TMP, "blind.yaml")],
+                           stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, env=env_t(60))
+    _early = select.select([_pb.stdout], [], [], 1.5)[0]
+    _pout = _pb.communicate(input=b"\n" * 80, timeout=120)[0]
+    check("[R2] the README says a non-terminal stdin shows nothing until the "
+          "first answer, and to type the project name and press Enter; "
+          "measured: no output in 1.5 s, then the banner",
+          "the tool prints nothing until it reads the first byte" in _lv
+          and "type the first answer (the project name) and press Enter"
+          in _lv and not _early and _pb.returncode == 0
+          and b"=== Bootstrap interview (interactive) ===" in _pout,
+          (_lv[-600:], bool(_early), _pb.returncode))
     check("[8c] input that ends after the first answer: the README's warning "
           "and header claims hold for both interviews",
           "the tool prints a `warning:` line, and the config's header names "

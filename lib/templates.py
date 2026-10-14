@@ -553,11 +553,16 @@ def _push_check_line(cfg):
     this replaces ("The CI-mirror hook runs these same checks locally
     before push") was false whenever CI local is set: ci-mirror runs CI
     local, else Test, never Lint. tech.md's command contract owns which
-    hook runs which command, so this points there."""
+    hook runs which command, so this points there. [WP4 fix round 1 / R9]
+    Not at "the checks tech.md names": the hook runs the commands the
+    config held at install time and never reads tech.md, so this names
+    them by their config keys and says how to change them."""
     if "ci-mirror" in cfg.get("_resolved_hooks", ()):
-        return ("\nBefore a push, the `ci-mirror` hook runs the checks "
-                "`.claude/steering/tech.md`\nnames, and blocks the push "
-                "when they fail.\n")
+        return ("\nBefore a push, the `ci-mirror` hook runs "
+                "`commands.ci_local`, or\n`commands.test` when that is empty, "
+                "as `bootstrap.config.yaml` held them\nat the last install, "
+                "and blocks the push when it fails. To change what it\nruns, "
+                "change the config and re-install.\n")
     return "\nNo hook checks a push: `hooks.ci_mirror` is off.\n"
 
 
@@ -9584,7 +9589,10 @@ def _tdd_stem_rule(cfg, bullet, indent):
 # request, or the last commit) is reached off the default branch. Step 2
 # comes right after the slug is resolved, because the branch is named from
 # it, and before the first write. CLAUDE.md's "Starting a task" sentence
-# says the same ("on a spec branch", _landing_claude_md).
+# says the same ("on a spec branch", _landing_claude_md). [WP4 fix round 1 /
+# NF1] From another spec's branch too: after a spec's pull request the
+# agent is still on spec/<that slug>, and "otherwise stay" put every later
+# spec on it. Only a branch the operator chose keeps the spec.
 _SPEC_NEW_BODY = """\
 Turn one PRD section into a versioned spec: `.claude/specs/<slug>/requirements.md`,
 with a seeded `decisions.md` and `changelog.md` beside it.
@@ -9607,9 +9615,13 @@ specify.
 
 ## 2. Start the spec's branch
 
-If you are on the default branch, create the spec's branch and switch to it:
-`git switch -c spec/<slug>`. The spec, its tasks and their merges then land on
-that branch, not on the default branch. Otherwise stay on the current branch.
+If you are on the default branch, or on another spec's branch (`spec/*`),
+create this spec's branch from the default branch and switch to it:
+`git switch -c spec/<slug> <default>`, where `<default>` is the default
+branch's name (`git symbolic-ref --short refs/remotes/origin/HEAD` prints it
+after `origin/`; with no remote, ask the operator). The spec, its tasks and
+their merges then land on that branch, not on the default branch or another
+spec's. On any other branch, one the operator chose, stay on it.
 
 ## 3. Read the source
 
@@ -10091,6 +10103,10 @@ entry.
 #     reports the item instead (ESC-3); the reply carries the fields even
 #     when the write is refused, as under `claude -p` (ESC-2).
 # No _SKILL_MODEL entry: like quiet, it has no Companion row (ESC-5).
+# _skills drops _ESCALATE_ALARM where the alarm is not wired.
+_ESCALATE_ALARM = """It often exists already, and may
+   be empty: the decision-required alarm creates it on any permission
+   prompt, including the prompt for this write. """
 _ESCALATE_BODY = """\
 1. Run this from the main session. Inside an implementer worktree (a path
    under `.claude/worktrees/`), report the 🔔 item in your result instead.
@@ -10101,9 +10117,8 @@ _ESCALATE_BODY = """\
    written.
 3. """ + _WRITE_RULE + """\
 4. Take the timestamp from the clock: `date -u +%Y-%m-%dT%H:%M:%SZ`.
-5. Read the file with the Read tool first. It often exists already, and may
-   be empty: the decision-required alarm creates it on any permission
-   prompt, including the prompt for this write. If it does not exist,
+5. Read the file with the Read tool first. """ + _ESCALATE_ALARM \
+    + """If it does not exist,
    create it with the Write tool. If it is empty, write the record with the
    Write tool. If it holds records, append with the Edit tool: old_string is
    the file's last record, from its `timestamp:` line to the end; new_string
@@ -10331,6 +10346,11 @@ def _skills(cfg):
         # autonomous modes. [WP4] escalate carries one too.
         if name == "spec-decompose":
             body = _spec_decompose_body(cfg, *_autonomous_flags(cfg))
+        elif (name == "escalate" and "decision-required-alarm"
+              not in cfg.get("_resolved_hooks", ())):
+            # [WP4 fix round 1 / C9] Step 5's alarm clause holds only where
+            # the alarm is wired (hooks.decision_required_alarm).
+            body = _ESCALATE_BODY.replace(_ESCALATE_ALARM, "")
         else:
             body = _SKILL_BODIES.get(name, desc)
         out[name] = _skill_file(name, desc, body)
@@ -11857,14 +11877,20 @@ def _claude_md_lifecycle(cfg):
 
 # [WP4 / Phase 8] A Phase 8 exit criterion. The drift sentence exists only
 # where the drift detector is wired, so /ack-drift is never named without it.
+# [WP4 fix round 1 / C3] The line, with the blank line after it, exists only
+# where the skills are installed: /checkpoint, /resume and /ack-drift are
+# skills (each command only invokes its skill), so with
+# workflow.install_skills false the install writes none of them.
 def _claude_md_hygiene(cfg):
+    if not cfg["workflow"]["install_skills"]:
+        return ""
     drift = ("drift-detector" in cfg.get("_resolved_hooks", ()))
     return _md_fill(
         "**Session hygiene:** run `/checkpoint` before `/clear`, and "
         "`/resume` after it."
         + (" When the drift detector says the session is running long, "
            "checkpoint, or run `/ack-drift` to dismiss the notice if you "
-           "mean to continue." if drift else "")) + "\n"
+           "mean to continue." if drift else "")) + "\n\n"
 
 
 # [WP4 / Phase 8, X3] The urgent items both CLAUDE.md variants share: the
@@ -11900,17 +11926,20 @@ def _claude_md_urgent(cfg, extra=()):
 # section (_steering_scaffolds); the never-read paths are secrets.md's,
 # named only where the install writes it. [WP4 / V3] "Commit code without
 # its tests." replaces "Commit without tests.", which also read as a ban on
-# committing a doc or a config change.
+# committing a doc or a config change. [WP4 fix round 1 / C3] `/spec-review`
+# only where its skill is installed.
 def _claude_md_never(cfg):
     where = ("Change a Do Not Touch path (`tech.md`)"
              + (" or read a never-read path (`secrets.md`)"
                 if cfg["secrets"]["enabled"] else "")
              + " without asking.")
+    review = ("`/spec-review`" if cfg["workflow"]["install_skills"]
+              else "spec review")
     return ("".join("- " + _md_fill(t, 76).replace("\n", "\n  ") + "\n"
                     for t in (where,
                               "Rewrite or delete a test to make it pass.",
-                              "Implement a spec that has not passed "
-                              "`/spec-review`.",
+                              f"Implement a spec that has not passed "
+                              f"{review}.",
                               "Commit code without its tests.")))
 
 
@@ -11928,6 +11957,9 @@ def _claude_md_never(cfg):
 # implemented; WP5).
 def _claude_md(cfg):
     flags = cfg["autonomous_modes"]
+    # [WP4 fix round 1 / C3] Only where the escalate skill is installed.
+    escalate = ("\nBefore you stop for a 🔔 item, run `/escalate` to record "
+                "why.\n" if cfg["workflow"]["install_skills"] else "")
     queue_section = ""
     if flags["queue_mode_enabled"]:
         queue_section = (
@@ -11955,15 +11987,12 @@ At task/iteration priming, read the task's `.claude/specs/<slug>/progress.md`
 brief, so a resumed session does not re-attempt a known dead end. The
 canonical shape of that file lives in `.claude/specs/progress-template.md`.
 {_landing_claude_md(cfg)}
-{_claude_md_hygiene(cfg)}
-## Never
+{_claude_md_hygiene(cfg)}## Never
 
 {_claude_md_never(cfg)}
 ## Urgent escalations (🔔: you are blocked; stop and ask)
 
-{_claude_md_urgent(cfg)}
-Before you stop for a 🔔 item, run `/escalate` to record why.
-
+{_claude_md_urgent(cfg)}{escalate}
 Non-urgent (in-chat only): ambiguous acceptance criteria, two reasonable
 approaches with material tradeoffs, spec version drift mid-task.
 
@@ -12471,7 +12500,12 @@ def _sessions_readme(cfg):
     mode-specific files are listed as such. The synopsis sections repeat
     the checkpoint skill's list (_SKILL_BODIES["checkpoint"]); a test
     pins the two together.
+    [WP4 fix round 1 / C9] The record file's row names the alarm only where
+    it is wired.
     """
+    alarm = ("; the decision-required alarm creates it, refreshes its mtime "
+             "and deletes it after 7 days" if "decision-required-alarm"
+             in cfg.get("_resolved_hooks", ()) else "")
     return f"""# Sessions
 
 Session-recovery state: the checkpoints you commit, plus the per-session
@@ -12530,7 +12564,7 @@ lint notice delete their own files once they are 7 days old.
 | `.drift-state-<id>`, `.drift-reads-<id>`, `.drift-lock-<id>` | the drift detector: its counters, the files read since the last checkpoint, and its lock |
 | `.drift-ack-<id>` | `/ack-drift`, which the drift detector consumes |
 | `.drift-tier3-<id>` | the tier-3 drift demand; tier 3 is not implemented yet |
-| `.decision-pending-<id>` | `/escalate` writes it; the decision-required alarm creates it, refreshes its mtime and deletes it after 7 days |
+| `.decision-pending-<id>` | `/escalate` writes it{alarm} |
 | `.quiet-<id>` | quiet mode (`/quiet`); audio alerts are not implemented yet |
 | `.lint-unset-<id>` | the format and lint gate: it has shown this session that `commands.lint` is empty |
 

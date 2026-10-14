@@ -709,7 +709,8 @@ def parse_interview_answers(text: str) -> dict:
 # Interactive front-end (mirror of greenfield's run_interactive)
 # --------------------------------------------------------------------------- #
 class _EOF:
-    """Sticky end-of-input flag shared across prompts.
+    """Sticky end-of-input flag shared across prompts: once stdin is
+    exhausted, every later `_ask` returns its default without reading.
 
     [WP4 8c] `.defaulted` lists, in order, the answer key of each question
     asked after the input ended, which the config header then names."""
@@ -723,7 +724,9 @@ def _ask(prompt: str, default: str, *, instream, outstream,
          eof: "_EOF | None" = None, key: str | None = None) -> str:
     outstream.write(prompt + f"\n  [default: {default}] > ")
     outstream.flush()
-    line = instream.readline()
+    # [WP4 fix round 1 / C4] As interview._ask: a terminal's end of input is
+    # not sticky, so once the input has ended no prompt reads again.
+    line = "" if eof is not None and eof.hit else instream.readline()
     if line == "":
         if eof is not None:
             eof.hit = True

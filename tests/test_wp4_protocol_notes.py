@@ -501,8 +501,12 @@ group("[route, D1] the protocol and RETROFIT.md route the AI through the "
             "its own phase", "change `bootstrap.config.yaml` and "
             "re-install"]),
           (RETRO, 9, _AI + " retrofit", D1,
-           ["Do R0 step 1 first", "`.claude.archived-<timestamp>/`",
+           ["Do R-1 first, then R0 step 1.",
+            "`.claude.archived-<timestamp>/`",
             "except `settings.json`", "`retrofit-interview analyze`",
+            "It does not do R0 steps 2, 5, 6, 7, 9, 10 or 11",
+            "step 5's `claude-md-extraction-plan.md`, which R8.E.1 uses",
+            "the mandatory step 10",
             "`retrofit-interview synthesize`",
             "`bootstrap-install --dry-run` as the preview",
             "move that file aside, then re-run `bootstrap-install`",
@@ -582,8 +586,8 @@ group("[steering, g2] tech.md's two scaffolds and ci-cd.md's one stop, in "
       "both protocols", [
           (PRD, 613, "5. Write `.claude/steering/tech.md` with explicit",
            AMEND, ["already has both sections", "`TODO:` paragraph",
-                   "never a path", "warns when the Test row and "
-                   "`commands.test` differ"]),
+                   "never a path", "warns when the Test row does not "
+                   "name `commands.test`"]),
           (RETRO, 804, "8. Write `.claude/steering/tech.md` with sections:",
            AMEND, ["`## Do Not Touch` and `## Documentation Policy`",
                    "`TODO:` paragraph", "steps 6 and 7", "never a path",

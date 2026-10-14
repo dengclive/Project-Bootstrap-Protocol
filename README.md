@@ -115,16 +115,19 @@ instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
 
 1. Start Claude Code at your project's root, as in steps 1 and 2 above, and
    ask Claude: "Read `$T/RETROFIT.md` and retrofit this project."
-2. Claude does R0 step 1 first. When that step archives an existing
-   `.claude/` to `.claude.archived-<timestamp>/`, Claude leaves
+2. Claude does R-1 first, then R0 step 1. When that step archives an
+   existing `.claude/` to `.claude.archived-<timestamp>/`, Claude leaves
    `settings.json` and `settings.local.json` in place: the installer merges
    its hook wiring into your `settings.json`, and it never writes
    `settings.local.json`.
 3. Claude runs `python3 "$T/bin/retrofit-interview" analyze`, which scans
-   the code, writes an inventory under `.claude/inventory/`, and writes its
-   proposals and open questions to `bootstrap.interview.md`. Claude resolves
-   them with you one question at a time, then runs
-   `python3 "$T/bin/retrofit-interview" synthesize`, which writes
+   the code, writes an inventory under `.claude/inventory/` (R0 steps 3, 4
+   and 12, and step 8's metrics as stubs), and writes its proposals and open
+   questions to `bootstrap.interview.md`. Claude does the R0 steps that
+   `analyze` doesn't (2, 5, 6, 7, 9, 10 and 11) from `RETROFIT.md`, among
+   them step 5's extraction plan for your `CLAUDE.md` and the mandatory step
+   10. Claude resolves the proposals with you one question at a time, then
+   runs `python3 "$T/bin/retrofit-interview" synthesize`, which writes
    `bootstrap.config.yaml`.
 4. Claude shows you the plan from `bootstrap-install --dry-run` and, when you
    approve it, runs `bootstrap-install`.
@@ -152,11 +155,12 @@ headless run gets that permission is decision D5, which is open.
 ### Re-install after a change
 
 To change a decision later, such as a command, a principle or a hook, edit
-`bootstrap.config.yaml` and re-run the installer. Without `--force`, the
-installer never overwrites a file that you or Claude edited: the re-install
-prints a `SKIP` line for it and keeps your version, so that file doesn't get
-the change. A file that exists before the first install is kept the same
-way, so install before you fill in the docs.
+`bootstrap.config.yaml` and re-run the installer. Commit
+`bootstrap.config.yaml`, because a clone needs it to re-install. Without
+`--force`, the installer never overwrites a file that you or Claude edited:
+the re-install prints a `SKIP` line for it and keeps your version, so that
+file doesn't get the change. A file that exists before the first install is
+kept the same way, so install before you fill in the docs.
 
 To take the installer's current version of one skipped file, move that file
 aside and re-install: the install re-creates only that file. Then merge your
@@ -185,11 +189,13 @@ ends before the first answer, or when stdin isn't a terminal and no answer
 arrives within `BOOTSTRAP_PROMPT_TIMEOUT` seconds (default 30). If you
 answer through a stdin that isn't a terminal, such as `ssh` or
 `docker run -i` without `-t`, set `BOOTSTRAP_PROMPT_TIMEOUT` to a larger
-number of seconds to give yourself time for the first answer. Input that
-ends partway, after the first answer, takes the proposed default for every
-later question: the tool prints a `warning:` line, and the config's header
-names the values that took their defaults. `retrofit-interview interactive`
-works the same way.
+number of seconds to give yourself time for the first answer. With such a
+stdin, the tool prints nothing until it reads the first byte: type the first
+answer (the project name) and press Enter to start it. Input that ends
+partway, after the first answer, takes the proposed default for every later
+question: the tool prints a `warning:` line, and the config's header names
+the values that took their defaults. `retrofit-interview interactive` works
+the same way.
 
 ### The plugin
 

@@ -494,21 +494,37 @@ check("spec-new: commits the spec and the roster before any dispatch "
 check("spec-new: next step is /spec-review",
       has(_sn, "Next step: `/spec-review <slug>`."))
 # [WP4 / ruling 1 (a)] Each spec starts on its own branch, in both modes:
-# from the default branch only, once the slug is resolved (the branch is
-# named from it), and before the first write, so the spec's commit and its
-# tasks' merges land on the spec branch.
+# from the default branch, once the slug is resolved (the branch is named
+# from it), and before the first write, so the spec's commit and its tasks'
+# merges land on the spec branch.
 for _label, _body in (("greenfield", _sn),
                       ("retrofit", skill(_PLANS["retrofit-loop"],
                                          "spec-new") or "")):
     _br = _body.find("## 2. Start the spec's branch")
     check(f"spec-new ({_label}): starts the spec's branch from the default "
           f"branch, after the slug and before the first write",
-          has(_body, "If you are on the default branch, create the spec's "
-                     "branch and switch to it: `git switch -c spec/<slug>`.")
-          and has(_body, "Otherwise stay on the current branch.")
+          has(_body, "If you are on the default branch, or on another "
+                     "spec's branch (`spec/*`), create this spec's branch "
+                     "from the default branch and switch to it: `git switch "
+                     "-c spec/<slug> <default>`")
           and -1 < _body.find("## 1. Resolve the slug") < _br
           < _body.find("## 4. Write `requirements.md`"),
           _body[_br:_br + 400] if _br >= 0 else _body[:400])
+    # [WP4 fix round 1 / NF1] After a spec's pull request the agent is
+    # still on that spec's branch. "Otherwise stay on the current branch"
+    # put the next spec, and every later one, on it.
+    check(f"spec-new ({_label}): on another spec's branch (spec/*), the new "
+          f"spec branches from the default branch, not from that spec; only "
+          f"a branch the operator chose keeps it, and the step says how to "
+          f"find the default branch's name",
+          has(_body, "or on another spec's branch (`spec/*`)")
+          and has(_body, "`git switch -c spec/<slug> <default>`")
+          and has(_body, "`git symbolic-ref --short refs/remotes/origin/HEAD` "
+                         "prints it after `origin/`")
+          and has(_body, "On any other branch, one the operator chose, stay "
+                         "on it.")
+          and not has(_body, "Otherwise stay on the current branch."),
+          _body[_br:_br + 700] if _br >= 0 else _body[:400])
 
 print("\n== spec-decompose ==")
 _sd = skill(_g, "spec-decompose") or ""
