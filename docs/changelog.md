@@ -470,7 +470,49 @@ next install replaces each steering doc you or Claude filled in, with no
 backup (review KEEP-1). `--force` replaces every skipped file, saving a copy
 of each; `--force --dry-run` lists them first.
 
-**Live walk (ruling 11).** To be recorded after the walk.
+**Live walk (ruling 11, 2026-10-15).** Claude Code drove two interactive
+sessions through tmux on a fresh project with fixture E's config, a
+two-feature PRD and a pushed `main` on a private throwaway repository, and
+answered as the operator; evidence and transcripts are outside the
+repository. Session 1 (Claude Code 2.1.296, every one of its 354 assistant
+lines `claude-opus-5-5`; the implementer subagent `claude-sonnet-5-5`, the
+reviewer `claude-opus-5-5`) was given the protocol and the PRD. It found the
+route at protocol line 283, ran `analyze`, previewed `--dry-run` (59
+files), fixed the config's PRD path by hand rather than run `synthesize`
+over the operator's choices, installed, and filled the steering docs in
+Phases 1 to 8, with Claude Code prompting for each write under `.claude/`
+until the operator allowed them. The four stubs were filled before the
+smoke-test offer; `Next steps:` after the install named them, offered the
+smoke test and ended with how to record it. Before `/spec-new` it committed
+the bootstrap on `main`; step 2 then ran the upstream lookup, `git pull
+--ff-only` and `git switch -c spec/health-check`, so the unpushed bootstrap
+commit came with it. Both smoke stages ran; `bootstrap_complete` became
+true when the operator asked Claude to set it. With `main` pushed by the
+operator, it pushed the spec branch (ci-mirror allowed it; `ci_local` was
+the real check by then, and in a scratch clone Claude had shown a failing
+test blocking a push), opened a pull request and stopped there; the pull
+request was closed unmerged. A
+second spec, started while it was open, made step 2 stop and ask which
+branch to start from; from `main` it ran the pull and created
+`spec/create-list-notes`. A re-install the operator ran in a copy of the
+project on `main`, with the docs filled and the bootstrap complete, printed
+no stub, smoke-test or completion line and kept the nine edited files with
+no warning. Session 2 (2.1.300, manual
+approvals) got two requests to edit Do Not Touch paths named in advance
+(`db/migrations/0001_init.sql`, `infra/deploy.yaml`). At each it ran the
+escalate skill's steps before stopping: at the first, `Skill(escalate)`,
+the clock, a Read (no file yet) and a Write of the four-field record to
+`.claude/sessions/.decision-pending-<session id>` (587 bytes); at the
+second, the clock, a Read and an Edit that appended the second record (993
+bytes, the first unchanged). Each write was approved once and succeeded
+first time, and neither path was edited. Found, and filed: the implementer
+subagent committed a package outside `tech.md`'s Stack table, a 🔔 item in
+that session's `CLAUDE.md`, without stopping; the reviewer caught it (Z-69).
+The installer's `tools.md` lists worktree-isolated subagents for an install
+with isolation `none` (Z-70, older than WP4). Phase 5 asked for a branch
+model and Claude proposed a branch per task until the operator named the
+spec branch (Z-71). The commit that switched the gates to real commands
+landed on the spec branch (Z-68 (s)).
 
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.2 (the `bootstrap-install`
@@ -494,13 +536,13 @@ marketplace file: whether a release follows WP4 is decided after it merges
 `_HOOK_HEADER`'s 6.D line still cites `Bootstrap-Protocol-v2-0-0.md`; the
 protocol-doc-snapshot-retire queue row now records that conflict. It builds
 no steering-authoring command, Phase 0 to 10 entry point or merge of the
-installer's `tech.md` sections into an AI-written file (D1 (b)). Whether a
-model follows the route, runs `/escalate` at a 🔔 stop, keeps the first
-record at a second stop, and starts each spec on its own branch is
-unmeasured until the live walk. Two specs in flight at once still conflict
-in `.claude/specs/INDEX.md` when the second pull request merges, and the
-person merging resolves the table (Z-65). **Deferred** to backlog section
-Z, rows Z-58 to Z-68 (layer "2026-10-14, WP4"): D1 (b) and the inventory rows
+installer's `tech.md` sections into an AI-written file (D1 (b)). The live
+walk measured the route, the 🔔 stops and the spec branch once, on one
+model; a subagent's handling of a 🔔 item is Z-69. Two specs in flight at
+once still conflict in `.claude/specs/INDEX.md` when the second pull
+request merges, and the person merging resolves the table (Z-65).
+**Deferred** to backlog section Z, rows Z-58 to Z-71 (layer "2026-10-14,
+WP4"): D1 (b) and the inventory rows
 it leaves open, the plugin path's skipped environment audit among them (Z-58),
 CI config generation (Z-59, ruling 8's 8d), the interviews' `bin/` hint paths
 (Z-60, 8e), retrofit Phase 8 parity and its `/escalate` pointer (Z-61, with a
@@ -510,7 +552,10 @@ in the plugin before it is published (Z-63), README text that predates WP4
 (Z-64), and, from fix round 2, the roster conflict of two specs in flight
 (Z-65), text, most of it older than WP4, that names skills or sweeps a
 skills-off or alarm-off install lacks (Z-66), the retrofit route's residue
-(Z-67) and the review residuals filed rather than fixed (Z-68). Dated layers
+(Z-67) and the review residuals filed rather than fixed (Z-68), and, from
+the live walk, a subagent that commits a 🔔 item without stopping (Z-69),
+`tools.md`'s worktree line under isolation `none` (Z-70) and Phase 5's
+branch-model question (Z-71). Dated layers
 on X-30a, Z-40 and M-2 record what WP4 changed there; M-2 is done.
 
 **Freeze exception 85.** One exception covers every frozen source WP4
