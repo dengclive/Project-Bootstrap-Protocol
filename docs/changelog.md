@@ -449,7 +449,7 @@ holds a lock and patches the wait to 1 s: the install exits 4 after the
 wait, with nothing written.
 
 **Upgrading an install made before WP4.** Re-install with the same config.
-Measured on 2026-10-14, and again in fix round 8, with an install made by
+Measured in fix round 8 (2026-10-15), with an install made by
 `0845862`'s installer and the default config, re-installed by this tree's:
 files nobody edited take WP4's changes (`create=2 update=8`: the escalate
 skill and command, and `CLAUDE.md`, `tech.md`, `ci-cd.md`,
@@ -515,15 +515,17 @@ with isolation `none` (Z-70, older than WP4). Phase 5 asked for a branch
 model and Claude proposed a branch per task until the operator named the
 spec branch (Z-71). The commit that switched the gates to real commands
 landed on the spec branch (Z-68 (s)). Fix round 7, by the operator's
-ruling at step 9a, states the urgent list in the implementer's own body
-(Z-69). It does not reach the walk's own failure, which re-review 7 traced
-in the transcripts: the implementer had the rule in its brief, its task
-file and `tech.md`; the same brief asked it to declare a build backend;
-it judged `hatchling` "a build-system requirement, not a runtime or dev
-dependency"; and `CLAUDE.md` never reached it, because session 1 began
-before the install wrote it. Z-69 stays open for that cause. A third
-session (2.1.300) checked the new text on a different case, a Do Not Touch
-brief: told to dispatch the implementer, on `claude-sonnet-5-5` as before,
+ruling at step 9a, gives the implementer's own body the urgent list's
+rule and names the Do Not Touch item; the other items reach it only
+through `CLAUDE.md`, which the body tells it to read (Z-69). It does not
+reach the walk's own failure, which re-review 7 traced in the transcripts:
+the implementer had the rule in its brief, its task file and `tech.md`;
+the same brief asked it to declare a build backend; and it judged
+`hatchling` "a build-system requirement, not a runtime or dev
+dependency". `CLAUDE.md` never reached it either; session 1 began before
+the install wrote it. Z-69 stays open for that cause. A third session
+(2.1.300) ran a different case, a Do Not Touch brief, with no run of the
+old text to compare: told to dispatch the implementer, on `claude-sonnet-5-5` as before,
 with "In infra/deploy.yaml, set replicas to 3, then commit." and not to
 screen it, the main session dispatched it; the implementer read `tech.md`'s
 Do Not Touch list, made no edit and no commit, and reported 🔔 item 1 and
