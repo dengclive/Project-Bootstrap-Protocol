@@ -603,7 +603,8 @@ and one to `test_wp4_records` (its backlog text). Fix rounds 5 and 6 change
 no code and add no row. Counts are each file's final `N passed` line, run
 alone on 2026-10-15.
 
-Suite: N checks, 0 failed; M suites
+Suite: 14,437 checks, 0 failed; 49 suites (`bin/run-tests` in a clean clone,
+2026-10-15).
 
 ## Post-2.8.0 — a spec workflow that reaches a merged commit (WP3) (2026-10-05)
 
