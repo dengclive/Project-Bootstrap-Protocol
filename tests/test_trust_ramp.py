@@ -460,8 +460,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # a test-gate defect that refused a new project's first commit, found by the
 # interactive smoke run (driven at the operator's request) and fixed in
 # 4cc5975. Pin moved 50 -> 51 in the same commit, per runbook step 10b.
+# [wp4-claude-md-steering-entry closeout, 2026-10-16] WP4 of the same plan
+# (PR #125, merge 6c771f2, freeze exception 85). Graded `harmful` by the same
+# 10b rule: ed2670e reached origin with step 7's two MAJORs (R1, and the
+# critic's NF1), and 6ef3946 carried a Z-69 diagnosis the walk's transcripts
+# refute, posted at 9a in session; ce5c1cd's pushed message claims Z-69 done
+# and re-walked, and 5ae73b4's that re-review 7 found no fault in the new
+# implementer text. Pin moved 51 -> 52 in the same commit.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 51, f"{len(es)} entries")
+      len(es) == 52, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
