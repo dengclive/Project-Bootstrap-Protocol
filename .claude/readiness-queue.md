@@ -440,7 +440,7 @@ separate items only because they were discovered separately.
   · full ceremony · **freeze exception required — next free number is 80**
   · scope `Bootstrap-Protocol-v2-{0,2,4,5}-0.md`,
   `Bootstrap-Protocol-Companion-v2-{0,2,4,5}-0.md`, `lib/`, `tests/`,
-  `docs/changelog.md`
+  `docs/changelog.md` **[+ `plugin/toolchain/**`: see this row's WP4 layer, dated 2026-10-14.]**
   **FILED 2026-09-22 by operator decision, taken with the blast radius already
   measured. The decision is: DELETE all eight pre-2.8.0 PRD/Companion files and
   REPOINT every citation, including the v2-0-0 hook citations that freeze
@@ -511,7 +511,7 @@ separate items only because they were discovered separately.
   its filename. A version bump is a *separate* axis — it would move
   `lib/installer.py:37`, `lib/templates.py:18`, `plugin/plugin.json`, two README
   lines and both doc headers together, and it is not what retiring a snapshot
-  requires.
+  requires. **[Layer 2026-10-14, WP4 (branch `feat/wp4-claude-md-steering-entry`, not yet merged).]** Four things this item now plans around. (1) The `_HOOK_HEADER` conflict: the header every emitted hook script carries cites `Bootstrap-Protocol-v2-0-0.md` 6.D, which this item would retire, and the 2026-09-27 pivot keeps `_HOOK_HEADER` byte-identical (`tests/test_wp4_must_not_change.py` pins its source string), so this item cannot repoint it without the operator's exception to the pivot. WP4 repointed the other emitted citations to `templates.PROTOCOL_DOC`: in the seven golden fixtures' emitted bodies, that 6.D line is the only stale protocol citation left (measured 2026-10-14). The census above is stale too: the same count of call sites in `lib/` and `bin/` (`git grep -o`) gives v2-0-0 20, v2-2-0 3, v2-4-0 2, v2-5-0 2, and 41 to the live v2-8-0. (2) The plugin manifest moved to `plugin/.claude-plugin/plugin.json`; NOT IN SCOPE above names its old path. (3) The scope globs gain `plugin/toolchain/**`: it tracks byte copies of `bin/bootstrap-install`, `bin/bootstrap-interview`, every tracked `lib/*.py` and the protocol document (`tests/plugin_toolchain_map.py`), so an edit to `lib/` or to the protocol must re-sync the copies, which E4 would otherwise halt as out of scope. (4) The feedback loop gains `tests/test_wp4_plugin_toolchain.py`: after such an edit, run `python3 tests/test_wp4_plugin_toolchain.py --sync` and `git add -A plugin/toolchain`, then the suite; without the sync, it and section 4 of `tests/test_doc_citations.py` and `tests/test_dynamic_workflow_policy.py` fail on the stale copies.
 
 - **[ready] x54-wrapper-emitted-comments-stale** · `EMITTED` · eligible: **yes**
   **FILED 2026-09-14 at step 10 by `x54-wrapper-cost`, found by its step-8.3

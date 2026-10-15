@@ -31,6 +31,7 @@ import argparse
 import json
 import subprocess
 import sys
+import textwrap
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -708,28 +709,42 @@ def parse_interview_answers(text: str) -> dict:
 # Interactive front-end (mirror of greenfield's run_interactive)
 # --------------------------------------------------------------------------- #
 class _EOF:
-    """Sticky end-of-input flag shared across prompts."""
+    """Sticky end-of-input flag shared across prompts: once stdin is
+    exhausted, every later `_ask` returns its default without reading.
+
+    [WP4 8c] `.defaulted` lists, in order, the answer key of each question
+    asked after the input ended, which the config header then names."""
 
     def __init__(self) -> None:
         self.hit = False
+        self.defaulted: list[str] = []
 
 
 def _ask(prompt: str, default: str, *, instream, outstream,
-         eof: "_EOF | None" = None) -> str:
+         eof: "_EOF | None" = None, key: str | None = None) -> str:
     outstream.write(prompt + f"\n  [default: {default}] > ")
     outstream.flush()
-    line = instream.readline()
+    # [WP4 fix round 1 / C4] As interview._ask: a terminal's end of input is
+    # not sticky, so once the input has ended no prompt reads again.
+    line = "" if eof is not None and eof.hit else instream.readline()
     if line == "":
         if eof is not None:
             eof.hit = True
+            if key and key not in eof.defaulted:
+                eof.defaulted.append(key)
         return default
     line = line.strip()
     return line if line else default
 
 
-def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
+def run_interactive(repo_root: Path, *, instream, outstream,
+                    eof: "_EOF | None" = None) -> dict:
     """Live stdin Q&A over the retrofit proposal core. Same 'show before
-    writing' discipline as the greenfield interactive front-end."""
+    writing' discipline as the greenfield interactive front-end.
+
+    [WP4 8c] It writes the inventory before its first question, so main()
+    refuses a stdin with no answer before calling it, and passes its own
+    `eof` to name in the config header the answers that took a default."""
     outstream.write("\n=== Retrofit interview (interactive) ===\n")
     outstream.write("Scanning codebase ...\n")
     outstream.flush()
@@ -752,12 +767,17 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     if p["pm"]["strategy"] == "hybrid":
         ans["hybrid_review_date"] = (
             date.today() + timedelta(days=90)).isoformat()
-    eof = _EOF()
+    if eof is None:
+        eof = _EOF()
     o = outstream.write
 
+    # [WP4] It said "Nothing is written until you confirm at the end", but
+    # the inventory is already written and the last answer writes the
+    # config: there is no confirmation step.
     o("\nEach decision below is a PROPOSAL with a rationale. Press Enter "
-      "to accept,\nor type an override. Nothing is written until you "
-      "confirm at the end.\n")
+      "to accept,\nor type an override. There is no confirmation step: the "
+      "config is written\nright after the last answer. Press Ctrl-C before "
+      "then and no config is written.\n")
 
     def show(title, rationale):
         o(f"\n--- {title} ---\n{rationale}\n")
@@ -765,13 +785,14 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     show("Project name", p["project_name"]["rationale"])
     ans["project_name"] = _ask(
         "Project name", ans["project_name"],
-        instream=instream, outstream=outstream, eof=eof)
+        instream=instream, outstream=outstream, eof=eof, key="project_name")
 
     show(f"Archetype (confidence {p['archetype']['confidence']})",
          p["archetype"]["rationale"])
     while True:
         v = _ask(f"Archetype {sorted(ARCHETYPES)}", ans["archetype"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="archetype")
         if v in ARCHETYPES:
             ans["archetype"] = v
             break
@@ -787,7 +808,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     show(f"PRD tier target (floor '{floor}')", p["prd_tier"]["rationale"])
     while True:
         v = _ask("PRD tier micro|standard|full", ans["prd_tier_target"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="prd_tier_target")
         if v in PH.TIER_ORDER and PH.TIER_ORDER[v] >= PH.TIER_ORDER[floor]:
             ans["prd_tier_target"] = v
             break
@@ -807,14 +829,16 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
         o(f"    {i}. {s}\n")
     v = _ask("Principles (semicolon-separated, in rank order)",
              "; ".join(ans["principles_ranked"]),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="principles_ranked")
     ans["principles_ranked"] = [x.strip() for x in v.split(";")
                                  if x.strip()]
 
     show("TDD policy", p["principles"]["tdd_policy"]["rationale"])
     while True:
         v = _ask("TDD policy off|encouraged|required", ans["tdd_policy"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="tdd_policy")
         if v in ("off", "encouraged", "required"):
             ans["tdd_policy"] = v
             break
@@ -831,7 +855,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     while True:
         v = _ask(f"Spec strategy {sorted(RETROFIT_SPEC_STRATEGIES)}",
                  ans["spec_strategy"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="spec_strategy")
         if v in RETROFIT_SPEC_STRATEGIES:
             ans["spec_strategy"] = v
             break
@@ -845,7 +870,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
     while True:
         v = _ask(f"PM strategy {sorted(RETROFIT_PM_STRATEGIES)}",
                  ans["pm_strategy"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="pm_strategy")
         if v in RETROFIT_PM_STRATEGIES:
             ans["pm_strategy"] = v
             break
@@ -873,13 +899,15 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
         ans["hybrid_review_date"] = _ask(
             "Hybrid review date (YYYY-MM-DD)",
             ans.get("hybrid_review_date") or "",
-            instream=instream, outstream=outstream, eof=eof)
+            instream=instream, outstream=outstream, eof=eof,
+            key="hybrid_review_date")
 
     show("CI/CD applicability", p["ci_cd_applicability"]["rationale"])
     while True:
         v = _ask("CI/CD applicability yes|no|unknown",
                  ans["ci_cd_applicability"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="ci_cd_applicability")
         if v in ("yes", "no", "unknown"):
             ans["ci_cd_applicability"] = v
             break
@@ -902,7 +930,7 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
                        "Queue mode (scaffold-only; requires loop or goal)")):
         v = _ask(f"{label} opt-in? true|false",
                  str(ans[mk]).lower(),
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof, key=mk)
         ans[mk] = v.lower() in ("true", "1", "yes", "on")
     if ans["queue_mode_opted_in"] and not (
             ans["loop_mode_opted_in"]
@@ -922,7 +950,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
                       ("commands_ci_local", "ci_local"),
                       ("commands_eval", "eval")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
-                        instream=instream, outstream=outstream, eof=eof)
+                        instream=instream, outstream=outstream, eof=eof,
+                        key=ck)
 
     # [W-1] Asked next to the commands it is a fact about. Brownfield weights
     # this higher than greenfield: an established codebase is more likely to
@@ -937,7 +966,8 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
       "that was never built. Answering false drops the worktree isolation.\n")
     v = _ask("commands.execute_in_cwd true|false",
              str(ans["commands_execute_in_cwd"]).lower(),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="commands_execute_in_cwd")
     ans["commands_execute_in_cwd"] = v.lower() in ("true", "1", "yes", "on")
 
     return ans, p
@@ -947,7 +977,10 @@ def run_interactive(repo_root: Path, *, instream, outstream) -> dict:
 # Orchestration helpers
 # --------------------------------------------------------------------------- #
 def _finalize(answers: dict, proposal: dict, out_path: Path, *,
-              outstream) -> int:
+              outstream, partial: str | None = None) -> int:
+    """[WP4 8c] `partial` is interview._defaulted_note's line for
+    interactive input that ended early; the header gains it after its first
+    line. Every other run keeps the header byte for byte."""
     cfg = answers_to_config(answers, proposal)
     # [WP3 fix1 INST-5] Keep the hand-set keys no answer sets.
     for line in carry_from_file(out_path, cfg):
@@ -962,7 +995,10 @@ def _finalize(answers: dict, proposal: dict, out_path: Path, *,
         return 2
 
     header = ("GENERATED BY bin/retrofit-interview — a PROPOSAL reviewed "
-              "by a human.\nempty commands.test/lint/format are "
+              "by a human.\n"
+              + ("" if partial is None else
+                 "\n".join(textwrap.wrap(partial, 76)) + "\n")
+              + "empty commands.test/lint/format are "
               "intentional per OD-3: the installer warns about each one."
               "\nRe-run "
               "bin/bootstrap-install --dry-run to preview the .claude/ "
@@ -1090,10 +1126,29 @@ def main(argv: list[str]) -> int:
                           outstream=sys.stdout)
 
     if args.cmd == "interactive":
+        # [WP4 8c] The same guard as bootstrap-interview's, before
+        # run_interactive writes the inventory, so a refusal writes nothing.
+        from interview import (_TrackedInput, _closed_refusal,
+                               _defaulted_note, _stdin_refusal)
+        refusal = _stdin_refusal("retrofit-interview")
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return 2
+        src, eof = _TrackedInput(sys.stdin), _EOF()
         answers, proposal = run_interactive(
-            root, instream=sys.stdin, outstream=sys.stdout)
+            root, instream=src, outstream=sys.stdout, eof=eof)
+        # Zero answers the check above could not see (Ctrl-D at the first
+        # prompt in a terminal): refuse too. The inventory is written by
+        # then, which is why every refusal says only "no config written".
+        if src.ended and src.read == 0:
+            print(_closed_refusal("retrofit-interview"), file=sys.stderr)
+            return 2
+        partial = None
+        if src.ended:
+            print(src.partial_warning("retrofit-interview"), file=sys.stderr)
+            partial = _defaulted_note(src.read, eof.defaulted)
         return _finalize(answers, proposal, root / args.out,
-                          outstream=sys.stdout)
+                          outstream=sys.stdout, partial=partial)
 
     return 2
 

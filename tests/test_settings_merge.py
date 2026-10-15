@@ -453,7 +453,7 @@ try:
     check("--force --dry-run writes no backup to disk",
           backups(_d) == [], str(backups(_d)))
     check("--force --dry-run still previews the backup path",
-          "previous version saved to" in r.stdout, r.stdout[-300:])
+          "previous version would be saved to" in r.stdout, r.stdout[-300:])
     check("--force --dry-run leaves the operator file alone",
           open(os.path.join(_d, ".claude", "settings.json")).read()
           == UNMERGEABLE)
@@ -723,8 +723,9 @@ try:
           _r.returncode == 3, f"rc={_r.returncode}")
     check("the reason does not claim the file is the operator's work",
           "no installer manifest" in _r.stdout, _r.stdout[-400:])
-    check("and stderr offers --adopt, not only --force",
-          "--adopt" in _r.stderr, _r.stderr[-300:])
+    check("and stderr gives the per-file remedy, not --adopt advice",
+          "move it aside and re-install" in _r.stderr
+          and "Don't use --adopt for this" in _r.stderr, _r.stderr[-300:])
 
     _a = install(_d, cfg_text=_HOOKS_OFF, argv=("--adopt",))
     check("--adopt exits 0", _a.returncode == 0, _a.stderr[-300:])

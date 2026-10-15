@@ -40,8 +40,11 @@ SCOPE, stated rather than implied.
        date-stamp their citations, and renumbering them to today's lines would
        corrupt the record by asserting a line that did not exist on that date;
        (b) bare `:NNN` continuations that name no file (the assessment's
-       `- :341 —` list form), which cannot be resolved without prose context.
-  Both exclusions are enforced by name below, not left to a regex accident.
+       `- :341 —` list form), which cannot be resolved without prose context;
+       (c) [WP4] the plugin's copies under `plugin/toolchain/`, while each
+       copy's bytes equal its source, whose own row checks the citation.
+  All three exclusions are enforced by name below, not left to a regex
+  accident.
 
 Run: python3 tests/test_doc_citations.py
 """
@@ -52,6 +55,8 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
+sys.path.insert(0, HERE)
+import plugin_toolchain_map as PTM            # noqa: E402
 
 passed = failed = 0
 
@@ -283,9 +288,17 @@ check("git ls-files returned a file list", len(tracked) > 20,
 
 SELF = os.path.relpath(os.path.abspath(__file__), ROOT)
 covered = {(c, d) for c, d, _, _ in CITATIONS}
+# [WP4, ruling 2 (b)] plugin/toolchain/ tracks byte copies of the two tools,
+# lib/ and the protocol document, so a plugin installed from a marketplace
+# carries them. A copy whose bytes equal its source cites what its source
+# cites, and the source's row checks that; a second row per copy would be a
+# second place to maintain one number. Any other file there fails below, so
+# the skip cannot hide a citation. The map is tests/plugin_toolchain_map.py.
+toolchain = {rel: PTM.toolchain_kind(rel) for rel in tracked}
+toolchain = {rel: kind for rel, kind in toolchain.items() if kind}
 uncovered = []
 for rel in tracked:
-    if rel == SELF or rel in HISTORICAL:
+    if rel == SELF or rel in HISTORICAL or rel in toolchain:
         continue
     try:
         with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
@@ -302,10 +315,17 @@ for rel in tracked:
 check("every live citation has a table row", uncovered == [],
       "\n".join(f"    {r} cites {d}:{n} with no CITATIONS row" for r, d, n in uncovered)
       + "\n    A citation with no row is a citation nothing checks.")
+_strays = sorted(r for r, k in toolchain.items() if k == "stray")
+check(f"every tracked file under {PTM.TOOLCHAIN}/ is a copy the map names, "
+      f"with its source's bytes "
+      f"({sum(k == 'copy' for k in toolchain.values())} copies not rescanned)",
+      _strays == [],
+      f"    not a copy, or not its source's bytes: {_strays}\n"
+      f"    re-sync with: {PTM.SYNC}")
 
 total_found = 0
 for rel in tracked:
-    if rel == SELF:
+    if rel == SELF or rel in toolchain:
         continue
     try:
         with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:

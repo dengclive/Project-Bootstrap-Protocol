@@ -28,9 +28,12 @@ from __future__ import annotations
 import argparse
 import difflib
 import json
+import math
 import os
+import select
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 
 import prd_heuristics as H
@@ -384,7 +387,7 @@ def validate_config_dict(cfg: dict) -> list[str]:
         if H.TIER_ORDER[tier] < H.TIER_ORDER[floor]:
             errors.append(
                 f"project.prd_tier '{tier}' is below the required floor "
-                f"'{floor}' for archetype '{arche}' (Bootstrap-Protocol-v2-0-0.md Phase 0 "
+                f"'{floor}' for archetype '{arche}' (Bootstrap-Protocol-v2-8-0.md Phase 0 "
                 f"step 7: a higher tier may be requested, never a lower "
                 f"one). Raise prd_tier to at least '{floor}'.")
     return errors
@@ -562,7 +565,7 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         p["prd_tier"]["rationale"],
         "",
         "_You may raise the tier but not lower it below the floor "
-        "(Bootstrap-Protocol-v2-0-0.md Phase 0)._",
+        "(Bootstrap-Protocol-v2-8-0.md Phase 0)._",
     ])
     # [WP1] The three Phase 0 fields answers_to_config used to hard-code.
     section(PRD_PATH_SECTION_TITLE, [
@@ -636,10 +639,10 @@ def render_interview(proposal: dict, prd_path: str) -> str:
         "",
         "_These modes ship as UNIMPLEMENTED skeletons: enabling one emits a "
         "wrapper that dispatches nothing (exits 1) until you complete the "
-        "dispatch loop (Bootstrap-Protocol-v2-0-0.md Phase 9.5/9.6/9.7)._",
+        "dispatch loop (Bootstrap-Protocol-v2-8-0.md Phase 9.5/9.6/9.7)._",
         "",
         "_Constraint: queue mode requires loop or goal mode "
-        "(Bootstrap-Protocol-v2-0-0.md Phase 9.7). The tool will not emit an invalid combo._",
+        "(Bootstrap-Protocol-v2-8-0.md Phase 9.7). The tool will not emit an invalid combo._",
     ])
     # TEL-01 (v2.4.0 fold): standalone opt-in decision, independent of every
     # autonomous mode. Question phrasing is the PRD's verbatim text
@@ -1004,29 +1007,139 @@ def _wp1_absent(k: str, lines: list[str]):
 # --------------------------------------------------------------------------- #
 # Interactive front-end (non-deterministic by design; same core)
 # --------------------------------------------------------------------------- #
+# [WP4 8c] Both interviews' `interactive` refusals end with this.
+_TERMINAL_HINT = ("Run it in a terminal of your own, or use analyze and "
+                  "synthesize.")
+# [WP4 fix round 1 / C5] The longest wait BOOTSTRAP_PROMPT_TIMEOUT can ask
+# for, in seconds: 2**31 - 1 (68 years) fits every platform's select()
+# timeout, a 32-bit timeval's included.
+_MAX_PROMPT_WAIT = float(2 ** 31 - 1)
+
+
+def _closed_refusal(tool: str) -> str:
+    return (f"error: {tool} interactive: stdin is empty or closed; no config "
+            f"written. {_TERMINAL_HINT}")
+
+
+def _stdin_refusal(tool: str) -> str | None:
+    """[WP4 8c] Why `<tool> interactive` must not start, or None. Both
+    interviews' main() calls it before run_interactive, so a refusal comes
+    before anything is written (retrofit's inventory included).
+
+    With no terminal, the interview used to take every proposed default
+    unanswered and write a config whose header says a person reviewed it.
+    An agent's Bash tool gives a command /dev/null (measured: rc 0, the
+    default config written), or a socket that never sends EOF when the
+    command line holds a `<`. So: refuse when there is no stdin at all
+    (fd 0 closed). When stdin is not a terminal, wait at most
+    BOOTSTRAP_PROMPT_TIMEOUT seconds (default 30, inside the Bash tool's
+    120 s, so the refusal is what the agent sees) for the first byte, once;
+    after that, input is read as it arrives, so a slow pipe that does answer
+    still works. Then refuse at end of input: zero answers. A stream with no
+    usable descriptor (an in-process StringIO: io.UnsupportedOperation is
+    both an OSError and a ValueError), or a platform where select() cannot
+    wait on it (Windows pipes), skips both checks, as before."""
+    stdin = sys.stdin
+    if stdin is None:
+        return _closed_refusal(tool)
+    try:
+        if stdin.isatty():
+            return None
+        stdin.fileno()
+    except (AttributeError, OSError, ValueError):
+        return None
+    try:
+        limit = float(os.environ.get("BOOTSTRAP_PROMPT_TIMEOUT", "30"))
+    except ValueError:
+        limit = 30.0
+    # [WP4 fix round 1 / C5] A negative, infinite or NaN value (1e400 reads
+    # as infinity) made select() raise, which the handler below takes for a
+    # stream it cannot wait on, so a silent pipe hung with no refusal. Those
+    # take the default, and a large value is capped where select() can wait.
+    if not (math.isfinite(limit) and limit >= 0):
+        limit = 30.0
+    limit = min(limit, _MAX_PROMPT_WAIT)
+    try:
+        ready, _, _ = select.select([stdin], [], [], limit)
+    except (OSError, ValueError, OverflowError):
+        return None
+    if not ready:
+        return (f"error: {tool} interactive: no answer arrived within "
+                f"{limit:g} s and stdin is not a terminal; no config "
+                f"written. {_TERMINAL_HINT}")
+    try:
+        if stdin.buffer.peek(1) == b"":
+            return _closed_refusal(tool)
+    except (AttributeError, OSError, ValueError):
+        return None
+    return None
+
+
+class _TrackedInput:
+    """[WP4 8c, from V6] The CLI's stdin for run_interactive: counts the
+    answers read and records whether the input ended before the interview
+    asked its last question."""
+
+    def __init__(self, f) -> None:
+        self.f, self.read, self.ended = f, 0, False
+
+    def readline(self) -> str:
+        line = self.f.readline()
+        if line == "":
+            self.ended = True
+        else:
+            self.read += 1
+        return line
+
+    def partial_warning(self, tool: str) -> str:
+        return (f"warning: {tool} interactive: input ended after {self.read} "
+                "answer(s); every later question took its proposed default "
+                "without being answered.")
+
+
+def _defaulted_note(read: int, keys: list[str]) -> str:
+    """[WP4 8c] The config header's line for input that ended early, in
+    place of the claim that every value was shown before acceptance. It
+    names the answers (ANSWERS-block keys) that took their default."""
+    return (f"The input ended after {read} answer(s), so these values took "
+            f"their proposed default without being answered: "
+            f"{', '.join(keys)}.")
+
+
 class _EOF:
     """Sticky end-of-input flag shared across prompts in one interview.
 
-    Once stdin is exhausted, every subsequent `_ask` returns its default and
-    sets `.hit`. Validated loops check this so they fall back to a known-good
-    value instead of re-prompting an exhausted stream forever (review finding
+    Once stdin is exhausted, every subsequent `_ask` returns its default
+    without reading, and sets `.hit`. Validated loops check this so they
+    fall back to a known-good value instead of re-prompting an exhausted
+    stream forever (review finding
     I-1: a validated loop whose proposed default is itself invalid - e.g. the
     PRD-tier default after an archetype override raises the floor above it -
     would otherwise spin infinitely on piped/scripted stdin).
+
+    [WP4 8c] `.defaulted` lists, in order, the answer key of each question
+    asked after the input ended, which the config header then names.
     """
 
     def __init__(self) -> None:
         self.hit = False
+        self.defaulted: list[str] = []
 
 
 def _ask(prompt: str, default: str, *, instream, outstream,
-         eof: "_EOF | None" = None) -> str:
+         eof: "_EOF | None" = None, key: str | None = None) -> str:
     outstream.write(prompt + f"\n  [default: {default}] > ")
     outstream.flush()
-    line = instream.readline()
+    # [WP4 fix round 1 / C4] A terminal's end of input is not sticky: after
+    # Ctrl-D the next readline waits for more, so the interview went on and
+    # the warning and header then named answers that were given. Once the
+    # input has ended, no prompt reads again.
+    line = "" if eof is not None and eof.hit else instream.readline()
     if line == "":  # EOF
         if eof is not None:
             eof.hit = True
+            if key and key not in eof.defaulted:
+                eof.defaulted.append(key)
         return default
     line = line.strip()
     return line if line else default
@@ -1035,7 +1148,8 @@ def _ask(prompt: str, default: str, *, instream, outstream,
 def run_interactive(prd_text: str, *, instream, outstream,
                      project_fallback: str = "my-project",
                      use_llm: bool = False,
-                     prd_path: str | None = None) -> dict:
+                     prd_path: str | None = None,
+                     eof: "_EOF | None" = None) -> dict:
     """Prompt the human one decision at a time over stdin; return answers.
 
     Equivalent to editing the questionnaire: every prompt shows the proposal
@@ -1043,17 +1157,24 @@ def run_interactive(prd_text: str, *, instream, outstream,
     sequential prompts (never batched). commands.* are explicitly NOT
     prompted as guessable - the human may optionally supply them, with the
     consequence of leaving them empty stated.
+
+    [WP4 8c] main() passes its own `eof`, to name in the config header the
+    answers that took their default after the input ended.
     """
     p = build_proposal(prd_text, project_fallback=project_fallback,
                         use_llm=use_llm)
     ans = default_answers(p, prd_path=prd_path)
     o = outstream.write
-    eof = _EOF()  # shared sticky end-of-input flag (review finding I-1)
+    if eof is None:
+        eof = _EOF()  # shared sticky end-of-input flag (review finding I-1)
 
     o("\n=== Bootstrap interview (interactive) ===\n")
+    # [WP4] It said "Nothing is written until you confirm at the end", but
+    # there is no confirmation step: the last answer writes the config.
     o("Each decision below is a PROPOSAL with a rationale. Press Enter to "
-      "accept it,\nor type an override. Nothing is written until you confirm "
-      "at the end.\n\n")
+      "accept it,\nor type an override. There is no confirmation step: the "
+      "config is written\nright after the last answer. Press Ctrl-C before "
+      "then and no config is written.\n\n")
     for n in p.get("_llm", {}).get("notices", []):
         o(f"  ! {n}\n")
 
@@ -1063,7 +1184,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
     show("Project name", p["project_name"]["rationale"])
     ans["project_name"] = _ask("Project name", ans["project_name"],
                                 instream=instream, outstream=outstream,
-                                eof=eof)
+                                eof=eof, key="project_name")
 
     show("Archetype "
          f"(confidence {p['archetype']['confidence']})",
@@ -1071,7 +1192,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
     while True:
         v = _ask(f"Archetype {sorted(__import__('defaults').ARCHETYPES)}",
                  ans["archetype"], instream=instream, outstream=outstream,
-                 eof=eof)
+                 eof=eof, key="archetype")
         if v in __import__("defaults").ARCHETYPES:
             ans["archetype"] = v
             break
@@ -1092,7 +1213,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
     show(f"PRD tier (floor '{floor}')", p["prd_tier"]["rationale"])
     while True:
         v = _ask("PRD tier micro|standard|full", ans["prd_tier"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="prd_tier")
         if v in H.TIER_ORDER and H.TIER_ORDER[v] >= H.TIER_ORDER[floor]:
             ans["prd_tier"] = v
             break
@@ -1116,19 +1238,20 @@ def run_interactive(prd_text: str, *, instream, outstream,
          "Recorded as project.prd_path (product.md and the state file). "
          "Relative to the project root.")
     ans["prd_path"] = _ask("PRD path", ans["prd_path"], instream=instream,
-                           outstream=outstream, eof=eof)
+                           outstream=outstream, eof=eof, key="prd_path")
     show(SHELL_SECTION_TITLE,
          "Recorded in tech.md. Every emitted hook is a bash script "
          "whatever this says.")
     ans["shell"] = _ask("Shell", ans["shell"], instream=instream,
-                        outstream=outstream, eof=eof)
+                        outstream=outstream, eof=eof, key="shell")
     show(CICD_SECTION_TITLE,
          "If no, ci-cd.md records \"No CI/CD\" and the ci-mirror hook is not "
          "installed.")
     while True:
         v = _ask(f"{CICD_QUESTION} yes|no",
                  "no" if ans["cicd_opt_out"] else "yes",
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="cicd_opt_out")
         word = v.strip().lower()
         if word in _TRUE_WORDS or word in _FALSE_WORDS:
             ans["cicd_opt_out"] = word in _FALSE_WORDS
@@ -1144,7 +1267,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
         o(f"    {i}. {s}\n")
     v = _ask("Principles (comma-separated, in rank order)",
              "; ".join(ans["principles_ranked"]),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="principles_ranked")
     ans["principles_ranked"] = [x.strip() for x in v.replace(";", ",").split(",")
                                 if x.strip()]
     # [WP1] Phase 4 step 5. Split on ';' only: a tiebreaker sentence often
@@ -1154,14 +1278,16 @@ def run_interactive(prd_text: str, *, instream, outstream,
          "\"DRY vs YAGNI: prefer YAGNI until the third duplication\".")
     v = _ask("Tiebreakers (separate with ';', empty for none)",
              "; ".join(ans["principles_tiebreakers"]),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="principles_tiebreakers")
     ans["principles_tiebreakers"] = [x.strip() for x in v.split(";")
                                      if x.strip()]
 
     show("TDD policy", p["tdd_policy"]["rationale"])
     while True:
         v = _ask("TDD policy off|encouraged|required", ans["tdd_policy"],
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="tdd_policy")
         if v in ("off", "encouraged", "required"):
             ans["tdd_policy"] = v
             break
@@ -1182,7 +1308,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
         # the same replies (POLICY_ANSWER_KEYS).
         while True:
             v = _ask(prompt, str(ans[key]).lower(), instream=instream,
-                     outstream=outstream, eof=eof)
+                     outstream=outstream, eof=eof, key=key)
             word = v.strip().lower()
             if word in _TRUE_WORDS or word in _FALSE_WORDS:
                 ans[key] = word in _TRUE_WORDS
@@ -1197,7 +1323,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
     ask_policy("secrets_enabled", "Secrets enabled? true|false")
     v = _ask("Never-read globs (comma-separated)",
              ", ".join(ans["secrets_never_read_paths"]),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="secrets_never_read_paths")
     ans["secrets_never_read_paths"] = [x.strip() for x in v.split(",")
                                        if x.strip()]
 
@@ -1211,12 +1338,12 @@ def run_interactive(prd_text: str, *, instream, outstream,
                       ("queue_mode_enabled", "Queue mode (scaffold-only)")):
         v = _ask(f"{label} enabled? true|false",
                  str(ans[mk]).lower(),
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof, key=mk)
         ans[mk] = v.lower() in ("true", "1", "yes", "on")
     # Enforce the skip-policy invariant interactively rather than emit invalid.
     if ans["queue_mode_enabled"] and not (
             ans["loop_mode_enabled"] or ans["goal_supervised_mode_enabled"]):
-        o("\n  ! Queue mode requires loop or goal mode (Bootstrap-Protocol-v2-0-0.md 9.7). "
+        o("\n  ! Queue mode requires loop or goal mode (Bootstrap-Protocol-v2-8-0.md 9.7). "
           "Disabling queue mode.\n")
         ans["queue_mode_enabled"] = False
 
@@ -1237,7 +1364,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
          "time later.")
     v = _ask("Telemetry export enabled? true|false",
              str(ans["telemetry_export_enabled"]).lower(),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="telemetry_export_enabled")
     ans["telemetry_export_enabled"] = v.lower() in ("true", "1", "yes", "on")
 
     # DS-01 (v2.5.0): the archetype-GATED offer — the ONE site with no telemetry
@@ -1259,13 +1387,15 @@ def run_interactive(prd_text: str, *, instream, outstream,
         show(DESIGN_SECTION_TITLE, DESIGN_STEERING_QUESTION)
         v = _ask("Generate design steering doc? true|false",
                  str(ans["design_steering_enabled"]).lower(),
-                 instream=instream, outstream=outstream, eof=eof)
+                 instream=instream, outstream=outstream, eof=eof,
+                 key="design_steering_enabled")
         ans["design_steering_enabled"] = v.lower() in ("true", "1", "yes", "on")
         if ans["design_steering_enabled"]:
             v2 = _ask("Add the optional advisory design-review skill? "
                       "true|false",
                       str(ans["design_review_skill_enabled"]).lower(),
-                      instream=instream, outstream=outstream, eof=eof)
+                      instream=instream, outstream=outstream, eof=eof,
+                      key="design_review_skill_enabled")
             ans["design_review_skill_enabled"] = \
                 v2.lower() in ("true", "1", "yes", "on")
     # else: both flags stay at their False default, no prompt shown.
@@ -1280,7 +1410,7 @@ def run_interactive(prd_text: str, *, instream, outstream,
                       ("commands_ci_local", "ci_local"),
                       ("commands_eval", "eval")):
         ans[ck] = _ask(f"commands.{label}", ans[ck],
-                       instream=instream, outstream=outstream, eof=eof)
+                       instream=instream, outstream=outstream, eof=eof, key=ck)
 
     # [W-1] Asked UNCONDITIONALLY, right after the commands themselves — it is
     # a fact about those five answers and belongs next to them. Not
@@ -1290,7 +1420,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
     v = _ask("Do these commands run in the directory they are invoked from? "
              "true|false",
              str(ans["commands_execute_in_cwd"]).lower(),
-             instream=instream, outstream=outstream, eof=eof)
+             instream=instream, outstream=outstream, eof=eof,
+             key="commands_execute_in_cwd")
     ans["commands_execute_in_cwd"] = v.lower() in ("true", "1", "yes", "on")
 
     # [WP1] Phase 6. One prompt, not thirteen: name the hooks to leave out.
@@ -1303,7 +1434,8 @@ def run_interactive(prd_text: str, *, instream, outstream,
          + "\n".join(f"  {n}: {d}" for n, d in HOOK_TOGGLES))
     while True:
         v = _ask("Hooks to leave out (comma-separated names, empty for none)",
-                 "", instream=instream, outstream=outstream, eof=eof)
+                 "", instream=instream, outstream=outstream, eof=eof,
+                 key="hooks_*")
         names = [x.strip() for x in v.split(",") if x.strip()]
         bad = [x for x in names if x not in HOOK_TOGGLE_NAMES]
         if not bad:
@@ -1321,9 +1453,15 @@ def run_interactive(prd_text: str, *, instream, outstream,
 # --------------------------------------------------------------------------- #
 # Orchestration helpers
 # --------------------------------------------------------------------------- #
-def _finalize(answers: dict, out_path: Path, *, outstream) -> int:
+def _finalize(answers: dict, out_path: Path, *, outstream,
+              partial: str | None = None) -> int:
     """answers -> config dict -> in-process validate -> write -> installer
-    validate. Refuses to leave an invalid config in place."""
+    validate. Refuses to leave an invalid config in place.
+
+    [WP4 8c] `partial` is _defaulted_note's line for interactive input that
+    ended early; it replaces the header's claim that every value was shown.
+    Every other run, synthesize included, keeps the header byte for byte
+    (tests/test_validate_only.py pins synthesize's output)."""
     cfg = answers_to_config(answers)
     # [WP3 fix1 INST-5] Keep the hand-set keys no answer sets.
     carried = carry_from_file(out_path, cfg)
@@ -1337,10 +1475,11 @@ def _finalize(answers: dict, out_path: Path, *, outstream) -> int:
         outstream.write("No file written. Resolve the above and re-run.\n")
         return 2
 
+    shown = ("Every value here was shown with a rationale before acceptance."
+             if partial is None else "\n".join(textwrap.wrap(partial, 76)))
     header = ("GENERATED BY bin/bootstrap-interview — a PROPOSAL reviewed by a "
-              "human.\nEvery value here was shown with a rationale before "
-              "acceptance.\nempty commands.test/lint/format are intentional: "
-              "the installer warns about each one.\nRe-run "
+              f"human.\n{shown}\nempty commands.test/lint/format are "
+              "intentional: the installer warns about each one.\nRe-run "
               "bin/bootstrap-install --dry-run to preview the .claude/ tree.")
     emit_warnings: list[str] = []
     out_path.write_text(emit(cfg, header=header, warnings=emit_warnings))
@@ -1457,12 +1596,30 @@ def main(argv: list[str]) -> int:
         if not prd.exists():
             print(f"error: PRD not found: {prd}", file=sys.stderr)
             return 2
+        # [WP4 8c] Before run_interactive, so a refusal writes nothing.
+        refusal = _stdin_refusal("bootstrap-interview")
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return 2
         use_llm = LLM.llm_requested(getattr(args, "llm", False))
+        src, eof = _TrackedInput(sys.stdin), _EOF()
         answers = run_interactive(
-            prd.read_text(), instream=sys.stdin, outstream=sys.stdout,
+            prd.read_text(), instream=src, outstream=sys.stdout,
             project_fallback=prd.stem or "my-project", use_llm=use_llm,
-            prd_path=_config_prd_path(prd, Path(args.out)))
-        return _finalize(answers, Path(args.out), outstream=sys.stdout)
+            prd_path=_config_prd_path(prd, Path(args.out)), eof=eof)
+        # [WP4 8c] Zero answers where the check above could not look (Ctrl-D
+        # at the first prompt in a terminal, a stream with no descriptor):
+        # refuse too. Input that ended later takes the remaining defaults,
+        # says so, and the header names them.
+        if src.ended and src.read == 0:
+            print(_closed_refusal("bootstrap-interview"), file=sys.stderr)
+            return 2
+        partial = None
+        if src.ended:
+            print(src.partial_warning("bootstrap-interview"), file=sys.stderr)
+            partial = _defaulted_note(src.read, eof.defaulted)
+        return _finalize(answers, Path(args.out), outstream=sys.stdout,
+                         partial=partial)
 
     return 2  # pragma: no cover
 

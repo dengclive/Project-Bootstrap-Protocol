@@ -2,7 +2,7 @@
 description: Apply bootstrap.config.yaml deterministically (creates the full .claude/ harness). Runs the installer; no interview.
 ---
 
-# /bootstrap-apply
+# /bootstrap-protocol:bootstrap-apply
 
 Run the **deterministic installer** against the `bootstrap.config.yaml` in the
 project root. This is the mechanical layer — it makes no decisions, asks no
@@ -12,13 +12,14 @@ config.
 ## What to do
 
 1. Confirm `bootstrap.config.yaml` exists in the project root. If it does not,
-   tell the operator to run `/bootstrap-interview` first (that command is the
-   decision layer; it produces the config this command consumes).
+   tell the operator to run `/bootstrap-protocol:bootstrap-interview` first
+   (that command is the decision layer; it produces the config this command
+   consumes).
 
 2. Show the plan first (never write blind):
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install --dry-run
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-install" --dry-run
    ```
 
 3. Summarize the plan for the operator: archetype, autonomous-mode flags,
@@ -29,7 +30,8 @@ config.
    test command whose "no tests yet" the test gate cannot tell from a
    failing suite; for each hook script the run leaves alone rather than
    update, so a config change will not reach it (on a tree with no
-   installer manifest the line names `--adopt`), and likewise for an
+   installer manifest the line says to move that one file aside and
+   re-install, and not to use `--adopt`), and likewise for an
    edited `.claude/githooks/dispatch`, `.claude/githooks/spec-check.sh` or
    `.claude/merge-back.sh`; for a `.claude/.gitignore` the run leaves alone
    that lacks the `/worktrees/` line, when no other ignore rule covers
@@ -49,7 +51,7 @@ config.
 4. On operator approval, apply:
 
    ```
-   python3 ${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-install
+   python3 "${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-install"
    ```
 
 5. **Check the exit code before reporting anything.** Exit 3 means files were
@@ -58,7 +60,9 @@ config.
    The stdout counts look like a success in that case, so read stderr and
    surface it verbatim; do not tell the operator the install succeeded.
    (Exit 2 is a config refusal — nothing was written; an unparseable
-   config names its file and line. Exit 0 is the only outcome
+   config names its file and line. Exit 4 means a loop wrapper or another
+   install held a state lock, so the run wrote at most an empty lock
+   file: re-run when it is free. Exit 0 is the only outcome
    whose enforcement was verified.) On exit 0, still surface every
    `warning:` line on stderr, verbatim: the apply repeats the dry run's,
    and names each of the operator's own hook commands that begins
@@ -78,14 +82,26 @@ config.
    worktree isolation, to land an approved branch with
    `.claude/merge-back.sh <branch>`. The installer prints the block only
    on exit 0, never under `--dry-run` or `--adopt`, and only while the
-   project has no task file under `.claude/specs/*/tasks/`.
+   project has no task file under `.claude/specs/*/tasks/`. Until the
+   state file records the Phase 9 decision (R6 on a retrofit) or a
+   complete bootstrap, the block offers the smoke test before the chain,
+   and until it records the bootstrap complete, its last line says how to
+   finish the bootstrap. Where a greenfield state file does not record
+   whether the bootstrap finished, as in a fresh clone, it offers neither
+   line, and its last line says the file does not record it and what to
+   do either way. While a steering doc is still the
+   installer's stub, a line names it and the phases that fill it in. Fill
+   in the steering docs that line names with the operator first. Offer
+   the smoke test and the completion step only when the block does, and
+   mark the bootstrap complete only after the smoke test ran or the
+   operator skipped it.
 
 ## Why this is split from the interview
 
 The Bootstrap Protocol has two layers. The **interview** (archetype, PRD tier,
 principles, secrets paths, TDD policy, MCP choices) genuinely needs a human and
-lives in `/bootstrap-interview`. The **scaffolding** (hook scripts,
-settings.json wiring, skill/command/agent files, queue scaffolding, state
-file) is fully determined by those answers and lives here. Keeping them
+lives in `/bootstrap-protocol:bootstrap-interview`. The **scaffolding** (hook
+scripts, settings.json wiring, skill/command/agent files, queue scaffolding,
+state file) is fully determined by those answers and lives here. Keeping them
 separate makes the mechanical half reproducible, diffable, and reversible —
 properties an interactive wizard cannot offer.

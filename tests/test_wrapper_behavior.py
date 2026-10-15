@@ -62,6 +62,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
@@ -577,6 +578,128 @@ check("unparseable .run-active -> refuses", rc != 0, f"rc={rc}")
 check("unparseable .run-active refusal says so", "could not read a PID" in err,
       err[:160])
 clear_sentinels()
+
+
+print("\n== [WP4 8b] an install waits for a wrapper's state update ==")
+
+# A wrapper holds the state file's sibling lock between its read and its
+# rename (the emitted `exec 9>"$STATE.lock"; flock 9` idiom), here with the
+# append step the skeletons leave to the operator done in python3, so this
+# section needs flock and nothing more. An install that runs in that window
+# must wait for the wrapper, then read the wrapper's state and add its own
+# keys; without the lock it writes at once, and the wrapper's rename then
+# drops what the install wrote. Each case runs twice: with _install_lock
+# replaced by a no-op (deny capability: the harness must see the loss), and
+# as shipped. The retrofit case is the reconcile write (X7): a retrofit
+# re-install downgrades a greenfield state file's "sdk-callable" to "shell",
+# and on 0845862 a wrapper's rename undid that.
+INTERLEAVE_WRAPPER = r'''
+set -u
+STATE=$1 D=$2 PY=$3
+exec 9>"$STATE.lock"; flock 9
+new=$("$PY" -c 'import json, sys
+s = json.load(open(sys.argv[1]))
+s.setdefault("loop_in_flight", []).append({"task_id": "t1", "iteration": 0})
+print(json.dumps(s))' "$STATE")
+: >"$D/W.read"
+n=0
+while [ ! -e "$D/I.done" ] && [ $n -lt 300 ]; do sleep 0.01; n=$((n+1)); done
+printf '%s\n' "$new" >"$STATE.tmp"; mv -f "$STATE.tmp" "$STATE"
+flock -u 9
+'''
+INTERLEAVE_INSTALL = r'''
+import contextlib, os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "lib"))
+import installer
+if sys.argv[3] == "nolock":
+    installer._install_lock = lambda root, cfg: contextlib.nullcontext()
+rc = installer.main(["-c", sys.argv[4], "-C", sys.argv[2]])
+open(os.path.join(sys.argv[5], "I.done"), "w").close()
+sys.exit(rc)
+'''
+INTERLEAVE_GREEN = ("project:\n  name: g6\n  archetype: cli\n"
+                    "autonomous_modes:\n  loop_mode_enabled: true\n"
+                    "  goal_supervised_mode_enabled: true\n")
+INTERLEAVE_RETRO = '''mode: "retrofit"
+project:
+  name: r-svc
+  archetype: service
+commands:
+  test: "true"
+  lint: "true"
+  format: "true"
+retrofit:
+  spec_strategy: "forward-only"
+  legacy_allowlist:
+    - "src/**"
+  retrofit_active: true
+  r08_committed: true
+'''
+
+
+def interleave(cfg_text, seed, mode):
+    """Run a wrapper's update and an install over one state file; return
+    (final state, install rc, install stderr tail)."""
+    d = tempfile.mkdtemp(prefix="wp4-interleave-", dir=TMP)
+    proj = os.path.join(d, "p")
+    os.makedirs(os.path.join(proj, ".claude"))
+    if shutil.which("git"):
+        subprocess.run(["git", "init", "-q", proj], check=True)
+    cfg = os.path.join(d, "config.yaml")
+    with open(cfg, "w", encoding="utf-8") as fh:
+        fh.write(cfg_text)
+    state = os.path.join(proj, ".claude", ".bootstrap-state.json")
+    with open(state, "w", encoding="utf-8") as fh:
+        json.dump(seed, fh)
+    w = subprocess.Popen([BASH, "-c", INTERLEAVE_WRAPPER, "w", state, d,
+                          sys.executable])
+    for _ in range(500):
+        if os.path.exists(os.path.join(d, "W.read")) or w.poll() is not None:
+            break
+        time.sleep(0.01)
+    i = subprocess.run([sys.executable, "-c", INTERLEAVE_INSTALL, ROOT, proj,
+                        mode, cfg, d], capture_output=True, text=True,
+                       timeout=120)
+    w.wait(timeout=60)
+    with open(state, encoding="utf-8") as fh:
+        return json.load(fh), i.returncode, i.stderr[-300:]
+
+
+_g_seed = {"bootstrap_protocol_version": "2.8.0", "gate_substrate": "shell",
+           "goal_supervised_mode_enabled": False, "loop_in_flight": []}
+_t1 = [{"task_id": "t1", "iteration": 0}]
+st, rc, err = interleave(INTERLEAVE_GREEN, _g_seed, "nolock")
+check("deny capability: with no install lock, the wrapper's rename drops "
+      "the install's keys", rc == 0
+      and st.get("goal_supervised_mode_enabled") is False
+      and st.get("loop_in_flight") == _t1,
+      repr((rc, err, st.get("goal_supervised_mode_enabled"),
+            st.get("loop_in_flight"))))
+st, rc, err = interleave(INTERLEAVE_GREEN, _g_seed, "lock")
+# [WP4 fix round 2 / CR-1] The install is a first install over a state file
+# written before it, so it seeds bootstrap_complete: false, one of the
+# install's keys that must survive the wrapper's rename.
+check("with the install lock, both the wrapper's entry and the install's "
+      "keys survive", rc == 0
+      and st.get("goal_supervised_mode_enabled") is True
+      and st.get("loop_in_flight") == _t1
+      and st.get("bootstrap_complete") is False,
+      repr((rc, err, st.get("goal_supervised_mode_enabled"),
+            st.get("loop_in_flight"))))
+_r_seed = {"bootstrap_protocol_version": "2.8.0",
+           "gate_substrate": "sdk-callable", "loop_in_flight": []}
+st, rc, err = interleave(INTERLEAVE_RETRO, _r_seed, "nolock")
+check("deny capability (X7): with no install lock, the wrapper's rename "
+      "undoes a retrofit re-install's sdk-callable downgrade", rc == 0
+      and st.get("gate_substrate") == "sdk-callable"
+      and st.get("loop_in_flight") == _t1,
+      repr((rc, err, st.get("gate_substrate"), st.get("loop_in_flight"))))
+st, rc, err = interleave(INTERLEAVE_RETRO, _r_seed, "lock")
+check("with the install lock (X7), the downgrade to \"shell\" and the "
+      "wrapper's entry both survive", rc == 0
+      and st.get("gate_substrate") == "shell"
+      and st.get("loop_in_flight") == _t1,
+      repr((rc, err, st.get("gate_substrate"), st.get("loop_in_flight"))))
 
 
 shutil.rmtree(TMP, ignore_errors=True)

@@ -2,7 +2,11 @@
   "name": "bootstrap-protocol",
   "version": "2.8.0",
   "description": "Deterministically configure Claude Code from a bootstrap.config.yaml (Project Bootstrap Protocol v2.8.0). Bundles a PRD-driven decision-layer interview tool (proposes a validated config for human approval) and the deterministic installer as the mechanical layer.",
-  "author": "Project Bootstrap Protocol",
+  "author": {
+    "name": "Project Bootstrap Protocol"
+  },
   "commands": "./commands",
-  "homepage": "https://example.invalid/bootstrap-protocol"
+  "homepage": "https://github.com/dengclive/Project-Bootstrap-Protocol",
+  "repository": "https://github.com/dengclive/Project-Bootstrap-Protocol",
+  "license": "Apache-2.0"
 }

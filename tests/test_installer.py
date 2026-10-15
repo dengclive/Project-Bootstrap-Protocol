@@ -991,8 +991,10 @@ try:
     leftovers = []
     for base, _, files in os.walk(d):
         for f in files:
+            # [WP4 8b] The state lock stays with the state file: the
+            # install took it, and it holds no content.
             if f in ("bootstrap.config.yaml", ".installer-manifest.json",
-                     ".bootstrap-state.json"):
+                     ".bootstrap-state.json", ".bootstrap-state.json.lock"):
                 continue
             leftovers.append(os.path.join(base, f))
     check("L-1b: clean uninstall removes all generated content files",
@@ -1145,6 +1147,7 @@ finally:
 # literal here — the absolute count is pinned by test_greenfield_golden.py).
 # ---------------------------------------------------------------------------
 _LEDGER_PATH = ".claude/steering/assumption-ledger.md"
+import re as _re_gr                                      # noqa: E402
 for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
     _c, _ = cfg_from(_fix)
     _plan = build_plan(_c)
@@ -1165,9 +1168,19 @@ for _fix_name, _fix in (("service", SERVICE), ("full", FULL)):
         # Interpolated (not hardcoded) default drift thresholds 50/120/3.
         check(f"GR2-03a[{_fix_name}]: ledger interpolates drift thresholds",
               "50 tool calls / 120 min / 3 file reads" in _body)
-        # Links to the v2.4.0 doc, not restating it as a second authority.
-        check(f"GR2-03a[{_fix_name}]: ledger cites Bootstrap-Protocol-v2-4-0",
-              "Bootstrap-Protocol-v2-4-0.md" in _body)
+        # Links to the protocol document, not restating it as a second
+        # authority. [WP4 / g5] The current document, by templates'
+        # PROTOCOL_DOC, and no other protocol file name. Through WP3 this
+        # row asked for Bootstrap-Protocol-v2-4-0.md, so it passed a ledger
+        # that sent the adopter to a superseded protocol file no install
+        # contains, beside two links to v2-8-0.
+        _names = set(_re_gr.findall(
+            r"Bootstrap-Protocol-(?:Companion-)?v\d+-\d+-\d+\.md", _body))
+        _pdoc = getattr(_tmpl, "PROTOCOL_DOC", None)
+        check(f"GR2-03a[{_fix_name}]: ledger cites the current protocol doc, "
+              f"and no other protocol file",
+              _pdoc is not None and f"`{_pdoc}`" in _body
+              and _names == {_pdoc})
 
 # Determinism: the seeded ledger body carries no timestamp/randomness, so two
 # independent resolves produce byte-identical bodies (and the whole plan digest
@@ -1191,9 +1204,11 @@ _cbody = [a for a in build_plan(_cc)
 check("GR2-03a: customized drift threshold flows into the ledger",
       "77 tool calls" in _cbody)
 
-# v2.4.0 spec-doc existence (RC-03 class): the assumption-ledger / telemetry
-# bodies and GR2-01/02 prose added by this fold cite Bootstrap-Protocol-v2-4-0
-# — the cited docs must exist at repo root so the citations are not dangling.
+# v2.4.0 spec-doc existence (RC-03 class). [WP4 / g5] No emitted body cites
+# the v2.4.0 pair any more: emitted citations name templates.PROTOCOL_DOC,
+# and RC-03 (tests/test_usage_limit_contract.py) checks that file exists.
+# These rows keep the frozen pair the changelog's history cites, until
+# protocol-doc-snapshot-retire decides its fate.
 for _doc in ("Bootstrap-Protocol-v2-4-0.md",
              "Bootstrap-Protocol-Companion-v2-4-0.md"):
     check(f"v2.4.0: cited spec doc exists at repo root: {_doc}",
@@ -1863,8 +1878,19 @@ check("AC-A0-1: installer and templates PROTOCOL_VERSION agree",
 # PR5-04/05), and the v2.2.0 bump omitted it again (caught only in review).
 # Both misses happened despite the changelog recording plugin.json as part of
 # the release set, so the convention alone is not the control.
-_PLUGIN_JSON = os.path.join(ROOT, "plugin", "plugin.json")
-check("AC-A0-1: plugin/plugin.json exists", os.path.exists(_PLUGIN_JSON))
+# [WP4] Claude Code reads a plugin manifest only at .claude-plugin/plugin.json
+# under the plugin root, and `author` is an object. At plugin/plugin.json the
+# manifest was never read, so the row that checked that path passed while the
+# file did nothing: `claude plugin validate plugin` said "No manifest found in
+# directory" (Claude Code 2.1.299), and --plugin-dir loaded the plugin as
+# `plugin@inline`, version "unknown" (2.1.296).
+_PLUGIN_DIR = os.path.join(ROOT, "plugin")
+_PLUGIN_JSON = os.path.join(_PLUGIN_DIR, ".claude-plugin", "plugin.json")
+_pj = {}
+check("AC-A0-1: plugin/.claude-plugin/plugin.json exists",
+      os.path.exists(_PLUGIN_JSON))
+check("[WP4] PL-1: no second manifest at plugin/plugin.json",
+      not os.path.exists(os.path.join(_PLUGIN_DIR, "plugin.json")))
 if os.path.exists(_PLUGIN_JSON):
     _pj = _json.load(open(_PLUGIN_JSON))
     check("AC-A0-1: plugin.json version tracks PROTOCOL_VERSION",
@@ -1873,6 +1899,172 @@ if os.path.exists(_PLUGIN_JSON):
     # 2.2.0 bump also had to hand-edit; pin it so prose and field cannot skew.
     check("AC-A0-1: plugin.json description names the current version",
           f"v{_installer_mod.PROTOCOL_VERSION}" in _pj.get("description", ""))
+_author = _pj.get("author")
+check("[WP4] PL-2: plugin.json author is an object with a non-empty name",
+      isinstance(_author, dict) and isinstance(_author.get("name"), str)
+      and _author["name"].strip() != ""
+      and set(_author) <= {"name", "email", "url"})
+# [WP4] The manifest is public: the plugin's details show it. The standing
+# rule is that no email address is ever published, and author.email is a key
+# Claude Code accepts, so nothing else would stop one being added.
+import re as _re_pl                                          # noqa: E402
+check("[WP4] PL-2: plugin.json publishes no email address",
+      not (isinstance(_author, dict) and "email" in _author)
+      and not _re_pl.search(r"[\w.+-]+@[\w-]+\.[\w.]+",
+                        open(_PLUGIN_JSON).read()
+                        if os.path.exists(_PLUGIN_JSON) else ""))
+_cpaths = []
+for _k in ("commands", "agents", "skills", "hooks", "outputStyles"):
+    _v = _pj.get(_k)
+    _cpaths += [_v] if isinstance(_v, str) else [
+        x for x in (_v if isinstance(_v, list) else []) if isinstance(x, str)]
+check("[WP4] PL-3: every component path starts with ./ and exists in plugin/",
+      bool(_cpaths) and all(
+          p.startswith("./") and ".." not in p.split("/")
+          and os.path.exists(os.path.join(_PLUGIN_DIR, p)) for p in _cpaths))
+# [WP4, operator ruling 2026-10-14] The license is the repository's
+# (readiness C-1 adopted Apache-2.0), and both URLs name the public
+# repository instead of the old example.invalid placeholder.
+_REPO_URL = "https://github.com/dengclive/Project-Bootstrap-Protocol"
+check("[WP4] PL-5: plugin.json license is Apache-2.0, as LICENSE says",
+      _pj.get("license") == "Apache-2.0"
+      and "Apache License" in open(os.path.join(ROOT, "LICENSE")).read(600))
+check("[WP4] PL-5: plugin.json repository and homepage name the GitHub "
+      "repository",
+      _pj.get("repository") == _REPO_URL and _pj.get("homepage") == _REPO_URL)
+# [WP4] With the manifest read, Claude Code namespaces the commands under the
+# plugin's name. Measured on 2.1.296: `/bootstrap-apply` alone "did not run";
+# only `/bootstrap-protocol:bootstrap-apply` expands.
+_cmd_dir = os.path.join(_PLUGIN_DIR, "commands")
+_bare = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _bare += [f"{_fn}:{_n}" for _n, _ln in enumerate(_fh, 1)
+                  if _re_pl.search(r"(?<![\w:-])/bootstrap-(?:interview|apply)"
+                                   r"\b", _ln)]
+_ns = "%s:" % _pj.get("name", "?")
+check("[WP4] PL-4: the commands name each other with the plugin's namespace "
+      f"(bare: {_bare})", _bare == [] and all(
+          _ns + "bootstrap-" in open(os.path.join(_cmd_dir, f),
+                                     encoding="utf-8").read()
+          for f in os.listdir(_cmd_dir)))
+# [WP4, g4-3] Phase 0 step 8 has the AI write the PRD with the operator when
+# none exists at the archetype's tier. The command used to say the PRD "must
+# be written first" and that the tool "does not attempt" it, which sent the
+# AI away from the step the protocol gives it.
+_iv_txt = open(os.path.join(_cmd_dir, "bootstrap-interview.md"),
+               encoding="utf-8").read()
+check("[WP4] G4-3: the interview command has the AI write a missing PRD, as "
+      "Phase 0 step 8 says",
+      "Phase 0 step 8" in _iv_txt and "docs/prd/<name>.md" in _iv_txt
+      and "must be written first" not in _iv_txt)
+# [WP4, IA-1] `bootstrap-interview interactive` reads its answers from the
+# keyboard. Run through the Bash tool before 8c, stdin was /dev/null and it
+# took every proposal and wrote the config, rc 0 (measured). Since 8c it
+# refuses with no terminal and no answer, and input that ends early takes
+# the remaining defaults with a warning. The command hands it to the
+# operator, and gives the AI that reason, not the old one.
+_iv_flat = " ".join(_iv_txt.split())
+check("[WP4] IA-1: the interactive interview is the operator's to run in a "
+      "terminal of their own, never the AI's, with 8c's reason",
+      "interactive --prd" in _iv_flat and "Don't run it yourself" in _iv_flat
+      and "terminal of their own" in _iv_flat
+      and "refuses and writes no config" in _iv_flat
+      and "input that ends early" in _iv_flat
+      and "accepts every proposal" not in _iv_flat
+      and '"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/bootstrap-interview" '
+      'interactive' in _iv_flat)
+
+# [WP4, G11] A plugin installed from a git-hosted marketplace is COPIED into
+# the plugin cache, and files outside the plugin directory are not copied.
+# Measured on Claude Code 2.1.296: `${CLAUDE_PLUGIN_ROOT}/../bin/bootstrap-
+# install` expanded to <cache>/bootstrap-protocol/bootstrap-protocol/2.8.0/
+# ../bin/bootstrap-install, which does not exist (python3 exit 2). The
+# commands now run the copies under plugin/toolchain/ (ruling 2 (b)).
+# tests/test_wp4_plugin_toolchain.py keeps each copy equal to its source and
+# fails on any symlink under plugin/, which replaces the link-era G11-4,
+# G11-5 and MK-1 (there is no marketplace file).
+_refs = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _refs += [(_fn, _m) for _m in _re_pl.findall(
+            r"\$\{?CLAUDE_PLUGIN_ROOT\}?[\"']?(/[^\s\"'`]*)", _fh.read())]
+check("[WP4] G11-1: the commands reference ${CLAUDE_PLUGIN_ROOT} paths "
+      f"(non-vacuity: {len(_refs)})", len(_refs) >= 7)
+_pd_real = os.path.realpath(_PLUGIN_DIR)
+_out = [f"{_fn}: {_r}" for _fn, _r in _refs
+        if not os.path.normpath(_pd_real + _r).startswith(_pd_real + os.sep)]
+check("[WP4] G11-2: no command path leaves the plugin root, in any spelling "
+      f"(out: {_out})", _out == [])
+# Every line that runs a tool, not only those that name the plugin root: a
+# line that runs bin/... from the project names no plugin path to quote.
+_shell_lines = []
+for _fn in sorted(os.listdir(_cmd_dir)):
+    with open(os.path.join(_cmd_dir, _fn), encoding="utf-8") as _fh:
+        _shell_lines += [f"{_fn}: {_ln.strip()}" for _ln in _fh
+                         if _ln.lstrip().startswith("python3 ")]
+_unquoted = [_ln for _ln in _shell_lines
+             if not _re_pl.search(r'"\$\{CLAUDE_PLUGIN_ROOT\}/[^"\s]+"', _ln)
+             or _re_pl.search(r'(?<!")\$\{?CLAUDE_PLUGIN_ROOT', _ln)]
+check("[WP4] G11-8: every shell line quotes its ${CLAUDE_PLUGIN_ROOT} path, "
+      f"so a plugin root with a space stays one word ({len(_shell_lines)} "
+      f"lines; unquoted: {_unquoted})",
+      len(_shell_lines) >= 6 and _unquoted == [])
+_tc_doc = os.path.join(_PLUGIN_DIR, "toolchain", "protocol.md")
+check("[WP4] G11-6: plugin/toolchain/protocol.md equals "
+      f"{_tmpl.PROTOCOL_DOC}, byte for byte",
+      os.path.isfile(_tc_doc) and not os.path.islink(_tc_doc)
+      and open(_tc_doc, "rb").read()
+      == open(os.path.join(ROOT, _tmpl.PROTOCOL_DOC), "rb").read())
+# Behaviour: `cp -r` plugin/ outside the repository, into the plugin cache's
+# layout, and run what the commands run from that copy: the interview's two
+# passes, the installer's dry run and the install. `cp -r` keeps a link as a
+# link, so a path that leaves plugin/ is missing here, as in the cache.
+_cp = tempfile.mkdtemp()
+_missing_in_copy = ["(copy not made)"]
+_g11_7 = _g11_9 = None
+try:
+    _root = os.path.join(_cp, "cache", "bootstrap-protocol",
+                         "bootstrap-protocol", "2.8.0")
+    os.makedirs(os.path.dirname(_root))
+    subprocess.run(["cp", "-r", _PLUGIN_DIR, _root], check=True)
+    _missing_in_copy = [f"{_fn}: {_r}" for _fn, _r in _refs
+                        if not os.path.isfile(_root + _r)]
+    _tc = os.path.join(_root, "toolchain")
+    _proj = os.path.join(_cp, "proj")
+    os.makedirs(os.path.join(_proj, "docs", "prd"))
+    _prd_copy = os.path.join(_proj, "docs", "prd", "sample.md")
+    shutil.copyfile(os.path.join(ROOT, "examples", "sample-prd.md"),
+                    _prd_copy)
+    _env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    _g11_7 = [subprocess.run([sys.executable, os.path.join(_tc, "bin", _t)]
+                             + _a, cwd=_proj, capture_output=True, text=True,
+                             env=_env).returncode
+              for _t, _a in (("bootstrap-interview",
+                              ["analyze", "--prd", _prd_copy]),
+                             ("bootstrap-interview", ["synthesize"]),
+                             ("bootstrap-install", ["--dry-run"]),
+                             ("bootstrap-install", []))]
+    _sp = os.path.join(_proj, ".claude", ".bootstrap-state.json")
+    _doc_rec = (_json.load(open(_sp)).get("protocol_doc")
+                if os.path.isfile(_sp) else "(no state file)")
+    # The installer records a resolved path; show it under the copy's name.
+    _g11_9 = (str(_doc_rec).replace(os.path.realpath(_root), "<copy>"),
+              isinstance(_doc_rec, str) and os.path.realpath(_doc_rec)
+              == os.path.realpath(os.path.join(_tc, "protocol.md")))
+except (OSError, subprocess.CalledProcessError, ValueError) as _e:
+    print(f"    G11 copy setup raised {_e!r}"[:400])
+finally:
+    shutil.rmtree(_cp, ignore_errors=True)
+check("[WP4] G11-3: every ${CLAUDE_PLUGIN_ROOT} path a command names exists "
+      f"in plugin/, as `cp -r` copies it (missing: {_missing_in_copy})",
+      _missing_in_copy == [])
+check("[WP4] G11-7: from a `cp -r` copy of plugin/ outside the repository, "
+      "analyze, synthesize, the dry run and the install all exit 0 "
+      f"(got {_g11_7})", _g11_7 == [0, 0, 0, 0])
+check("[WP4] G11-9: the install from that copy records protocol_doc as the "
+      f"copy's toolchain/protocol.md (got {_g11_9 and _g11_9[0]!r})",
+      bool(_g11_9 and _g11_9[1]))
 
 # [v2.7.4] plugin.json was pinned to PROTOCOL_VERSION; the README release line
 # and the PRD version header were not, and both went stale — the README at

@@ -4,6 +4,10 @@
 > pin the annotated git tag `v2.8.0`** — pinning a moving `main` is pinning a
 > branch, not a release. This line was stale at `v2.6.0` through three releases
 > (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
+> *Correction (WP4, 2026-10-14):* to follow [Getting started](#getting-started),
+> use a clone of `main`. The `v2.8.0` tag predates that route: at the tag, the
+> installer prints no `Next steps:` block, and the protocol document has its
+> old file name (see "Why a filename need not match the version" below).
 >
 > The normative spec is still `Bootstrap-Protocol-v2-8-0.md` +
 > `Bootstrap-Protocol-Companion-v2-8-0.md`: **2.6.1 through 2.7.4 are gate
@@ -14,21 +18,24 @@
 > 2.8.0 is the LIT literature fold — nine additive doc/steering items plus one
 > priming-contract change ([LIT-07]) — amended into the same pair in place,
 > with a v2.8.0 block at the PRD head and a migration note in the Companion.
-> **Why the filename says `v2-6-0` when the version says 2.8.0:** the filename
+> **Why a filename need not match the version:** the filename
 > records **when the pair was cut**, not what it describes. Through 2.6.0 a new
 > pair was cut at each MAJOR/MINOR; **since 2.7.0 releases amend the pair in
 > place**, and a new one is cut only by an explicit re-issue decision recorded
-> in `docs/changelog.md`. **The normative pair is the one whose `**Version:**`
-> equals `PROTOCOL_VERSION`** — and `tests/test_installer.py` pins this file,
-> the PRD header and the Companion mirror line to that one value, so they cannot
-> drift apart. The full rule, with the history that contradicts the tidy version
-> of it, is in the PRD's own filename note.
+> in `docs/changelog.md`. This pair was cut as `v2-6-0` and renamed `v2-8-0`
+> on 2026-08-14 (freeze exception 70), a few hours after the `v2.8.0` tag, so
+> at that tag its files still carry the `v2-6-0` name. **The normative pair is
+> the one whose `**Version:**` equals `PROTOCOL_VERSION`** — and
+> `tests/test_installer.py` pins this file, the PRD header and the Companion
+> mirror line to that one value, so they cannot drift apart. The full rule,
+> with the history that contradicts the tidy version of it, is in the PRD's
+> own filename note.
 >
 > Older PRD/Companion pairs are retained as historical record — with
 > one exception worth knowing: `Bootstrap-Protocol-v2-5-0.md` carries seven
 > corrections applied *in place* on 2026-07-28, each marked at its edit site,
 > made before a 2.6.0 document existed to hold them. They are native text in the
-> v2-6-0 pair now.
+> v2-8-0 pair now.
 >
 > Release record: `docs/changelog.md` (newest entry first). Known deferrals:
 > `docs/deferred-backlog.md` — cluster **X-36** is the live one (rows `a`–`t`);
@@ -49,6 +56,197 @@
 > CI failures that 2.5.0 was reporting to nobody, and it rewrites
 > `.claude/steering/deps.md`, which you must merge by hand if you have edited it.
 
+## Getting started
+
+You bootstrap a project by giving Claude the protocol document. Claude runs
+the protocol with you, one phase at a time, and runs this repository's tools
+for the parts they automate: `bin/bootstrap-interview` proposes the
+decisions and writes `bootstrap.config.yaml`, and `bin/bootstrap-install`
+writes the `.claude/` tree from it. The install writes the steering docs as
+stubs, and Claude then fills them in with you.
+
+### Before you begin
+
+- Claude Code.
+- Python 3. The tools use only the standard library; CI tests them on
+  Python 3.12.
+- Your project, in a git repository.
+- A clone of this repository at `main` (see the correction in the banner).
+
+### Bootstrap a new project
+
+1. Clone this repository. These steps write the clone's path as `$T`, for
+   example `T=~/src/Project-Bootstrap-Protocol`.
+2. At your project's root, start Claude Code with access to the clone:
+   `claude --add-dir "$T"`.
+3. Ask Claude: "Read `$T/Bootstrap-Protocol-v2-8-0.md` and bootstrap this
+   project." The protocol tells Claude which tool to run at each step.
+4. In Phases 0 and 0.5, Claude runs
+   `python3 "$T/bin/bootstrap-interview" analyze --prd <your PRD>`, takes you
+   through its proposals one question at a time, and records your answers in
+   the ANSWERS block of `bootstrap.interview.md`. It then runs
+   `python3 "$T/bin/bootstrap-interview" synthesize`, which writes
+   `bootstrap.config.yaml`, and shows you the plan from
+   `python3 "$T/bin/bootstrap-install" --dry-run`. To answer the questions
+   live instead, see [Answer the interview live](#answer-the-interview-live).
+5. When you approve the plan, Claude runs
+   `python3 "$T/bin/bootstrap-install"`. The install writes the hooks,
+   `settings.json`, the skills, commands and agents, the steering docs, a
+   thin `CLAUDE.md` and the state file, and ends with a `Next steps:` block.
+6. Claude runs Phases 1 to 8 on the installed files. The install writes
+   `product.md`, `tech.md`, `structure.md` and `ci-cd.md` under
+   `.claude/steering/` as stubs, and `Next steps:` names each stub the
+   install still owns. Claude fills them in with you and shows you each
+   file.
+7. Claude offers the Phase 9 smoke test, then the Phase 10 handoff. The last
+   line of `Next steps:` says how to record the smoke test and mark the
+   bootstrap complete in `.claude/.bootstrap-state.json`: record it, or ask
+   Claude to.
+
+If a hand edit leaves `.claude/.bootstrap-state.json` unparsable, the next
+install keeps a copy of it as
+`.claude/.bootstrap-state.json.pre-unparsed-<UTC stamp>`, prints a
+`warning:` line that names the copy, and carries on without the keys it
+couldn't read. Restore them from the copy.
+
+### Retrofit an existing project
+
+If your project already has code that you want to keep, run `RETROFIT.md`
+instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
+
+1. Start Claude Code at your project's root, as in steps 1 and 2 above, and
+   ask Claude: "Read `$T/RETROFIT.md` and retrofit this project."
+2. Claude does R-1 first, then R0 step 1. When that step archives an
+   existing `.claude/` to `.claude.archived-<timestamp>/`, Claude leaves
+   `settings.json`, `settings.local.json` and the `.retrofit-state.json`
+   that R-1 wrote in place: the installer merges its hook wiring into your
+   `settings.json`, it never writes `settings.local.json`, and R0.5 extends
+   R-1's state file.
+3. Claude runs `python3 "$T/bin/retrofit-interview" analyze`, which scans
+   the code, writes first cuts of the inventory under `.claude/inventory/`
+   (the files of R0 steps 3, 4 and 12, and step 8's metrics as stubs), and
+   writes its proposals and open questions to `bootstrap.interview.md`.
+   Claude checks each first cut against its step's list in `RETROFIT.md`
+   and completes it: for example, step 3's convention groups, the
+   dependencies of every manifest but the root `pyproject.toml`,
+   `requirements.txt`, `package.json` and `Cargo.toml`, step 4's product
+   summary, step 8's metrics, and step 12's documentation, PR-template and
+   issue-tracker checks. Claude also does the R0 steps that `analyze`
+   doesn't (2, 5, 6, 7, 9, 10 and 11) from `RETROFIT.md`, among them step
+   5's extraction plan for your `CLAUDE.md` and the mandatory step 10.
+   Claude resolves the proposals with you one question at a time, then
+   runs `python3 "$T/bin/retrofit-interview" synthesize`, which writes
+   `bootstrap.config.yaml`.
+4. Claude shows you the plan from `bootstrap-install --dry-run` and, when you
+   approve it, runs `bootstrap-install`.
+5. If the install skipped a root `CLAUDE.md` that already existed, Claude
+   moves that file aside and re-runs `bootstrap-install`: it creates only
+   `CLAUDE.md`, and Claude merges your old file into it, as R8.E.1 says.
+6. Claude runs R1 to R5.5 on the installed files, and R8.F for `ci-cd.md`,
+   which fills in the steering stubs with you. Then come the R6 smoke test
+   and the R7 handoff, whose step 5 marks the retrofit complete in
+   `.claude/.retrofit-state.json`.
+
+### Approve Claude's writes under `.claude/`
+
+Run the route in an interactive session. Claude writes the steering docs and
+the state file under `.claude/`, which Claude Code protects. In an
+interactive session, in Claude Code's default permission mode, Claude Code
+asks you to approve each of those writes, so expect to approve the steering
+docs one at a time. Under `claude -p`, Claude Code denies Claude's Write and
+Edit tools there, even when your allow rules permit them (measured on Claude
+Code 2.1.283 and 2.1.289), and the protocol tells Claude to stop and tell
+you rather than write the file another way. The same holds for the decision
+record that the `escalate` skill writes under `.claude/sessions/`. How a
+headless run gets that permission is decision D5, which is open.
+
+### Re-install after a change
+
+To change a decision later, such as a command, a principle or a hook, edit
+`bootstrap.config.yaml` and re-run the installer. Commit
+`bootstrap.config.yaml`, because a clone needs it to re-install. Without
+`--force`, the installer never overwrites a file that you or Claude edited:
+the re-install prints a `SKIP` line for it and keeps your version, so that
+file doesn't get the change. A file that exists before the first install is
+kept the same way, so install before you fill in the docs.
+
+To take the installer's current version of one skipped file, move that file
+aside and re-install: the install re-creates only that file. Then merge your
+edits back from the moved copy by hand. This works in a fresh clone too,
+which has no installer manifest because git ignores it. Don't use `--adopt`
+for this: it records every skipped file as the installer's, so the next
+install replaces each steering doc you or Claude filled in, with no backup.
+`--force` isn't limited to one file either: it replaces every file that you
+or Claude edited. To see which files it would replace, run
+`bootstrap-install --force --dry-run`: it lists each one, says where its
+current version would be saved to under `.claude/.installer-backups/`, and
+writes nothing.
+
+### Answer the interview live
+
+`bootstrap-interview interactive` asks the same questions one at a time and
+reads your answers from the keyboard. Run it yourself, in a terminal:
+
+```bash
+python3 "$T/bin/bootstrap-interview" interactive --prd <your PRD>
+```
+
+Claude doesn't run it for you: in Claude's Bash tool it has no terminal, and
+it refuses. It exits 2 and writes no config when stdin is closed, when stdin
+ends before the first answer, or when stdin isn't a terminal and no answer
+arrives within `BOOTSTRAP_PROMPT_TIMEOUT` seconds (default 30). If you
+answer through a stdin that isn't a terminal, such as `ssh` or
+`docker run -i` without `-t`, set `BOOTSTRAP_PROMPT_TIMEOUT` to a larger
+number of seconds to give yourself time for the first answer. With such a
+stdin, the tool prints nothing until it reads the first byte: type the first
+answer (the project name) and press Enter to start it. Input that ends
+partway, after the first answer, takes the proposed default for every later
+question: the tool prints a `warning:` line, and the config's header names
+the values that took their defaults. `retrofit-interview interactive` works
+the same way.
+
+### The plugin
+
+`plugin/` wraps the interview and the install as a Claude Code plugin with
+two commands. Its manifest is `plugin/.claude-plugin/plugin.json`, and Claude
+Code prefixes each command with the plugin's name:
+
+- `/bootstrap-protocol:bootstrap-interview` writes `bootstrap.config.yaml`.
+  If you don't have a PRD at the required tier, Claude writes one with you
+  first.
+- `/bootstrap-protocol:bootstrap-apply` previews the install and, when you
+  approve it, runs it.
+
+The commands run the plugin's own copies of the tools, under
+`plugin/toolchain/`: `bin/bootstrap-install`, `bin/bootstrap-interview`,
+every `lib/*.py` module, and the protocol document as `protocol.md`. They
+don't run the checkout's `bin/`, so a copy of `plugin/` works on its own.
+After the install, `Next steps:` sends Claude to Phases 1 to 8 of that
+`protocol.md` to fill in the steering stubs. The plugin has no retrofit
+command, and it doesn't copy `bin/retrofit-interview`; for an existing
+codebase, follow [Retrofit an existing project](#retrofit-an-existing-project).
+
+This repository has no marketplace file (`marketplace.json`) yet, so load
+the plugin from a clone:
+
+```bash
+claude --plugin-dir "$T/plugin"
+```
+
+The copies under `plugin/toolchain/` are byte-identical to their sources.
+`tests/test_wp4_plugin_toolchain.py` checks each copy's bytes and exec bit
+against its source, so it stands in for a review of `plugin/toolchain/`:
+reviewing `bin/` and `lib/` reviews the copies. After you edit
+`bin/bootstrap-install`, `bin/bootstrap-interview`, a `lib/` module or the
+protocol document, re-sync the copies and stage them:
+
+```bash
+python3 tests/test_wp4_plugin_toolchain.py --sync
+git add -A plugin/toolchain
+```
+
+## The question this repository answers
+
 This answers the question (as originally posed against the v2-0-0 document —
 the two-layer split below is unchanged through v2.6.0): *"Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin, or
 deterministic code that configures Claude Code with all the hooks, commands,
@@ -58,7 +256,8 @@ etc.?"*
 
 ## The two layers
 
-`Bootstrap-Protocol-v2-0-0.md` mixes two fundamentally different things:
+The protocol document, `Bootstrap-Protocol-v2-8-0.md`, mixes two
+fundamentally different things:
 
 | Layer | Examples | Can it be deterministic? |
 |---|---|---|
@@ -70,14 +269,16 @@ they don't branch on archetype). A single deterministic script can't *make*
 the decisions. So the right design **separates them**:
 
 ```
-/bootstrap-interview   ──>   bootstrap.config.yaml   ──>   bootstrap-install
+bootstrap-interview    ──>   bootstrap.config.yaml   ──>   bootstrap-install
    (decision layer,            (the frozen,                 (mechanical layer,
     needs a human)              reproducible input)          deterministic)
 ```
 
 The interview's only output is a config file. The installer turns that config
 into the entire `.claude/` tree — every *content* file byte-for-byte
-reproducible (see Properties below for the metadata caveat).
+reproducible (see Properties below for the metadata caveat). Four steering
+docs in that tree are stubs, which Claude fills in with you by following the
+protocol (see [Getting started](#getting-started)).
 
 ## The decision-layer tool (`bin/bootstrap-interview`)
 
@@ -91,7 +292,7 @@ and edit before it is ever used.
 It **proposes, never silently decides.** Where the PRD is ambiguous (contested
 archetype, no recognizable signal) it surfaces an explicit OPEN QUESTION rather
 than guessing. It maps PRD content to archetype and PRD tier using the
-Bootstrap-Protocol-v2-0-0.md Project Archetypes table and PRD-tier definitions, and it reuses
+Bootstrap-Protocol-v2-8-0.md Project Archetypes table and PRD-tier definitions, and it reuses
 the archetype principle starter sets from `lib/defaults.py` verbatim
 (`PRINCIPLE_STARTERS` is imported, not re-listed) — the interview only proposes
 *deltas* from those defaults. It **never guesses** `commands.test/lint/format`
@@ -112,9 +313,12 @@ Two front-ends over one pure proposal core:
   identical interview file ⇒ identical config (digest-stable, like the
   installer).
 - **`interactive`** — a live one-question-at-a-time stdin Q&A over the same
-  core, honoring Bootstrap-Protocol-v2-0-0.md's "show before writing" and "one open-ended
+  core, honoring Bootstrap-Protocol-v2-8-0.md's "show before writing" and "one open-ended
   question at a time": each prompt shows the proposal and rationale, Enter
-  accepts it, nothing is written until the config validates. This front-end is
+  accepts it, nothing is written until the config validates. With no answer
+  to read, it exits 2 and writes no config; input that ends early takes the
+  remaining defaults and says so (see
+  [Answer the interview live](#answer-the-interview-live)). This front-end is
   intentionally the only non-deterministic surface (like a live wizard) and is
   excluded from the determinism guarantees; the test suite proves it produces
   the same config as the questionnaire for the same answers.
@@ -169,9 +373,10 @@ bootstrap-installer/
   bootstrap.config.yaml        # the schema, fully commented
   examples/sample-prd.md       # runnable PRD fixture for the interview
   plugin/                      # Claude Code plugin wrapper
-    plugin.json
+    .claude-plugin/plugin.json # the plugin manifest
     commands/bootstrap-interview.md
     commands/bootstrap-apply.md
+    toolchain/                 # copies of the tools, lib/ and the protocol
   tests/test_installer.py      # installer suite: determinism, idempotency, etc.
   tests/test_interview.py      # decision-layer suite
 ```
@@ -189,12 +394,15 @@ bootstrap-installer/
 - **Non-destructive** — files you hand-edit are detected (via a manifest of
   digests) and skipped, not clobbered. `--force` overrides, and copies
   anything it displaces to `.claude/.installer-backups/<run>/` first, naming
-  the location in its output. A `--force` that destroys nothing writes no
-  backup and says nothing. `--adopt` is the non-destructive counterpart: it
-  records files at planned paths as installer-owned and writes none of them,
-  for a tree whose manifest is gone (it is gitignored, so a fresh clone has
-  none) and whose files are an earlier install's artifacts rather than your
-  work. Re-run normally afterwards.
+  the location in its output; `--force --dry-run` says where each copy would
+  be saved and saves nothing. A `--force` that destroys nothing writes no
+  backup and says nothing. `--adopt` records every file the run would skip
+  as installer-owned and writes none of them, so the next install replaces
+  each of them, a steering doc you or Claude filled in included, with no
+  backup. The manifest is gitignored, so a fresh clone has none, and an
+  install there keeps every file it would change. To refresh one of them,
+  move it aside and re-install (see
+  [Re-install after a change](#re-install-after-a-change)).
 - **Co-owned where it has to be** — the project-root `.gitignore` and
   `.claude/settings.json` are shared with you, so they are merged rather than
   skipped: the installer owns its managed block / its hook registrations and
@@ -224,6 +432,11 @@ bootstrap-installer/
 - **Loud when it did not enforce** — an install that could not write a
   security-critical file, or whose tree does not dispatch its own plan, exits
   **3** with the reason on stderr. Exit 0 means enforcement was verified.
+- **Waits for a running loop** — before its first write, an install locks
+  `.claude/.bootstrap-state.json.lock` (and, on a retrofit,
+  `.claude/.retrofit-state.json.lock`). If a loop wrapper or another install
+  holds the lock for 30 seconds, the install exits **4** and writes at most
+  an empty lock file; re-run it once the other process has finished.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
 - **Faithful to Bootstrap-Protocol-v2-8-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle
@@ -260,9 +473,10 @@ python3 bin/bootstrap-install
 python3 bin/bootstrap-install --uninstall
 ```
 
-As a Claude Code plugin: install `plugin/`, then run `/bootstrap-interview`
-(produces the config interactively) followed by `/bootstrap-apply` (runs the
-deterministic installer).
+As a Claude Code plugin: run `/bootstrap-protocol:bootstrap-interview`,
+which produces the config, then `/bootstrap-protocol:bootstrap-apply`, which
+runs the deterministic installer. [The plugin](#the-plugin) says how to load
+it.
 
 ## Honest limitations
 
@@ -279,7 +493,7 @@ deterministic installer).
   runs the format or typecheck command.
 - `auto.sh` is scaffolded as a guarded skeleton. The full Phase 9.7 dispatch
   loop is intentionally left for the operator to complete before unattended
-  use, matching Bootstrap-Protocol-v2-0-0.md's own trust-ramp guidance.
+  use, matching Bootstrap-Protocol-v2-8-0.md's own trust-ramp guidance.
 - The emitted skill/command/agent bodies are faithful stubs (frontmatter +
   intent). They are correct and load, but the deep prompt engineering for
   each skill is a separate effort from the structural scaffolding.
@@ -607,6 +821,13 @@ upload.
   default; the tier loop clamps **up** to the floor, never below, per
   BOOTSTRAP.md Phase 0 step 7). Regression-tested (previously-hanging
   scenarios now terminate; all-defaults and queue-self-correct unchanged).
+  *Correction (WP4, 2026-10-14):* `interactive` no longer takes every
+  default from input it can't use. It exits 2 and writes no config when
+  stdin is closed, when stdin ends before the first answer, or when stdin
+  isn't a terminal and no answer arrives within `BOOTSTRAP_PROMPT_TIMEOUT`
+  seconds (default 30). Input that ends after the first answer still takes
+  the fallbacks above, and now says so: a `warning:` line, and a config
+  header that names the values that took their defaults.
 - **F-3 (Medium)** — the `analyze`→`synthesize` path did not enforce the
   archetype's required PRD-tier floor. `resolve_config` (frozen,
   installer-shared) validates archetype membership, the queue⇒loop|goal

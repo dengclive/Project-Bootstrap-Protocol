@@ -37,6 +37,15 @@ assert not set('"$`\\') & set(SPEC_FALLBACK_NOTE_FOREIGN
                                 + SPEC_FALLBACK_NOTE_HOOKS_OFF)
 
 PROTOCOL_VERSION = "2.8.0"
+# [WP4 / g5] The normative protocol pair, by FILE NAME. The name records when
+# the pair was cut, not the version it describes (the PRD's filename note), so
+# it is not derived from PROTOCOL_VERSION. Every emitted citation of the
+# protocol names this file, except the shared hook header's 6.D line, which
+# the pivot leaves to protocol-doc-snapshot-retire. RC-03
+# (tests/test_usage_limit_contract.py) and GR2-03a (tests/test_installer.py)
+# fail when the wrappers or the ledger name any other protocol file.
+PROTOCOL_DOC = "Bootstrap-Protocol-v2-8-0.md"
+PROTOCOL_COMPANION = "Bootstrap-Protocol-Companion-v2-8-0.md"
 
 
 # --------------------------------------------------------------------------- #
@@ -237,6 +246,97 @@ def _eval_row(cfg):
     return f"| Eval      | `{ev}` |\n"
 
 
+# [WP4 / g2] Phase 2 step 3's default "do not touch" suggestions, by
+# archetype, from Bootstrap-Protocol-v2-8-0.md: "auth/payment/migrations for
+# full-stack; public API surface for libraries; prompt files for AI
+# systems; secrets handling and infrastructure-as-code for all". They are
+# suggestions to ask about, never a list: the exit criterion wants the list
+# "explicit and approved", and only the operator approves it. Categories,
+# not paths, because the installer does not know this project's paths.
+_DO_NOT_TOUCH_ALL = ("secrets handling", "infrastructure-as-code files")
+_DO_NOT_TOUCH_BY_ARCHETYPE = {
+    "fullstack": ("authentication code", "payment code",
+                  "database migrations"),
+    "library": ("the public API surface",),
+    "ai-agent": ("prompt files",),
+}
+# [WP4 / X11] RETROFIT.md R2 step 6 asks for "Default suggestions plus
+# retrofit-specific defaults", so a retrofit install suggests the union of
+# Phase 2 step 3's set and these: the three retrofit defaults, then R2's own
+# archetype defaults. R2 has no full-stack line, so replacing the Phase 2
+# set would drop full-stack's auth and payment suggestions (verify V1).
+# tests/test_wp4_steering.py derives both sets from the two documents.
+_DO_NOT_TOUCH_RETROFIT = ("modules the inventory flags as stable",
+                          "frozen artifacts such as initial database "
+                          "migrations",
+                          "pinned-contract files")
+_DO_NOT_TOUCH_RETROFIT_BY_ARCHETYPE = {
+    "service": ("authentication modules", "payment modules"),
+    "library": ("the public API surface",),
+    "ai-agent": ("prompt files", "the eval harness"),
+    "platform": ("cross-component contract files",),
+}
+
+
+def _do_not_touch_choices(cfg):
+    """[WP4 / g2, X11] The suggestions for this install's archetype and
+    mode, in order: Phase 2's archetype set, R2's (retrofit only, without
+    repeats), R2's three retrofit defaults (retrofit only), then the two
+    Phase 2 suggestions every archetype gets."""
+    arche = cfg["project"]["archetype"]
+    picks = _DO_NOT_TOUCH_BY_ARCHETYPE.get(arche, ())
+    if cfg.get("mode") == "retrofit":
+        picks += tuple(p for p in
+                       _DO_NOT_TOUCH_RETROFIT_BY_ARCHETYPE.get(arche, ())
+                       if p not in picks)
+        picks += _DO_NOT_TOUCH_RETROFIT
+    return picks + _DO_NOT_TOUCH_ALL
+
+
+def _steering_scaffolds(cfg):
+    """[WP4 / g2] tech.md's `## Do Not Touch` and `## Documentation Policy`
+    sections (Phase 2 step 5; RETROFIT.md R2 step 8). Under D1 (c) the AI
+    writes their content by following the protocol, so the installer emits
+    each as a labelled scaffold: a `TODO:` paragraph the AI replaces with
+    the operator's approved answers. The rule under Do Not Touch stays when
+    it does, so it agrees with CLAUDE.md's Never list and urgent escalation
+    1. No hook reads tech.md, so neither section changes what a gate does.
+    [WP4 / X11] Keyed on cfg["mode"]: RETROFIT.md R2 governs a retrofit
+    install's tech.md, so its scaffolds cite R2, and its Documentation
+    Policy also asks R2 step 7's drift question."""
+    arche = cfg["project"]["archetype"]
+    retrofit = cfg.get("mode") == "retrofit"
+    picks = _do_not_touch_choices(cfg)
+    choices = (" and ".join(picks) if len(picks) == 2 else
+               ", ".join(picks[:-1]) + ", and " + picks[-1])
+    source = "RETROFIT.md R2" if retrofit else "Bootstrap Protocol Phase 2"
+    dnt = _md_fill(
+        "TODO: not yet approved, so no path is listed. Ask the "
+        "operator which files the agent must never change without asking "
+        f"first ({source}). Then replace this paragraph "
+        "with one line per path or glob and its reason, and get the "
+        "operator's approval. Common choices for the "
+        f"`{arche}` archetype: {choices}.")
+    if retrofit:
+        doc = _md_fill(
+            "TODO: not yet decided. Ask the operator where docs live, who "
+            "updates the README and how the changelog works, and ask "
+            "\"Does existing documentation reflect current code, or has it "
+            "drifted?\" (RETROFIT.md R2). If it has drifted, log the drift "
+            "as a debt item in `.claude/debt.md`. Then replace this "
+            "paragraph with the answers.")
+    else:
+        doc = _md_fill(
+            "TODO: not yet decided. Ask the operator where docs live, who "
+            "updates the README, and how the changelog works (Bootstrap "
+            "Protocol Phase 2). Then replace this paragraph with the "
+            "answers.")
+    return (f"\n## Do Not Touch\n\n{dnt}\n\n"
+            "If a task needs to change a path listed here, stop and ask the "
+            "operator first.\n"
+            f"\n## Documentation Policy\n\n{doc}\n")
+
+
 def _tech(cfg):
     p = cfg["project"]
     c = cfg["commands"]
@@ -257,7 +357,7 @@ def _tech(cfg):
 {_eval_row(cfg)}
 {_command_contract(cfg)}
 {_execution_location(cfg)}
-{_ultracode_line(cfg)}"""
+{_ultracode_line(cfg)}{_steering_scaffolds(cfg)}"""
 
 
 def _deps(cfg):
@@ -442,8 +542,37 @@ ranking and project rules.
         if pr["tdd_policy"] == "required" else "")
 
 
+# [WP4 / g2] ONE stopping point per variant (Phase 5 exit criterion: "The
+# agent-vs-human line is unambiguous"). The text this replaces named two,
+# "**PR open** (or PR merge)", and an adopter's AI-authored ci-cd.md kept
+# that wording verbatim. CLAUDE.md's lifecycle ends "-> pr-author -> stop
+# as `ci-cd.md` says", so this file is the one place the stop is stated,
+# and the AI may change it in Phase 5 without CLAUDE.md contradicting it.
+def _push_check_line(cfg):
+    """[WP4 / g2] What checks a push, said only where it holds. The sentence
+    this replaces ("The CI-mirror hook runs these same checks locally
+    before push") was false whenever CI local is set: ci-mirror runs CI
+    local, else Test, never Lint. tech.md's command contract owns which
+    hook runs which command. [WP4 fix round 1 / R9]
+    Not at "the checks tech.md names": the hook runs the commands the
+    config held at install time and never reads tech.md, so this names
+    them by their config keys and says how to change them."""
+    if "ci-mirror" in cfg.get("_resolved_hooks", ()):
+        return ("\nBefore a push, the `ci-mirror` hook runs "
+                "`commands.ci_local`, or\n`commands.test` when that is empty, "
+                "as `bootstrap.config.yaml` held them\nat the last install, "
+                "and blocks the push when it fails. To change what it\nruns, "
+                "change the config and re-install.\n")
+    return "\nNo hook checks a push: `hooks.ci_mirror` is off.\n"
+
+
 def _cicd(cfg):
     c = cfg["commands"]
+    # [WP4 fix round 2 / MS-3] `/pr-author` only where the install writes
+    # the skill (_claude_md keys its slash commands the same way).
+    pr = ("the description `/pr-author` writes"
+          if cfg["workflow"]["install_skills"] else
+          "a description that links to the spec")
     return f"""# CI/CD Steering
 
 ## Pipeline
@@ -456,9 +585,13 @@ PR checks must at minimum run:
 
 ## Agent stopping point
 
-The agent's last action is **PR open** (or PR merge). The agent never deploys.
-The CI-mirror hook runs these same checks locally before push.
-"""
+The agent stops after it opens a pull request. It pushes its branch, then
+opens the pull request with {pr}. A person
+reviews the pull request and merges it. The agent never merges a pull
+request, never pushes to the default branch, and never deploys. If its work
+is on the default branch, or there is no remote, it stops before pushing and
+tells the operator.
+{_push_check_line(cfg)}"""
 
 
 def _cicd_optout(cfg):
@@ -471,6 +604,11 @@ The agent still runs the test command locally:
 `{c['test'] or 'TODO: set commands.test'}`
 
 Placeholder for future CI addition. Re-run the wizard's CI setup to populate.
+
+## Agent stopping point
+
+The agent stops after its last commit for the task. A person pushes the
+work. The agent never pushes and never deploys.
 """
 
 
@@ -3228,8 +3366,10 @@ for _k in _HEADER_PLACEHOLDERS:
 
 def _assumption_ledger(cfg):
     # GR2-03a (v2.4.0 fold): the assumption-ledger steering artifact. Faithful
-    # workspace-doc rendering of the frozen `## Assumption Ledger` section of
-    # Bootstrap-Protocol-v2-4-0.md (anchor #assumption-ledger). The three
+    # workspace-doc rendering of the `## Assumption Ledger` section of
+    # PROTOCOL_DOC (anchor #assumption-ledger). [WP4 / g5] The protocol
+    # document is not copied into the project: the ledger names it once and
+    # says where it lives, through the mode's state file. The three
     # drift-threshold numbers are INTERPOLATED from cfg["hooks"] (not
     # hardcoded 50/120/3) so the ledger never becomes a stale second authority
     # when an operator customizes the drift detector; the drift-detector hook
@@ -3249,10 +3389,26 @@ def _assumption_ledger(cfg):
     # install (where the ledger still lands, unconditionally) to a path that
     # does not exist in its tree.
     max_iter_where = (
-        "the max-iterations value is\n  configurable in `.claude/loop-config.md`."
+        "the value is configurable in `.claude/loop-config.md`."
         if cfg["autonomous_modes"]["loop_mode_enabled"] else
-        "the max-iterations value becomes\n  configurable in "
-        "`.claude/loop-config.md` if you opt into loop mode.")
+        "the value becomes configurable in `.claude/loop-config.md` if\n"
+        "  you opt into loop mode.")
+    state_file = (".claude/.retrofit-state.json"
+                  if cfg.get("mode") == "retrofit"
+                  else ".claude/.bootstrap-state.json")
+    # [WP4 / escalate] The substitution row's tokens are literal text here:
+    # Claude Code substitutes them only in a skill body, never in a steering
+    # doc. Measured on 2.1.288 by WP2 (the ack-drift comment in
+    # _SKILL_BODIES); /escalate's record path depends on it too, so a Claude
+    # Code upgrade is the trigger to re-check. [WP4 fix round 2 / MS-3] Only
+    # where the install writes those skills.
+    subst = (
+        "\n| Skill-body substitution of `${CLAUDE_SESSION_ID}` and "
+        "`${CLAUDE_PROJECT_DIR}` (`/escalate`, `/ack-drift`) | The model "
+        "cannot know its own session id, and the hooks key their "
+        "per-session files on it | Claude Code 2.1.288 (measured: the "
+        "substituted id equals the hook payload's `session_id`) | Any "
+        "Claude Code upgrade |" if cfg["workflow"]["install_skills"] else "")
     return f"""# Assumption Ledger
 
 > Generated by bootstrap-installer from bootstrap.config.yaml.
@@ -3275,7 +3431,7 @@ compensates for**, the **model generation it was calibrated against**, and a
 | Subagent token multipliers (~2–3x mixed-model) | Per-session context cost under the current price/tokenizer structure | Pre-remap estimate; re-derive on Sonnet 5 | Any price/tokenizer or model-tier change |
 | Max-iterations default (10 per task) | Bounded blast radius when a task cannot converge | Current runtime-floor model tier | Any pinned-model tier change |
 | No-lossy-rewrite preservation invariant [LIT-01] | Current-generation condensation tendency in rewrite/summarization passes (silent fact loss) | Current pinned-model generation | Any pinned-model change |
-| Priming-slice cap redaction [LIT-07] | Current-generation budget-anxiety behavior when an iteration cap is prompt-visible | Current pinned-model tier | Any pinned-model change — a generation that plans *better* with a known budget flips this default |
+| Priming-slice cap redaction [LIT-07] | Current-generation budget-anxiety behavior when an iteration cap is prompt-visible | Current pinned-model tier | Any pinned-model change — a generation that plans *better* with a known budget flips this default |{subst}
 
 ## How this ledger is used
 
@@ -3284,12 +3440,13 @@ protocol specifies that when you change a pinned model tier or the runtime
 floor moves, the wizard reads this ledger and surfaces every row whose
 re-validation trigger matches as a plain notice — never blocking the change,
 never silently proceeding. Until that surfacing lands in your installed
-tooling (deferred with locked constraints; see the project changelog), treat
-any such change as your cue to re-check the matching rows by hand. Where a
-committed golden set exists (Phase 9 step 9, LIT-06), re-running it through
-each enabled autonomous mode turns that re-check from a notice into a
-measurement. The point is only to make the calibration debt visible at the
-moment it becomes payable; you decide whether to re-tune.
+tooling (deferred with locked constraints; see `docs/changelog.md` in the
+Bootstrap Protocol toolchain), treat any such change as your cue to re-check
+the matching rows by hand. Where a committed golden set exists (Phase 9
+step 9, LIT-06), re-running it through each enabled autonomous mode turns
+that re-check from a notice into a measurement. The point is only to make
+the calibration debt visible at the moment it becomes payable; you decide
+whether to re-tune.
 
 **Where the re-validation evidence comes from.** A surfaced row asks a question
 you then answer with data. If you opted into telemetry export (TEL-01),
@@ -3302,18 +3459,22 @@ ledger stands on its own; telemetry only turns "re-check this" into a query.
 
 ## Source of truth (this ledger links, it does not restate)
 
-Each default is owned by the section that defines it; this ledger points there
-rather than becoming a second authority:
+Each default is owned by the section of the protocol document that defines
+it; this ledger points there rather than becoming a second authority. The
+document is `{PROTOCOL_DOC}` (protocol {PROTOCOL_VERSION}). It ships with the
+Bootstrap Protocol toolchain, not with this project: open it in the toolchain
+checkout you installed from. `protocol_doc` in `{state_file}`
+records its path on the machine that ran the install.
 
-- **Drift thresholds** — §6.E of `Bootstrap-Protocol-v2-4-0.md` ("Audio alert
-  system", *Drift detector specifics*), and the drift-detector hook config. The
-  numbers above reflect this project's actual configured values.
-- **Max-iterations and the subagent token-multiplier note** — Phase 9.5 of
-  `Bootstrap-Protocol-v2-4-0.md`; {max_iter_where}
-- **No-lossy-rewrite preservation invariant (LIT-01)** — Phase 7 step 5 of
-  the working PRD (`Bootstrap-Protocol-v2-8-0.md`, 2.8.0).
+- **Drift thresholds** — §6.E "Audio alert system", *Drift detector
+  specifics*, and the drift-detector hook config. The numbers above reflect
+  this project's actual configured values.
+- **Subagent token multipliers** — Phase 7 step 3 (the cost disclosure).
+- **Max-iterations** — Phase 9.5 "Max-iterations safety";
+  {max_iter_where}
+- **No-lossy-rewrite preservation invariant (LIT-01)** — Phase 7 step 5.
 - **Priming-slice cap redaction (LIT-07)** — Phase 9.5 "Max-iterations
-  safety" of the working PRD (`Bootstrap-Protocol-v2-8-0.md`, 2.8.0).
+  safety".
 
 Add a row whenever a new default is introduced because a current model needs
 it — that is what keeps the staleness class from going invisible again.
@@ -9125,7 +9286,7 @@ def _audio_config(cfg):
 # implemented by the emitted stubs (docs/deferred-backlog.md I-1). Threshold
 # values are BAKED into the hooks at install time from bootstrap.config.yaml;
 # editing this file does not change runtime behavior. The keys below document
-# the Bootstrap-Protocol-v2-5-0.md 6.E surface an operator-completed
+# the Bootstrap-Protocol-v2-8-0.md 6.E surface an operator-completed
 # implementation would honor.
 # CORRECTION [WP2 drift-tier1, 2026-10-03]: the duration and file-read
 # triggers ARE now implemented, at tier 1 only, and all three count since
@@ -9197,6 +9358,11 @@ _SKILL_LIST = [
     ("decision-log", "Use when you make a non-obvious choice while working "
      "a spec (a library pick, a tradeoff, a deviation from a default). "
      "Appends it to the spec's decisions.md."),
+    # [WP4 / ruling 7 (c)] escalate is the other skill the model invokes on
+    # its own, when it stops for an urgent escalation, so its description
+    # leads with WHEN too. No ": " inside it (see pr-author below).
+    ("escalate", "Use before you stop for an urgent escalation marked 🔔 in "
+     "CLAUDE.md. Records why you stopped, for the operator."),
     # [WP3 skills] No ": " inside the value: a plain YAML scalar may not hold
     # one (strict parsers reject it; Claude Code 2.1.289 tolerates it on one
     # line only, measured). The paired command shares this line.
@@ -9430,6 +9596,18 @@ def _tdd_stem_rule(cfg, bullet, indent):
             "`tests/test_due_add.py`.\n")
     return bullet + text.replace("\n@", "\n" + indent)
 
+# [WP4 / ruling 1 (a)] Each spec starts on its own branch, in both modes, so
+# merge-back lands the spec's tasks there and ci-cd.md's one stop (a pull
+# request, or the last commit) is reached off the default branch. Step 2
+# comes right after the slug is resolved, because the branch is named from
+# it, and before the first write. CLAUDE.md's "Starting a task" sentence
+# says the same ("on a spec branch", _landing_claude_md). [WP4 fix round 3,
+# operator ruling 2026-10-15: "Simplify, ask when unclear"] From the local
+# default branch after a fast-forward pull: the pull brings in the pull
+# requests a person merged on the remote, an unpushed bootstrap commit
+# rides along in the spec's pull request, any remote name works, and no
+# translated git output is read. Where the base is unclear (a remote but no
+# upstream, a failed pull, another spec's branch, a detached HEAD), ask.
 _SPEC_NEW_BODY = """\
 Turn one PRD section into a versioned spec: `.claude/specs/<slug>/requirements.md`,
 with a seeded `decisions.md` and `changelog.md` beside it.
@@ -9450,14 +9628,29 @@ specify.
   overwrites a spec. Changing a spec is a version bump
   (`.claude/steering/spec-versioning.md`).
 
-## 2. Read the source
+## 2. Start the spec's branch
+
+- On the default branch: if it tracks a remote branch
+  (`git rev-parse --abbrev-ref @{upstream}` prints one), run
+  `git pull --ff-only` to bring in the pull requests merged since your last
+  spec. If it tracks none but `git remote` lists a remote, or the pull
+  fails, stop and ask the operator. Then run `git switch -c spec/<slug>`.
+- On another spec's branch (`spec/*`), or with no branch checked out, stop
+  and ask the operator which branch to start from. To start from the
+  default branch, switch to it and follow the bullet above; to start from
+  another branch, run `git switch -c spec/<slug> <branch>`.
+- On any other branch, one the operator chose, stay on it.
+
+The spec, its tasks and their merges then land on that branch.
+
+## 3. Read the source
 
 Read the PRD named on the `**PRD:**` line of `.claude/steering/product.md`,
 the section for this deliverable, and `.claude/steering/principles.md`.
 Specify only what the section says. Put every gap and every guess under
 "Open questions"; never fill one silently.
 
-## 3. Write `requirements.md`
+## 4. Write `requirements.md`
 
 ```markdown
 ---
@@ -9501,7 +9694,7 @@ Acceptance criteria:
 - Each criterion must be checkable by a test or a named manual check. "Feels
   fast" is not a criterion; "responds within 200 ms at p95" is.
 
-## 4. Seed `decisions.md` and `changelog.md`
+## 5. Seed `decisions.md` and `changelog.md`
 
 Take dates from the clock (`date -u +%Y-%m-%d`), never from memory.
 
@@ -9523,14 +9716,14 @@ Append-only, newest last. Entries are written by the decision-log skill.
 | 1.0.0 | <date> | Initial spec from <PRD path> section <number>. | none |
 ```
 
-## 5. Update the roster
+## 6. Update the roster
 
 In `.claude/specs/INDEX.md`, use the spec's row: the `planned` row, or a new
 row if there is none (replace `_placeholder_` when it is the only row). Set
 the status to `draft` and `active version` to `1.0.0`.
 """ + _ROW_RULE + """
 
-## 6. Commit and report
+## 7. Commit and report
 
 """ + _COMMIT_SPEC + """
 List the files written and the open questions. Next step:
@@ -9911,6 +10104,60 @@ ends go in the spec's `progress.md`, which links here and never copies an
 entry.
 """
 
+# [WP4 / ruling 7 (c)] escalate writes the decision record PRD Phase 8 asks
+# for when the agent stops for a 🔔 item (:1299, backlog X-30a): the four
+# fields X-30 pinned, in the file decision-required-alarm.sh keys on the
+# payload's session_id. Precedents: _DECISION_LOG_BODY (a record written
+# with the Write and Edit tools) and ack-drift (the substituted path).
+#   * Claude Code substitutes ${CLAUDE_PROJECT_DIR} and ${CLAUDE_SESSION_ID}
+#     in a skill body (measured on 2.1.288; the assumption ledger's
+#     substitution row), so this is a plain string, never an f-string: both
+#     tokens must reach SKILL.md as written. Step 2's guard quotes only `${`,
+#     so Claude Code leaves the guard text itself alone (build F12).
+#   * The alarm creates the file, empty, on every permission prompt, the
+#     prompt for this write included, and afterwards only touches it. The
+#     Write tool refuses a file the session has not read, and a Write over
+#     a file that holds a record would lose it, so step 5 reads first and
+#     appends with the Edit tool (risk ESC-1, build N2 and F3).
+#   * A worktree implementer's substituted dir and id are unmeasured, so it
+#     reports the item instead (ESC-3); the reply carries the fields even
+#     when the write is refused, as under `claude -p` (ESC-2).
+# No _SKILL_MODEL entry: like quiet, it has no Companion row (ESC-5).
+# _skills drops _ESCALATE_ALARM where the alarm is not wired.
+_ESCALATE_ALARM = """It often exists already, and may
+   be empty: the decision-required alarm creates it on any permission
+   prompt, including the prompt for this write. """
+_ESCALATE_BODY = """\
+1. Run this from the main session. Inside an implementer worktree (a path
+   under `.claude/worktrees/`), report the 🔔 item in your result instead.
+2. The record file is
+   `${CLAUDE_PROJECT_DIR}/.claude/sessions/.decision-pending-${CLAUDE_SESSION_ID}`;
+   Claude Code substitutes both before you see this. If the path still
+   shows a `${`, stop and tell the operator the record could not be
+   written.
+3. """ + _WRITE_RULE + """\
+4. Take the timestamp from the clock: `date -u +%Y-%m-%dT%H:%M:%SZ`.
+5. Read the file with the Read tool first. """ + _ESCALATE_ALARM \
+    + """If it does not exist,
+   create it with the Write tool. If it is empty, write the record with the
+   Write tool. If it holds records, append with the Edit tool: old_string is
+   the file's last record, from its `timestamp:` line to the end; new_string
+   is that record, a blank line, then the new record. Never use the Write
+   tool on a file that holds a record. "File has not been read yet" or
+   "modified since read" is not a refusal: Read the file and retry.
+6. The record is four lines, in this order:
+
+       timestamp: <the clock's output>
+       reason: <the 🔔 item, and what triggered it>
+       about-to: <what you were about to do>
+       needs: <what you need from the operator>
+
+7. Stop: end your turn with the four fields in your reply, and say if the
+   record was not written.
+
+Never edit or delete an earlier record.
+"""
+
 # [WP3 skills] spec-review and plan-review are the two review steps of smoke
 # stage 1 (operator ruling 2026-10-05: IN). Neither writes a file a later
 # step reads, so their stubs did not stop the stage from running;
@@ -9984,6 +10231,7 @@ _SKILL_BODIES.update({
     "spec-new": _SPEC_NEW_BODY,
     "spec-validate": _SPEC_VALIDATE_BODY,
     "decision-log": _DECISION_LOG_BODY,
+    "escalate": _ESCALATE_BODY,
 })
 
 # [WP3 skills] Per-skill model recommendation (PRD Phase 7 step 1: "include
@@ -10115,9 +10363,14 @@ def _skills(cfg):
         # [WP2 drift-tier1] ack-drift carries a body too: the ack command.
         # [WP3 skills] spec-new, spec-decompose, spec-validate and
         # decision-log carry real bodies; spec-decompose varies with the
-        # autonomous modes.
+        # autonomous modes. [WP4] escalate carries one too.
         if name == "spec-decompose":
             body = _spec_decompose_body(cfg, *_autonomous_flags(cfg))
+        elif (name == "escalate" and "decision-required-alarm"
+              not in cfg.get("_resolved_hooks", ())):
+            # [WP4 fix round 1 / C9] Step 5's alarm clause holds only where
+            # the alarm is wired (hooks.decision_required_alarm).
+            body = _ESCALATE_BODY.replace(_ESCALATE_ALARM, "")
         else:
             body = _SKILL_BODIES.get(name, desc)
         out[name] = _skill_file(name, desc, body)
@@ -10188,6 +10441,26 @@ _IMPLEMENTER_WRITES = (
     "session sets it. Never change `requirements.md`: if the spec is wrong, "
     "stop and report it. If you use the `test-author` skill, run it here, "
     "in your own checkout, so its tests are committed with your source.\n")
+
+# [WP4 fix round 7 / Z-69, operator ruling 2026-10-15] The urgent list binds
+# the implementer too. In the WP4 live walk an implementer committed a
+# package outside tech.md's Stack table, a 🔔 item in that session's
+# CLAUDE.md, and reported it afterwards; the reviewer caught it. The
+# implementer stops and reports, and the main session records the stop:
+# /escalate writes the main session's record, and with the skills off there
+# is no /escalate to name.
+def _implementer_urgent(cfg):
+    then = ("the main session records it with `/escalate` and asks the "
+            "operator" if cfg["workflow"]["install_skills"] else
+            "the main session stops and asks the operator")
+    return ("\n## Urgent items (🔔)\n\n"
+            "Read the urgent list in `CLAUDE.md` (the 🔔 items) before you "
+            "start: it binds you as it binds the main session. A Do Not "
+            "Touch path in `tech.md` is one of them. When the task needs one, "
+            "do not make that change, and commit nothing for it. Stop and "
+            "report it: start your report with a line that names the 🔔 "
+            f"item, so that {then}.\n")
+
 
 _IMPLEMENTER_REPORT = (
     "```\n"
@@ -10563,6 +10836,7 @@ def _agents(cfg):
             f"do-not-retry. Its canonical shape is in `.claude/specs/"
             f"progress-template.md`.\n"
             f"{_IMPLEMENTER_WRITES}"
+            f"{_implementer_urgent(cfg)}"
             f"{_tests_first_section(cfg)}"
             f"{_isolation_note(cfg)}{_landing_note(cfg)}"),
         "reviewer": (
@@ -10670,7 +10944,7 @@ def _auto_sh(cfg):
     return '''#!/usr/bin/env bash
 # Generated by bootstrap-installer. Autonomous queue runner (Phase 9.7).
 # SKELETON: the dispatch loop is intentionally unimplemented - see README and
-# Bootstrap-Protocol-v2-2-0.md Phase 9.7. Do not use unattended until the loop and the
+# Bootstrap-Protocol-v2-8-0.md Phase 9.7. Do not use unattended until the loop and the
 # exit_reason accounting below are completed and smoke-tested.
 #
 # [REFUSALS vs RUN OUTCOMES, and why exit 1 covers every refusal - P-9,
@@ -10687,7 +10961,7 @@ def _auto_sh(cfg):
 #  its map alongside this block if it does. Until then: 0 = the run ended,
 #  see exit_reason; 1 = refused before or during dispatch, see REFUSED.
 #
-# [exit_reason enum - Bootstrap-Protocol-v2-2-0.md Recovery & State. The
+# [exit_reason enum - Bootstrap-Protocol-v2-8-0.md Recovery & State. The
 #  operator-completed dispatch loop MUST implement the WHOLE enum, not just
 #  the subset this skeleton exercises. These describe why a RUN ENDED; a
 #  refusal is not one of them and claims no value here. All 13 values with
@@ -10920,7 +11194,7 @@ exec 8>&-                               # release the startup lock
 log "auto.sh started (skeleton)."
 
 echo "Queue runner skeleton installed. Implement the dispatch loop per" \\
-     "Bootstrap-Protocol-v2-2-0.md Phase 9.7 before any unattended use." >&2
+     "Bootstrap-Protocol-v2-8-0.md Phase 9.7 before any unattended use." >&2
 # A RUN THAT DISPATCHED NOTHING MUST NOT REPORT SUCCESS. This used to set
 # EXIT_REASON="queue-empty" and exit 0 - and the enum above defines
 # queue-empty as "all ready-to-run tasks completed ... (terminal success)".
@@ -10974,14 +11248,14 @@ def _per_task_wrapper(kind: str, cfg) -> str:
     return '''#!/usr/bin/env bash
 # Generated by bootstrap-installer. {title}.
 # SKELETON: the claude -p iteration loop is intentionally unimplemented -
-# see README and Bootstrap-Protocol-v2-2-0.md Phase {phase}. The race-safe claim sequence and
+# see README and Bootstrap-Protocol-v2-8-0.md Phase {phase}. The race-safe claim sequence and
 # all fail-safe guards below ARE implemented; the agent loop is the part the
 # operator completes and smoke-tests per the trust ramp. Until then this
 # script refuses to dispatch any unattended work.
 #
 {worktree_routing}
 #
-# [Trajectory retention - GR2-02, Bootstrap-Protocol-v2-4-0.md Phase 9.5
+# [Trajectory retention - GR2-02, Bootstrap-Protocol-v2-8-0.md Phase 9.5
 #  "Deliverable contract for the wrappers" item 4 - the single normative home
 #  of this contract, which Phase 9.6 references rather than restates. BINDING
 #  on the operator-completed iteration loop; the bare skeleton dispatches
@@ -11006,7 +11280,7 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 # telemetry/privacy review MUST be told the real retention, not an inherited
 # one.
 #
-# [Usage-limit vs transient-failure handling - Bootstrap-Protocol-v2-2-0.md
+# [Usage-limit vs transient-failure handling - Bootstrap-Protocol-v2-8-0.md
 #  Phase {phase} "Infrastructure-error handling", AR2-corrected. BINDING on the
 #  operator-completed iteration loop; the bare skeleton dispatches nothing.]
 #
@@ -11087,7 +11361,7 @@ def _per_task_wrapper(kind: str, cfg) -> str:
 #  do not "fix" the unfiltered task definition back into priming; the
 #  rationale block lives in loop-config.md / goal-config.md.
 #
-# [loop-final-$TASK_ID.md structure - GR2-02, Bootstrap-Protocol-v2-4-0.md
+# [loop-final-$TASK_ID.md structure - GR2-02, Bootstrap-Protocol-v2-8-0.md
 #  Phase {phase}] The operator-completed loop writes the audit record to
 #     .claude/sessions/loop-final-$TASK_ID.md
 #  at exit. It is an operator-facing audit record and is COMMITTED: the
@@ -11189,7 +11463,7 @@ then
   exit 1
 fi
 
-# 2. Race-safe claim (Bootstrap-Protocol-v2-2-0.md Phase {phase} step 2):
+# 2. Race-safe claim (Bootstrap-Protocol-v2-8-0.md Phase {phase} step 2):
 #    RETAINED under native worktrees (IC-6, documented per case): the
 #    --worktree mechanism isolates the working DIRECTORY only. It does
 #    not provide per-task mutual exclusion across wrappers (the
@@ -11203,9 +11477,12 @@ if ! ( set -C; printf '%s\\n' "$$" >"$ACTIVE" ) 2>/dev/null; then
   exit 1
 fi
 CLAIMED=1
-#    2.2-2.4 flock the state file, cross-mode mutual-exclusion check, append
-#    to {my_list}, tmpfile-then-rename. flock is required; if it is missing
-#    we fail safe (release sentinel via trap) rather than racing.
+#    2.2-2.4 flock the sibling $STATE.lock, cross-mode mutual-exclusion
+#    check, append to {my_list}, tmpfile-then-rename. Never lock the state
+#    file itself: the rename replaces it, so a second writer would lock the
+#    new file while the first still holds the old one, and an entry is lost.
+#    flock is required; if it is missing we fail safe (release sentinel via
+#    trap) rather than racing.
 if ! command -v flock >/dev/null 2>&1; then
   echo "flock unavailable - cannot guarantee race-safe state update." >&2
   EXIT_REASON="infrastructure-failure"
@@ -11224,7 +11501,7 @@ fi
 flock -u 9
 log "{self} claimed task=$TASK_ID (skeleton: agent loop not implemented)"
 echo "{title} skeleton: task '$TASK_ID' claimed and guarded. Implement the" >&2
-echo "claude -p iteration loop per Bootstrap-Protocol-v2-2-0.md Phase {phase} before any" >&2
+echo "claude -p iteration loop per Bootstrap-Protocol-v2-8-0.md Phase {phase} before any" >&2
 {dispatch_hint}
 # A WRAPPER THAT DISPATCHED NOTHING MUST NOT REPORT SUCCESS. This used to set
 # EXIT_REASON="max-iterations" and exit 0 - i.e. "the loop ran and hit its
@@ -11370,7 +11647,7 @@ echo "usage-limit headers). No agent work was dispatched." >&2'''.lstrip("\n")
 # Phase 9.6 / `.claude/goal-config.md`).
 _JUDGE_PARITY_COMMENT = '''
 #
-# [goal-loop.sh judge parity - Bootstrap-Protocol-v2-2-0.md Phase 9.6] This
+# [goal-loop.sh judge parity - Bootstrap-Protocol-v2-8-0.md Phase 9.6] This
 # wrapper runs a judge call after each `claude -p` exit. A `rejected`
 # usage-limit `rate_limit_event` on EITHER the `claude -p` call OR the judge
 # call is NOT a transient failure: it takes the same reset-aware wait path
@@ -11439,7 +11716,7 @@ def _goal_loop_sh(cfg):
 def _loop_config(cfg):
     return """# loop-config.md
 
-# Operator-tunable loop-mode settings (Bootstrap-Protocol-v2-2-0.md Phase 9.5).
+# Operator-tunable loop-mode settings (Bootstrap-Protocol-v2-8-0.md Phase 9.5).
 # Format mirrors audio-alerts.config. Committed to the repo.
 
 max_iterations: 10
@@ -11466,7 +11743,7 @@ require_completion_sentinel: true
 def _goal_config(cfg):
     return """# goal-config.md
 
-# Operator-tunable goal-supervised settings (Bootstrap-Protocol-v2-2-0.md Phase 9.6).
+# Operator-tunable goal-supervised settings (Bootstrap-Protocol-v2-8-0.md Phase 9.6).
 # Format mirrors audio-alerts.config. Committed to the repo.
 
 max_iterations: 10
@@ -11562,10 +11839,14 @@ def _landing_claude_md(cfg, retrofit=False):
     runs = _LANDING_GATES[
         ("tests-retrofit" if retrofit else "tests") if "test-gate" in gates
         else "spec" if gates else "none"]
+    # [WP4 / ruling 1 (a)] "on a spec branch, " is the 18-character clause
+    # the retrofit-agent fixture's 80 lines leave room for (19 or more takes
+    # it to 81, review build N1); /spec-new creates that branch.
     return "\n" + _md_fill(
-        "Starting a task: set `status: in-progress` in its task file, commit "
-        "`.claude/specs/<slug>/` and `.claude/specs/INDEX.md`, then dispatch "
-        "it. Landing it: after `VERDICT: approve`, run "
+        "Starting a task: on a spec branch, set `status: in-progress` in its "
+        "task file, commit `.claude/specs/<slug>/` and "
+        "`.claude/specs/INDEX.md`, then dispatch it. Landing it: after "
+        "`VERDICT: approve`, run "
         f"`{MERGE_BACK_SCRIPT} <branch>` (Bash timeout 600000 ms), never a "
         f"hand `git merge`. {runs} Act on its last line: if the branch "
         "merged, set `status: done`, commit it; on CONFLICT, invoke the "
@@ -11575,45 +11856,184 @@ def _landing_claude_md(cfg, retrofit=False):
         "No worktree branch: set `done` once approved.") + "\n"
 
 
+# [WP4 / Phase 8] The steering docs CLAUDE.md names, in PRD Phase 8 order,
+# the docs an agent looks up by topic annotated with that topic. One
+# wrapped bullet, not a line per doc: the golden fixtures' budget of 80
+# lines (tests/test_merge_back.py) holds with the queue section. The
+# predicates are build_plan's own, so the list names exactly the steering
+# files the install writes: deps.md and secrets.md only while their policy
+# is on (with the gates off, an escalation naming deps.md pointed at a file
+# the install never wrote). tests/test_wp4_claude_md.py pins the list
+# against the plan's steering paths.
+def _claude_md_steering(cfg):
+    # build_plan's normalizers live in installer.py, which imports this
+    # module; build_plan is the only caller, so installer is loaded.
+    from installer import design_steering_enabled, telemetry_enabled
+    docs = ["product.md", "tech.md (commands, Do Not Touch, documentation "
+                          "policy)"]
+    if cfg["deps"]["enabled"]:
+        docs.append("deps.md (approved dependencies)")
+    if cfg["secrets"]["enabled"]:
+        docs.append("secrets.md (never-read paths)")
+    docs += ["structure.md", "principles.md (TDD policy)", "ci-cd.md",
+             "tools.md", "spec-versioning.md"]
+    if design_steering_enabled(cfg):
+        docs.append("design.md")
+    docs.append("assumption-ledger.md")
+    if telemetry_enabled(cfg):
+        docs.append("telemetry.md")
+    names = ", ".join(re.sub(r"^(\S+)", r"`\1`", d) for d in docs)
+    return ("- " + _md_fill(f"Steering, in `.claude/steering/`: {names}.",
+                            76).replace("\n", "\n  ") + "\n")
+
+
+# [WP4 / Phase 8, PRD Phase 7 "6 gates if TDD off, 7 if TDD on"] The
+# lifecycle line adapts to the TDD policy the way the implementer's
+# _tests_first_section does: the order is enforced only where a tdd-gate is
+# wired. The tests-first step is the implementer's, inside its own checkout
+# (WP3 critic 2f: tests written in the main checkout ahead of a worktree
+# implementer never reach it), so it is not a main-session step. [WP4 / g2]
+# It ends at ci-cd.md's one stop, which that file states (verify V3: ONE
+# lifecycle paragraph, carrying both the TDD step and the stop).
+def _claude_md_lifecycle(cfg):
+    policy = cfg["principles"]["tdd_policy"]
+    tdd_gate = "tdd-gate" in cfg.get("_resolved_hooks", ())
+    if policy == "off" and not tdd_gate:
+        step, note = "", ""
+    elif policy == "required" or tdd_gate:
+        step = "failing test first; "
+        note = (f" TDD policy `{policy}`: "
+                + ("the tdd-gate refuses a source write under `src/` or "
+                   "`lib/` until its test exists." if tdd_gate else
+                   "no hook enforces the order."))
+    else:
+        step = "failing test first, preferred; "
+        note = f" TDD policy `{policy}`: no gate enforces the order."
+    return _md_fill(
+        "Per-task lifecycle: spec-review -> spec-decompose -> plan-review "
+        f"-> implement ({step}decisions logged continuously) -> local gates "
+        "-> code-review (the reviewer agent) -> merge-back -> spec-validate "
+        f"-> pr-author -> stop as `ci-cd.md` says.{note}") + "\n"
+
+
+# [WP4 / Phase 8] A Phase 8 exit criterion. The drift sentence exists only
+# where the drift detector is wired, so /ack-drift is never named without it.
+# [WP4 fix round 1 / C3] The line, with the blank line after it, exists only
+# where the skills are installed: /checkpoint, /resume and /ack-drift are
+# skills (each command only invokes its skill), so with
+# workflow.install_skills false the install writes none of them.
+def _claude_md_hygiene(cfg):
+    if not cfg["workflow"]["install_skills"]:
+        return ""
+    drift = ("drift-detector" in cfg.get("_resolved_hooks", ()))
+    return _md_fill(
+        "**Session hygiene:** run `/checkpoint` before `/clear`, and "
+        "`/resume` after it."
+        + (" When the drift detector says the session is running long, "
+           "checkpoint, or run `/ack-drift` to dismiss the notice if you "
+           "mean to continue." if drift else "")) + "\n\n"
+
+
+# [WP4 / Phase 8, X3] The urgent items both CLAUDE.md variants share: the
+# deps.md item exists only where deps.md does, and the never-read half of
+# item 1 only where secrets.md does, so a gates-off install names no file it
+# never wrote. Item numbers follow; _retrofit_claude_md continues from here
+# with its own items 6 and 7 (one copy of items 1-5: verify V1 found the two
+# hand-kept copies had already drifted). The spec-versioning clause keeps
+# its exact wrapping: _SPEC_VERSIONING_POINTERS rewrites it. The /escalate
+# line stays in _claude_md, outside this helper: retrofit has no room for it
+# (review freeze F11).
+def _claude_md_urgent_items(cfg):
+    never = " or never-read" if cfg["secrets"]["enabled"] else ""
+    items = [f"A Do Not Touch{never} path needs access or modification.",
+             "A secret or credential is encountered.",
+             "A hook blocks and the fix is not obvious within one attempt."]
+    if cfg["deps"]["enabled"]:
+        items.append("A dependency not on the `deps.md` approved list is "
+                     "needed.")
+    items.append("Implementation reveals the spec was wrong (follow\n"
+                 "   `.claude/steering/spec-versioning.md`).")
+    return items
+
+
+def _claude_md_urgent(cfg, extra=()):
+    """The numbered, bell-marked urgent list: the shared items, then
+    `extra` (retrofit's own)."""
+    items = _claude_md_urgent_items(cfg) + list(extra)
+    return "".join(f"{i}. **🔔** {t}\n" for i, t in enumerate(items, 1))
+
+
+# [WP4 / Phase 8] PRD Phase 8's Never list. Do Not Touch is tech.md's
+# section (_steering_scaffolds); the never-read paths are secrets.md's,
+# named only where the install writes it. [WP4 / V3] "Commit code without
+# its tests." replaces "Commit without tests.", which also read as a ban on
+# committing a doc or a config change. [WP4 fix round 1 / C3] `/spec-review`
+# only where its skill is installed.
+def _claude_md_never(cfg):
+    where = ("Change a Do Not Touch path (`tech.md`)"
+             + (" or read a never-read path (`secrets.md`)"
+                if cfg["secrets"]["enabled"] else "")
+             + " without asking.")
+    review = ("`/spec-review`" if cfg["workflow"]["install_skills"]
+              else "spec review")
+    return ("".join("- " + _md_fill(t, 76).replace("\n", "\n  ") + "\n"
+                    for t in (where,
+                              "Rewrite or delete a test to make it pass.",
+                              f"Implement a spec that has not passed "
+                              f"{review}.",
+                              "Commit code without its tests.")))
+
+
 # [WP3 / D6, operator ruling 2026-10-05] Both CLAUDE.md lifecycle lines name
 # the reviewer agent as the code-review step (the code-review skill stays a
 # stub; see REVIEWER_DESCRIPTION) and the landing step, merge-back.
+# [WP4 / Phase 8] The greenfield body now carries what PRD Phase 8 lists
+# and the install can make true: the steering index, the specs, learnings
+# and sessions references, the TDD-adaptive lifecycle, session hygiene, the
+# Never list, the bell-marked urgent items and, after them, one line that
+# sends the agent to /escalate to write the decision record (backlog X-30a;
+# ruling 7 (c) put the record in a skill, so CLAUDE.md carries no command).
+# Not here, each with its own package: the loop and goal addenda and the
+# autonomous routing (WP6), and the drift Alert 3 item (tier 3 is not
+# implemented; WP5).
 def _claude_md(cfg):
     flags = cfg["autonomous_modes"]
+    # [WP4 fix round 1 / C3] Only where the escalate skill is installed.
+    escalate = ("\nBefore you stop for a 🔔 item, run `/escalate` to record "
+                "why.\n" if cfg["workflow"]["install_skills"] else "")
     queue_section = ""
     if flags["queue_mode_enabled"]:
         queue_section = (
             "\n## Queue mode coordination layer\n\n"
             "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped it "
             "dispatches nothing and exits 1. When you complete the dispatch "
-            "loop (Bootstrap-Protocol-v2-0-0.md Phase 9.7), it dispatches "
+            "loop (Bootstrap-Protocol-v2-8-0.md Phase 9.7), it dispatches "
             "per-task wrappers from `.claude/queue/backlog.md`; the runner "
             "does not load this file, the queue is the coordination surface.\n")
     return f"""# CLAUDE.md
 
-Thin by design. Steering lives in `.claude/steering/`. This file is the
-escalation contract, not a knowledge dump.
+Thin by design: the escalation contract and an index, not a knowledge dump.
+
+## Index (read on demand)
+
+{_claude_md_steering(cfg)}- `.claude/specs/INDEX.md`: the spec roster (columns: the README beside it).
+- `.claude/learnings/`: lessons that outlive one spec; add one per feature.
+- `.claude/sessions/`: checkpoints and per-session state (see its README).
 
 ## Workflow
 
-Per-task lifecycle: spec-review -> spec-decompose -> plan-review -> implement
-(decisions logged continuously) -> local gates -> code-review (the reviewer
-agent) -> merge-back -> spec-validate -> pr-author.
-
+{_claude_md_lifecycle(cfg)}
 At task/iteration priming, read the task's `.claude/specs/<slug>/progress.md`
 **first** — its `Status` and `Failed approaches` ledger — before the task
 brief, so a resumed session does not re-attempt a known dead end. The
 canonical shape of that file lives in `.claude/specs/progress-template.md`.
 {_landing_claude_md(cfg)}
-## Urgent escalations (AI stops and asks)
+{_claude_md_hygiene(cfg)}## Never
 
-1. A do-not-touch / never-read path needs access or modification.
-2. A secret or credential is encountered.
-3. A hook blocks and the fix is not obvious within one attempt.
-4. A dependency not on the `deps.md` approved list is needed.
-5. Implementation reveals the spec was wrong (follow
-   `.claude/steering/spec-versioning.md`).
+{_claude_md_never(cfg)}
+## Urgent escalations (🔔: you are blocked; stop and ask)
 
+{_claude_md_urgent(cfg)}{escalate}
 Non-urgent (in-chat only): ambiguous acceptance criteria, two reasonable
 approaches with material tradeoffs, spec version drift mid-task.
 
@@ -12121,7 +12541,17 @@ def _sessions_readme(cfg):
     mode-specific files are listed as such. The synopsis sections repeat
     the checkpoint skill's list (_SKILL_BODIES["checkpoint"]); a test
     pins the two together.
+    [WP4 fix round 1 / C9] The record file's row names the alarm only where
+    it is wired. [WP4 fix round 2 / D2] And `/escalate` only where the
+    install writes the skill.
     """
+    pending = "; ".join(
+        (["`/escalate` writes it"] if cfg["workflow"]["install_skills"]
+         else [])
+        + (["the decision-required alarm creates it, refreshes its mtime "
+            "and deletes it after 7 days"] if "decision-required-alarm"
+           in cfg.get("_resolved_hooks", ()) else [])) or (
+        "nothing in this install writes it")
     return f"""# Sessions
 
 Session-recovery state: the checkpoints you commit, plus the per-session
@@ -12180,7 +12610,7 @@ lint notice delete their own files once they are 7 days old.
 | `.drift-state-<id>`, `.drift-reads-<id>`, `.drift-lock-<id>` | the drift detector: its counters, the files read since the last checkpoint, and its lock |
 | `.drift-ack-<id>` | `/ack-drift`, which the drift detector consumes |
 | `.drift-tier3-<id>` | the tier-3 drift demand; tier 3 is not implemented yet |
-| `.decision-pending-<id>` | the decision-required alarm: why the agent stopped and what it needs |
+| `.decision-pending-<id>` | {pending} |
 | `.quiet-<id>` | quiet mode (`/quiet`); audio alerts are not implemented yet |
 | `.lint-unset-<id>` | the format and lint gate: it has shown this session that `commands.lint` is empty |
 
@@ -14297,6 +14727,10 @@ def _retrofit_implementer_agent(cfg):
             f"Self-contained: subagents do not inherit the default system "
             f"prompt. Read steering + spec + task, implement, run gates, "
             f"commit, log decisions via decision-log.\n"
+            # [WP4 fix round 7] Before the writes section here, so that with
+            # TDD off it still runs straight into the retrofit rules (WP3's
+            # tests/test_wp3_agents_handoff.py pins that join).
+            f"{_implementer_urgent(cfg)}"
             f"{_IMPLEMENTER_WRITES}"
             f"{_tests_first_section(cfg, retrofit=True)}"
             f"\n## Retrofit-specific behavior\n\n"
@@ -14388,6 +14822,20 @@ def _retrofit_reviewer_agent(cfg):
             f"`blocking` issue: ask for the pinning test.\n")
 
 
+# [WP4 / X3] Retrofit's own urgent items, 6 and 7 after the shared five
+# (_claude_md_urgent_items) when both policies are on, renumbered with them
+# when deps is off. Their wording and wrapping are as RETROFIT R8.E.2 had
+# them. The retrofit CLAUDE.md carries no /escalate line: the retrofit
+# agent fixture renders exactly 80 lines (review build F6, ESC-4).
+_RETROFIT_URGENT = (
+    "Modifying a file in the legacy allowlist WITHOUT first creating\n"
+    "   a spec via touch-based backfill.",
+    "Modifying a file in `inventory/danger-zones.md` WITHOUT first\n"
+    "   generating a `legacy-pin-test` (or for AI/agent prompt files, a\n"
+    "   `prompt-pinning-eval`).",
+)
+
+
 def _retrofit_claude_md(cfg):
     """Override of greenfield CLAUDE.md with retrofit-specific escalation
     criteria + retrofit-specific doc refs. Per RETROFIT R8.E.2.
@@ -14470,25 +14918,14 @@ context lives in `.claude/debt.md`, `.claude/inventory/`, and
 
 Per-task lifecycle: spec-review -> spec-decompose -> plan-review -> implement
 (decisions logged continuously) -> local gates -> code-review (the reviewer
-agent) -> merge-back -> spec-validate -> pr-author.
+agent) -> merge-back -> spec-validate -> pr-author -> stop as `ci-cd.md` says.
 
 For LEGACY files (in the allowlist or in danger-zones): pin → spec → modify
 (see `spec-strategy.md`).
 {_landing_claude_md(cfg, retrofit=True)}
 ## Urgent escalations (AI stops and asks)
 
-1. **🔔** A do-not-touch / never-read path needs access or modification.
-2. **🔔** A secret or credential is encountered.
-3. **🔔** A hook blocks and the fix is not obvious within one attempt.
-4. **🔔** A dependency not on the `deps.md` approved list is needed.
-5. **🔔** Implementation reveals the spec was wrong (follow
-   `.claude/steering/spec-versioning.md`).
-6. **🔔** Modifying a file in the legacy allowlist WITHOUT first creating
-   a spec via touch-based backfill.
-7. **🔔** Modifying a file in `inventory/danger-zones.md` WITHOUT first
-   generating a `legacy-pin-test` (or for AI/agent prompt files, a
-   `prompt-pinning-eval`).
-
+{_claude_md_urgent(cfg, _RETROFIT_URGENT)}
 Non-urgent (in-chat only): ambiguous acceptance criteria, two reasonable
 approaches with material tradeoffs, spec version drift mid-task, a
 categorization in `tech.md` that looks wrong in light of new evidence.
@@ -14541,6 +14978,13 @@ def _retrofit_gitignore(cfg):
         "settings.local.json",
         # Retrofit-specific (per RETROFIT R8.C gitignore block):
         ".retrofit-state.json",
+        # [WP4 g6] The retrofit wrappers lock "$STATE.lock", which is this
+        # sibling once STATE is swapped to .retrofit-state.json; on 0845862
+        # a retrofit loop.sh run left it untracked, so `git add -A` took it.
+        # The `.pre-*` line covers the copy the installer's parse guard
+        # keeps of a retrofit state file it cannot parse (WP4 ruling
+        # 12 (a)), as the bootstrap file's `.pre-*` line below covers its.
+        ".retrofit-state.json.lock", ".retrofit-state.json.pre-*",
         ".bootstrap-state.json.pre-1.7", ".bootstrap-state.json.pre-1.8",
         ".bootstrap-state.json.pre-1.9", ".bootstrap-state.json.pre-*",
         "inventory/.scan-cache-*",

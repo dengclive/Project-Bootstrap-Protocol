@@ -42,6 +42,8 @@ sys.path.insert(0, os.path.join(ROOT, "lib"))
 from defaults import resolve_config           # noqa: E402
 from installer import build_plan              # noqa: E402
 from minyaml import load_yaml                 # noqa: E402
+sys.path.insert(0, HERE)
+import plugin_toolchain_map as PTM            # noqa: E402
 
 passed = failed = 0
 
@@ -398,6 +400,15 @@ SOURCE_DIRS = [("lib", os.path.join(ROOT, "lib")),
                ("bin", os.path.join(ROOT, "bin")),
                ("plugin", os.path.join(ROOT, "plugin"))]
 
+# [WP4, ruling 2 (b)] plugin/toolchain/ holds byte copies of the two tools,
+# lib/ and the protocol document, so a plugin installed from a marketplace
+# carries them. A copy whose bytes equal its source adds nothing to this
+# scan: bin/ and lib/ are scanned under their own labels, and the protocol
+# document quotes this policy by name in its exclusion note. Any other file
+# there fails, so the skip cannot hide one; ignored bytecode is skipped.
+# The map is tests/plugin_toolchain_map.py, which the identity suite
+# tests/test_wp4_plugin_toolchain.py also reads.
+toolchain_copies, toolchain_strays = [], []
 for label, d in SOURCE_DIRS:
     offenders = []
     js = []
@@ -410,6 +421,13 @@ for label, d in SOURCE_DIRS:
             rel = os.path.relpath(path, d)
             if name.endswith(".js"):
                 js.append(rel)
+            kind = PTM.toolchain_kind(PTM.rel_of(ROOT, path))
+            if kind == "copy":
+                toolchain_copies.append(rel)
+            elif kind == "stray":
+                toolchain_strays.append(rel)
+            if kind is not None:
+                continue
             try:
                 with open(path, encoding="utf-8") as fh:
                     text = fh.read()
@@ -429,6 +447,12 @@ for label, d in SOURCE_DIRS:
     # Non-vacuity for this section: a scan of zero files trivially finds nothing.
     check(f"{label}/: the scan actually read files", scanned > 0,
           f"    walked {d} and read {scanned} files")
+
+check(f"{PTM.TOOLCHAIN}/: every file is a copy the map names, with its "
+      f"source's bytes ({len(toolchain_copies)} copies not rescanned)",
+      toolchain_strays == [],
+      f"    not a copy, or not its source's bytes: {toolchain_strays}\n"
+      f"    re-sync with: {PTM.SYNC}")
 
 
 # --------------------------------------------------------------------------- #
