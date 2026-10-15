@@ -548,7 +548,7 @@ no `seam_version` bump, no file rename, and the contract stays SUSPENDED.
 | Shared sentinel names/locations/scope (§7.4) | No | No sentinel is added. The lock files and the `.pre-unparsed-*` copies sit beside the state files (§7.1 note), and the escalate skill appends to the existing `.claude/sessions/.decision-pending-<id>` file. |
 | §7.2 security-critical membership | No | The escalate skill and command are non-critical `file` actions; no hook is added or removed. |
 | §7.3 provenance markers / synthesize-file contract | No | Neither interview's ANSWERS keys change (the same 36 keys for `examples/sample-prd.md` and the same 23 from `retrofit-interview analyze` on a small Python project, at `0845862` and now), and `synthesize`'s output does not move (the AC-2-3 mini-golden, `tests/test_validate_only.py`). Only interactive input that ends early changes the config header. |
-| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ 042d88a`. Re-pointing it once WP4 merges is the WP4 closeout's operator call, as it was for WP3. |
+| `binds` set (§8.1a) | No (not edited) | The bind stays `2.8.0 @ 042d88a`. Re-pointing it once WP4 merges is the WP4 closeout's operator call, as it was for WP3. **[Layer 2026-10-16, the WP4 closeout.]** WP4 merged as `6c771f2` (PR #125, 2026-10-15T17:31:43Z), and the bind is re-pointed in-version to `2.8.0 @ 6c771f2` (the seam's v3.0.0 entry has the dated note). The text before this layer stays as written on its date. |
 
 **What WP4 does not do.** It bumps no version and cuts no release, tag or
 marketplace file: whether a release follows WP4 is decided after it merges
@@ -7182,8 +7182,8 @@ it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
 `2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut;
 the TODO was filled in-version on 2026-10-03 with the WP1 merge commit
 `c642731`, and re-pointed in-version on 2026-10-04 to the WP2 merge
-commit `322b0d3` and on 2026-10-13 to the WP3 merge commit `042d88a`).
-Branch `version-2-1-0`.
+commit `322b0d3`, on 2026-10-13 to the WP3 merge commit `042d88a` and
+on 2026-10-16 to the WP4 merge commit `6c771f2`). Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 
