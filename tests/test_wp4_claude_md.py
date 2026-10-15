@@ -47,7 +47,7 @@ def check(name, cond, detail=""):
 
 def cfg_text(tdd="encouraged", sec=True, deps=True, design=False, tel=False,
              modes=False, drift=True, tdd_gate=None, cicd_opt_out=False,
-             arch="service", skills=True, commands=True):
+             arch="service", skills=True, commands=True, alarm=True):
     t = (f"project:\n  name: g1\n  archetype: {arch}\n"
          f"  cicd_opt_out: {str(cicd_opt_out).lower()}\n"
          f"principles:\n  tdd_policy: \"{tdd}\"\n"
@@ -62,6 +62,8 @@ def cfg_text(tdd="encouraged", sec=True, deps=True, design=False, tel=False,
          f"hooks:\n  drift_detector: {str(drift).lower()}\n")
     if tdd_gate is not None:
         t += f"  tdd_gate: {str(tdd_gate).lower()}\n"
+    if not alarm:
+        t += "  decision_required_alarm: false\n"
     if not (skills and commands):
         t += (f"workflow:\n  install_skills: {str(skills).lower()}\n"
               f"  install_commands: {str(commands).lower()}\n")
@@ -101,6 +103,9 @@ CONFIGS = {
     # [WP4 fix round 1 / C3] workflow.install_skills and install_commands.
     "skills off": cfg_text(skills=False),
     "commands off": cfg_text(commands=False),
+    # [WP4 fix round 3 / LP-13] No /escalate and no alarm: nothing writes
+    # the decision record.
+    "skills and alarm off": cfg_text(skills=False, alarm=False),
 }
 PLANS = {k: plan_of(v) for k, v in CONFIGS.items()}
 
@@ -226,6 +231,11 @@ check("skills off: ci-cd.md's stop names no /pr-author, the ledger has no "
       in _off[".claude/sessions/README.md"]["body"],
       [ln for ln in _off[".claude/sessions/README.md"]["body"].splitlines()
        if "decision-pending" in ln])
+_both = PLANS["skills and alarm off"][1][".claude/sessions/README.md"]["body"]
+check("skills and alarm off: the sessions README's decision-record row says "
+      "nothing in this install writes it",
+      "| `.decision-pending-<id>` | nothing in this install writes it |"
+      in _both, [ln for ln in _both.splitlines() if "decision-pending" in ln])
 check("skills off: CLAUDE.md has no session-hygiene line and no /escalate "
       "line, and its blank lines stay single",
       "Session hygiene" not in md_of(PLANS["skills off"][1])

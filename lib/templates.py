@@ -9601,20 +9601,13 @@ def _tdd_stem_rule(cfg, bullet, indent):
 # request, or the last commit) is reached off the default branch. Step 2
 # comes right after the slug is resolved, because the branch is named from
 # it, and before the first write. CLAUDE.md's "Starting a task" sentence
-# says the same ("on a spec branch", _landing_claude_md). [WP4 fix round 1 /
-# NF1] From another spec's branch too: after a spec's pull request the
-# agent is still on spec/<that slug>, and "otherwise stay" put every later
-# spec on it. Only a branch the operator chose keeps the spec. [WP4 fix
-# round 2 / RR-1, LC-4] From the remote's default branch, fetched: a person
-# merges each pull request on the remote and nothing updates the local
-# default branch, so a spec started from it lacked the merged specs and
-# conflicted. `--no-track` keeps a later `git push -u` from tracking the
-# default branch. `git remote show origin` names that branch without
-# refs/remotes/origin/HEAD, which a repository whose remote was added by
-# hand and pushed to does not have. The `git log` stops the step while the
-# local default branch has commits the remote lacks, such as a bootstrap
-# commit made before the first push, which a branch from the remote's
-# default branch would not have.
+# says the same ("on a spec branch", _landing_claude_md). [WP4 fix round 3,
+# operator ruling 2026-10-15: "Simplify, ask when unclear"] From the local
+# default branch after a fast-forward pull: the pull brings in the pull
+# requests a person merged on the remote, an unpushed bootstrap commit
+# rides along in the spec's pull request, any remote name works, and no
+# translated git output is read. Where the base is unclear (a remote but no
+# upstream, a failed pull, another spec's branch, a detached HEAD), ask.
 _SPEC_NEW_BODY = """\
 Turn one PRD section into a versioned spec: `.claude/specs/<slug>/requirements.md`,
 with a seeded `decisions.md` and `changelog.md` beside it.
@@ -9637,25 +9630,19 @@ specify.
 
 ## 2. Start the spec's branch
 
-If you are on the default branch, or on another spec's branch (`spec/*`),
-create this spec's branch from the default branch and switch to it:
+- On the default branch: if it tracks a remote branch
+  (`git rev-parse --abbrev-ref @{upstream}` prints one), run
+  `git pull --ff-only` to bring in the pull requests merged since your last
+  spec. If it tracks none but `git remote` lists a remote, or the pull
+  fails, stop and ask the operator. Then run `git switch -c spec/<slug>`.
+- On another spec's branch (`spec/*`), or with no branch checked out, stop
+  and ask the operator which branch to start from: that spec's work reaches
+  the default branch only once its pull request is merged. To start from
+  the default branch, switch to it and follow the bullet above; to start
+  from another branch, run `git switch -c spec/<slug> <branch>`.
+- On any other branch, one the operator chose, stay on it.
 
-- With a remote, run `git fetch origin`, then
-  `git log --oneline origin/<default>..<default>`. `<default>` is the name
-  on the `HEAD branch:` line of `git remote show origin`. If the log lists
-  a commit, the remote lacks work on the local default branch, such as a
-  bootstrap commit not yet pushed: stop and ask the operator to push it
-  first. Otherwise run
-  `git switch --no-track -c spec/<slug> origin/<default>`. The fetch brings
-  in the pull requests merged since your last spec, and `--no-track` keeps
-  the new branch from tracking the default branch.
-- With no remote, or when that line says `(unknown)` (an empty remote), run
-  `git switch -c spec/<slug> <default>`, where `<default>` is the local
-  default branch. If that branch isn't clear, ask the operator.
-
-The spec, its tasks and their merges then land on that branch, not on the
-default branch or another spec's. On any other branch, one the operator
-chose, stay on it.
+The spec, its tasks and their merges then land on that branch.
 
 ## 3. Read the source
 

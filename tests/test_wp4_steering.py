@@ -38,10 +38,19 @@ sections, and ci-cd.md's one agent stopping point.
    pins the re-review found missing, each with the mutant it kills (K1's
    later run, the skills-off exemptions, the heading's word boundary and
    whitespace, the dry-run wording).
+8. [WP4 fix round 3] What the second re-review found in 8a: the ci-cd.md
+   warning says only what its search found (F1); a double-backtick code
+   span is one span (F3); and the pins it found missing, each with the
+   mutant it kills (the search's case and line breaks, the lifecycle
+   clause with CLAUDE.md kept, the Test cell's plain, two-span, padded and
+   doubled-space forms, the own mark after an edit, a later dry run, the
+   probe's agents and skills directories, a second retrofit install, and
+   "them" for two missing elements).
 
 Run: python3 tests/test_wp4_steering.py
 """
 import ast
+import json
 import os
 import re
 import shutil
@@ -871,20 +880,22 @@ try:
     w1 = warns(r1, CICD)
     # [WP4 fix round 2 / LC-12 (b), RR-7] Worded so the lifecycle clause
     # does not contradict "names no stop", and with no Phase 5 citation:
-    # its opt-out path skips the step that names a stop.
+    # its opt-out path skips the step that names a stop. [WP4 fix round 3 /
+    # LM-3] It says what the search found, not that the file names no stop.
     check("[F1] opt-out ci-cd.md from before WP4, kept: one warning says "
-          "nothing in it says where the agent stops, and that the agent stops "
-          "after its last commit and never pushes",
+          "the installer found no mention of a stopping point in it, and "
+          "that the agent stops after its last commit and never pushes",
           r1.returncode == 0 and len(w1) == 1
-          and "'## Agent stopping point' section, and nothing in it says "
-              "where the agent stops." in w1[0]
+          and "'## Agent stopping point' section, and the installer found "
+              "no mention of a stopping point in it." in w1[0]
           and "the agent stops after its last commit for the task, and never "
               "pushes" in w1[0]
           and "CLAUDE.md's lifecycle ends at the stop this file should name."
               in w1[0]
           and "names no stop" not in w1[0] and "Phase 5" not in w1[0]
-          and w1[0].endswith("Add a section that says where the agent "
-                             "stops."), w1)
+          and w1[0].endswith("If the file says where the agent stops in "
+                             "other words, nothing needs doing; otherwise, "
+                             "add a section that says so."), w1)
     write(f1, CICD, OLD_OPTOUT + "\n## Agent Stopping Point\n\nThe agent "
           "stops after its last commit. A person pushes.\n")
     r1b = run(f1)
@@ -961,6 +972,12 @@ try:
               and ("as RETROFIT.md R8.E.1 says" in w5[0]) == r8
               and "did not receive" not in w5[0]
               and "merge the change by hand" not in w5[0], w5)
+        if r8:
+            # [WP4 fix round 3 / LP-12] Keyed on the manifest's mark, not
+            # the run: a second retrofit install says the same.
+            w5b = warns(run(f5), "CLAUDE.md")
+            check("[F5] retrofit, a second install over the project's own "
+                  "CLAUDE.md: the same own-file warning", w5b == w5, w5b)
     check("[F5] a fresh clone's CLAUDE.md (an earlier install's) keeps the "
           "missed-update wording and the remedy, whose edited branch is the "
           "move-aside route",
@@ -1067,21 +1084,26 @@ try:
               "the project's own file" in skip_reason(r.stdout, "CLAUDE.md")
               for r in f5runs), [skip_reason(r.stdout, "CLAUDE.md")
                                  for r in f5runs])
-    # A project's own command at a plan path does not hide the first install.
-    f5c = proj("f5-own-command")
-    write(f5c, "CLAUDE.md", OWN_MD)
-    os.makedirs(os.path.join(f5c, ".claude", "commands"))
-    write(f5c, ".claude/commands/code-review.md", "Review my way.\n")
-    r5c = run(f5c)
-    w5c = warns(r5c, "CLAUDE.md")
-    st5c = read(f5c, ".claude/.bootstrap-state.json") or "{}"
-    check("[F5] the project's own .claude/commands/code-review.md and "
-          "CLAUDE.md: still a first install (bootstrap_complete false, the "
-          "own-file warning)",
-          r5c.returncode == 0
-          and '"bootstrap_complete": false' in st5c
-          and len(w5c) == 1
-          and "the project's own file" in w5c[0], (w5c, st5c[-300:]))
+    # A project's own command, agent or skill at a plan path does not hide
+    # the first install ([WP4 fix round 3 / LP-1, LP-2] one path in each
+    # directory the probe ignores).
+    for own_rel in (".claude/commands/code-review.md",
+                    ".claude/agents/reviewer.md",
+                    ".claude/skills/spec-new/SKILL.md"):
+        f5c = proj("f5-own-" + own_rel.split("/")[2])
+        write(f5c, "CLAUDE.md", OWN_MD)
+        os.makedirs(os.path.dirname(os.path.join(f5c, own_rel)))
+        write(f5c, own_rel, "Mine.\n")
+        r5c = run(f5c)
+        w5c = warns(r5c, "CLAUDE.md")
+        st5c = read(f5c, ".claude/.bootstrap-state.json") or "{}"
+        check(f"[F5] the project's own {own_rel} and CLAUDE.md: still a "
+              f"first install (bootstrap_complete false, the own-file "
+              f"warning)",
+              r5c.returncode == 0
+              and '"bootstrap_complete": false' in st5c
+              and len(w5c) == 1
+              and "the project's own file" in w5c[0], (w5c, st5c[-300:]))
     f5d = proj("f5-own-dry")
     write(f5d, "CLAUDE.md", OWN_MD)
     r5d = run(f5d, "--dry-run")
@@ -1095,13 +1117,21 @@ try:
               "the new one." in w5d[0]
           and "re-install" not in w5d[0], w5d)
 
-    # [LC-12 (d)] "it" for one missing element, "them" for more.
+    # [LC-12 (d)] "it" for one missing element, "them" for more ([WP4 fix
+    # round 3 / LP-14] two, the boundary).
+    write(f2, "CLAUDE.md", re.sub(r"^## Index.*?(?=^## )", "",
+                                  STRIP_NEVER.sub("", fresh_md),
+                                  flags=re.S | re.M))
+    w2m = warns(run(f2), "CLAUDE.md")
+    write(f2, "CLAUDE.md", fresh_md)
     check("[F2] the hand remedy says 'Merge it' for one missing element and "
-          "'Merge them' for three",
+          "'Merge them' for two",
           we_ and we_[0].endswith("Merge it by hand from a fresh install's "
                                   "CLAUDE.md.")
-          and wo and wo[0].endswith("Merge them by hand from a fresh "
-                                    "install's CLAUDE.md."), (we_, wo))
+          and len(w2m) == 1
+          and "it has no '## Never' section or '## Index' section." in w2m[0]
+          and w2m[0].endswith("Merge them by hand from a fresh install's "
+                              "CLAUDE.md."), (we_, w2m))
 
     # [K1 / P1] A later re-install of a fresh clone: the hook-script
     # warning and the exit-3 note keep the per-file remedy (main()).
@@ -1177,6 +1207,119 @@ try:
           "warning", rdn.returncode == 0 and skip_line(rdn.stdout, TECH)
           and warns(rdn, TECH) == [], warns(rdn, TECH))
     write(f2, TECH, fresh_tech)
+
+    # ---- 8. Fix round 3: the second re-review's 8a findings ------------ #
+    print("\n== 8. fix round 3: what the second re-review found in 8a ==")
+
+    # [F1 / LM-3, LC2-4] A stop put in other words still draws the warning
+    # (a text search cannot tell it from none; backlog Z-68), so the
+    # warning says what the search found and that nothing needs doing then.
+    f1w = proj("f1-other-words", OCFG)
+    run(f1w)
+    write(f1w, CICD, OLD_OPTOUT + "\nThe agent's last action is its commit "
+          "for the task; a person pushes.\n")
+    w1w = warns(run(f1w), CICD)
+    check("[F1] ci-cd.md kept with its stop put in other words ('The "
+          "agent's last action is its commit'): the warning says the "
+          "installer found no mention of a stopping point, not that the file "
+          "names no stop, and that nothing needs doing if it says so in "
+          "other words",
+          len(w1w) == 1
+          and "the installer found no mention of a stopping point in it."
+              in w1w[0]
+          and "nothing in it says where the agent stops" not in w1w[0]
+          and "If the file says where the agent stops in other words, "
+              "nothing needs doing" in w1w[0], w1w)
+    # [F1 / LP-5, LP-6] The search ignores case, and a phrase wrapped over
+    # a line break still matches.
+    for n, (label, body) in enumerate((
+            ("under a Title Case '## Where The Agent Stops'",
+             "## Where The Agent Stops\n\nAfter the pull request opens. A "
+             "person merges it.\n"),
+            ("in a sentence wrapped across a line break",
+             "## Where we stop\n\nAfter it opens a pull request, the "
+             "agent\nstops. A person merges it.\n"))):
+        f1x = proj(f"f1-r3-{n}")
+        run(f1x)
+        write(f1x, CICD, STOP_SECTION.sub(body, read(f1x, CICD)))
+        r1x = run(f1x)
+        check(f"[F1] ci-cd.md kept with its stop stated {label}: no warning",
+              r1x.returncode == 0 and skip_line(r1x.stdout, CICD)
+              and warns(r1x, CICD) == [], warns(r1x, CICD))
+    # [F1 / LP-10, V7] With an edited CLAUDE.md kept too, the warning makes
+    # no claim about CLAUDE.md's lifecycle.
+    f1k = proj("f1-claude-kept")
+    run(f1k)
+    write(f1k, CICD, STOP_SECTION.sub("## Notes\n\nNone.\n",
+                                      read(f1k, CICD)))
+    write(f1k, "CLAUDE.md", read(f1k, "CLAUDE.md") + "\nA project rule.\n")
+    w1k = warns(run(f1k), CICD)
+    check("[F1] ci-cd.md with no stop and an edited CLAUDE.md, both kept: "
+          "the ci-cd.md warning has no lifecycle clause naming CLAUDE.md",
+          len(w1k) == 1 and "found no mention of a stopping point" in w1k[0]
+          and "CLAUDE.md" not in w1k[0], w1k)
+
+    # [F3 / LC2-3, LP-4, LP-7, LP-8, LP-9] A code span opens with a run of
+    # backticks and closes at the next run as long; the rest are pins of
+    # fix round 2's _names.
+    for n, (label, cmd, cell) in enumerate((
+            ("a double-backtick span", "make test", "``make test``"),
+            ("the plain command, no backticks", "pytest -q", "pytest -q"),
+            ("the command and a note holding another code span", "pytest -q",
+             "`pytest -q` (or `make test` from the root)"),
+            ("a span padded with spaces", "pytest -q", "` pytest -q `"))):
+        f3r = proj(f"f3-r3-{n}", CFG.replace('test: "true"',
+                                             f'test: "{cmd}"'))
+        run(f3r)
+        write(f3r, TECH, TEST_ROW.sub(f"| Test      | {cell} |",
+                                      read(f3r, TECH)) + "\nFilled.\n")
+        r3r = run(f3r)
+        check(f"[F3] Test row naming the command as {label} ({cell}): no "
+              f"warning", r3r.returncode == 0 and skip_line(r3r.stdout, TECH)
+              and warns(r3r, TECH) == [], warns(r3r, TECH))
+    f3d = proj("f3-r3-doubled", CFG.replace('test: "true"',
+                                            'test: "pytest  -q"'))
+    run(f3d)
+    write(f3d, TECH, read(f3d, TECH) + "\nFilled.\n")
+    r3d = run(f3d)
+    check("[F3] commands.test with a doubled space, tech.md kept with the "
+          "installer's own Test row: no warning",
+          r3d.returncode == 0 and skip_line(r3d.stdout, TECH)
+          and "| Test      | `pytest  -q` |" in read(f3d, TECH)
+          and warns(r3d, TECH) == [], warns(r3d, TECH))
+
+    # [F5 / LP-11] The own mark holds while the file keeps the bytes the
+    # first install kept: after an edit it is lost, and a revert does not
+    # bring it back (backlog Z-68 (k)). Today's behaviour, pinned.
+    f5e = proj("f5-own-edited")
+    write(f5e, "CLAUDE.md", OWN_MD)
+    run(f5e)
+    write(f5e, "CLAUDE.md", OWN_MD + "\nAn edit.\n")
+    r5e = run(f5e)
+    write(f5e, "CLAUDE.md", OWN_MD)
+    r5r = run(f5e)
+    m5r = json.loads(read(f5e, MANIFEST) or "{}")
+    row5 = next((f for f in m5r.get("files", ())
+                 if f.get("path") == "CLAUDE.md"), {})
+    check("[F5] the project's own CLAUDE.md, edited after the first install: "
+          "a local edit now, with the missed-update wording",
+          "locally modified" in skip_reason(r5e.stdout, "CLAUDE.md")
+          and any("did not receive this release's Phase 8 text" in w
+                  for w in warns(r5e, "CLAUDE.md")),
+          (skip_reason(r5e.stdout, "CLAUDE.md"), warns(r5e, "CLAUDE.md")))
+    check("[F5] ... and reverted to the bytes the first install kept: the "
+          "mark stays lost (no `own` in the manifest, no own-file wording)",
+          not row5.get("own")
+          and "project's own" not in skip_reason(r5r.stdout, "CLAUDE.md")
+          and not any("project's own" in w for w in warns(r5r, "CLAUDE.md")),
+          (row5, skip_reason(r5r.stdout, "CLAUDE.md")))
+    # [F5 / LP-15] A dry run after the first install: "re-install".
+    w5l = warns(run(f5o, "--dry-run"), "CLAUDE.md")
+    check("[F5] --dry-run after a first install over the project's own "
+          "CLAUDE.md: move it aside and re-install, not 'before you install'",
+          len(w5l) == 1 and "Move it aside and re-install, which creates "
+          "only CLAUDE.md" in w5l[0] and "before you install" not in w5l[0],
+          w5l)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

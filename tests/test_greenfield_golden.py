@@ -3735,7 +3735,15 @@ EXPECTED_DIGESTS = {
         # branches from the remote's default branch, review RR-1), and no
         # other; 0 added, 0 removed, order, modes and kinds unchanged,
         # count 66. It is among the moved bodies above; no hook body moves.
-        "8acdbe3fcd9495929265a4dd6975c8c92cfc606e71d4ac08e459fc25b8c1f399",
+        # [freeze-exception no. 85, 2026-10-15, fix round 3] Re-baselined
+        # in the same exception (WP4 fix round 3). Measured on the emitted
+        # plans against the previous digest (8acdbe3f...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2 pulls the default
+        # branch with --ff-only and asks where the base is unclear, the
+        # operator's ruling of 2026-10-15), and no other; 0 added, 0
+        # removed, order, modes and kinds unchanged, count 66. It is
+        # among the moved bodies above; no hook body moves.
+        "54693706c8df3a9f7e561c2ac2bd85c7f9bdd4ae5b8775e9e6a3eadb5cec5fdc",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4424,7 +4432,15 @@ EXPECTED_DIGESTS = {
         # branches from the remote's default branch, review RR-1), and no
         # other; 0 added, 0 removed, order, modes and kinds unchanged,
         # count 78. It is among the moved bodies above; no hook body moves.
-        "559b223d28973f16ca008ba0c06374630daa589573164711cebb5ecdba0f4a8e",
+        # [freeze-exception no. 85, 2026-10-15, fix round 3] Re-baselined
+        # in the same exception (WP4 fix round 3). Measured on the emitted
+        # plans against the previous digest (559b223d...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2 pulls the default
+        # branch with --ff-only and asks where the base is unclear, the
+        # operator's ruling of 2026-10-15), and no other; 0 added, 0
+        # removed, order, modes and kinds unchanged, count 78. It is
+        # among the moved bodies above; no hook body moves.
+        "f588c8deedbe9c22c3a9ac6693e33ad8743f3677765ddbdcd7a6b9b940291683",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -5040,7 +5056,15 @@ EXPECTED_DIGESTS = {
         # branches from the remote's default branch, review RR-1), and no
         # other; 0 added, 0 removed, order, modes and kinds unchanged,
         # count 67. It is among the moved bodies above; no hook body moves.
-        "39e58db571a82bbb61c0b7f09e4e435de3b2dbe9573cc0a5b1fe3beaafa90373",
+        # [freeze-exception no. 85, 2026-10-15, fix round 3] Re-baselined
+        # in the same exception (WP4 fix round 3). Measured on the emitted
+        # plans against the previous digest (39e58db5...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2 pulls the default
+        # branch with --ff-only and asks where the base is unclear, the
+        # operator's ruling of 2026-10-15), and no other; 0 added, 0
+        # removed, order, modes and kinds unchanged, count 67. It is
+        # among the moved bodies above; no hook body moves.
+        "1914baae97162edd47989cd2c38a7a8661e4eb77ee51daaf3175d21ac05a38df",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5252,7 +5276,15 @@ EXPECTED_DIGESTS = {
         # branches from the remote's default branch, review RR-1), and no
         # other; 0 added, 0 removed, order, modes and kinds unchanged,
         # count 67. It is among the moved bodies above; no hook body moves.
-        "0878463901e8aed7e9365a8ef6af2a98265181d7173fd5c159d8fe3b223b56f2",
+        # [freeze-exception no. 85, 2026-10-15, fix round 3] Re-baselined
+        # in the same exception (WP4 fix round 3). Measured on the emitted
+        # plans against the previous digest (08784639...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2 pulls the default
+        # branch with --ff-only and asks where the base is unclear, the
+        # operator's ruling of 2026-10-15), and no other; 0 added, 0
+        # removed, order, modes and kinds unchanged, count 67. It is
+        # among the moved bodies above; no hook body moves.
+        "e2a44202b24a099b46889f09c80dd55583e5b8d8d1e6feae817ad62b9683c878",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5280,7 +5312,15 @@ EXPECTED_DIGESTS = {
         # branches from the remote's default branch, review RR-1), and no
         # other; 0 added, 0 removed, order, modes and kinds unchanged,
         # count 59. It is among the 7 above; no hook body moves.
-        "13bb6e528af058d50dccfda941e0c3304cefcbd0d81de26e701f82ad1aa5aac1",
+        # [freeze-exception no. 85, 2026-10-15, fix round 3] Re-baselined
+        # in the same exception (WP4 fix round 3). Measured on the emitted
+        # plans against the previous digest (13bb6e52...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2 pulls the default
+        # branch with --ff-only and asks where the base is unclear, the
+        # operator's ruling of 2026-10-15), and no other; 0 added, 0
+        # removed, order, modes and kinds unchanged, count 59. It is
+        # among the 7 above; no hook body moves.
+        "f5ed3f9f5705c3c7958ff198219ac1a8850df9f1ba329f9865707647d65865ea",
 }
 
 EXPECTED_ACTION_COUNTS = {

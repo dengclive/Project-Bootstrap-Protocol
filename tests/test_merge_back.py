@@ -269,20 +269,18 @@ for label, text, retro in (("greenfield", CFG, False),
           repr(_clause))
     _sn = " ".join(
         plan_of(text)[".claude/skills/spec-new/SKILL.md"]["body"].split())
-    # [WP4 fix round 1 / NF1] From another spec's branch too, so a spec
-    # never lands on the previous spec's branch. [WP4 fix round 2 / RR-1]
-    # From the remote's default branch, fetched, where there is a remote
+    # [WP4 fix round 1 / NF1] Never on the previous spec's branch. [WP4 fix
+    # round 3, operator ruling 2026-10-15] From the default branch after a
+    # fast-forward pull; on another spec's branch the step asks
     # (tests/test_skill_bodies.py section 5 runs the commands).
     check(f"{label}: /spec-new creates the spec branch the clause names, from "
-          f"the default branch, also when on another spec's branch",
-          "If you are on the default branch, or on another spec's branch "
-          "(`spec/*`), create this spec's branch from the default branch and "
-          "switch to it:" in _sn
-          and "run `git fetch origin`, then `git log --oneline "
-          "origin/<default>..<default>`." in _sn
-          and "Otherwise run `git switch --no-track -c spec/<slug> "
-          "origin/<default>`." in _sn
-          and "run `git switch -c spec/<slug> <default>`" in _sn
+          f"the default branch, and asks on another spec's branch",
+          "- On the default branch: if it tracks a remote branch" in _sn
+          and "run `git pull --ff-only`" in _sn
+          and "Then run `git switch -c spec/<slug>`." in _sn
+          and "- On another spec's branch (`spec/*`), or with no branch "
+          "checked out, stop and ask the operator which branch to start "
+          "from" in _sn
           and "On any other branch, one the operator chose, stay on it."
           in _sn, _sn[:900])
     # [WP3 fix1 MB-3, MB-8] Done once the branch merged, whichever line

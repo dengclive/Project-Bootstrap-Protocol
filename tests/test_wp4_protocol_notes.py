@@ -510,7 +510,7 @@ group("[route, D1] the protocol and RETROFIT.md route the AI through the "
             "except `settings.json`, `settings.local.json` and the "
             "`.retrofit-state.json` R-1 wrote", "`retrofit-interview analyze`",
             "writes automated first cuts of the R0 inventory",
-            "Complete the first cuts from this document",
+            "Check each first cut against its step's list in this document",
             "Do R0 steps 2, 5, 6, 7, 9, 10 and 11 from this document",
             "step 5's `claude-md-extraction-plan.md`, which R8.E.1 uses",
             "the mandatory step 10",
@@ -563,6 +563,8 @@ group("[state keys] bootstrap_complete, protocol_doc and the Phase 9 "
            ["`completed_phases`", "`last_phase_started`",
             "`bootstrap_complete`", "on a first install",
             "whether or not you wrote the state file first",
+            "A state file can lack it, for example one an earlier install "
+            "wrote before the key existed",
             "read that as unknown, not as incomplete", "`protocol_doc`",
             "`toolchain/protocol.md`", "`null`"]),
           (PRD, 1313, "1. Ask: \"Run the workflow as a smoke test?", AMEND,
@@ -638,7 +640,9 @@ group("[escalate, ruling 7 (c)] every escalate note names the skill and "
            ["`escalate`", "`/escalate`",
             "`.claude/sessions/.decision-pending-<session-id>`",
             "With `workflow.install_skills` on (the default)",
-            "with the skills off it writes no skill"]),
+            "with the skills off it writes no skill, and the `/escalate` "
+            "command, like every command, then only names its missing skill "
+            "(backlog Z-66)"]),
           (PRD, 1299, "   - When triggering the decision-required alarm, "
            "the agent writes to", R7C,
            ["`/escalate`", "`timestamp:` (from the clock), `reason:`, "
@@ -656,7 +660,9 @@ group("[escalate, ruling 7 (c)] every escalate note names the skill and "
           (RETRO, 1450, "Write `CLAUDE.md` at repo root with:", AMEND,
            ["`escalate`", "no line that points at it", "is unmeasured",
             "With `workflow.install_skills` on (the default)",
-            "With it off, the install writes no skill."]),
+            "With it off, the install writes no skill, and the `/escalate` "
+            "command, like every command, then only names its missing skill "
+            "(backlog Z-66)."]),
       ])
 _D5 = ("so the record lands only where Claude Code allows writes under "
        "`.claude/`; under `claude -p` the write is refused until D5 is "
@@ -731,6 +737,8 @@ group("[CLAUDE.md, g1 and X3] what the installer's CLAUDE.md carries, in "
           (RETRO, 1450, "Write `CLAUDE.md` at repo root with:", AMEND,
            ["`deps.enabled: false`", "`secrets.enabled: false`",
             "starts each spec on a spec branch", "`spec/<slug>`",
+            "pulled first when it tracks a remote branch, and asks the "
+            "operator where the base is unclear",
             "the one stop `ci-cd.md` states"]),
       ])
 _gfoff = plan_of(GATES_OFF)["CLAUDE.md"]

@@ -126,12 +126,15 @@ instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
    the code, writes first cuts of the inventory under `.claude/inventory/`
    (the files of R0 steps 3, 4 and 12, and step 8's metrics as stubs), and
    writes its proposals and open questions to `bootstrap.interview.md`.
-   Claude completes the first cuts from `RETROFIT.md`: step 3's convention
-   groups, step 4's product summary, and step 12's documentation,
-   PR-template and issue-tracker checks. Claude also does the R0 steps that
-   `analyze` doesn't (2, 5, 6, 7, 9, 10 and 11) from `RETROFIT.md`, among
-   them step 5's extraction plan for your `CLAUDE.md` and the mandatory step
-   10. Claude resolves the proposals with you one question at a time, then
+   Claude checks each first cut against its step's list in `RETROFIT.md`
+   and completes it: for example, step 3's convention groups, the
+   dependencies of every manifest but the root `pyproject.toml`,
+   `requirements.txt`, `package.json` and `Cargo.toml`, step 4's product
+   summary, step 8's metrics, and step 12's documentation, PR-template and
+   issue-tracker checks. Claude also does the R0 steps that `analyze`
+   doesn't (2, 5, 6, 7, 9, 10 and 11) from `RETROFIT.md`, among them step
+   5's extraction plan for your `CLAUDE.md` and the mandatory step 10.
+   Claude resolves the proposals with you one question at a time, then
    runs `python3 "$T/bin/retrofit-interview" synthesize`, which writes
    `bootstrap.config.yaml`.
 4. Claude shows you the plan from `bootstrap-install --dry-run` and, when you
@@ -432,8 +435,8 @@ bootstrap-installer/
 - **Waits for a running loop** — before its first write, an install locks
   `.claude/.bootstrap-state.json.lock` (and, on a retrofit,
   `.claude/.retrofit-state.json.lock`). If a loop wrapper or another install
-  holds the lock for 30 seconds, the install exits **4** and writes nothing
-  but an empty lock file; re-run it once the other process has finished.
+  holds the lock for 30 seconds, the install exits **4** and writes at most
+  an empty lock file; re-run it once the other process has finished.
 - **Inspectable** — `--dry-run` prints the full plan; nothing is written blind.
 - **Faithful to Bootstrap-Protocol-v2-8-0.md** — encodes the skip-policy invariants
   (e.g. queue mode requires loop or goal mode), the archetype principle

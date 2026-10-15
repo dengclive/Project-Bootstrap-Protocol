@@ -61,8 +61,8 @@ config.
    surface it verbatim; do not tell the operator the install succeeded.
    (Exit 2 is a config refusal — nothing was written; an unparseable
    config names its file and line. Exit 4 means a loop wrapper or another
-   install held a state lock, so nothing but an empty lock file was
-   written: re-run when it is free. Exit 0 is the only outcome
+   install held a state lock, so the run wrote at most an empty lock
+   file: re-run when it is free. Exit 0 is the only outcome
    whose enforcement was verified.) On exit 0, still surface every
    `warning:` line on stderr, verbatim: the apply repeats the dry run's,
    and names each of the operator's own hook commands that begins
@@ -83,16 +83,17 @@ config.
    `.claude/merge-back.sh <branch>`. The installer prints the block only
    on exit 0, never under `--dry-run` or `--adopt`, and only while the
    project has no task file under `.claude/specs/*/tasks/`. Until the
-   state file records the Phase 9 decision (R6 on a retrofit), the block
-   offers the smoke test before the chain, and until it records the
-   bootstrap complete, its last line says how to finish the bootstrap. In
-   a fresh clone of a greenfield project, whose state file does not record
-   whether the bootstrap finished, it offers neither, and its last line
-   says so. While a steering doc is still the installer's stub, a line
-   names it and the phases that fill it in. Fill in the steering docs that
-   line names with the operator first. Offer the smoke test and the
-   completion step only when the block does, and mark the bootstrap
-   complete only after the smoke test ran or the operator skipped it.
+   state file records the Phase 9 decision (R6 on a retrofit) or a
+   complete bootstrap, the block offers the smoke test before the chain,
+   and until it records the bootstrap complete, its last line says how to
+   finish the bootstrap. Where a greenfield state file does not record
+   whether the bootstrap finished, as in a fresh clone, it offers neither,
+   and its last line says so. While a steering doc is still the
+   installer's stub, a line names it and the phases that fill it in. Fill
+   in the steering docs that line names with the operator first. Offer
+   the smoke test and the completion step only when the block does, and
+   mark the bootstrap complete only after the smoke test ran or the
+   operator skipped it.
 
 ## Why this is split from the interview
 

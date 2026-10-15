@@ -8,7 +8,7 @@ protocol-doc-snapshot-retire row.
 
   1. Freeze exception 85. Its seven action counts and seven digests are
      pinned below as LITERALS, the values commit 4's re-baseline set and
-     fix rounds 1 and 2 moved (their digests only). This
+     fix rounds 1, 2 and 3 moved (their digests only). This
      suite never reads the golden suites' EXPECTED_* tables: a row that
      reads a live table moves with the next re-baseline and turns red while
      its record stays true (X2; review freeze F10). The changelog's table
@@ -116,27 +116,28 @@ check("the changelog's WP4 entry is found, above the WP3 entry", bool(CL))
 # Pinned as data: the values commit 4 (9ba6699) wrote into
 # EXPECTED_ACTION_COUNTS and EXPECTED_DIGESTS (tests/test_greenfield_golden.py)
 # and EXPECTED_RETROFIT_COUNTS and EXPECTED_RETROFIT_DIGESTS
-# (tests/test_retrofit.py), with the digests fix rounds 1 and 2 re-baselined
-# in the same exception (the counts did not move). Never read from those
+# (tests/test_retrofit.py), with the digests fix rounds 1, 2 and 3
+# re-baselined in the same exception (the counts did not move). Never read
+# from those
 # tables (freeze F10).
 _COUNTS = {"default": 66, "full_autonomous": 78, "design_steering": 67,
            "sdk_callable": 67, "gates_off": 59, "retrofit service": 89,
            "retrofit agent": 103}
 _DIGESTS = {
     "default":
-        "8acdbe3fcd9495929265a4dd6975c8c92cfc606e71d4ac08e459fc25b8c1f399",
+        "54693706c8df3a9f7e561c2ac2bd85c7f9bdd4ae5b8775e9e6a3eadb5cec5fdc",
     "full_autonomous":
-        "559b223d28973f16ca008ba0c06374630daa589573164711cebb5ecdba0f4a8e",
+        "f588c8deedbe9c22c3a9ac6693e33ad8743f3677765ddbdcd7a6b9b940291683",
     "design_steering":
-        "39e58db571a82bbb61c0b7f09e4e435de3b2dbe9573cc0a5b1fe3beaafa90373",
+        "1914baae97162edd47989cd2c38a7a8661e4eb77ee51daaf3175d21ac05a38df",
     "sdk_callable":
-        "0878463901e8aed7e9365a8ef6af2a98265181d7173fd5c159d8fe3b223b56f2",
+        "e2a44202b24a099b46889f09c80dd55583e5b8d8d1e6feae817ad62b9683c878",
     "gates_off":
-        "13bb6e528af058d50dccfda941e0c3304cefcbd0d81de26e701f82ad1aa5aac1",
+        "f5ed3f9f5705c3c7958ff198219ac1a8850df9f1ba329f9865707647d65865ea",
     "retrofit service":
-        "01f7e7f40f1fd395c591f1b5745fcd43885a7b55f12caf33d7d5c20bd7da59d1",
+        "46d46ce0daf629200f4e23c2cdefbb43f836202f11bf6cd3715bdc59e3b0a3ef",
     "retrofit agent":
-        "b9bc6b155503eaa8d345698e7690853cadeb6db8255557d072dc8b32d09d2915",
+        "fd94080015d091542b0e01ebac3d16676dfed86ddd67ce305f85a1c9fab45a21",
 }
 _FIXTURES = r"(default|full_autonomous|design_steering|sdk_callable|" \
             r"gates_off|retrofit service|retrofit agent)"
@@ -231,7 +232,7 @@ _src = read("lib/installer.py")
 # reads as main() prints it.
 _src_joined = re.sub(r'"\s*\n\s*f?"', "", _src)
 _held = ("is held by another process (a loop wrapper or another install); "
-         "nothing but an empty lock file was written. Re-run when it is "
+         "this run wrote at most an empty lock file. Re-run when it is "
          "free.")
 check(f"section 3.2 (10): the held-lock exit code is installer.EXIT_LOCKED "
       f"({getattr(installer, 'EXIT_LOCKED', None)}), after "
@@ -251,6 +252,18 @@ check("section 3.2 (11): the kept-file warnings name what each kept file "
       and all(h in _src for h in ('"## Do Not Touch"',
                                   '"## Documentation Policy"',
                                   '"## Never"')))
+# [WP4 fix round 3 / LM-3, LC2-6, LR-6, LM-7] What the ci-cd.md warning
+# and the unknown line can say: no claim the file names no stop, and a
+# missing key's cause only as an example.
+check("section 3.2 (11) and (12): the ci-cd.md warning is what the search "
+      "found, and a fresh clone is an example of a state file without the "
+      "key, as the code says",
+      "or in which the installer finds no mention of a stopping point;"
+      in _s32 and "names none" not in _s32
+      and "(a fresh clone's, for example)" in _s32
+      and "the installer found no mention of a stopping point" in _src_joined
+      and "does not record whether the bootstrap finished. If it finished"
+      in _src_joined, _s32[-900:])
 check("section 3.2 (11): the no-manifest remedy is per file, and the note "
       "says not to use --adopt, as _no_manifest_remedy does",
       "move the file aside and re-install" in _s32
@@ -354,7 +367,9 @@ check("section 7.1: the note names protocol_doc (an absolute path, or "
                               "`.claude/.bootstrap-state.json.lock`",
                               "`.claude/.retrofit-state.json.lock`",
                               "`<state>.pre-unparsed-<UTC stamp>`",
-                              "`--uninstall` leaves them")),
+                              "`--uninstall` leaves them"))
+      and "a file can lack it, for example one an earlier install wrote "
+          "before the key existed" in _s71,
       _s71[:400])
 shutil.rmtree(_TMP, ignore_errors=True)
 
@@ -466,6 +481,29 @@ check("Z-65 to Z-68 are fix round 2's, the layer names them, and each row "
           "records/R3", "counts/F2", "counts/F5", "counts/F6", "counts/F7",
           "LC-12 (e)", "LC-12 (f)", "macOS")),
       {r: _rows[r][:120] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
+# [WP4 fix round 3] The second re-review's residue and corrections.
+check("fix round 3: Z-65 describes step 2's pull, Z-66 is mostly older "
+      "text and lists the files and the live hook messages, Z-67 (b) is a "
+      "partial list, and Z-68 files LM-2, LP-11 and the two heuristics' "
+      "residuals",
+      "pulls the default branch (`git pull --ff-only`)" in _rows["Z-65"]
+      and "mostly in text that predates WP4" in _rows["Z-66"]
+      and all(f"`.claude/{f}`" in _rows["Z-66"] for f in (
+          "githooks/spec-check.sh", "hooks/audio-alerts.config",
+          "hooks/drift-detector.sh", "hooks/spec-gate-entry.sh",
+          "learnings/README.md", "sessions/README.md", "specs/INDEX.md",
+          "specs/README.md", "steering/spec-versioning.md",
+          "steering/structure.md"))
+      and "live instructions injected into the session" in _rows["Z-66"]
+      and "the `/escalate` command among them, which is WP4's"
+          in _rows["Z-66"]
+      and "these gaps are examples, not the list (review LR-1)"
+          in _rows["Z-67"]
+      and all(i in _rows["Z-68"] for i in ("(m) LM-2", "LP-11",
+                                            "(n) LM-3, LC2-4",
+                                            "(o) LC2-3, LM-6"))
+      and "Fix round 3 (2026-10-15), from the second re-review" in BL,
+      {r: _rows[r][:160] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
 check("X-30a's WP4 layer says greenfield is done only with the skills on",
       "Greenfield, with `workflow.install_skills` on (the default): done."
       in _rows["X-30a"] and "Greenfield with the skills off: still open"

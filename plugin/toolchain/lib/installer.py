@@ -60,12 +60,12 @@ INSTALLER_VERSION = "1.1.0"
 # whose enforcement was verified.
 EXIT_UNENFORCED = 3
 # [WP4 8b] Exit code for "another process held a state lock for the whole
-# wait, so this run wrote nothing but an empty lock file" (_install_lock).
+# wait, so this run wrote at most an empty lock file" (_install_lock).
 # Distinct from 2, which means fix the config, and 3, which means files were
-# written: here the config is fine and the tree is as it was, but for that
-# lock file, so the next move is to re-run once the loop wrapper or the
-# other install has finished. 1 is `--ic-checks` failing and an uncaught
-# error, so 4 is the next free code.
+# written: here the config is fine and the tree is as it was, but for at
+# most that lock file, so the next move is to re-run once the loop wrapper
+# or the other install has finished. 1 is `--ic-checks` failing and an
+# uncaught error, so 4 is the next free code.
 EXIT_LOCKED = 4
 
 
@@ -839,8 +839,9 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     """[WP4 8b] A real apply (not --dry-run) runs under _install_lock, from
     before its first write to after the manifest write, so a loop wrapper's
     state update and an install never interleave, and a run that cannot get
-    the lock writes nothing (StateLockHeld; main() exits EXIT_LOCKED). The
-    three state writers run inside it and take no lock of their own."""
+    the lock writes at most an empty lock file (StateLockHeld; main() exits
+    EXIT_LOCKED). The three state writers run inside it and take no lock of
+    their own."""
     if dry:
         return _apply_plan(root, plan, cfg, dry=dry, force=force,
                            adopt=adopt)
@@ -4264,9 +4265,13 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
         `cmd` as the command it is, not inside a longer one (`make
         test-all` for `make test`): with code spans, one span is the
         command, whitespace collapsed; with none, the cell without emphasis
-        marks is the command, or starts with it and a parenthetical note."""
+        marks is the command, or starts with it and a parenthetical note.
+        [WP4 fix round 3 / LC2-3] A span opens with a run of backticks and
+        closes at the next run as long (CommonMark), so ``make test`` is
+        one span; the collapse also drops the space CommonMark strips."""
         cmd = " ".join(cmd.split())
-        spans = re.findall(r"`([^`]*)`", cell)
+        spans = [m.group(2) for m in
+                 re.finditer(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", cell)]
         if spans:
             return any(" ".join(sp.split()) == cmd for sp in spans)
         return _plain(cell) == cmd or _plain(cell).startswith(cmd + " (")
@@ -4289,9 +4294,11 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
             if (ln.lstrip().startswith("|") and len(cells) >= 2
                     and cells[0] == "Test"):
                 # [WP4 fix round 1 / F3] Stale only when the cell does not
-                # name the command: Claude fills the table in Phase 2, and a
-                # note after the command, or bold around it, is still the
-                # command (_names). Quoted as written.
+                # name the command: Claude fills the table in Phase 2. [WP4
+                # fix round 3 / LR-4] Since fix round 2 a code span equal to
+                # the command names it, and with no code span, the cell
+                # equal to it or followed by a parenthetical note (_names).
+                # Quoted as written.
                 have = cells[1]
                 if want and not _names(have, want):
                     msgs.append(
@@ -4324,19 +4331,23 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
         # names one, so a kept opt-out ci-cd.md names no stop. [WP4 fix
         # round 2 / LC-3, MS-8] Phase 5 prescribes no heading, so a stop
         # stated under another one, or in a bold line, is still a stop.
+        # [WP4 fix round 3 / LM-3, LC2-4] A text search cannot tell a stop
+        # put in other words from none, so the warning says only what it
+        # found (backlog Z-68).
         stop = ("the agent stops after its last commit for the task, and "
                 "never pushes" if cfg["project"].get("cicd_opt_out") else
                 "the agent stops after it opens a pull request, and a "
                 "person merges it")
         msgs.append(
             f"{rel} was left as it is (see its SKIP line), so it {did} the "
-            f"'## Agent stopping point' section, and nothing in it says "
-            f"where the agent stops."
+            f"'## Agent stopping point' section, and the installer found no "
+            f"mention of a stopping point in it."
             + ("" if claude_kept else " CLAUDE.md's lifecycle ends at the "
                "stop this file should name.")
             + f" This release's stop for this config: {stop}."
-            + _remedy(rel, " Add a section that says where the agent "
-                           "stops."))
+            + _remedy(rel, " If the file says where the agent stops in "
+                           "other words, nothing needs doing; otherwise, "
+                           "add a section that says so."))
 
     rel = "CLAUDE.md"
     text = _read(rel) if claude_kept else None
@@ -4545,11 +4556,13 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     [WP4 fix round 2 / CR-1, MS-7] Once the Phase 9 decision is recorded,
     the completion line no longer asks to record it. A greenfield state
     file without bootstrap_complete is unknown, not incomplete (protocol
-    Recovery & State): a fresh clone's install re-creates the file, which
-    git ignores, and an install before WP4 never wrote the key. Then
-    neither line is offered, and one line in place of the completion line
-    says the file does not record it. A retrofit keeps its completion
-    line, which repairs a fresh clone's reset retrofit_complete."""
+    Recovery & State), as in a fresh clone, whose install re-creates the
+    file git ignores. Then neither line is offered, and one line in place
+    of the completion line says the file does not record it. [WP4 fix
+    round 3 / LC2-6, LM-7] That line names no cause: a fresh clone is one
+    of several, a state file the parse guard replaced among them. A
+    retrofit keeps its completion line, which repairs a fresh clone's reset
+    retrofit_complete."""
     specs = root / ".claude" / "specs"
     try:
         if any(specs.glob("*/tasks/*")):
@@ -4661,9 +4674,7 @@ def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     elif unknown:
         lines.append(
             "The state file, .claude/.bootstrap-state.json, does not record "
-            "whether the bootstrap finished: a fresh clone's install "
-            "re-creates the file, because git ignores it, and an install "
-            "before this release never wrote the key. If it finished, set "
+            "whether the bootstrap finished. If it finished, set "
             "bootstrap_complete to true there, or ask Claude to; if not, "
             + ("" if decided else "take the Phase 9 smoke test and ")
             + "finish Phase 10.")
@@ -4845,8 +4856,8 @@ def main(argv: list[str]) -> int:
         # it, and a retrofit run opens the bootstrap lock before it waits on
         # the retrofit one (_install_lock).
         print(f"error: {held.path} is held by another process (a loop "
-              f"wrapper or another install); nothing but an empty lock file "
-              f"was written. Re-run when it is free.", file=sys.stderr)
+              f"wrapper or another install); this run wrote at most an empty "
+              f"lock file. Re-run when it is free.", file=sys.stderr)
         return EXIT_LOCKED
     print(f"\nDone. create={summary['create']} update={summary['update']} "
           f"unchanged={summary['unchanged']} skipped={summary['skipped']} "
