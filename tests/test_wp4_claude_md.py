@@ -398,7 +398,8 @@ print("\n=== The implementer and the urgent list (fix round 7 / Z-69) ===")
 # implementer committed a 🔔 item and reported it afterwards. Its body now
 # says the urgent list binds it: stop, commit nothing for the item, and name
 # it first in the report; the main session records it with /escalate where
-# the skills are installed.
+# the skills are installed. [WP4 fix round 8 / LC7-2] The stop and the Do
+# Not Touch sentence are checked too.
 URGENT_IMPL = ("Read the urgent list in `CLAUDE.md` (the 🔔 items) before "
                "you start: it binds you as it binds the main session.")
 
@@ -408,6 +409,8 @@ def urgent_impl_ok(cfg, plan):
     imp, skills = flat(body), cfg["workflow"]["install_skills"]
     return ("\n## Urgent items (🔔)\n" in body and URGENT_IMPL in imp
             and "do not make that change, and commit nothing for it." in imp
+            and "Stop and report it:" in imp
+            and "A Do Not Touch path in `tech.md` is one of them." in imp
             and "start your report with a line that names the 🔔 item" in imp
             and ("/escalate" in imp) == skills
             and ("records it with `/escalate` and asks the operator." in imp

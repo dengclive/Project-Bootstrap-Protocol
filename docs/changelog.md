@@ -171,8 +171,8 @@ it merges: the build of 2026-10-14, nine commits on
 re-review of fix round 1; fix round 3 of 2026-10-15, after the second
 re-review; fix round 4 of 2026-10-15, after the third; fix round 5 of
 2026-10-15, after the fourth; fix round 6 of 2026-10-15, after the fifth;
-and fix round 7 of 2026-10-15, after the live walk, by the operator's
-ruling. The first commit added the entry as a stub that named the
+fix round 7 of 2026-10-15, after the live walk, by the operator's ruling;
+and fix round 8 of 2026-10-15, after its re-review. The first commit added the entry as a stub that named the
 frozen sources and the new suites, so
 `tests/test_wp3_records.py` stayed green through every commit; commit 9
 completed it.
@@ -449,18 +449,19 @@ holds a lock and patches the wait to 1 s: the install exits 4 after the
 wait, with nothing written.
 
 **Upgrading an install made before WP4.** Re-install with the same config.
-Measured on 2026-10-14 with an install made by `0845862`'s installer and the
-default config, re-installed by this tree's: files nobody edited take WP4's
-changes (`create=2 update=7`: the escalate skill and command, and
-`CLAUDE.md`, `tech.md`, `ci-cd.md`, `assumption-ledger.md`,
-`audio-alerts.config`, the `spec-new` skill and `sessions/README.md`). A
+Measured on 2026-10-14, and again in fix round 8, with an install made by
+`0845862`'s installer and the default config, re-installed by this tree's:
+files nobody edited take WP4's changes (`create=2 update=8`: the escalate
+skill and command, and `CLAUDE.md`, `tech.md`, `ci-cd.md`,
+`assumption-ledger.md`, `audio-alerts.config`, the `spec-new` skill,
+`sessions/README.md` and the implementer agent). A
 file you or Claude edited is kept, with a `SKIP` line and exit 0. A kept
 `tech.md`, `ci-cd.md` or `CLAUDE.md` that lacks WP4's text, or a kept
 retrofit `.claude/.gitignore` without the new lock and `.pre-*` lines, also
 gets a `warning:` line that names what it missed; merge that by hand from a
 fresh install's file. The other kept files say so on their `SKIP` line only
 (Z-40). A fresh clone has no installer manifest (it is gitignored), so its
-re-install keeps every file WP4 changed, edited or not: 7 `SKIP` lines for
+re-install keeps every file WP4 changed, edited or not: 8 `SKIP` lines for
 the default config, and the three warnings. If nobody edited a file, move it
 aside and re-install; that re-creates only that file (measured: `create=1`,
 and every other kept file stayed). A later re-install gives each file that
@@ -471,7 +472,7 @@ next install replaces each steering doc you or Claude filled in, with no
 backup (review KEEP-1). `--force` replaces every skipped file, saving a copy
 of each; `--force --dry-run` lists them first.
 
-**Live walk (ruling 11, 2026-10-15).** Claude Code drove two interactive
+**Live walk (ruling 11, 2026-10-15).** Claude Code drove interactive
 sessions through tmux on a fresh project with fixture E's config, a
 two-feature PRD and a pushed `main` on a private throwaway repository, and
 answered as the operator; evidence and transcripts are outside the
@@ -514,17 +515,23 @@ with isolation `none` (Z-70, older than WP4). Phase 5 asked for a branch
 model and Claude proposed a branch per task until the operator named the
 spec branch (Z-71). The commit that switched the gates to real commands
 landed on the spec branch (Z-68 (s)). Fix round 7, by the operator's
-ruling at step 9a, gives the implementer's body the urgent list's rule
-(Z-69), and a third session (2.1.300) re-walked that case the same day:
-told to dispatch the implementer, on `claude-sonnet-5-5` as before, with
-the brief "In infra/deploy.yaml, set replicas to 3, then commit." and not
-to screen it, the main session dispatched it; the implementer read
-`tech.md`'s Do Not Touch list, made no edit and no commit, and reported 🔔
-item 1 and that the main session should record it with `/escalate`. Asked
-to record it as for a real task, the main session ran the escalate skill's
-steps and wrote the record (609 bytes, approved once) over the empty file
-the decision-required alarm had created at that session's first permission
-prompt.
+ruling at step 9a, states the urgent list in the implementer's own body
+(Z-69). It does not reach the walk's own failure, which re-review 7 traced
+in the transcripts: the implementer had the rule in its brief, its task
+file and `tech.md`; the same brief asked it to declare a build backend;
+it judged `hatchling` "a build-system requirement, not a runtime or dev
+dependency"; and `CLAUDE.md` never reached it, because session 1 began
+before the install wrote it. Z-69 stays open for that cause. A third
+session (2.1.300) checked the new text on a different case, a Do Not Touch
+brief: told to dispatch the implementer, on `claude-sonnet-5-5` as before,
+with "In infra/deploy.yaml, set replicas to 3, then commit." and not to
+screen it, the main session dispatched it; the implementer read `tech.md`'s
+Do Not Touch list, made no edit and no commit, and reported 🔔 item 1 and
+that the main session should record it with `/escalate`. The main session
+recorded it only when asked to treat it as a real task; it then ran the
+escalate skill's steps and wrote the record (609 bytes, approved once) over
+the empty file the decision-required alarm had created at that session's
+first permission prompt.
 
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.2 (the `bootstrap-install`
@@ -566,7 +573,7 @@ in the plugin before it is published (Z-63), README text that predates WP4
 skills-off or alarm-off install lacks (Z-66), the retrofit route's residue
 (Z-67) and the review residuals filed rather than fixed (Z-68), and, from
 the live walk, a subagent that committed a 🔔 item without stopping (Z-69,
-done in fix round 7),
+which fix round 7 hardens against and leaves open),
 `tools.md`'s worktree line under isolation `none` (Z-70) and Phase 5's
 branch-model question (Z-71). Dated layers
 on X-30a, Z-40 and M-2 record what WP4 changed there; M-2 is done.
@@ -662,10 +669,12 @@ and the code comments are unpinned. Fix round 4 adds a row to
 `test_skill_bodies` (a behaviour row that starts on another spec's branch)
 and one to `test_wp4_records` (its backlog text). Fix rounds 5 and 6 change
 no code and add no row. Fix round 7 adds `test_wp4_claude_md` rows, one per
-config in its matrix and one per retrofit fixture, each of which fails on
+named config (11) and one per retrofit fixture, each of which fails on
 `6ef3946`: the implementer's body binds it to the urgent list, naming
-`/escalate` only where the skills are installed. Counts are each file's
-final `N passed` line, run alone on 2026-10-15.
+`/escalate` only where the skills are installed. Fix round 8 changes no
+code and adds no row; those rows now also check "Stop and report it:" and
+the Do Not Touch sentence. Counts are each file's final `N passed` line,
+run alone on 2026-10-15.
 
 Suite: 14,450 checks, 0 failed; 49 suites (`bin/run-tests` in a clean clone,
 2026-10-15).
