@@ -8,7 +8,7 @@ protocol-doc-snapshot-retire row.
 
   1. Freeze exception 85. Its seven action counts and seven digests are
      pinned below as LITERALS, the values commit 4's re-baseline set and
-     fix rounds 1 to 4 moved (their digests only). This
+     fix rounds 1 to 4 and 7 moved (their digests only). This
      suite never reads the golden suites' EXPECTED_* tables: a row that
      reads a live table moves with the next re-baseline and turns red while
      its record stays true (X2; review freeze F10). The changelog's table
@@ -116,7 +116,7 @@ check("the changelog's WP4 entry is found, above the WP3 entry", bool(CL))
 # Pinned as data: the values commit 4 (9ba6699) wrote into
 # EXPECTED_ACTION_COUNTS and EXPECTED_DIGESTS (tests/test_greenfield_golden.py)
 # and EXPECTED_RETROFIT_COUNTS and EXPECTED_RETROFIT_DIGESTS
-# (tests/test_retrofit.py), with the digests fix rounds 1 to 4
+# (tests/test_retrofit.py), with the digests fix rounds 1 to 4 and 7
 # re-baselined in the same exception (the counts did not move). Never read
 # from those
 # tables (freeze F10).
@@ -125,19 +125,19 @@ _COUNTS = {"default": 66, "full_autonomous": 78, "design_steering": 67,
            "retrofit agent": 103}
 _DIGESTS = {
     "default":
-        "2b49e07beb0f3083c89da0169bf1f63084286033f0e603cadd4056786d015acb",
+        "ad5e515d8597e144da4546f50bd3c61e979b37cf5fa78cd2d0390a973da991b5",
     "full_autonomous":
-        "463979830c46eee571d9688df051e3237a4f756ff64f943bfe944afd57f47a81",
+        "a963da97e1e833b8a62fbe6b5447a6766867dd7edcf6b2601c6472fcf1511965",
     "design_steering":
-        "3e9f89293c4343e8d692b597c7737addb24b38ce1305491628b779f83257189e",
+        "a6c10556687f28d30b665915abe2cd1f8413de033b1c2878d85991dc08adabc1",
     "sdk_callable":
-        "3f3df46b4bd1be1dd64f1552cbc019718f81bf6466cfb04fcf7e7f14d7761c35",
+        "e2021cb283ceaebb3d4243766baf3f4673fc471a073c8bc015eda575ac549235",
     "gates_off":
-        "d0a6f1bb77943519a636ebd0cf8142df7e47766a5a2e6d579337e5129b3f3718",
+        "dfa6f03d06050efe9cfa710abd3ade13ceea14f34df27eb528a8700a95a4a3a1",
     "retrofit service":
-        "afe60526014a180f55a1740341a605139c39ac9cb6df4b4f118f28d2e0f00ac3",
+        "ba444547dd5d05da2dead337fb45424e5cc104f05dfaa9e7a8bd2e072ed18988",
     "retrofit agent":
-        "f598709305c35ae5db220042815fde5fe83ddab83e38cba59c185797580320d8",
+        "4f82c1657ab7b4356a9f71ab5675d7a8e74eed3ee86a91d1f3c6952f2e9367b3",
 }
 _FIXTURES = r"(default|full_autonomous|design_steering|sdk_callable|" \
             r"gates_off|retrofit service|retrofit agent)"

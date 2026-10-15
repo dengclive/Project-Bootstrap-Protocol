@@ -393,6 +393,45 @@ check("retrofit, deps off, R8.D skipped: item 4 drops the spec-versioning "
       section(_skip_md, "Urgent escalations"))
 
 # --------------------------------------------------------------------------- #
+print("\n=== The implementer and the urgent list (fix round 7 / Z-69) ===")
+# [WP4 fix round 7 / Z-69, operator ruling 2026-10-15] In the live walk an
+# implementer committed a 🔔 item and reported it afterwards. Its body now
+# says the urgent list binds it: stop, commit nothing for the item, and name
+# it first in the report; the main session records it with /escalate where
+# the skills are installed.
+URGENT_IMPL = ("Read the urgent list in `CLAUDE.md` (the 🔔 items) before "
+               "you start: it binds you as it binds the main session.")
+
+
+def urgent_impl_ok(cfg, plan):
+    body = plan[".claude/agents/implementer.md"]["body"]
+    imp, skills = flat(body), cfg["workflow"]["install_skills"]
+    return ("\n## Urgent items (🔔)\n" in body and URGENT_IMPL in imp
+            and "do not make that change, and commit nothing for it." in imp
+            and "start your report with a line that names the 🔔 item" in imp
+            and ("/escalate" in imp) == skills
+            and ("records it with `/escalate` and asks the operator." in imp
+                 if skills else
+                 "the main session stops and asks the operator." in imp))
+
+
+for label, (cfg, plan) in PLANS.items():
+    check(f"{label}: implementer.md binds the implementer to the urgent "
+          f"list: stop, commit nothing for the item, name it first in the "
+          f"report" + (", recorded with /escalate"
+                       if cfg["workflow"]["install_skills"]
+                       else ", with no /escalate to name"),
+          urgent_impl_ok(cfg, plan),
+          section(plan[".claude/agents/implementer.md"]["body"],
+                  "Urgent items"))
+for _fx in ("SERVICE_RETROFIT_CFG", "AGENT_RETROFIT_CFG"):
+    _rc, _rp = plan_of(_retrofit_fixture(_fx))
+    check(f"retrofit {_fx}: implementer.md carries the same urgent section",
+          urgent_impl_ok(_rc, _rp),
+          section(_rp[".claude/agents/implementer.md"]["body"],
+                  "Urgent items"))
+
+# --------------------------------------------------------------------------- #
 print("\n=== Thin: CLAUDE.md within budget (PRD Phase 8 step 2) ===")
 # The golden fixtures' cap is 80 (tests/test_merge_back.py). Over this
 # matrix the plan's budget is 76: the measured worst is 70, and the queue

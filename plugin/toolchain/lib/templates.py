@@ -10442,6 +10442,26 @@ _IMPLEMENTER_WRITES = (
     "stop and report it. If you use the `test-author` skill, run it here, "
     "in your own checkout, so its tests are committed with your source.\n")
 
+# [WP4 fix round 7 / Z-69, operator ruling 2026-10-15] The urgent list binds
+# the implementer too. In the WP4 live walk an implementer committed a
+# package outside tech.md's Stack table, a 🔔 item in that session's
+# CLAUDE.md, and reported it afterwards; the reviewer caught it. The
+# implementer stops and reports, and the main session records the stop:
+# /escalate writes the main session's record, and with the skills off there
+# is no /escalate to name.
+def _implementer_urgent(cfg):
+    then = ("the main session records it with `/escalate` and asks the "
+            "operator" if cfg["workflow"]["install_skills"] else
+            "the main session stops and asks the operator")
+    return ("\n## Urgent items (🔔)\n\n"
+            "Read the urgent list in `CLAUDE.md` (the 🔔 items) before you "
+            "start: it binds you as it binds the main session. A Do Not "
+            "Touch path in `tech.md` is one of them. When the task needs one, "
+            "do not make that change, and commit nothing for it. Stop and "
+            "report it: start your report with a line that names the 🔔 "
+            f"item, so that {then}.\n")
+
+
 _IMPLEMENTER_REPORT = (
     "```\n"
     "BRANCH: <git branch --show-current>\n"
@@ -10816,6 +10836,7 @@ def _agents(cfg):
             f"do-not-retry. Its canonical shape is in `.claude/specs/"
             f"progress-template.md`.\n"
             f"{_IMPLEMENTER_WRITES}"
+            f"{_implementer_urgent(cfg)}"
             f"{_tests_first_section(cfg)}"
             f"{_isolation_note(cfg)}{_landing_note(cfg)}"),
         "reviewer": (
@@ -14706,6 +14727,10 @@ def _retrofit_implementer_agent(cfg):
             f"Self-contained: subagents do not inherit the default system "
             f"prompt. Read steering + spec + task, implement, run gates, "
             f"commit, log decisions via decision-log.\n"
+            # [WP4 fix round 7] Before the writes section here, so that with
+            # TDD off it still runs straight into the retrofit rules (WP3's
+            # tests/test_wp3_agents_handoff.py pins that join).
+            f"{_implementer_urgent(cfg)}"
             f"{_IMPLEMENTER_WRITES}"
             f"{_tests_first_section(cfg, retrofit=True)}"
             f"\n## Retrofit-specific behavior\n\n"

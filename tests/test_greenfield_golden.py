@@ -3749,7 +3749,13 @@ EXPECTED_DIGESTS = {
         # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
         # loses its reason clause, review CRIT3-1), and no other; count
         # 66.
-        "2b49e07beb0f3083c89da0169bf1f63084286033f0e603cadd4056786d015acb",
+        # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined
+        # in the same exception (WP4 fix round 7, operator ruling after
+        # the live walk). Measured on the emitted plans against the
+        # previous digest (2b49e07b...), per file: 1 body moves,
+        # agents/implementer.md (the urgent list binds the implementer,
+        # Z-69), and no other; count 66.
+        "ad5e515d8597e144da4546f50bd3c61e979b37cf5fa78cd2d0390a973da991b5",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4452,7 +4458,13 @@ EXPECTED_DIGESTS = {
         # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
         # loses its reason clause, review CRIT3-1), and no other; count
         # 78.
-        "463979830c46eee571d9688df051e3237a4f756ff64f943bfe944afd57f47a81",
+        # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined
+        # in the same exception (WP4 fix round 7, operator ruling after
+        # the live walk). Measured on the emitted plans against the
+        # previous digest (46397983...), per file: 1 body moves,
+        # agents/implementer.md (the urgent list binds the implementer,
+        # Z-69), and no other; count 78.
+        "a963da97e1e833b8a62fbe6b5447a6766867dd7edcf6b2601c6472fcf1511965",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -5082,7 +5094,13 @@ EXPECTED_DIGESTS = {
         # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
         # loses its reason clause, review CRIT3-1), and no other; count
         # 67.
-        "3e9f89293c4343e8d692b597c7737addb24b38ce1305491628b779f83257189e",
+        # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined
+        # in the same exception (WP4 fix round 7, operator ruling after
+        # the live walk). Measured on the emitted plans against the
+        # previous digest (3e9f8929...), per file: 1 body moves,
+        # agents/implementer.md (the urgent list binds the implementer,
+        # Z-69), and no other; count 67.
+        "a6c10556687f28d30b665915abe2cd1f8413de033b1c2878d85991dc08adabc1",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5308,7 +5326,13 @@ EXPECTED_DIGESTS = {
         # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
         # loses its reason clause, review CRIT3-1), and no other; count
         # 67.
-        "3f3df46b4bd1be1dd64f1552cbc019718f81bf6466cfb04fcf7e7f14d7761c35",
+        # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined
+        # in the same exception (WP4 fix round 7, operator ruling after
+        # the live walk). Measured on the emitted plans against the
+        # previous digest (3f3df46b...), per file: 1 body moves,
+        # agents/implementer.md (the urgent list binds the implementer,
+        # Z-69), and no other; count 67.
+        "e2021cb283ceaebb3d4243766baf3f4673fc471a073c8bc015eda575ac549235",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5350,7 +5374,13 @@ EXPECTED_DIGESTS = {
         # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
         # loses its reason clause, review CRIT3-1), and no other; count
         # 59.
-        "d0a6f1bb77943519a636ebd0cf8142df7e47766a5a2e6d579337e5129b3f3718",
+        # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined
+        # in the same exception (WP4 fix round 7, operator ruling after
+        # the live walk). Measured on the emitted plans against the
+        # previous digest (d0a6f1bb...), per file: 1 body moves,
+        # agents/implementer.md (the urgent list binds the implementer,
+        # Z-69), and no other; count 59.
+        "dfa6f03d06050efe9cfa710abd3ade13ceea14f34df27eb528a8700a95a4a3a1",
 }
 
 EXPECTED_ACTION_COUNTS = {

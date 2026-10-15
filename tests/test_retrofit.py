@@ -2671,10 +2671,15 @@ EXPECTED_RETROFIT_DIGESTS = {
     # (46d46ce0... / fd940800...): the round's one template change is
     # spec-new step 2's text (its spec/* bullet loses its reason clause,
     # review CRIT3-1); counts 89 / 103 unchanged.
+    # [freeze-exception no. 85, 2026-10-15, fix round 7] Re-baselined in
+    # the same exception (WP4 fix round 7), against the previous digests
+    # (afe60526... / f5987093...): the round's one template change is the
+    # implementer body's urgent section, which the retrofit flavour places
+    # before its writes section (Z-69); counts 89 / 103 unchanged.
     "service":
-        "afe60526014a180f55a1740341a605139c39ac9cb6df4b4f118f28d2e0f00ac3",
+        "ba444547dd5d05da2dead337fb45424e5cc104f05dfaa9e7a8bd2e072ed18988",
     "agent":
-        "f598709305c35ae5db220042815fde5fe83ddab83e38cba59c185797580320d8",
+        "4f82c1657ab7b4356a9f71ab5675d7a8e74eed3ee86a91d1f3c6952f2e9367b3",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

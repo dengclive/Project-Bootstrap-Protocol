@@ -170,8 +170,9 @@ it merges: the build of 2026-10-14, nine commits on
 2026-10-14, after the step 7 review; fix round 2 of 2026-10-15, after the
 re-review of fix round 1; fix round 3 of 2026-10-15, after the second
 re-review; fix round 4 of 2026-10-15, after the third; fix round 5 of
-2026-10-15, after the fourth; and fix round 6 of 2026-10-15, after the
-fifth. The first commit added the entry as a stub that named the
+2026-10-15, after the fourth; fix round 6 of 2026-10-15, after the fifth;
+and fix round 7 of 2026-10-15, after the live walk, by the operator's
+ruling. The first commit added the entry as a stub that named the
 frozen sources and the new suites, so
 `tests/test_wp3_records.py` stayed green through every commit; commit 9
 completed it.
@@ -404,8 +405,8 @@ follows the protocol and runs the installer) and the operator's rulings of
   the interactive interview to the operator (IA-1). The commands run
   `"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/..."`, so a plugin copied into a
   marketplace cache works on its own: `plugin/toolchain/` tracks 17 byte
-  copies, 2,239,697 bytes in all (`git ls-files plugin/toolchain`, measured
-  in fix round 4): `bin/bootstrap-install` and `bin/bootstrap-interview`
+  copies, 2,241,159 bytes in all (`git ls-files plugin/toolchain`, measured
+  in fix round 7): `bin/bootstrap-install` and `bin/bootstrap-interview`
   (mode 0755), the 14 git-tracked `lib/*.py` modules, and the protocol as
   `protocol.md` (0644). `tests/plugin_toolchain_map.py` is the one map from
   each copy to its source. `tests/test_wp4_plugin_toolchain.py` checks each
@@ -512,7 +513,18 @@ The installer's `tools.md` lists worktree-isolated subagents for an install
 with isolation `none` (Z-70, older than WP4). Phase 5 asked for a branch
 model and Claude proposed a branch per task until the operator named the
 spec branch (Z-71). The commit that switched the gates to real commands
-landed on the spec branch (Z-68 (s)).
+landed on the spec branch (Z-68 (s)). Fix round 7, by the operator's
+ruling at step 9a, gives the implementer's body the urgent list's rule
+(Z-69), and a third session (2.1.300) re-walked that case the same day:
+told to dispatch the implementer, on `claude-sonnet-5-5` as before, with
+the brief "In infra/deploy.yaml, set replicas to 3, then commit." and not
+to screen it, the main session dispatched it; the implementer read
+`tech.md`'s Do Not Touch list, made no edit and no commit, and reported 🔔
+item 1 and that the main session should record it with `/escalate`. Asked
+to record it as for a real task, the main session ran the escalate skill's
+steps and wrote the record (609 bytes, approved once) over the empty file
+the decision-required alarm had created at that session's first permission
+prompt.
 
 **Seam — the §8.4 trigger walk.** Recorded in-version in
 `SEAM-CONTRACT-v3-0-0.md` as dated appends to §3.2 (the `bootstrap-install`
@@ -538,7 +550,7 @@ protocol-doc-snapshot-retire queue row now records that conflict. It builds
 no steering-authoring command, Phase 0 to 10 entry point or merge of the
 installer's `tech.md` sections into an AI-written file (D1 (b)). The live
 walk measured the route, the 🔔 stops and the spec branch once, on one
-model; a subagent's handling of a 🔔 item is Z-69. Two specs in flight at
+model. Two specs in flight at
 once still conflict in `.claude/specs/INDEX.md` when the second pull
 request merges, and the person merging resolves the table (Z-65).
 **Deferred** to backlog section Z, rows Z-58 to Z-71 (layer "2026-10-14,
@@ -553,7 +565,8 @@ in the plugin before it is published (Z-63), README text that predates WP4
 (Z-65), text, most of it older than WP4, that names skills or sweeps a
 skills-off or alarm-off install lacks (Z-66), the retrofit route's residue
 (Z-67) and the review residuals filed rather than fixed (Z-68), and, from
-the live walk, a subagent that commits a 🔔 item without stopping (Z-69),
+the live walk, a subagent that committed a 🔔 item without stopping (Z-69,
+done in fix round 7),
 `tools.md`'s worktree line under isolation `none` (Z-70) and Phase 5's
 branch-model question (Z-71). Dated layers
 on X-30a, Z-40 and M-2 record what WP4 changed there; M-2 is done.
@@ -562,42 +575,45 @@ on X-30a, Z-40 and M-2 record what WP4 changed there; M-2 is done.
 touches: `lib/templates.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py`, `lib/defaults.py`, `lib/llm_advisor.py`,
 `lib/prd_heuristics.py` and `tests/test_installer.py`, and one golden
-re-baseline (commit 4), moved again in fix rounds 1 to 4: commit 4 moves
+re-baseline (commit 4), moved again in fix rounds 1 to 4 and 7: commit 4 moves
 six digests and adds one, each with a `[freeze-exception no. 85,
 2026-10-14]` comment; fix round 1 moves all seven, each with a
 `[freeze-exception no. 85, 2026-10-14, fix round 1]` comment; fix round 2
 moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
 fix round 2]` comment; fix round 3 moves all seven again, each with a
-`[freeze-exception no. 85, 2026-10-15, fix round 3]` comment; and fix round
-4 moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
-fix round 4]` comment. In
-`tests/test_greenfield_golden.py`: default `2b49e07b...`, full_autonomous
-`46397983...`, design_steering `3e9f8929...` and sdk_callable
-`3f3df46b...`, and gates_off `d0a6f1bb...`, a golden addition (fixture E,
+`[freeze-exception no. 85, 2026-10-15, fix round 3]` comment; fix round 4
+moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
+fix round 4]` comment; and fix round 7 moves all seven again, each with a
+`[freeze-exception no. 85, 2026-10-15, fix round 7]` comment. In
+`tests/test_greenfield_golden.py`: default `ad5e515d...`, full_autonomous
+`a963da97...`, design_steering `a6c10556...` and sdk_callable
+`e2021cb2...`, and gates_off `dfa6f03d...`, a golden addition (fixture E,
 the gates-off config). In `tests/test_retrofit.py`:
-service `afe60526...` and agent `f5987093...`. Fix round 1 moves two bodies
+service `ba444547...` and agent `4f82c165...`. Fix round 1 moves two bodies
 in each fixture, `ci-cd.md` and the `spec-new` skill, and fix rounds 2 to 4
-one each, the `spec-new` skill; each is already in the table's moved set, and
-no round moves an action count.
+one each, the `spec-new` skill, each already in the table's moved set; fix
+round 7 moves one, `agents/implementer.md`, which joins it. No round moves
+an action count.
 `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
 (`tests/test_validate_only.py`) do not move. Measured on the emitted plans
 against `0845862`, per file, with gates_off's config rendered there too:
 
 | Fixture | Actions | Added / removed | Digest | Bodies that move |
 |---|---|---|---|---|
-| default | 64 → 66 | +2 / 0 | `2b49e07b...` | 7 |
-| full_autonomous | 76 → 78 | +2 / 0 | `46397983...` | 12: the default's 7, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
-| design_steering | 65 → 67 | +2 / 0 | `3e9f8929...` | 7 |
-| sdk_callable | 65 → 67 | +2 / 0 | `3f3df46b...` | 7; `gates.py` does not move |
-| gates_off | 57 → 59 | +2 / 0 | `d0a6f1bb...` | 7 (a golden addition: 57 is its config rendered at `0845862`) |
-| retrofit service | 87 → 89 | +2 / 0 | `afe60526...` | 8: the default's 7, plus `.claude/.gitignore` |
-| retrofit agent | 101 → 103 | +2 / 0 | `f5987093...` | 12: the service's 8, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
+| default | 64 → 66 | +2 / 0 | `ad5e515d...` | 8 |
+| full_autonomous | 76 → 78 | +2 / 0 | `a963da97...` | 13: the default's 8, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
+| design_steering | 65 → 67 | +2 / 0 | `a6c10556...` | 8 |
+| sdk_callable | 65 → 67 | +2 / 0 | `e2021cb2...` | 8; `gates.py` does not move |
+| gates_off | 57 → 59 | +2 / 0 | `dfa6f03d...` | 8 (a golden addition: 57 is its config rendered at `0845862`) |
+| retrofit service | 87 → 89 | +2 / 0 | `ba444547...` | 9: the default's 8, plus `.claude/.gitignore` |
+| retrofit agent | 101 → 103 | +2 / 0 | `4f82c165...` | 13: the service's 9, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
 
 The two added paths are `.claude/skills/escalate/SKILL.md` and
-`.claude/commands/escalate.md`. The default's 7 moved bodies are
+`.claude/commands/escalate.md`. The default's 8 moved bodies are
 `CLAUDE.md`, steering `tech.md`, `ci-cd.md` and `assumption-ledger.md`,
-`hooks/audio-alerts.config`, `skills/spec-new/SKILL.md` and
-`sessions/README.md`. No path is removed, the kept paths keep their order,
+`hooks/audio-alerts.config`, `skills/spec-new/SKILL.md`,
+`sessions/README.md` and, since fix round 7, `agents/implementer.md`. No
+path is removed, the kept paths keep their order,
 and no mode or kind changes. No hook script moves in any fixture:
 `tests/test_wp4_must_not_change.py` pins, at `0845862`, the 82
 `.claude/hooks/*.sh` bodies of the seven fixtures (11, 15, 11, 11, 8, 11
@@ -605,7 +621,7 @@ and 15, in the table's order), `gates.py` in sdk_callable, the bytes of
 `lib/sdk_gates_template.py` and `_HOOK_HEADER`'s source string.
 
 **Tests.** Eight new suites: `tests/test_wp4_must_not_change.py` (20
-checks), `tests/test_wp4_claude_md.py` (157), `tests/test_wp4_escalate.py`
+checks), `tests/test_wp4_claude_md.py` (170), `tests/test_wp4_escalate.py`
 (26), `tests/test_wp4_steering.py` (216), `tests/test_wp4_tool_path.py`
 (196), `tests/test_wp4_protocol_notes.py` (55),
 `tests/test_wp4_plugin_toolchain.py` (14) and `tests/test_wp4_records.py`
@@ -615,7 +631,7 @@ three suites read, and `bin/run-tests` runs only `test_*.py` files. Rows
 added or rewritten in `test_installer` (the manifest, the namespaced
 commands, G4-3, IA-1, GR2-03a, and G11-1 to G11-3 and G11-6 to G11-9 for the
 copies), `test_greenfield_golden` and `test_retrofit` (fixture E and the
-re-baseline, moved again in fix rounds 1 to 4), `test_merge_back` (the
+re-baseline, moved again in fix rounds 1 to 4 and 7), `test_merge_back` (the
 "on a spec branch," clause in both modes; the 80-line cap over seven fixtures;
 `/spec-new`'s branch rule), `test_wp3_records` (exception 84's counts and
 digests pinned as data, X2), `test_usage_limit_contract` (RC-03 pins the
@@ -645,10 +661,13 @@ backlog; the changelog's own sentences, `bootstrap-apply.md`'s exit 4 line
 and the code comments are unpinned. Fix round 4 adds a row to
 `test_skill_bodies` (a behaviour row that starts on another spec's branch)
 and one to `test_wp4_records` (its backlog text). Fix rounds 5 and 6 change
-no code and add no row. Counts are each file's final `N passed` line, run
-alone on 2026-10-15.
+no code and add no row. Fix round 7 adds `test_wp4_claude_md` rows, one per
+config in its matrix and one per retrofit fixture, each of which fails on
+`6ef3946`: the implementer's body binds it to the urgent list, naming
+`/escalate` only where the skills are installed. Counts are each file's
+final `N passed` line, run alone on 2026-10-15.
 
-Suite: 14,437 checks, 0 failed; 49 suites (`bin/run-tests` in a clean clone,
+Suite: 14,450 checks, 0 failed; 49 suites (`bin/run-tests` in a clean clone,
 2026-10-15).
 
 ## Post-2.8.0 — a spec workflow that reaches a merged commit (WP3) (2026-10-05)
