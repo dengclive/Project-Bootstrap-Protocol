@@ -504,12 +504,14 @@ check("fix round 3: Z-65 describes step 2's pull, Z-66 is mostly older "
                                             "(o) LC2-3, LM-6,"))
       and "Fix round 3 (2026-10-15), from the second re-review" in BL,
       {r: _rows[r][:160] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
-# [WP4 fix round 4] The third re-review's corrections and residue.
-check("fix rounds 4 and 5: Z-65 says step 2 pulls a tracking default branch "
-      "and asks on another spec's branch, Z-66 names implementer.md, the task "
-      "line and spec-check.sh's relayed refusal, and Z-68 (n) makes no "
-      "remedy claim, (s) covers every smoke commit no pull request carried, "
-      "and (p) to (t) are filed",
+# [WP4 fix rounds 4 and 5] The third and fourth re-reviews' corrections
+# and residue. [WP4 fix round 6 / PINS5-2, LR5-3] The label says only what
+# the assertions check.
+check("fix rounds 4 and 5: Z-65 names the tracking condition and the "
+      "question on another spec's branch, Z-66 names implementer.md, the task "
+      "line and spec-check.sh's relayed refusal, Z-68 (n) no longer says the "
+      "warning says nothing needs doing, (s) names the commits no merged pull "
+      "request carried, and (p) to (t) are filed",
       "on another spec's branch it asks the operator which branch to start "
       "from (third re-review LC3-2)" in _rows["Z-65"]
       and "starts each spec's branch from it" not in _rows["Z-65"]
@@ -522,11 +524,13 @@ check("fix rounds 4 and 5: Z-65 says step 2 pulls a tracking default branch "
       and "a commit on the smoke spec's branch that no merged pull request "
           "carried" in _rows["Z-68"]
       and "when that branch tracks a remote branch" in _rows["Z-65"]
-      and "fix round 5 (2026-10-15), from the fourth re-review" in BL
+      and "fix rounds 4 and 5 (2026-10-15), from the third and fourth "
+          "re-reviews" in BL
       and all(i in _rows["Z-68"] for i in ("(p) LC3-1", "(q) LC3-3",
                                             "(r) LM3-4", "(s) CRIT3-1",
                                             "(t) LM3-3"))
-      and "fix round 4 (2026-10-15), from the third re-review" in BL,
+      and "corrected Z-65, Z-66 and Z-68 in place and added Z-68 (p) to "
+          "(t)" in BL,
       {r: _rows[r][-400:] for r in ("Z-65", "Z-66", "Z-68")})
 check("X-30a's WP4 layer says greenfield is done only with the skills on",
       "Greenfield, with `workflow.install_skills` on (the default): done."

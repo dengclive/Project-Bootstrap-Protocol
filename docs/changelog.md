@@ -169,8 +169,9 @@ it merges: the build of 2026-10-14, nine commits on
 `feat/wp4-claude-md-steering-entry` from `0845862`; fix round 1 of
 2026-10-14, after the step 7 review; fix round 2 of 2026-10-15, after the
 re-review of fix round 1; fix round 3 of 2026-10-15, after the second
-re-review; fix round 4 of 2026-10-15, after the third; and fix round 5 of
-2026-10-15, after the fourth. The first commit added the entry as a stub that named the
+re-review; fix round 4 of 2026-10-15, after the third; fix round 5 of
+2026-10-15, after the fourth; and fix round 6 of 2026-10-15, after the
+fifth. The first commit added the entry as a stub that named the
 frozen sources and the new suites, so
 `tests/test_wp3_records.py` stayed green through every commit; commit 9
 completed it.
@@ -598,12 +599,9 @@ gap's mutant fails. Rows pin some of its text fixes, in the protocol,
 backlog; the changelog's own sentences, `bootstrap-apply.md`'s exit 4 line
 and the code comments are unpinned. Fix round 4 adds a row to
 `test_skill_bodies` (a behaviour row that starts on another spec's branch)
-and to `test_wp4_records` (its backlog text), and tightens rows in
-`test_skill_bodies` and `test_merge_back` (the whole spec/* bullet of
-`/spec-new` step 2) and `test_wp4_steering` (the P6 row's guard, compared
-in lower case; "Merge them" for three elements again). Fix round 5 corrects
-records only, and the `test_wp4_records` rows that pin them. Counts are
-each file's final `N passed` line, run alone on 2026-10-15.
+and one to `test_wp4_records` (its backlog text). Fix rounds 5 and 6 change
+no code and add no row. Counts are each file's final `N passed` line, run
+alone on 2026-10-15.
 
 Suite: N checks, 0 failed; M suites
 
