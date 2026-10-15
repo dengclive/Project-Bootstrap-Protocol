@@ -168,8 +168,8 @@ in-version notes in `SEAM-CONTRACT-v3-0-0.md` §3.2 and §7.1, and a note at
 it merges: the build of 2026-10-14, nine commits on
 `feat/wp4-claude-md-steering-entry` from `0845862`; fix round 1 of
 2026-10-14, after the step 7 review; fix round 2 of 2026-10-15, after the
-re-review of fix round 1; and fix round 3 of 2026-10-15, after the second
-re-review. The first commit added the entry as a stub that named the
+re-review of fix round 1; fix round 3 of 2026-10-15, after the second
+re-review; and fix round 4 of 2026-10-15, after the third. The first commit added the entry as a stub that named the
 frozen sources and the new suites, so
 `tests/test_wp3_records.py` stayed green through every commit; commit 9
 completed it.
@@ -354,8 +354,8 @@ follows the protocol and runs the installer) and the operator's rulings of
   not ignore a lock file the install creates or the parse guard's copy. A
   heading counts whatever its case, by prefix (fix round 1, review F1 to F4,
   C6). A Test row names the command when one of its code spans is the command,
-  or, with no code span, when the cell without emphasis marks is the command
-  or the command and a parenthetical note, so a longer command
+  or, with no code span, when the cell without backticks and asterisks is
+  the command or the command and a parenthetical note, so a longer command
   (`make test-all` for `make test`) is stale; and a stop stated under another
   heading or in a bold line is a stop (fix round 2, review LC-1 and LC-3). A
   double-backtick code span is one span, and the `ci-cd.md` warning says only
@@ -402,8 +402,8 @@ follows the protocol and runs the installer) and the operator's rulings of
   the interactive interview to the operator (IA-1). The commands run
   `"${CLAUDE_PLUGIN_ROOT}/toolchain/bin/..."`, so a plugin copied into a
   marketplace cache works on its own: `plugin/toolchain/` tracks 17 byte
-  copies, 2,239,781 bytes in all (`git ls-files plugin/toolchain`, measured
-  in fix round 3): `bin/bootstrap-install` and `bin/bootstrap-interview`
+  copies, 2,239,697 bytes in all (`git ls-files plugin/toolchain`, measured
+  in fix round 4): `bin/bootstrap-install` and `bin/bootstrap-interview`
   (mode 0755), the 14 git-tracked `lib/*.py` modules, and the protocol as
   `protocol.md` (0644). `tests/plugin_toolchain_map.py` is the one map from
   each copy to its source. `tests/test_wp4_plugin_toolchain.py` checks each
@@ -515,19 +515,21 @@ on X-30a, Z-40 and M-2 record what WP4 changed there; M-2 is done.
 touches: `lib/templates.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py`, `lib/defaults.py`, `lib/llm_advisor.py`,
 `lib/prd_heuristics.py` and `tests/test_installer.py`, and one golden
-re-baseline (commit 4), moved again in fix rounds 1, 2 and 3: commit 4 moves
+re-baseline (commit 4), moved again in fix rounds 1 to 4: commit 4 moves
 six digests and adds one, each with a `[freeze-exception no. 85,
 2026-10-14]` comment; fix round 1 moves all seven, each with a
 `[freeze-exception no. 85, 2026-10-14, fix round 1]` comment; fix round 2
 moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
-fix round 2]` comment; and fix round 3 moves all seven again, each with a
-`[freeze-exception no. 85, 2026-10-15, fix round 3]` comment. In
-`tests/test_greenfield_golden.py`: default `54693706...`, full_autonomous
-`f588c8de...`, design_steering `1914baae...` and sdk_callable
-`e2a44202...`, and gates_off `f5ed3f9f...`, a golden addition (fixture E,
+fix round 2]` comment; fix round 3 moves all seven again, each with a
+`[freeze-exception no. 85, 2026-10-15, fix round 3]` comment; and fix round
+4 moves all seven again, each with a `[freeze-exception no. 85, 2026-10-15,
+fix round 4]` comment. In
+`tests/test_greenfield_golden.py`: default `2b49e07b...`, full_autonomous
+`46397983...`, design_steering `3e9f8929...` and sdk_callable
+`3f3df46b...`, and gates_off `d0a6f1bb...`, a golden addition (fixture E,
 the gates-off config). In `tests/test_retrofit.py`:
-service `46d46ce0...` and agent `fd940800...`. Fix round 1 moves two bodies
-in each fixture, `ci-cd.md` and the `spec-new` skill, and fix rounds 2 and 3
+service `afe60526...` and agent `f5987093...`. Fix round 1 moves two bodies
+in each fixture, `ci-cd.md` and the `spec-new` skill, and fix rounds 2 to 4
 one each, the `spec-new` skill; each is already in the table's moved set, and
 no round moves an action count.
 `EXPECTED_TELEMETRY_BODY` and the AC-2-3 mini-golden
@@ -536,13 +538,13 @@ against `0845862`, per file, with gates_off's config rendered there too:
 
 | Fixture | Actions | Added / removed | Digest | Bodies that move |
 |---|---|---|---|---|
-| default | 64 → 66 | +2 / 0 | `54693706...` | 7 |
-| full_autonomous | 76 → 78 | +2 / 0 | `f588c8de...` | 12: the default's 7, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
-| design_steering | 65 → 67 | +2 / 0 | `1914baae...` | 7 |
-| sdk_callable | 65 → 67 | +2 / 0 | `e2a44202...` | 7; `gates.py` does not move |
-| gates_off | 57 → 59 | +2 / 0 | `f5ed3f9f...` | 7 (a golden addition: 57 is its config rendered at `0845862`) |
-| retrofit service | 87 → 89 | +2 / 0 | `46d46ce0...` | 8: the default's 7, plus `.claude/.gitignore` |
-| retrofit agent | 101 → 103 | +2 / 0 | `fd940800...` | 12: the service's 8, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
+| default | 64 → 66 | +2 / 0 | `2b49e07b...` | 7 |
+| full_autonomous | 76 → 78 | +2 / 0 | `46397983...` | 12: the default's 7, plus `loop.sh`, `goal-loop.sh`, `auto.sh`, `loop-config.md` and `goal-config.md` |
+| design_steering | 65 → 67 | +2 / 0 | `3e9f8929...` | 7 |
+| sdk_callable | 65 → 67 | +2 / 0 | `3f3df46b...` | 7; `gates.py` does not move |
+| gates_off | 57 → 59 | +2 / 0 | `d0a6f1bb...` | 7 (a golden addition: 57 is its config rendered at `0845862`) |
+| retrofit service | 87 → 89 | +2 / 0 | `afe60526...` | 8: the default's 7, plus `.claude/.gitignore` |
+| retrofit agent | 101 → 103 | +2 / 0 | `f5987093...` | 12: the service's 8, plus `loop.sh`, `goal-loop.sh`, `loop-config.md` and `goal-config.md` |
 
 The two added paths are `.claude/skills/escalate/SKILL.md` and
 `.claude/commands/escalate.md`. The default's 7 moved bodies are
@@ -566,7 +568,7 @@ three suites read, and `bin/run-tests` runs only `test_*.py` files. Rows
 added or rewritten in `test_installer` (the manifest, the namespaced
 commands, G4-3, IA-1, GR2-03a, and G11-1 to G11-3 and G11-6 to G11-9 for the
 copies), `test_greenfield_golden` and `test_retrofit` (fixture E and the
-re-baseline, moved again in fix rounds 1, 2 and 3), `test_merge_back` (the
+re-baseline, moved again in fix rounds 1 to 4), `test_merge_back` (the
 "on a spec branch," clause in both modes; the 80-line cap over seven fixtures;
 `/spec-new`'s branch rule), `test_wp3_records` (exception 84's counts and
 digests pinned as data, X2), `test_usage_limit_contract` (RC-03 pins the
@@ -591,10 +593,15 @@ fixes in the code, to `test_skill_bodies`, `test_merge_back`,
 `test_wp4_steering`, `test_wp4_tool_path` and `test_wp4_records`, and for
 each pin gap the second re-review found (LP-1 to LP-16) a row that the
 gap's mutant fails. Of its text fixes, rows pin those in the protocol,
-`RETROFIT.md`, the README, `bootstrap-apply.md` step 7, the seam and the
-backlog; the changelog's own sentences, `bootstrap-apply.md`'s exit 4 line
-and the code comments are unpinned. Counts are each file's final `N passed`
-line, run alone on 2026-10-15.
+`RETROFIT.md`, the README, `bootstrap-apply.md` step 7 and the seam by
+phrase, and the backlog rows only by finding id; the changelog's own
+sentences, `bootstrap-apply.md`'s exit 4 line and the code comments are
+unpinned. Fix round 4 adds rows to `test_skill_bodies` (the whole spec/*
+bullet of `/spec-new` step 2, and a behaviour row that starts on another
+spec's branch), `test_merge_back` and `test_wp4_steering` (the P6 row's
+guard, compared in lower case; "Merge them" for three elements again); its
+text fixes are unpinned but for the step 2 text. Counts are each file's
+final `N passed` line, run alone on 2026-10-15.
 
 Suite: N checks, 0 failed; M suites
 

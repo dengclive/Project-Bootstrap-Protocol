@@ -2666,10 +2666,15 @@ EXPECTED_RETROFIT_DIGESTS = {
     # the operator's ruling of 2026-10-15), and no other; 0 added, 0
     # removed, order, modes and kinds unchanged, counts 89 / 103. It is
     # among the 8 / 12 above; no hook body moves.
+    # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined in
+    # the same exception (WP4 fix round 4), against the previous digests
+    # (46d46ce0... / fd940800...): the round's one template change is
+    # spec-new step 2's text (its spec/* bullet loses its reason clause,
+    # review CRIT3-1); counts 89 / 103 unchanged.
     "service":
-        "46d46ce0daf629200f4e23c2cdefbb43f836202f11bf6cd3715bdc59e3b0a3ef",
+        "afe60526014a180f55a1740341a605139c39ac9cb6df4b4f118f28d2e0f00ac3",
     "agent":
-        "fd94080015d091542b0e01ebac3d16676dfed86ddd67ce305f85a1c9fab45a21",
+        "f598709305c35ae5db220042815fde5fe83ddab83e38cba59c185797580320d8",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

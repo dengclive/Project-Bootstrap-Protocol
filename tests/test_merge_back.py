@@ -280,7 +280,9 @@ for label, text, retro in (("greenfield", CFG, False),
           and "Then run `git switch -c spec/<slug>`." in _sn
           and "- On another spec's branch (`spec/*`), or with no branch "
           "checked out, stop and ask the operator which branch to start "
-          "from" in _sn
+          "from. To start from the default branch, switch to it and follow "
+          "the bullet above; to start from another branch, run `git switch "
+          "-c spec/<slug> <branch>`." in _sn
           and "On any other branch, one the operator chose, stay on it."
           in _sn, _sn[:900])
     # [WP3 fix1 MB-3, MB-8] Done once the branch merged, whichever line

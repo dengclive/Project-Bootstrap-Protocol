@@ -9636,10 +9636,9 @@ specify.
   spec. If it tracks none but `git remote` lists a remote, or the pull
   fails, stop and ask the operator. Then run `git switch -c spec/<slug>`.
 - On another spec's branch (`spec/*`), or with no branch checked out, stop
-  and ask the operator which branch to start from: that spec's work reaches
-  the default branch only once its pull request is merged. To start from
-  the default branch, switch to it and follow the bullet above; to start
-  from another branch, run `git switch -c spec/<slug> <branch>`.
+  and ask the operator which branch to start from. To start from the
+  default branch, switch to it and follow the bullet above; to start from
+  another branch, run `git switch -c spec/<slug> <branch>`.
 - On any other branch, one the operator chose, stay on it.
 
 The spec, its tasks and their merges then land on that branch.

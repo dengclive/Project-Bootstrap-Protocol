@@ -87,8 +87,9 @@ config.
    complete bootstrap, the block offers the smoke test before the chain,
    and until it records the bootstrap complete, its last line says how to
    finish the bootstrap. Where a greenfield state file does not record
-   whether the bootstrap finished, as in a fresh clone, it offers neither,
-   and its last line says so. While a steering doc is still the
+   whether the bootstrap finished, as in a fresh clone, it offers neither
+   line, and its last line says the file does not record it and what to
+   do either way. While a steering doc is still the
    installer's stub, a line names it and the phases that fill it in. Fill
    in the steering docs that line names with the operator first. Offer
    the smoke test and the completion step only when the block does, and

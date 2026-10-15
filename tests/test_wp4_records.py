@@ -8,7 +8,7 @@ protocol-doc-snapshot-retire row.
 
   1. Freeze exception 85. Its seven action counts and seven digests are
      pinned below as LITERALS, the values commit 4's re-baseline set and
-     fix rounds 1, 2 and 3 moved (their digests only). This
+     fix rounds 1 to 4 moved (their digests only). This
      suite never reads the golden suites' EXPECTED_* tables: a row that
      reads a live table moves with the next re-baseline and turns red while
      its record stays true (X2; review freeze F10). The changelog's table
@@ -116,7 +116,7 @@ check("the changelog's WP4 entry is found, above the WP3 entry", bool(CL))
 # Pinned as data: the values commit 4 (9ba6699) wrote into
 # EXPECTED_ACTION_COUNTS and EXPECTED_DIGESTS (tests/test_greenfield_golden.py)
 # and EXPECTED_RETROFIT_COUNTS and EXPECTED_RETROFIT_DIGESTS
-# (tests/test_retrofit.py), with the digests fix rounds 1, 2 and 3
+# (tests/test_retrofit.py), with the digests fix rounds 1 to 4
 # re-baselined in the same exception (the counts did not move). Never read
 # from those
 # tables (freeze F10).
@@ -125,19 +125,19 @@ _COUNTS = {"default": 66, "full_autonomous": 78, "design_steering": 67,
            "retrofit agent": 103}
 _DIGESTS = {
     "default":
-        "54693706c8df3a9f7e561c2ac2bd85c7f9bdd4ae5b8775e9e6a3eadb5cec5fdc",
+        "2b49e07beb0f3083c89da0169bf1f63084286033f0e603cadd4056786d015acb",
     "full_autonomous":
-        "f588c8deedbe9c22c3a9ac6693e33ad8743f3677765ddbdcd7a6b9b940291683",
+        "463979830c46eee571d9688df051e3237a4f756ff64f943bfe944afd57f47a81",
     "design_steering":
-        "1914baae97162edd47989cd2c38a7a8661e4eb77ee51daaf3175d21ac05a38df",
+        "3e9f89293c4343e8d692b597c7737addb24b38ce1305491628b779f83257189e",
     "sdk_callable":
-        "e2a44202b24a099b46889f09c80dd55583e5b8d8d1e6feae817ad62b9683c878",
+        "3f3df46b4bd1be1dd64f1552cbc019718f81bf6466cfb04fcf7e7f14d7761c35",
     "gates_off":
-        "f5ed3f9f5705c3c7958ff198219ac1a8850df9f1ba329f9865707647d65865ea",
+        "d0a6f1bb77943519a636ebd0cf8142df7e47766a5a2e6d579337e5129b3f3718",
     "retrofit service":
-        "46d46ce0daf629200f4e23c2cdefbb43f836202f11bf6cd3715bdc59e3b0a3ef",
+        "afe60526014a180f55a1740341a605139c39ac9cb6df4b4f118f28d2e0f00ac3",
     "retrofit agent":
-        "fd94080015d091542b0e01ebac3d16676dfed86ddd67ce305f85a1c9fab45a21",
+        "f598709305c35ae5db220042815fde5fe83ddab83e38cba59c185797580320d8",
 }
 _FIXTURES = r"(default|full_autonomous|design_steering|sdk_callable|" \
             r"gates_off|retrofit service|retrofit agent)"
@@ -494,16 +494,33 @@ check("fix round 3: Z-65 describes step 2's pull, Z-66 is mostly older "
           "learnings/README.md", "sessions/README.md", "specs/INDEX.md",
           "specs/README.md", "steering/spec-versioning.md",
           "steering/structure.md"))
-      and "live instructions injected into the session" in _rows["Z-66"]
+      and "are live instructions that reach the session" in _rows["Z-66"]
       and "the `/escalate` command among them, which is WP4's"
           in _rows["Z-66"]
       and "these gaps are examples, not the list (review LR-1)"
           in _rows["Z-67"]
       and all(i in _rows["Z-68"] for i in ("(m) LM-2", "LP-11",
                                             "(n) LM-3, LC2-4",
-                                            "(o) LC2-3, LM-6"))
+                                            "(o) LC2-3, LM-6,"))
       and "Fix round 3 (2026-10-15), from the second re-review" in BL,
       {r: _rows[r][:160] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
+# [WP4 fix round 4] The third re-review's corrections and residue.
+check("fix round 4: Z-65 says step 2 asks on another spec's branch, Z-66 "
+      "names implementer.md, the task line and spec-check.sh's relayed "
+      "refusal, and Z-68 files (p) to (t)",
+      "on another spec's branch it asks the operator which branch to start "
+      "from (third re-review LC3-2)" in _rows["Z-65"]
+      and "starts each spec's branch from it" not in _rows["Z-65"]
+      and "`.claude/agents/implementer.md` (`test-author`)" in _rows["Z-66"]
+      and "the chain and task lines of `Next steps:`" in _rows["Z-66"]
+      and "the refusal of `spec-check.sh`, which `spec-gate-commit.sh` and "
+          "the git pre-commit hook relay" in _rows["Z-66"]
+      and "on one with none it gives the per-file remedy" in _rows["Z-68"]
+      and all(i in _rows["Z-68"] for i in ("(p) LC3-1", "(q) LC3-3",
+                                            "(r) LM3-4", "(s) CRIT3-1",
+                                            "(t) LM3-3"))
+      and "fix round 4 (2026-10-15), from the third re-review" in BL,
+      {r: _rows[r][-400:] for r in ("Z-65", "Z-66", "Z-68")})
 check("X-30a's WP4 layer says greenfield is done only with the skills on",
       "Greenfield, with `workflow.install_skills` on (the default): done."
       in _rows["X-30a"] and "Greenfield with the skills off: still open"

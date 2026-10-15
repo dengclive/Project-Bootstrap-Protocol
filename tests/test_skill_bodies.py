@@ -522,13 +522,20 @@ for _label, _body in (("greenfield", _sn),
     # --ff-only and the spec branches from it; on another spec's branch or a
     # detached HEAD, and wherever the base is unclear, the step asks. No
     # fetch, remote-HEAD lookup or unpushed-commit check is left. Section 5
-    # runs the commands.
+    # runs the commands. [WP4 fix round 4 / LPINS3-1, CRIT3-1] The whole
+    # spec/* bullet is pinned, with no reason clause: the one it had was
+    # false with no remote, where no pull request exists.
     check(f"spec-new ({_label}): on another spec's branch (spec/*) or with "
           f"no branch checked out, the step asks the operator which branch "
           f"to start from; only a branch the operator chose keeps the spec",
           has(_st2, "- On another spec's branch (`spec/*`), or with no "
                     "branch checked out, stop and ask the operator which "
-                    "branch to start from")
+                    "branch to start from. To start from the default "
+                    "branch, switch to it and follow the bullet above; to "
+                    "start from another branch, run `git switch -c "
+                    "spec/<slug> <branch>`.")
+          and has(_st2, "The spec, its tasks and their merges then land on "
+                        "that branch.")
           and has(_st2, "If it tracks none but `git remote` lists a remote, "
                         "or the pull fails, stop and ask the operator.")
           and has(_st2, "On any other branch, one the operator chose, stay "
@@ -1149,6 +1156,45 @@ elif len(_spans) == 4:
               and _pl.returncode == 0,
               [(r.returncode, r.stdout[-200:], r.stderr[-200:])
                for r in (_lk, _pl)])
+        # (h) [WP4 fix round 4 / LPINS3-1] On another spec's branch, after a
+        # person merged a pull request on the remote: each answer the step
+        # names, run as written. The default branch: switch to it, then the
+        # first bullet's commands. Another branch: the second bullet's
+        # command, with <branch> filled in.
+        _other = next((ln for ln in re.split(r"\n(?=- )", _step2)
+                       if ln.startswith("- On another spec's branch")), "")
+        _from = next((c for c in re.findall(r"`([^`]+)`", _other)
+                      if c.startswith("git switch -c ")), "")
+        hop = os.path.join(tmp, "hop")
+        g(tmp, "clone", "-q", origin, hop)
+        g(hop, "switch", "-q", "-c", "spec/first-local")
+        commit(hop, "wip.py", "unmerged spec work")
+        wip = g(hop, "rev-parse", "HEAD").stdout.strip()
+        g(person, "fetch", "-q", "origin")
+        g(person, "reset", "-q", "--hard", "origin/main")
+        commit(person, "second.py", "Merge spec/second")
+        g(person, "push", "-q", "origin", "main")
+        second = g(person, "rev-parse", "HEAD").stdout.strip()
+        _sm = g(hop, "switch", "-q", "main")
+        _ran = [step(hop, c) for c in (_lookup, _pull, _switch)]
+        _def = (_sm.returncode == 0 and all(r.returncode == 0 for r in _ran)
+                and g(hop, "merge-base", "--is-ancestor", second,
+                      "spec/next").returncode == 0
+                and g(hop, "merge-base", "--is-ancestor", wip,
+                      "spec/next").returncode != 0)
+        _br = g(hop, *_from.replace("<slug>", "stacked")
+                .replace("<branch>", "spec/first-local").split()[1:]) \
+            if _from else None
+        check("(h) on another spec's branch after a person merged a pull "
+              "request on the remote: the default-branch answer starts the "
+              "spec from the merged main without that spec's work; the "
+              "other-branch answer starts it from the branch named",
+              bool(_from) and _def and _br is not None
+              and _br.returncode == 0
+              and g(hop, "merge-base", "--is-ancestor", wip,
+                    "spec/stacked").returncode == 0,
+              (_from, [(r.returncode, r.stderr[-200:]) for r in _ran],
+               _br and (_br.returncode, _br.stderr[-200:])))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -3743,7 +3743,13 @@ EXPECTED_DIGESTS = {
         # operator's ruling of 2026-10-15), and no other; 0 added, 0
         # removed, order, modes and kinds unchanged, count 66. It is
         # among the moved bodies above; no hook body moves.
-        "54693706c8df3a9f7e561c2ac2bd85c7f9bdd4ae5b8775e9e6a3eadb5cec5fdc",
+        # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined
+        # in the same exception (WP4 fix round 4). Measured on the emitted
+        # plans against the previous digest (54693706...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
+        # loses its reason clause, review CRIT3-1), and no other; count
+        # 66.
+        "2b49e07beb0f3083c89da0169bf1f63084286033f0e603cadd4056786d015acb",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4440,7 +4446,13 @@ EXPECTED_DIGESTS = {
         # operator's ruling of 2026-10-15), and no other; 0 added, 0
         # removed, order, modes and kinds unchanged, count 78. It is
         # among the moved bodies above; no hook body moves.
-        "f588c8deedbe9c22c3a9ac6693e33ad8743f3677765ddbdcd7a6b9b940291683",
+        # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined
+        # in the same exception (WP4 fix round 4). Measured on the emitted
+        # plans against the previous digest (f588c8de...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
+        # loses its reason clause, review CRIT3-1), and no other; count
+        # 78.
+        "463979830c46eee571d9688df051e3237a4f756ff64f943bfe944afd57f47a81",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -5064,7 +5076,13 @@ EXPECTED_DIGESTS = {
         # operator's ruling of 2026-10-15), and no other; 0 added, 0
         # removed, order, modes and kinds unchanged, count 67. It is
         # among the moved bodies above; no hook body moves.
-        "1914baae97162edd47989cd2c38a7a8661e4eb77ee51daaf3175d21ac05a38df",
+        # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined
+        # in the same exception (WP4 fix round 4). Measured on the emitted
+        # plans against the previous digest (1914baae...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
+        # loses its reason clause, review CRIT3-1), and no other; count
+        # 67.
+        "3e9f89293c4343e8d692b597c7737addb24b38ce1305491628b779f83257189e",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5284,7 +5302,13 @@ EXPECTED_DIGESTS = {
         # operator's ruling of 2026-10-15), and no other; 0 added, 0
         # removed, order, modes and kinds unchanged, count 67. It is
         # among the moved bodies above; no hook body moves.
-        "e2a44202b24a099b46889f09c80dd55583e5b8d8d1e6feae817ad62b9683c878",
+        # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined
+        # in the same exception (WP4 fix round 4). Measured on the emitted
+        # plans against the previous digest (e2a44202...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
+        # loses its reason clause, review CRIT3-1), and no other; count
+        # 67.
+        "3f3df46b4bd1be1dd64f1552cbc019718f81bf6466cfb04fcf7e7f14d7761c35",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5320,7 +5344,13 @@ EXPECTED_DIGESTS = {
         # operator's ruling of 2026-10-15), and no other; 0 added, 0
         # removed, order, modes and kinds unchanged, count 59. It is
         # among the 7 above; no hook body moves.
-        "f5ed3f9f5705c3c7958ff198219ac1a8850df9f1ba329f9865707647d65865ea",
+        # [freeze-exception no. 85, 2026-10-15, fix round 4] Re-baselined
+        # in the same exception (WP4 fix round 4). Measured on the emitted
+        # plans against the previous digest (f5ed3f9f...), per file: 1
+        # body moves, skills/spec-new/SKILL.md (step 2's spec/* bullet
+        # loses its reason clause, review CRIT3-1), and no other; count
+        # 59.
+        "d0a6f1bb77943519a636ebd0cf8142df7e47766a5a2e6d579337e5129b3f3718",
 }
 
 EXPECTED_ACTION_COUNTS = {

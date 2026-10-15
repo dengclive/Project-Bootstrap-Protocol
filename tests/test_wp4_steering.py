@@ -1056,11 +1056,13 @@ try:
     os.remove(os.path.join(f1c, MANIFEST))
     r1c = run(f1c)
     w1c = warns(r1c, CICD)
+    # [WP4 fix round 4 / LM3-2] Compared in lower case: fix round 3's hand
+    # text says "add a section" mid-sentence.
     check("[F1] the pre-WP4 opt-out ci-cd.md on a tree with no manifest: the "
           "warning ends with the per-file remedy, not the hand fix",
           r1c.returncode == 0 and len(w1c) == 1
           and w1c[0].endswith(no_manifest(CICD))
-          and "Add a section" not in w1c[0], w1c)
+          and "add a section" not in w1c[0].lower(), w1c)
 
     # [F5 / LC-2, MS-5, RR-8] The project's own CLAUDE.md is named so on
     # every run while it keeps the bytes the first install kept, and its
@@ -1118,20 +1120,23 @@ try:
           and "re-install" not in w5d[0], w5d)
 
     # [LC-12 (d)] "it" for one missing element, "them" for more ([WP4 fix
-    # round 3 / LP-14] two, the boundary).
+    # round 3 / LP-14] two, the boundary; [WP4 fix round 4 / LM3-5] and
+    # three, the earlier row's).
     write(f2, "CLAUDE.md", re.sub(r"^## Index.*?(?=^## )", "",
                                   STRIP_NEVER.sub("", fresh_md),
                                   flags=re.S | re.M))
     w2m = warns(run(f2), "CLAUDE.md")
     write(f2, "CLAUDE.md", fresh_md)
     check("[F2] the hand remedy says 'Merge it' for one missing element and "
-          "'Merge them' for two",
+          "'Merge them' for two and for three",
           we_ and we_[0].endswith("Merge it by hand from a fresh install's "
                                   "CLAUDE.md.")
           and len(w2m) == 1
           and "it has no '## Never' section or '## Index' section." in w2m[0]
           and w2m[0].endswith("Merge them by hand from a fresh install's "
-                              "CLAUDE.md."), (we_, w2m))
+                              "CLAUDE.md.")
+          and wo and wo[0].endswith("Merge them by hand from a fresh "
+                                    "install's CLAUDE.md."), (we_, w2m, wo))
 
     # [K1 / P1] A later re-install of a fresh clone: the hook-script
     # warning and the exit-3 note keep the per-file remedy (main()).
