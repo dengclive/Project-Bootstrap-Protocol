@@ -169,7 +169,8 @@ it merges: the build of 2026-10-14, nine commits on
 `feat/wp4-claude-md-steering-entry` from `0845862`; fix round 1 of
 2026-10-14, after the step 7 review; fix round 2 of 2026-10-15, after the
 re-review of fix round 1; fix round 3 of 2026-10-15, after the second
-re-review; and fix round 4 of 2026-10-15, after the third. The first commit added the entry as a stub that named the
+re-review; fix round 4 of 2026-10-15, after the third; and fix round 5 of
+2026-10-15, after the fourth. The first commit added the entry as a stub that named the
 frozen sources and the new suites, so
 `tests/test_wp3_records.py` stayed green through every commit; commit 9
 completed it.
@@ -562,7 +563,7 @@ checks), `tests/test_wp4_claude_md.py` (157), `tests/test_wp4_escalate.py`
 (26), `tests/test_wp4_steering.py` (216), `tests/test_wp4_tool_path.py`
 (196), `tests/test_wp4_protocol_notes.py` (55),
 `tests/test_wp4_plugin_toolchain.py` (14) and `tests/test_wp4_records.py`
-(63). `tests/plugin_toolchain_map.py` is a helper module, not a suite: it
+(64). `tests/plugin_toolchain_map.py` is a helper module, not a suite: it
 holds the one map from each `plugin/toolchain/` copy to its source, which
 three suites read, and `bin/run-tests` runs only `test_*.py` files. Rows
 added or rewritten in `test_installer` (the manifest, the namespaced
@@ -592,16 +593,17 @@ Fix round 3 adds a row that fails on `ad6a42e` for each review finding it
 fixes in the code, to `test_skill_bodies`, `test_merge_back`,
 `test_wp4_steering`, `test_wp4_tool_path` and `test_wp4_records`, and for
 each pin gap the second re-review found (LP-1 to LP-16) a row that the
-gap's mutant fails. Of its text fixes, rows pin those in the protocol,
-`RETROFIT.md`, the README, `bootstrap-apply.md` step 7 and the seam by
-phrase, and the backlog rows only by finding id; the changelog's own
-sentences, `bootstrap-apply.md`'s exit 4 line and the code comments are
-unpinned. Fix round 4 adds rows to `test_skill_bodies` (the whole spec/*
-bullet of `/spec-new` step 2, and a behaviour row that starts on another
-spec's branch), `test_merge_back` and `test_wp4_steering` (the P6 row's
-guard, compared in lower case; "Merge them" for three elements again); its
-text fixes are unpinned but for the step 2 text. Counts are each file's
-final `N passed` line, run alone on 2026-10-15.
+gap's mutant fails. Rows pin some of its text fixes, in the protocol,
+`RETROFIT.md`, the README, `bootstrap-apply.md` step 7, the seam and the
+backlog; the changelog's own sentences, `bootstrap-apply.md`'s exit 4 line
+and the code comments are unpinned. Fix round 4 adds a row to
+`test_skill_bodies` (a behaviour row that starts on another spec's branch)
+and to `test_wp4_records` (its backlog text), and tightens rows in
+`test_skill_bodies` and `test_merge_back` (the whole spec/* bullet of
+`/spec-new` step 2) and `test_wp4_steering` (the P6 row's guard, compared
+in lower case; "Merge them" for three elements again). Fix round 5 corrects
+records only, and the `test_wp4_records` rows that pin them. Counts are
+each file's final `N passed` line, run alone on 2026-10-15.
 
 Suite: N checks, 0 failed; M suites
 

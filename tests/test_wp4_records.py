@@ -505,9 +505,11 @@ check("fix round 3: Z-65 describes step 2's pull, Z-66 is mostly older "
       and "Fix round 3 (2026-10-15), from the second re-review" in BL,
       {r: _rows[r][:160] for r in ("Z-65", "Z-66", "Z-67", "Z-68")})
 # [WP4 fix round 4] The third re-review's corrections and residue.
-check("fix round 4: Z-65 says step 2 asks on another spec's branch, Z-66 "
-      "names implementer.md, the task line and spec-check.sh's relayed "
-      "refusal, and Z-68 files (p) to (t)",
+check("fix rounds 4 and 5: Z-65 says step 2 pulls a tracking default branch "
+      "and asks on another spec's branch, Z-66 names implementer.md, the task "
+      "line and spec-check.sh's relayed refusal, and Z-68 (n) makes no "
+      "remedy claim, (s) covers every smoke commit no pull request carried, "
+      "and (p) to (t) are filed",
       "on another spec's branch it asks the operator which branch to start "
       "from (third re-review LC3-2)" in _rows["Z-65"]
       and "starts each spec's branch from it" not in _rows["Z-65"]
@@ -515,7 +517,12 @@ check("fix round 4: Z-65 says step 2 asks on another spec's branch, Z-66 "
       and "the chain and task lines of `Next steps:`" in _rows["Z-66"]
       and "the refusal of `spec-check.sh`, which `spec-gate-commit.sh` and "
           "the git pre-commit hook relay" in _rows["Z-66"]
-      and "on one with none it gives the per-file remedy" in _rows["Z-68"]
+      and "still warns (truthfully since fix round 3), and" in _rows["Z-68"]
+      and "says nothing needs doing" not in _rows["Z-68"]
+      and "a commit on the smoke spec's branch that no merged pull request "
+          "carried" in _rows["Z-68"]
+      and "when that branch tracks a remote branch" in _rows["Z-65"]
+      and "fix round 5 (2026-10-15), from the fourth re-review" in BL
       and all(i in _rows["Z-68"] for i in ("(p) LC3-1", "(q) LC3-3",
                                             "(r) LM3-4", "(s) CRIT3-1",
                                             "(t) LM3-3"))
