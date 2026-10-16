@@ -60,7 +60,9 @@ config.
    The stdout counts look like a success in that case, so read stderr and
    surface it verbatim; do not tell the operator the install succeeded.
    (Exit 2 is a config refusal — nothing was written; an unparseable
-   config names its file and line. Exit 4 means a loop wrapper or another
+   config names its file and line. **[Dated note 2026-10-16.]** An exit 2
+   that names backlog row Z-72 means the retrofit route is disabled: stop
+   and ask the operator, and don't edit the config to get past it. Exit 4 means a loop wrapper or another
    install held a state lock, so the run wrote at most an empty lock
    file: re-run when it is free. Exit 0 is the only outcome
    whose enforcement was verified.) On exit 0, still surface every

@@ -14,7 +14,7 @@
       "find": "    if not retrofit_enabled():\n        print(f\"retrofit-interview: error:",
       "replace": "    if False:\n        print(f\"retrofit-interview: error:",
       "expect": {
-        "test_retrofit_disabled.py": "R5 retrofit-interview bin scan"
+        "test_retrofit_disabled.py": "R5 retrofit-interview bin scan: refused"
       }
     },
     {

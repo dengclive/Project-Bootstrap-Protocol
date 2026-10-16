@@ -70,6 +70,7 @@ GF_CFG = 'project:\n  name: "gf"\n  archetype: "cli"\n'
 BI = os.path.join(ROOT, "bin", "bootstrap-install")
 PBI = os.path.join(ROOT, "plugin", "toolchain", "bin", "bootstrap-install")
 RI = os.path.join(ROOT, "bin", "retrofit-interview")
+BI_INT = os.path.join(ROOT, "bin", "bootstrap-interview")
 RIM = os.path.join(ROOT, "lib", "retrofit_interview.py")
 PRIM = os.path.join(ROOT, "plugin", "toolchain", "lib",
                     "retrofit_interview.py")
@@ -98,7 +99,10 @@ def install_retrofit(name):
     with open(os.path.join(d, "src", "app.py"), "w") as fh:
         fh.write("print('legacy')\n")
     r = run(BI, ["-C", d], d, env=dict(ENV, **{ENV_NAME: "1"}))
-    assert r.returncode == 0, r.stderr[-400:]
+    if r.returncode != 0:
+        check(f"FIXTURE {name}: retrofit install with the override", False,
+              f"rc={r.returncode} {r.stderr[-300:]}")
+        return None
     subprocess.run(["git", "-C", d, "add", "-A"], check=True)
     subprocess.run(["git", "-C", d, "-c", "user.email=t@t", "-c",
                     "user.name=t", "commit", "-qm", "rf"], check=True)
@@ -114,6 +118,26 @@ def tree(d):
     return sorted(x for x in os.listdir(d) if x != ".git")
 
 
+MSG = ("the retrofit route is disabled (directive of 2026-10-14) until its "
+       "backlog rows are built; row Z-72 of docs/deferred-backlog.md in the "
+       "Bootstrap Protocol repository records it. Stop and ask the operator, "
+       "and do not work around this refusal.")
+
+
+def commit_cfg(d, cfg):
+    with open(os.path.join(d, "bootstrap.config.yaml"), "w") as fh:
+        fh.write(cfg)
+    subprocess.run(["git", "-C", d, "add", "-A"], check=True)
+    subprocess.run(["git", "-C", d, "-c", "user.email=t@t", "-c",
+                    "user.name=t", "commit", "-qm", "cfg"],
+                   capture_output=True)
+
+
+def frozen(r, d):
+    return (r.returncode == 2 and MARK in r.stderr
+            and "ask the operator" in r.stderr and git_dirty(d) == "")
+
+
 def refused(r, d, cfg_kept=True):
     return (r.returncode == 2 and MARK in r.stderr
             and "ask the operator" in r.stderr
@@ -121,8 +145,20 @@ def refused(r, d, cfg_kept=True):
 
 
 try:
+    for val, opens in (("1", True), ("true", False), ("0", False),
+                       ("", False), (" 1", False), ("yes", False)):
+        d = project(f"hatch-{val.strip() or 'empty'}-{len(val)}", RF_CFG)
+        r = run(BI, ["-C", d], d, env=dict(ENV, **{ENV_NAME: val}))
+        if opens:
+            ok = (r.returncode == 0 and MARK not in r.stderr
+                  and os.path.exists(os.path.join(d, "CLAUDE.md")))
+        else:
+            ok = refused(r, d)
+        check(f"R7 hatch {val!r}: {'opens (CONTRAST)' if opens else 'stays closed'}",
+              ok, f"rc={r.returncode} {r.stderr[-300:]}")
     for label, tool in (("bin", BI), ("plugin", PBI)):
-        for extra in ([], ["--dry-run"], ["--print-config"]):
+        for extra in ([], ["--dry-run"], ["--print-config"], ["--force"],
+                      ["--adopt"]):
             tag = extra[0] if extra else "install"
             d = project(f"rf-{label}-{tag}", RF_CFG)
             r = run(tool, ["-C", d, *extra], d)
@@ -157,42 +193,109 @@ try:
             check(f"R5 retrofit-interview {label} {name}: refused",
                   refused(r, d, cfg_kept=False),
                   f"rc={r.returncode} {r.stderr[-300:]}")
+        d = os.path.join(TMP, f"ri-{label}-gitrepo-dir")
+        os.makedirs(d)
+        subprocess.run(["git", "init", "-q", d], check=True)
+        r = run(tool, ["scan", "--dir", d], d)
+        check(f"R5 retrofit-interview {label} scan --dir in a git repo: "
+              f"refused", refused(r, d, cfg_kept=False),
+              f"rc={r.returncode} {r.stderr[-300:]}")
     # R11 a `retrofit:` section is refused however the mode line reads
     for tag, cfg in (
             ("mode-absent", RF_CFG.replace('mode: "retrofit"\n', "")),
             ("mode-cased", RF_CFG.replace('mode: "retrofit"', 'Mode: "retrofit"')),
-            ("bom", "\ufeff" + RF_CFG)):
+            ("bom", "\ufeff" + RF_CFG),
+            ("mode-bootstrap", RF_CFG.replace('mode: "retrofit"',
+                                              'mode: "bootstrap"')),
+            ("quoted-keys", RF_CFG.replace('mode:', '"mode":')
+             .replace("\nretrofit:", '\n"retrofit":')),
+            ("bom-quoted-mode-only", '\ufeff"mode": "retrofit"\n'
+             + RF_CFG[RF_CFG.index("project:"):RF_CFG.index("retrofit:\n")])):
         d = project(f"rkey-{tag}", cfg)
         r = run(BI, ["-C", d, "--dry-run"], d)
         check(f"R11 retrofit section, {tag}: refused", refused(r, d),
               f"rc={r.returncode} {r.stderr[-300:]}")
-    # R12 an existing retrofit install is frozen: only --uninstall runs
+    # R12 a retrofit project is frozen: only --uninstall runs
     for tag, cfg, extra in (("greenfield", GF_CFG, []),
                             ("greenfield", GF_CFG, ["--dry-run"]),
                             ("greenfield", GF_CFG, ["--adopt"]),
+                            ("greenfield", GF_CFG, ["--force"]),
                             ("greenfield", GF_CFG, ["--print-config"]),
                             ("retrofit", RF_CFG, [])):
         d = install_retrofit(f"frozen-{tag}-{'-'.join(extra) or 'install'}")
-        with open(os.path.join(d, "bootstrap.config.yaml"), "w") as fh:
-            fh.write(cfg)
-        subprocess.run(["git", "-C", d, "add", "-A"], check=True)
-        subprocess.run(["git", "-C", d, "-c", "user.email=t@t", "-c",
-                        "user.name=t", "commit", "-qm", "cfg"],
-                       capture_output=True)
+        if d is None:
+            continue
+        commit_cfg(d, cfg)
         r = run(BI, ["-C", d, *extra], d)
         check(f"R12 existing retrofit install, {tag} config "
               f"{' '.join(extra) or 'install'}: refused, tree unchanged",
-              r.returncode == 2 and MARK in r.stderr
-              and "ask the operator" in r.stderr and git_dirty(d) == "",
-              f"rc={r.returncode} dirty={git_dirty(d)[:200]} "
+              frozen(r, d), f"rc={r.returncode} dirty={git_dirty(d)[:200]} "
               f"{r.stderr[-300:]}")
+    # R12b a clone: the gitignored state file is absent, the markers are not
+    d = install_retrofit("frozen-clone")
+    if d is not None:
+        os.remove(os.path.join(d, ".claude", ".retrofit-state.json"))
+        commit_cfg(d, GF_CFG)
+        r = run(BI, ["-C", d], d)
+        check("R12b a clone of a retrofit project (no state file): refused",
+              frozen(r, d), f"rc={r.returncode} dirty={git_dirty(d)[:200]} "
+              f"{r.stderr[-300:]}")
+    # R12c each marker freezes on its own
+    for rel in (".claude/.retrofit-state.json",
+                ".claude/hooks/rollout-schedule.md",
+                ".claude/inventory/README.md",
+                ".claude/steering/spec-strategy.md", ".claude/debt.md"):
+        d = project("marker-" + rel.replace("/", "_"), GF_CFG)
+        os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+        with open(os.path.join(d, rel), "w") as fh:
+            fh.write("x\n")
+        r = run(BI, ["-C", d, "--dry-run"], d)
+        check(f"R12c marker {rel} alone freezes the tree and is named",
+              r.returncode == 2 and MARK in r.stderr and rel in r.stderr,
+              f"rc={r.returncode} {r.stderr[-300:]}")
     d = install_retrofit("frozen-uninstall")
-    r = run(BI, ["-C", d, "--uninstall"], d)
-    check("R13 CONTRAST --uninstall still runs on a retrofit install",
-          r.returncode == 0 and MARK not in r.stderr, r.stderr[-300:])
+    if d is not None:
+        r = run(BI, ["-C", d, "--uninstall"], d)
+        check("R13 CONTRAST --uninstall still runs on a retrofit install",
+              r.returncode == 0 and MARK not in r.stderr, r.stderr[-300:])
+        with open(os.path.join(d, "bootstrap.config.yaml"), "w") as fh:
+            fh.write(GF_CFG)
+        r = run(BI, ["-C", d], d)
+        check("R13b after a clean --uninstall the tree is released: a "
+              "greenfield install runs",
+              r.returncode == 0 and MARK not in r.stderr, r.stderr[-300:])
+    d = install_retrofit("frozen-uninstall-edited")
+    if d is not None:
+        with open(os.path.join(d, ".claude", "steering",
+                               "spec-strategy.md"), "a") as fh:
+            fh.write("operator notes\n")
+        r = run(BI, ["-C", d, "--uninstall"], d)
+        with open(os.path.join(d, "bootstrap.config.yaml"), "w") as fh:
+            fh.write(GF_CFG)
+        r = run(BI, ["-C", d], d)
+        check("R13c an edited marker that --uninstall kept still freezes, "
+              "and is named",
+              r.returncode == 2 and MARK in r.stderr
+              and "spec-strategy.md" in r.stderr, r.stderr[-300:])
+    # R16 bootstrap-interview synthesize in a retrofit project writes nothing
+    d = install_retrofit("frozen-synth")
+    if d is not None:
+        with open(os.path.join(d, "PRD.md"), "w") as fh:
+            fh.write("# Demo Service\nA REST API service for widgets.\n")
+        r = run(BI_INT, ["analyze", "--prd", "PRD.md", "-o", "iv.md"], d)
+        before = open(os.path.join(d, "bootstrap.config.yaml"), "rb").read()
+        r = run(BI_INT, ["synthesize", "-i", "iv.md", "-o",
+                         "bootstrap.config.yaml"], d)
+        after = open(os.path.join(d, "bootstrap.config.yaml"), "rb").read()
+        out = r.stdout + r.stderr
+        check("R16 bootstrap-interview synthesize in a retrofit project: "
+              "refused, config unchanged",
+              r.returncode == 2 and MARK in out and before == after,
+              f"rc={r.returncode} same={before == after} {out[-300:]}")
     # R14 the write-side guard: apply_plan called in-process
-    d = project("inproc", RF_CFG)
-    code = (
+    for force, adopt in ((False, False), (True, False), (False, True)):
+      d = project(f"inproc-f{int(force)}-a{int(adopt)}", RF_CFG)
+      code = (
         "import sys; sys.path.insert(0, %r)\n"
         "from pathlib import Path\nimport installer, defaults, minyaml\n"
         "raw = minyaml.load_yaml(open(%r).read())\n"
@@ -200,17 +303,19 @@ try:
         "assert not errs, errs\n"
         "plan = installer.build_plan(cfg)\n"
         "try:\n"
-        "    installer.apply_plan(Path(%r), plan, cfg, dry=False, force=False)\n"
+        "    installer.apply_plan(Path(%r), plan, cfg, dry=False, force=%r,"
+        " adopt=%r)\n"
         "except Exception as exc:\n"
         "    print('RAISED', exc, file=sys.stderr); sys.exit(3)\n"
         % (os.path.join(ROOT, "lib"),
-           os.path.join(d, "bootstrap.config.yaml"), d))
-    r = subprocess.run([sys.executable, "-c", code], cwd=d, env=ENV,
-                       capture_output=True, text=True, timeout=300)
-    check("R14 apply_plan refuses a retrofit plan in-process, writes nothing",
-          r.returncode == 3 and MARK in r.stderr
-          and tree(d) == ["bootstrap.config.yaml"],
-          f"rc={r.returncode} tree={tree(d)[:5]} {r.stderr[-300:]}")
+           os.path.join(d, "bootstrap.config.yaml"), d, force, adopt))
+      r = subprocess.run([sys.executable, "-c", code], cwd=d, env=ENV,
+                         capture_output=True, text=True, timeout=300)
+      check(f"R14 apply_plan refuses a retrofit plan in-process "
+            f"(force={force}, adopt={adopt}), writes nothing",
+            r.returncode == 3 and MARK in r.stderr
+            and tree(d) == ["bootstrap.config.yaml"],
+            f"rc={r.returncode} tree={tree(d)[:5]} {r.stderr[-300:]}")
     # R15 the two runners open the route for the other suites
     for rel in ("bin/run-tests", ".claude/mutation-gate.py"):
         with open(os.path.join(ROOT, rel)) as fh:
@@ -222,17 +327,6 @@ try:
     check("R6 CONTRAST greenfield still installs, rc=0",
           r.returncode == 0 and MARK not in r.stderr
           and os.path.exists(os.path.join(d, "CLAUDE.md")), r.stderr[-300:])
-    for val, opens in (("1", True), ("true", False), ("0", False),
-                       ("", False), (" 1", False), ("yes", False)):
-        d = project(f"hatch-{val.strip() or 'empty'}-{len(val)}", RF_CFG)
-        r = run(BI, ["-C", d], d, env=dict(ENV, **{ENV_NAME: val}))
-        if opens:
-            ok = (r.returncode == 0 and MARK not in r.stderr
-                  and os.path.exists(os.path.join(d, "CLAUDE.md")))
-        else:
-            ok = refused(r, d)
-        check(f"R7 hatch {val!r}: {'opens (CONTRAST)' if opens else 'stays closed'}",
-              ok, f"rc={r.returncode} {r.stderr[-300:]}")
     d = project("msg", RF_CFG)
     r = run(BI, ["-C", d], d)
     err = r.stderr
@@ -242,7 +336,13 @@ try:
           r.returncode == 2 and ENV_NAME not in err, err[-300:])
     check("R10 message does not steer to a greenfield install",
           r.returncode == 2 and "mode: bootstrap" not in err
-          and "drop" not in err.lower(), err[-300:])
+          and not any(w in err.lower() for w in (
+              "drop", "greenfield", "override", "environment")), err[-300:])
+    check("R10b message says not to work around the refusal",
+          r.returncode == 2 and "do not work around this refusal" in err,
+          err[-300:])
+    check("R10c message is exactly the reviewed text",
+          r.returncode == 2 and MSG in err, err[-300:])
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

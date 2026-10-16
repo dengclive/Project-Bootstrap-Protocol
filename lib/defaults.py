@@ -668,9 +668,11 @@ MODES = {"bootstrap", "retrofit"}
 
 # [retrofit-disable, 2026-10-16] The retrofit route is DISABLED by directive
 # (2026-10-14) until the retrofit backlog rows are revisited and built; backlog
-# row Z-72 lists them. Refused at every edge: bin/bootstrap-install on a config
+# row Z-72 records the disable, and which rows gate re-enabling is the
+# operator's call. Refused at every edge: bin/bootstrap-install on a config
 # whose mode is "retrofit" or that has a `retrofit:` section, and on any config
-# over an existing retrofit install (only --uninstall runs there);
+# over a retrofit project (RETROFIT_MARKERS; only --uninstall runs there);
+# bin/bootstrap-interview's synthesize and interactive in such a project;
 # installer.apply_plan on a retrofit config; retrofit-interview on every
 # subcommand. resolve_config and build_plan still accept retrofit, so the
 # suites that carry retrofit fixtures keep running under bin/run-tests, which
@@ -679,13 +681,37 @@ RETROFIT_ENABLE_ENV = "BOOTSTRAP_ENABLE_RETROFIT"
 RETROFIT_DISABLED_MESSAGE = (
     "the retrofit route is disabled (directive of 2026-10-14) until its "
     "backlog rows are built; row Z-72 of docs/deferred-backlog.md in the "
-    "Bootstrap Protocol repository lists them. Stop and ask the operator, "
+    "Bootstrap Protocol repository records it. Stop and ask the operator, "
     "and do not work around this refusal.")
 
 
 def retrofit_enabled() -> bool:
     """True only when the test runners' override is set to exactly "1"."""
     return os.environ.get(RETROFIT_ENABLE_ENV) == "1"
+
+
+# [retrofit-disable fix round 1, operator ruling 2026-10-16] What marks a
+# retrofit project: the installer's state file, or a file only a retrofit
+# install writes. The state file is gitignored, so the others are what a clone
+# or a worktree of a committed retrofit project carries. --uninstall removes
+# the state file and every marker nobody edited; an edited marker it keeps
+# still freezes the tree, and the refusal names it.
+RETROFIT_MARKERS = (
+    ".claude/.retrofit-state.json",
+    ".claude/hooks/rollout-schedule.md",
+    ".claude/inventory/README.md",
+    ".claude/steering/spec-strategy.md",
+    ".claude/debt.md",
+)
+
+
+def retrofit_marker(root) -> str | None:
+    """The first RETROFIT_MARKERS path present under `root` (a dangling
+    symlink counts), or None."""
+    for rel in RETROFIT_MARKERS:
+        if os.path.lexists(os.path.join(str(root), rel)):
+            return rel
+    return None
 
 
 RETROFIT_SPEC_STRATEGIES = {"forward-only", "touch-based", "bulk"}

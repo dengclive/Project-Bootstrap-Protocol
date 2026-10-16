@@ -116,10 +116,12 @@ instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
 
 **[Dated note 2026-10-16.]** The retrofit route is disabled until its
 backlog rows are built (backlog row Z-72). `bin/bootstrap-install` refuses a
-retrofit config, and refuses every run but `--uninstall` on a project that
-already has `.claude/.retrofit-state.json`; `bin/retrofit-interview` refuses
-every command. Don't run the greenfield route over an existing codebase in
-its place: ask the maintainers instead. The steps below describe the route
+retrofit config, and every run but `--uninstall` on a project that already
+holds retrofit files (`.claude/.retrofit-state.json`, or another file only a
+retrofit install writes, so a clone counts too); `bin/bootstrap-interview`
+won't write a config there; `bin/retrofit-interview` refuses every command.
+A clean `--uninstall` releases the project. Don't run the greenfield route
+over an existing codebase in its place: ask the maintainers instead. The steps below describe the route
 as it will work once it's re-enabled.
 
 1. Start Claude Code at your project's root, as in steps 1 and 2 above, and

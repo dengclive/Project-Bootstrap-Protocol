@@ -39,7 +39,8 @@ from pathlib import Path
 import prd_heuristics as H
 import llm_advisor as LLM
 from configemit import carry_from_file, emit
-from defaults import DEFAULTS, resolve_config
+from defaults import (DEFAULTS, RETROFIT_DISABLED_MESSAGE, resolve_config,
+                      retrofit_enabled, retrofit_marker)
 from minyaml import load_yaml
 
 HERE = Path(__file__).resolve().parent
@@ -1462,6 +1463,24 @@ def _finalize(answers: dict, out_path: Path, *, outstream,
     ended early; it replaces the header's claim that every value was shown.
     Every other run, synthesize included, keeps the header byte for byte
     (tests/test_validate_only.py pins synthesize's output)."""
+    # [retrofit-disable fix round 1] In a retrofit project the draft would
+    # overwrite its retrofit config with a greenfield one, which the installer
+    # then refuses; refuse here first, so nothing is written.
+    if not retrofit_enabled():
+        retro = retrofit_marker(out_path.parent)
+        if not retro and out_path.exists():
+            try:
+                raw = load_yaml(out_path.read_text())
+            except Exception:
+                raw = None
+            if isinstance(raw, dict) and (raw.get("mode") == "retrofit"
+                                          or "retrofit" in raw):
+                retro = out_path.name
+        if retro:
+            outstream.write(f"\nerror: this project holds retrofit files "
+                            f"({retro}); {RETROFIT_DISABLED_MESSAGE}\n"
+                            "No file written.\n")
+            return 2
     cfg = answers_to_config(answers)
     # [WP3 fix1 INST-5] Keep the hand-set keys no answer sets.
     carried = carry_from_file(out_path, cfg)

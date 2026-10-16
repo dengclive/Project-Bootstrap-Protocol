@@ -38,7 +38,8 @@ from templates import (  # all file bodies live here
     SPEC_VERSIONING_PATH,
     _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
-from defaults import RETROFIT_DISABLED_MESSAGE, retrofit_enabled
+from defaults import (RETROFIT_DISABLED_MESSAGE, retrofit_enabled,
+                      retrofit_marker)
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
@@ -3950,6 +3951,14 @@ def uninstall(root: Path) -> None:
                 d.rmdir()
             except OSError:
                 pass
+    # [retrofit-disable fix round 1] The retrofit state file is the
+    # installer's own record, so it goes whatever was kept: a retrofit
+    # marker that was edited, and so kept, is what still freezes the tree.
+    for rel in (RETROFIT_STATE, RETROFIT_STATE + ".lock"):
+        try:
+            (root / rel).unlink()
+        except FileNotFoundError:
+            pass
     print(f"Uninstall complete. removed={removed} kept={kept} "
           f"(modified files and the manifest/state are left for inspection).")
 
@@ -4756,12 +4765,14 @@ def main(argv: list[str]) -> int:
         uninstall(root)
         return 0
 
-    # [retrofit-disable] An existing retrofit install is frozen while the
-    # route is disabled (operator ruling 2026-10-16): any other run, a
-    # greenfield config included, would convert or rewrite it, so only
-    # --uninstall (above) gets through.
-    if (root / RETROFIT_STATE).exists() and not retrofit_enabled():
-        print(f"error: {root} has a retrofit install ({RETROFIT_STATE}); "
+    # [retrofit-disable] A retrofit project is frozen while the route is
+    # disabled (operator rulings 2026-10-16): any other run, a greenfield
+    # config included, would convert or rewrite it, so only --uninstall
+    # (above) gets through. RETROFIT_MARKERS reach a clone too.
+    marker = retrofit_marker(root)
+    if marker and not retrofit_enabled():
+        print(f"error: {root} holds retrofit files ({marker}), from a "
+              f"retrofit install or what --uninstall kept of one; "
               f"{RETROFIT_DISABLED_MESSAGE}", file=sys.stderr)
         return 2
 
@@ -4787,9 +4798,12 @@ def main(argv: list[str]) -> int:
         return 2
     # [retrofit-disable] Refused before every other config check, so the
     # disable is the one reason shown. A `retrofit:` section counts whatever
-    # the mode line says (absent, mis-cased, behind a BOM).
+    # the mode line says (absent, mis-cased, behind a BOM), and a key keeps
+    # counting when it is quoted or carries the BOM itself.
+    keys = ({str(k).lstrip("\ufeff").strip("\"'"): v for k, v in raw.items()}
+            if isinstance(raw, dict) else {})
     if (not retrofit_enabled() and isinstance(raw, dict)
-            and (raw.get("mode") == "retrofit" or "retrofit" in raw)):
+            and (keys.get("mode") == "retrofit" or "retrofit" in keys)):
         print(f"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}",
               file=sys.stderr)
         return 2

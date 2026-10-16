@@ -1,0 +1,31 @@
+{
+  "guard": "retrofit-disable: bootstrap-interview won't write a config in a retrofit project",
+  "target": "lib/interview.py",
+  "guard_site": "lib/interview.py _finalize(), before carry_from_file",
+  "why": [
+    "[fix round 1, step 7 ROUTES-S7-2] Without the refusal, synthesize",
+    "overwrites a retrofit project's config with a greenfield draft and",
+    "keeps it after the installer refuses it."
+  ],
+  "mutations": [
+    {
+      "id": "bi-refusal-dropped",
+      "why": "The refusal never fires; synthesize replaces the retrofit config.",
+      "find": "    if not retrofit_enabled():\n        retro = retrofit_marker(out_path.parent)",
+      "replace": "    if False:\n        retro = retrofit_marker(out_path.parent)",
+      "expect": {
+        "test_retrofit_disabled.py": "R16 bootstrap-interview synthesize"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. One word of the refusal's comment. It MUST escape.",
+      "find": "refuse here first, so nothing is written.",
+      "replace": "refuse here first, so nothing gets written.",
+      "expect": {
+        "test_retrofit_disabled.py": null
+      }
+    }
+  ]
+}
