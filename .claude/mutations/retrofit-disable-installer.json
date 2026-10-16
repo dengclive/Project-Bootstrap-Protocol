@@ -1,0 +1,104 @@
+{
+  "guard": "retrofit-disable: bin/bootstrap-install refuses the retrofit route",
+  "target": "lib/installer.py",
+  "guard_site": "lib/installer.py main() (the retrofit-project freeze; the config refusal), apply_plan() (the write side) and _retire_retrofit_state() (uninstall keeps the state file aside)",
+  "why": [
+    "The operator disabled the retrofit route (backlog Z-72). Each of the",
+    "installer's three refusals can be removed by a one-line edit that",
+    "leaves every source-text pin intact; this set re-measures that each",
+    "removal turns a named behaviour row red."
+  ],
+  "mutations": [
+    {
+      "id": "inst-refusal-dropped",
+      "why": "The mode/section refusal never fires: a retrofit config validates under --print-config.",
+      "find": "if not retrofit_enabled() and is_retrofit_raw(raw):",
+      "replace": "if False and not retrofit_enabled() and is_retrofit_raw(raw):",
+      "expect": {
+        "test_retrofit_disabled.py": "R1 bin bootstrap-install --print-config"
+      }
+    },
+    {
+      "id": "inst-falls-through",
+      "why": "The refusal prints but does not return, so --dry-run plans the retrofit install.",
+      "find": "        print(f\"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n        return 2\n",
+      "replace": "        print(f\"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n",
+      "expect": {
+        "test_retrofit_disabled.py": "R1 bin bootstrap-install --dry-run"
+      }
+    },
+    {
+      "id": "inst-freeze-dropped",
+      "why": "An existing retrofit install is no longer frozen: a greenfield config converts it.",
+      "find": "if marker and not retrofit_enabled():",
+      "replace": "if False and marker and not retrofit_enabled():",
+      "expect": {
+        "test_retrofit_disabled.py": "greenfield config install"
+      }
+    },
+    {
+      "id": "inst-apply-guard-dropped",
+      "why": "The write side is open again for a caller that skips main().",
+      "find": "if cfg.get(\"mode\") == \"retrofit\" and not retrofit_enabled():\n        raise RuntimeError(RETROFIT_DISABLED_MESSAGE)",
+      "replace": "if False and cfg.get(\"mode\") == \"retrofit\" and not retrofit_enabled():\n        raise RuntimeError(RETROFIT_DISABLED_MESSAGE)",
+      "expect": {
+        "test_retrofit_disabled.py": "R14 apply_plan refuses a retrofit plan in-process (force=False, adopt=False)"
+      }
+    },
+    {
+      "id": "inst-hatch-ignored",
+      "why": "The front refusal ignores the override, so even the test runners cannot open the route.",
+      "find": "if not retrofit_enabled() and is_retrofit_raw(raw):",
+      "replace": "if is_retrofit_raw(raw):",
+      "expect": {
+        "test_retrofit_disabled.py": "R7 hatch '1'"
+      }
+    },
+    {
+      "id": "inst-uninstall-keeps-state",
+      "why": "--uninstall leaves the retrofit state file, so an uninstalled project stays frozen for good.",
+      "find": "    moved = _retire_retrofit_state(root)\n    print(f\"Uninstall complete.",
+      "replace": "    moved = None\n    print(f\"Uninstall complete.",
+      "expect": {
+        "test_retrofit_disabled.py": "R13b after a clean"
+      }
+    },
+    {
+      "id": "inst-backup-not-kept",
+      "why": "[fix round 2] The state file is deleted, not kept aside, so the operator's runtime decisions are lost.",
+      "find": "    state.rename(backup)\n",
+      "replace": "    state.unlink()\n",
+      "expect": {
+        "test_retrofit_disabled.py": "R13d --uninstall moves"
+      }
+    },
+    {
+      "id": "inst-state-follows-symlink",
+      "why": "[fix round 3] A dangling-symlink state file is not seen, so uninstall leaves it and the tree stays frozen.",
+      "find": "    if not os.path.lexists(state):\n        return None",
+      "replace": "    if not state.exists():\n        return None",
+      "expect": {
+        "test_retrofit_disabled.py": "R13e a dangling-symlink"
+      }
+    },
+    {
+      "id": "inst-nomanifest-keeps-state",
+      "why": "[fix round 3] With no manifest, uninstall leaves the state file in place.",
+      "find": "    if not m:\n        moved = _retire_retrofit_state(root)",
+      "replace": "    if not m:\n        moved = None",
+      "expect": {
+        "test_retrofit_disabled.py": "R13f no manifest"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. One word of a comment beside the refusal. It MUST escape.",
+      "find": "disable is the one reason shown",
+      "replace": "disable is the only reason shown",
+      "expect": {
+        "test_retrofit_disabled.py": null
+      }
+    }
+  ]
+}

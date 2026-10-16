@@ -39,6 +39,7 @@ import retrofit_heuristics as RH
 import prd_heuristics as PH  # for ARCHETYPE_REQUIRED_TIER, TIER_ORDER, CONF_*
 from configemit import carry_from_file, emit
 from defaults import (
+    RETROFIT_DISABLED_MESSAGE, retrofit_enabled,
     resolve_config, ARCHETYPES, RETROFIT_SPEC_STRATEGIES,
     RETROFIT_PM_STRATEGIES,
 )
@@ -1028,6 +1029,12 @@ def _finalize(answers: dict, proposal: dict, out_path: Path, *,
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv: list[str]) -> int:
+    # [retrofit-disable] Refused before argparse, so --help and a bad
+    # subcommand get the reason too; nothing is read or written.
+    if not retrofit_enabled():
+        print(f"retrofit-interview: error: {RETROFIT_DISABLED_MESSAGE}",
+              file=sys.stderr)
+        return 2
     ap = argparse.ArgumentParser(
         prog="retrofit-interview",
         description=(

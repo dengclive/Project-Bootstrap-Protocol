@@ -1,0 +1,130 @@
+{
+  "guard": "retrofit-disable: the override, the refusal text, what marks a retrofit project, and what counts as a retrofit config",
+  "target": "lib/defaults.py",
+  "guard_site": "lib/defaults.py retrofit_enabled(), RETROFIT_DISABLED_MESSAGE, RETROFIT_MARKERS/_is_marker/retrofit_marker_above and is_retrofit_raw",
+  "why": [
+    "The override is for the test runners only (operator ruling 2026-10-16:",
+    "exactly \"1\", never named in the refusal). The refusal must send the",
+    "reader to the operator and must not steer to a greenfield install."
+  ],
+  "mutations": [
+    {
+      "id": "hatch-truthy",
+      "why": "Any non-empty value opens the route.",
+      "find": "return os.environ.get(RETROFIT_ENABLE_ENV) == \"1\"",
+      "replace": "return bool(os.environ.get(RETROFIT_ENABLE_ENV))",
+      "expect": {
+        "test_retrofit_disabled.py": "R7 hatch 'true': stays closed"
+      }
+    },
+    {
+      "id": "hatch-stripped",
+      "why": "Whitespace around the value is forgiven.",
+      "find": "return os.environ.get(RETROFIT_ENABLE_ENV) == \"1\"",
+      "replace": "return (os.environ.get(RETROFIT_ENABLE_ENV) or \"\").strip() == \"1\"",
+      "expect": {
+        "test_retrofit_disabled.py": "R7 hatch ' 1': stays closed"
+      }
+    },
+    {
+      "id": "hatch-always-open",
+      "why": "The route is open by default.",
+      "find": "return os.environ.get(RETROFIT_ENABLE_ENV) == \"1\"",
+      "replace": "return True",
+      "expect": {
+        "test_retrofit_disabled.py": "R8 message names Z-72"
+      }
+    },
+    {
+      "id": "msg-names-override",
+      "why": "The refusal names the override.",
+      "find": "\"and do not work around this refusal.\")",
+      "replace": "\"and do not work around this refusal. Override: BOOTSTRAP_ENABLE_RETROFIT=1\")",
+      "expect": {
+        "test_retrofit_disabled.py": "R9 message never names the override"
+      }
+    },
+    {
+      "id": "msg-steers-greenfield",
+      "why": "The refusal tells the reader to switch to a greenfield install.",
+      "find": "\"and do not work around this refusal.\")",
+      "replace": "\"and do not work around this refusal. Or set mode: bootstrap.\")",
+      "expect": {
+        "test_retrofit_disabled.py": "R10 message does not steer"
+      }
+    },
+    {
+      "id": "msg-no-operator",
+      "why": "The refusal no longer sends the reader to the operator.",
+      "find": "\"Bootstrap Protocol repository records it. Stop and ask the operator, \"",
+      "replace": "\"Bootstrap Protocol repository records it. Fix the config, \"",
+      "expect": {
+        "test_retrofit_disabled.py": "R8 message names Z-72"
+      }
+    },
+    {
+      "id": "markers-state-only",
+      "why": "Only the gitignored state file marks a retrofit project, so a clone is not frozen.",
+      "find": "    (\".claude/.retrofit-state.json\", None),\n    (\".claude/hooks/rollout-schedule.md\", _RETROFIT_SIGNATURE),\n    (\".claude/inventory/README.md\", \"codebase audit (R0)\"),\n    (\".claude/steering/spec-strategy.md\", _RETROFIT_SIGNATURE),\n    (\".claude/debt.md\", _RETROFIT_SIGNATURE),\n)",
+      "replace": "    (\".claude/.retrofit-state.json\", None),\n)",
+      "expect": {
+        "test_retrofit_disabled.py": "R12b a clone"
+      }
+    },
+    {
+      "id": "signature-ignored",
+      "why": "[fix round 2] Any file at a marker path counts, so a greenfield project's own .claude/debt.md freezes it.",
+      "find": "    return any(signature in line for line in head)",
+      "replace": "    return True",
+      "expect": {
+        "test_retrofit_disabled.py": "R12d .claude/debt.md without"
+      }
+    },
+    {
+      "id": "marker-root-only",
+      "why": "[fix round 2] Only the -C root is checked, so a run from a subdirectory of a retrofit project installs a nested greenfield harness.",
+      "find": "    for d in chain:\n        if d == home and d != start:",
+      "replace": "    for d in chain[:1]:\n        if d == home and d != start:",
+      "expect": {
+        "test_retrofit_disabled.py": "R12e a greenfield install from a subdirectory"
+      }
+    },
+    {
+      "id": "raw-section-dropped",
+      "why": "Only an exact mode line counts; a retrofit: section with the mode line missing installs greenfield.",
+      "find": "    return keys.get(\"mode\") == \"retrofit\" or \"retrofit\" in keys",
+      "replace": "    return keys.get(\"mode\") == \"retrofit\"",
+      "expect": {
+        "test_retrofit_disabled.py": "R11 retrofit section, mode-absent"
+      }
+    },
+    {
+      "id": "raw-keys-unnormalized",
+      "why": "A quoted or BOM-carrying key is read as written, so a quoted retrofit config installs greenfield.",
+      "find": "    keys = {str(k).lstrip(\"\\ufeff\").strip(\"\\\"'\"): v for k, v in raw.items()}",
+      "replace": "    keys = raw",
+      "expect": {
+        "test_retrofit_disabled.py": "R11 retrofit section, quoted-keys"
+      }
+    },
+    {
+      "id": "marker-ends-only",
+      "why": "[fix round 3] Only the start and the git top are checked, so a project below the git top escapes from its subdirectory.",
+      "find": "    for d in chain:\n        if d == home and d != start:",
+      "replace": "    for d in chain[:1] + chain[-1:]:\n        if d == home and d != start:",
+      "expect": {
+        "test_retrofit_disabled.py": "R12g a retrofit project below the git top"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. One word of the comment above the constants. It MUST escape.",
+      "find": "Re-enabling is the operator's call.",
+      "replace": "Re-enabling is the operator's decision.",
+      "expect": {
+        "test_retrofit_disabled.py": null
+      }
+    }
+  ]
+}
