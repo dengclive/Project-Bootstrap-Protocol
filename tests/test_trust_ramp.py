@@ -648,12 +648,13 @@ _REQUIRED_SETS = {
     # binds a single target file; the jury is the suite that removes the
     # override and checks every refusal (backlog Z-72).
     "retrofit-disable-installer.json": {
-        "sha256": "dedd0754667ffa16d5c3f571bbb4c74c"
-                  "7bb8de85218354a186921ad3f34760eb",
+        "sha256": "48aacaa6779c48564d25d5781929a5df"
+                  "c3c5dbd1f676f3b7b4fd567b2ebbae1a",
         "bypasses": ["inst-refusal-dropped", "inst-falls-through",
                      "inst-freeze-dropped", "inst-apply-guard-dropped",
                      "inst-hatch-ignored", "inst-uninstall-keeps-state",
-                     "inst-backup-not-kept"],
+                     "inst-backup-not-kept", "inst-state-follows-symlink",
+                     "inst-nomanifest-keeps-state"],
         "controls": ["control-inert-comment"],
         "digest_suites": [],
         "suites": ["test_retrofit_disabled.py"],
@@ -675,13 +676,14 @@ _REQUIRED_SETS = {
         "suites": ["test_retrofit_disabled.py"],
     },
     "retrofit-disable-hatch.json": {
-        "sha256": "e4c5b1423a30380fec4652285828a18f"
-                  "a34aae1e09b95bb6aa8e4f7ef25d281d",
+        "sha256": "5409a5149239340188af1776c514e92d"
+                  "32bae23466d0f4d00812d19a5dedb6c9",
         "bypasses": ["hatch-truthy", "hatch-stripped", "hatch-always-open",
                      "msg-names-override", "msg-steers-greenfield",
                      "msg-no-operator", "markers-state-only",
                      "signature-ignored", "marker-root-only",
-                     "raw-section-dropped", "raw-keys-unnormalized"],
+                     "raw-section-dropped", "raw-keys-unnormalized",
+                     "marker-ends-only"],
         "controls": ["control-inert-comment"],
         "digest_suites": [],
         "suites": ["test_retrofit_disabled.py"],

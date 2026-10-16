@@ -73,6 +73,24 @@
       }
     },
     {
+      "id": "inst-state-follows-symlink",
+      "why": "[fix round 3] A dangling-symlink state file is not seen, so uninstall leaves it and the tree stays frozen.",
+      "find": "    if not os.path.lexists(state):\n        return None",
+      "replace": "    if not state.exists():\n        return None",
+      "expect": {
+        "test_retrofit_disabled.py": "R13e a dangling-symlink"
+      }
+    },
+    {
+      "id": "inst-nomanifest-keeps-state",
+      "why": "[fix round 3] With no manifest, uninstall leaves the state file in place.",
+      "find": "    if not m:\n        moved = _retire_retrofit_state(root)",
+      "replace": "    if not m:\n        moved = None",
+      "expect": {
+        "test_retrofit_disabled.py": "R13f no manifest"
+      }
+    },
+    {
       "control": true,
       "id": "control-inert-comment",
       "why": "NEGATIVE CONTROL. One word of a comment beside the refusal. It MUST escape.",

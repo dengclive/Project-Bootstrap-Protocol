@@ -326,6 +326,55 @@ try:
               "and is named",
               r.returncode == 2 and MARK in r.stderr
               and "spec-strategy.md" in r.stderr, r.stderr[-300:])
+    # R13e a dangling symlink at the state path is moved aside too, so a
+    # clean uninstall still releases the tree
+    d = install_retrofit("frozen-uninstall-dangling")
+    if d is not None:
+        sp = os.path.join(d, ".claude", ".retrofit-state.json")
+        os.remove(sp)
+        os.symlink("gone.json", sp)
+        r = run(BI, ["-C", d, "--uninstall"], d)
+        with open(os.path.join(d, "bootstrap.config.yaml"), "w") as fh:
+            fh.write(GF_CFG)
+        r2 = run(BI, ["-C", d, "--dry-run"], d)
+        check("R13e a dangling-symlink state file is moved aside and the tree "
+              "released",
+              r.returncode == 0 and not os.path.lexists(sp)
+              and os.path.lexists(sp + ".pre-uninstall")
+              and r2.returncode == 0 and MARK not in r2.stderr,
+              f"rc={r.returncode}/{r2.returncode} {r2.stderr[-300:]}")
+    # R13f with no manifest, --uninstall still moves the state file aside
+    d = install_retrofit("frozen-uninstall-nomanifest")
+    if d is not None:
+        os.remove(os.path.join(d, ".claude", ".installer-manifest.json"))
+        sp = os.path.join(d, ".claude", ".retrofit-state.json")
+        r = run(BI, ["-C", d, "--uninstall"], d)
+        check("R13f no manifest: --uninstall still moves the state file aside "
+              "and says where",
+              r.returncode == 0 and "No installer manifest found" in r.stdout
+              and not os.path.lexists(sp)
+              and os.path.exists(sp + ".pre-uninstall")
+              and ".retrofit-state.json.pre-uninstall" in r.stdout,
+              f"rc={r.returncode} {r.stdout[-300:]}")
+    # R12g a retrofit project below the git top level: a run from its
+    # subdirectory is caught (the walk's middle entries)
+    top = os.path.join(TMP, "mono")
+    os.makedirs(top)
+    subprocess.run(["git", "init", "-q", top], check=True)
+    svc = os.path.join(top, "svc")
+    os.makedirs(os.path.join(svc, "src"))
+    with open(os.path.join(svc, "bootstrap.config.yaml"), "w") as fh:
+        fh.write(RF_CFG)
+    r = run(BI, ["-C", svc], svc, env=dict(ENV, **{ENV_NAME: "1"}))
+    sd = os.path.join(svc, "src")
+    with open(os.path.join(sd, "bootstrap.config.yaml"), "w") as fh:
+        fh.write(GF_CFG)
+    r2 = run(BI, ["-C", sd], sd)
+    check("R12g a retrofit project below the git top: a greenfield install "
+          "from its subdirectory is refused",
+          r.returncode == 0 and r2.returncode == 2 and MARK in r2.stderr
+          and not os.path.exists(os.path.join(sd, ".claude")),
+          f"rc={r.returncode}/{r2.returncode} {r2.stderr[-300:]}")
     # R13d uninstall keeps the operator's retrofit state in a backup
     d = install_retrofit("frozen-uninstall-state")
     if d is not None:

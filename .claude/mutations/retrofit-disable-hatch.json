@@ -108,6 +108,15 @@
       }
     },
     {
+      "id": "marker-ends-only",
+      "why": "[fix round 3] Only the start and the git top are checked, so a project below the git top escapes from its subdirectory.",
+      "find": "    for d in chain:\n        if d == home and d != start:",
+      "replace": "    for d in chain[:1] + chain[-1:]:\n        if d == home and d != start:",
+      "expect": {
+        "test_retrofit_disabled.py": "R12g a retrofit project below the git top"
+      }
+    },
+    {
       "control": true,
       "id": "control-inert-comment",
       "why": "NEGATIVE CONTROL. One word of the comment above the constants. It MUST escape.",

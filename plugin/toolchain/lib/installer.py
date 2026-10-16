@@ -3889,11 +3889,12 @@ def _retire_retrofit_state(root: Path) -> str | None:
     name matches the retrofit `.gitignore`'s `.retrofit-state.json.pre-*`
     line and is not a marker. Returns the copy's path, or None."""
     state = root / RETROFIT_STATE
-    if not state.exists():
+    # lexists, as _is_marker: a dangling symlink still freezes the tree.
+    if not os.path.lexists(state):
         return None
     backup = root / (RETROFIT_STATE + ".pre-uninstall")
     n = 1
-    while backup.exists():
+    while os.path.lexists(backup):
         n += 1
         backup = root / (RETROFIT_STATE + f".pre-uninstall-{n}")
     state.rename(backup)

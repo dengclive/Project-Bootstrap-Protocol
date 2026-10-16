@@ -186,7 +186,8 @@ operator. None names the override.
   `.claude/inventory/README.md`, `.claude/steering/spec-strategy.md`,
   `.claude/debt.md`) while its first lines carry that template's signature,
   so a greenfield project's own file at one of those paths doesn't count. A
-  run from a subdirectory, up to the git top level, counts too. The state
+  run from a subdirectory of a project in a git repository, up to the git
+  top level, counts too. The state
   file is gitignored; the signed files reach a clone or a worktree. Such a
   project is frozen: it keeps the hooks it has, and only `--uninstall` runs
   (operator rulings, 2026-10-16). `--uninstall` now moves the retrofit state
@@ -232,11 +233,12 @@ codebase.
 change touches: `lib/defaults.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py` and `bin/run-tests`. No golden re-baseline.
 
-**Tests.** The new suite `tests/test_retrofit_disabled.py` (88 checks) was
+**Tests.** The new suite `tests/test_retrofit_disabled.py` (91 checks) was
 red first. The build's 52 rows reported 4 passed and 48 failed on
 `b2e146a`, the four being rows marked CONTRAST; fix round 1's suite reported
-11 failed on the build commit `f778eff`, and fix round 2's reported 6 failed
-on fix round 1's commit `6df122f`, one per new behaviour. Mutation
+11 failed on the build commit `f778eff`, fix round 2's reported 6 failed
+on fix round 1's commit `6df122f`, and fix round 3's reported 1 failed on
+fix round 2's commit `3f3acf1`. Mutation
 sets, one per target, use it as their jury, registered in
 `tests/test_trust_ramp.py`. `.claude/mutation-gate.py` sets the override for
 its suites too, so its pin moves. Of the five registered sets that name
