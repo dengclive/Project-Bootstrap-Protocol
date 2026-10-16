@@ -117,6 +117,15 @@
       }
     },
     {
+      "id": "marker-walk-capped",
+      "why": "[final check] The parent walk stops after three entries, so a run deep below a retrofit project escapes.",
+      "find": "        if os.path.lexists(os.path.join(d, \".git\")):\n            break",
+      "replace": "        if os.path.lexists(os.path.join(d, \".git\")) or len(chain) > 2:\n            break",
+      "expect": {
+        "test_retrofit_disabled.py": "R12h the same, four levels below"
+      }
+    },
+    {
       "control": true,
       "id": "control-inert-comment",
       "why": "NEGATIVE CONTROL. One word of the comment above the constants. It MUST escape.",

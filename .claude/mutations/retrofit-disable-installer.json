@@ -91,6 +91,15 @@
       }
     },
     {
+      "id": "inst-backup-clobbered",
+      "why": "[final check] A second uninstall overwrites the first backup, losing the earlier state.",
+      "find": "    while os.path.lexists(backup):",
+      "replace": "    while False:",
+      "expect": {
+        "test_retrofit_disabled.py": "R13g a second --uninstall"
+      }
+    },
+    {
       "control": true,
       "id": "control-inert-comment",
       "why": "NEGATIVE CONTROL. One word of a comment beside the refusal. It MUST escape.",

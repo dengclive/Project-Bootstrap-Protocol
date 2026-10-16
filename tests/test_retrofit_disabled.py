@@ -375,6 +375,38 @@ try:
           r.returncode == 0 and r2.returncode == 2 and MARK in r2.stderr
           and not os.path.exists(os.path.join(sd, ".claude")),
           f"rc={r.returncode}/{r2.returncode} {r2.stderr[-300:]}")
+    deep = os.path.join(svc, "src", "a", "b", "c")
+    os.makedirs(deep)
+    with open(os.path.join(deep, "bootstrap.config.yaml"), "w") as fh:
+        fh.write(GF_CFG)
+    r3 = run(BI, ["-C", deep, "--dry-run"], deep)
+    check("R12h the same, four levels below the retrofit project",
+          r3.returncode == 2 and MARK in r3.stderr,
+          f"rc={r3.returncode} {r3.stderr[-300:]}")
+    # R13g a second uninstall keeps the first backup, and a dangling symlink
+    # at the backup name is not overwritten either
+    d = install_retrofit("frozen-uninstall-twice")
+    if d is not None:
+        import json as _json
+        sp = os.path.join(d, ".claude", ".retrofit-state.json")
+        on = dict(ENV, **{ENV_NAME: "1"})
+        st = _json.load(open(sp)); st["probe_round"] = 1
+        _json.dump(st, open(sp, "w"))
+        run(BI, ["-C", d, "--uninstall"], d)
+        os.symlink("gone.json", sp + ".pre-uninstall-2")
+        run(BI, ["-C", d], d, env=on)
+        st = _json.load(open(sp)); st["probe_round"] = 2
+        _json.dump(st, open(sp, "w"))
+        r = run(BI, ["-C", d, "--uninstall"], d)
+        b1, b3 = sp + ".pre-uninstall", sp + ".pre-uninstall-3"
+        ok = (r.returncode == 0 and os.path.exists(b1) and os.path.exists(b3)
+              and _json.load(open(b1)).get("probe_round") == 1
+              and _json.load(open(b3)).get("probe_round") == 2
+              and os.path.islink(sp + ".pre-uninstall-2")
+              and ".pre-uninstall-3" in r.stdout)
+        check("R13g a second --uninstall keeps the first backup and skips a "
+              "dangling symlink at the next name", ok,
+              f"rc={r.returncode} {r.stdout[-300:]}")
     # R13d uninstall keeps the operator's retrofit state in a backup
     d = install_retrofit("frozen-uninstall-state")
     if d is not None:

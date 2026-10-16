@@ -233,7 +233,7 @@ codebase.
 change touches: `lib/defaults.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py` and `bin/run-tests`. No golden re-baseline.
 
-**Tests.** The new suite `tests/test_retrofit_disabled.py` (91 checks) was
+**Tests.** The new suite `tests/test_retrofit_disabled.py` (93 checks) was
 red first. The build's 52 rows reported 4 passed and 48 failed on
 `b2e146a`, the four being rows marked CONTRAST; fix round 1's suite reported
 11 failed on the build commit `f778eff`, fix round 2's reported 6 failed
