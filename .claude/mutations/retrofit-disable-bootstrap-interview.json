@@ -11,10 +11,19 @@
     {
       "id": "bi-refusal-dropped",
       "why": "The refusal never fires; synthesize replaces the retrofit config.",
-      "find": "    if not retrofit_enabled():\n        retro = retrofit_marker(out_path.parent)",
-      "replace": "    if False:\n        retro = retrofit_marker(out_path.parent)",
+      "find": "    if not retrofit_enabled():\n        retro = retrofit_marker_above(out_path.parent)",
+      "replace": "    if False:\n        retro = retrofit_marker_above(out_path.parent)",
       "expect": {
         "test_retrofit_disabled.py": "R16 bootstrap-interview synthesize"
+      }
+    },
+    {
+      "id": "bi-config-branch-dropped",
+      "why": "[fix round 2] Only markers count; a retrofit config with nothing installed is replaced by a greenfield draft.",
+      "find": "            if is_retrofit_raw(raw):\n                retro = out_path.name",
+      "replace": "            if False:\n                retro = out_path.name",
+      "expect": {
+        "test_retrofit_disabled.py": "R16c synthesize over a retrofit config (mode)"
       }
     },
     {

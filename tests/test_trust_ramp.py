@@ -648,12 +648,12 @@ _REQUIRED_SETS = {
     # binds a single target file; the jury is the suite that removes the
     # override and checks every refusal (backlog Z-72).
     "retrofit-disable-installer.json": {
-        "sha256": "ade6998312b0278fa937bba5efa677e8"
-                  "96a628d6308a947416400e59cb3cc565",
-        "bypasses": ["inst-refusal-dropped", "inst-section-guard-dropped",
-                     "inst-falls-through", "inst-freeze-dropped",
-                     "inst-apply-guard-dropped", "inst-hatch-ignored",
-                     "inst-keys-unnormalized", "inst-uninstall-keeps-state"],
+        "sha256": "dedd0754667ffa16d5c3f571bbb4c74c"
+                  "7bb8de85218354a186921ad3f34760eb",
+        "bypasses": ["inst-refusal-dropped", "inst-falls-through",
+                     "inst-freeze-dropped", "inst-apply-guard-dropped",
+                     "inst-hatch-ignored", "inst-uninstall-keeps-state",
+                     "inst-backup-not-kept"],
         "controls": ["control-inert-comment"],
         "digest_suites": [],
         "suites": ["test_retrofit_disabled.py"],
@@ -667,19 +667,21 @@ _REQUIRED_SETS = {
         "suites": ["test_retrofit_disabled.py"],
     },
     "retrofit-disable-bootstrap-interview.json": {
-        "sha256": "d3ac8c881a4b72ac18d7c11dfbeea97d"
-                  "84d3f9286b2fbb99973bda8d1aec0b52",
-        "bypasses": ["bi-refusal-dropped"],
+        "sha256": "8bb3fb1fd06d0d9a7286e9a1481fc6a2"
+                  "c6092eaf63425862c42df516a0759e48",
+        "bypasses": ["bi-refusal-dropped", "bi-config-branch-dropped"],
         "controls": ["control-inert-comment"],
         "digest_suites": [],
         "suites": ["test_retrofit_disabled.py"],
     },
     "retrofit-disable-hatch.json": {
-        "sha256": "de0638fc9d25d6471e68e9ac51809e01"
-                  "87ac4ed87f8e784280894466afe2a480",
+        "sha256": "e4c5b1423a30380fec4652285828a18f"
+                  "a34aae1e09b95bb6aa8e4f7ef25d281d",
         "bypasses": ["hatch-truthy", "hatch-stripped", "hatch-always-open",
                      "msg-names-override", "msg-steers-greenfield",
-                     "msg-no-operator", "markers-state-only"],
+                     "msg-no-operator", "markers-state-only",
+                     "signature-ignored", "marker-root-only",
+                     "raw-section-dropped", "raw-keys-unnormalized"],
         "controls": ["control-inert-comment"],
         "digest_suites": [],
         "suites": ["test_retrofit_disabled.py"],

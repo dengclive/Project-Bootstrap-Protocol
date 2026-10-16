@@ -1,7 +1,7 @@
 {
-  "guard": "retrofit-disable: the override opens only on exactly \"1\", the refusal text, and what marks a retrofit project",
+  "guard": "retrofit-disable: the override, the refusal text, what marks a retrofit project, and what counts as a retrofit config",
   "target": "lib/defaults.py",
-  "guard_site": "lib/defaults.py retrofit_enabled(), RETROFIT_DISABLED_MESSAGE and RETROFIT_MARKERS",
+  "guard_site": "lib/defaults.py retrofit_enabled(), RETROFIT_DISABLED_MESSAGE, RETROFIT_MARKERS/_is_marker/retrofit_marker_above and is_retrofit_raw",
   "why": [
     "The override is for the test runners only (operator ruling 2026-10-16:",
     "exactly \"1\", never named in the refusal). The refusal must send the",
@@ -64,11 +64,47 @@
     },
     {
       "id": "markers-state-only",
-      "why": "[fix round 1] Only the gitignored state file marks a retrofit project, so a clone is not frozen.",
-      "find": "    \".claude/.retrofit-state.json\",\n    \".claude/hooks/rollout-schedule.md\",\n    \".claude/inventory/README.md\",\n    \".claude/steering/spec-strategy.md\",\n    \".claude/debt.md\",\n)",
-      "replace": "    \".claude/.retrofit-state.json\",\n)",
+      "why": "Only the gitignored state file marks a retrofit project, so a clone is not frozen.",
+      "find": "    (\".claude/.retrofit-state.json\", None),\n    (\".claude/hooks/rollout-schedule.md\", _RETROFIT_SIGNATURE),\n    (\".claude/inventory/README.md\", \"codebase audit (R0)\"),\n    (\".claude/steering/spec-strategy.md\", _RETROFIT_SIGNATURE),\n    (\".claude/debt.md\", _RETROFIT_SIGNATURE),\n)",
+      "replace": "    (\".claude/.retrofit-state.json\", None),\n)",
       "expect": {
         "test_retrofit_disabled.py": "R12b a clone"
+      }
+    },
+    {
+      "id": "signature-ignored",
+      "why": "[fix round 2] Any file at a marker path counts, so a greenfield project's own .claude/debt.md freezes it.",
+      "find": "    return any(signature in line for line in head)",
+      "replace": "    return True",
+      "expect": {
+        "test_retrofit_disabled.py": "R12d .claude/debt.md without"
+      }
+    },
+    {
+      "id": "marker-root-only",
+      "why": "[fix round 2] Only the -C root is checked, so a run from a subdirectory of a retrofit project installs a nested greenfield harness.",
+      "find": "    for d in chain:\n        if d == home and d != start:",
+      "replace": "    for d in chain[:1]:\n        if d == home and d != start:",
+      "expect": {
+        "test_retrofit_disabled.py": "R12e a greenfield install from a subdirectory"
+      }
+    },
+    {
+      "id": "raw-section-dropped",
+      "why": "Only an exact mode line counts; a retrofit: section with the mode line missing installs greenfield.",
+      "find": "    return keys.get(\"mode\") == \"retrofit\" or \"retrofit\" in keys",
+      "replace": "    return keys.get(\"mode\") == \"retrofit\"",
+      "expect": {
+        "test_retrofit_disabled.py": "R11 retrofit section, mode-absent"
+      }
+    },
+    {
+      "id": "raw-keys-unnormalized",
+      "why": "A quoted or BOM-carrying key is read as written, so a quoted retrofit config installs greenfield.",
+      "find": "    keys = {str(k).lstrip(\"\\ufeff\").strip(\"\\\"'\"): v for k, v in raw.items()}",
+      "replace": "    keys = raw",
+      "expect": {
+        "test_retrofit_disabled.py": "R11 retrofit section, quoted-keys"
       }
     },
     {

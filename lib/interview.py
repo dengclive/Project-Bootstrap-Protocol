@@ -39,8 +39,9 @@ from pathlib import Path
 import prd_heuristics as H
 import llm_advisor as LLM
 from configemit import carry_from_file, emit
-from defaults import (DEFAULTS, RETROFIT_DISABLED_MESSAGE, resolve_config,
-                      retrofit_enabled, retrofit_marker)
+from defaults import (DEFAULTS, RETROFIT_DISABLED_MESSAGE, is_retrofit_raw,
+                      resolve_config, retrofit_enabled,
+                      retrofit_marker_above)
 from minyaml import load_yaml
 
 HERE = Path(__file__).resolve().parent
@@ -1467,14 +1468,13 @@ def _finalize(answers: dict, out_path: Path, *, outstream,
     # overwrite its retrofit config with a greenfield one, which the installer
     # then refuses; refuse here first, so nothing is written.
     if not retrofit_enabled():
-        retro = retrofit_marker(out_path.parent)
+        retro = retrofit_marker_above(out_path.parent)
         if not retro and out_path.exists():
             try:
                 raw = load_yaml(out_path.read_text())
             except Exception:
                 raw = None
-            if isinstance(raw, dict) and (raw.get("mode") == "retrofit"
-                                          or "retrofit" in raw):
+            if is_retrofit_raw(raw):
                 retro = out_path.name
         if retro:
             outstream.write(f"\nerror: this project holds retrofit files "

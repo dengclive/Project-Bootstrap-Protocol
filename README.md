@@ -120,7 +120,9 @@ retrofit config, and every run but `--uninstall` on a project that already
 holds retrofit files (`.claude/.retrofit-state.json`, or another file only a
 retrofit install writes, so a clone counts too); `bin/bootstrap-interview`
 won't write a config there; `bin/retrofit-interview` refuses every command.
-A clean `--uninstall` releases the project. Don't run the greenfield route
+Where the install ran, a clean `--uninstall` releases the project and keeps
+the retrofit state file as a `.pre-uninstall` copy; in a clone it removes
+nothing. Don't run the greenfield route
 over an existing codebase in its place: ask the maintainers instead. The steps below describe the route
 as it will work once it's re-enabled.
 

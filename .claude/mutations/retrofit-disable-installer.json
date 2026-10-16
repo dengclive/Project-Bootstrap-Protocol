@@ -1,7 +1,7 @@
 {
   "guard": "retrofit-disable: bin/bootstrap-install refuses the retrofit route",
   "target": "lib/installer.py",
-  "guard_site": "lib/installer.py main() (the retrofit-project freeze after --uninstall; the mode/section refusal after the YAML parse), apply_plan() (the write side) and uninstall() (removes the retrofit state file)",
+  "guard_site": "lib/installer.py main() (the retrofit-project freeze; the config refusal), apply_plan() (the write side) and _retire_retrofit_state() (uninstall keeps the state file aside)",
   "why": [
     "The operator disabled the retrofit route (backlog Z-72). Each of the",
     "installer's three refusals can be removed by a one-line edit that",
@@ -12,19 +12,10 @@
     {
       "id": "inst-refusal-dropped",
       "why": "The mode/section refusal never fires: a retrofit config validates under --print-config.",
-      "find": "if (not retrofit_enabled() and isinstance(raw, dict)\n            and (keys.get(\"mode\") == \"retrofit\" or \"retrofit\" in keys)):",
-      "replace": "if (False and not retrofit_enabled() and isinstance(raw, dict)\n            and (keys.get(\"mode\") == \"retrofit\" or \"retrofit\" in keys)):",
+      "find": "if not retrofit_enabled() and is_retrofit_raw(raw):",
+      "replace": "if False and not retrofit_enabled() and is_retrofit_raw(raw):",
       "expect": {
         "test_retrofit_disabled.py": "R1 bin bootstrap-install --print-config"
-      }
-    },
-    {
-      "id": "inst-section-guard-dropped",
-      "why": "Only an exact mode line is refused; a retrofit: section with the mode line missing installs greenfield.",
-      "find": "and (keys.get(\"mode\") == \"retrofit\" or \"retrofit\" in keys)):",
-      "replace": "and (keys.get(\"mode\") == \"retrofit\")):",
-      "expect": {
-        "test_retrofit_disabled.py": "R11 retrofit section, mode-absent"
       }
     },
     {
@@ -56,29 +47,29 @@
     },
     {
       "id": "inst-hatch-ignored",
-      "why": "[fix round 1] The front refusal ignores the override, so even the test runners cannot open the route.",
-      "find": "if (not retrofit_enabled() and isinstance(raw, dict)\n            and (keys.get(\"mode\")",
-      "replace": "if (isinstance(raw, dict)\n            and (keys.get(\"mode\")",
+      "why": "The front refusal ignores the override, so even the test runners cannot open the route.",
+      "find": "if not retrofit_enabled() and is_retrofit_raw(raw):",
+      "replace": "if is_retrofit_raw(raw):",
       "expect": {
         "test_retrofit_disabled.py": "R7 hatch '1'"
       }
     },
     {
-      "id": "inst-keys-unnormalized",
-      "why": "[fix round 1] A quoted or BOM-carrying key is read as written, so a quoted retrofit config installs greenfield.",
-      "find": "keys = ({str(k).lstrip(\"\\ufeff\").strip(\"\\\"'\"): v for k, v in raw.items()}\n            if isinstance(raw, dict) else {})",
-      "replace": "keys = raw if isinstance(raw, dict) else {}",
+      "id": "inst-uninstall-keeps-state",
+      "why": "--uninstall leaves the retrofit state file, so an uninstalled project stays frozen for good.",
+      "find": "    moved = _retire_retrofit_state(root)\n    print(f\"Uninstall complete.",
+      "replace": "    moved = None\n    print(f\"Uninstall complete.",
       "expect": {
-        "test_retrofit_disabled.py": "R11 retrofit section, quoted-keys"
+        "test_retrofit_disabled.py": "R13b after a clean"
       }
     },
     {
-      "id": "inst-uninstall-keeps-state",
-      "why": "[fix round 1] --uninstall leaves the retrofit state file, so an uninstalled project stays frozen for good.",
-      "find": "    for rel in (RETROFIT_STATE, RETROFIT_STATE + \".lock\"):\n        try:\n            (root / rel).unlink()",
-      "replace": "    for rel in ():\n        try:\n            (root / rel).unlink()",
+      "id": "inst-backup-not-kept",
+      "why": "[fix round 2] The state file is deleted, not kept aside, so the operator's runtime decisions are lost.",
+      "find": "    state.rename(backup)\n",
+      "replace": "    state.unlink()\n",
       "expect": {
-        "test_retrofit_disabled.py": "R13b after a clean"
+        "test_retrofit_disabled.py": "R13d --uninstall moves"
       }
     },
     {

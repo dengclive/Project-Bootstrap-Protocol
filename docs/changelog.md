@@ -180,16 +180,22 @@ operator. None names the override.
   `retrofit` or that has a `retrofit:` section (a quoted key or a leading BOM
   counts too), for an install, `--dry-run`, `--print-config`, `--force` and
   `--adopt`. The refusal comes ahead of every other config check.
-- `bin/bootstrap-install` on any config over a retrofit project: one that
-  holds `.claude/.retrofit-state.json` or another file only a retrofit
-  install writes (`.claude/hooks/rollout-schedule.md`,
+- `bin/bootstrap-install` on any config in a retrofit project: one that
+  holds `.claude/.retrofit-state.json`, or one of the four files only a
+  retrofit install writes (`.claude/hooks/rollout-schedule.md`,
   `.claude/inventory/README.md`, `.claude/steering/spec-strategy.md`,
-  `.claude/debt.md`). The state file is gitignored; the others reach a clone
-  or a worktree. Such a project is frozen: it keeps the hooks it has, and
-  only `--uninstall` runs (operator rulings, 2026-10-16). `--uninstall` now
-  always removes the retrofit state file, so a clean uninstall releases the
-  project; a marker someone edited, which uninstall keeps, still freezes it,
-  and the refusal names that file.
+  `.claude/debt.md`) while its first lines carry that template's signature,
+  so a greenfield project's own file at one of those paths doesn't count. A
+  run from a subdirectory, up to the git top level, counts too. The state
+  file is gitignored; the signed files reach a clone or a worktree. Such a
+  project is frozen: it keeps the hooks it has, and only `--uninstall` runs
+  (operator rulings, 2026-10-16). `--uninstall` now moves the retrofit state
+  file to `.claude/.retrofit-state.json.pre-uninstall`, so the operator's
+  runtime decisions survive. Where the install ran, which has the gitignored
+  installer manifest, a clean uninstall releases the project; a marker
+  someone edited, which uninstall keeps, still freezes it, and the refusal
+  names that file. A clone or a worktree has no manifest, so there uninstall
+  removes nothing, and releasing the tree is the operator's call.
 - `bin/bootstrap-interview`'s `synthesize` and `interactive` in a retrofit
   project, or over a retrofit config, so a greenfield draft never replaces a
   retrofit config.
@@ -226,20 +232,22 @@ codebase.
 change touches: `lib/defaults.py`, `lib/installer.py`, `lib/interview.py`,
 `lib/retrofit_interview.py` and `bin/run-tests`. No golden re-baseline.
 
-**Tests.** The new suite `tests/test_retrofit_disabled.py` (76 checks) was
+**Tests.** The new suite `tests/test_retrofit_disabled.py` (88 checks) was
 red first. The build's 52 rows reported 4 passed and 48 failed on
 `b2e146a`, the four being rows marked CONTRAST; fix round 1's suite reported
-11 failed on the build commit `f778eff`, one per new behaviour. Mutation
+11 failed on the build commit `f778eff`, and fix round 2's reported 6 failed
+on fix round 1's commit `6df122f`, one per new behaviour. Mutation
 sets, one per target, use it as their jury, registered in
 `tests/test_trust_ramp.py`. `.claude/mutation-gate.py` sets the override for
-its suites too, so its pin moves. Of the five registered sets whose juries
-include retrofit fixtures, the step 7 review ran three in full on `b2e146a`
-and on `f778eff` with the override unset in the calling shell, and each gave
-the same verdict on both (int-word-clamp-sufficiency FAIL, its designed
+its suites too, so its pin moves. Of the five registered sets that name
+`test_retrofit.py`, the step 7 review ran three in full on `b2e146a` and on
+`f778eff` with the override unset in the calling shell, and each gave the
+same verdict on both (int-word-clamp-sufficiency FAIL, its designed
 DIGEST-ONLY verdict; x54-head-bearing-early-stop and
-x54-arg-scanner-quadratic-and-fork PASS). The other two
-(prefix-run-language-guard, x54-wrapper-cost) were checked only by
-`--dry-run`, whose baselines are green.
+x54-arg-scanner-quadratic-and-fork PASS). In the other two
+(prefix-run-language-guard, x54-wrapper-cost), `test_retrofit.py` is only a
+digest suite and no mutation's `expect` names it; the gate runs only the
+`expect` suites, so neither verdict can depend on the retrofit fixtures.
 
 ## Post-2.8.0 — CLAUDE.md, steering and the entry path (WP4) (2026-10-14)
 

@@ -38,8 +38,8 @@ from templates import (  # all file bodies live here
     SPEC_VERSIONING_PATH,
     _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
-from defaults import (RETROFIT_DISABLED_MESSAGE, retrofit_enabled,
-                      retrofit_marker)
+from defaults import (RETROFIT_DISABLED_MESSAGE, is_retrofit_raw,
+                      retrofit_enabled, retrofit_marker_above)
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
@@ -3882,6 +3882,26 @@ def _load_manifest(root: Path) -> dict | None:
     return None
 
 
+def _retire_retrofit_state(root: Path) -> str | None:
+    """[retrofit-disable fix round 2, operator ruling 2026-10-16] Move the
+    retrofit state file aside on --uninstall, so it no longer freezes the
+    tree while the operator's runtime decisions in it survive. The copy's
+    name matches the retrofit `.gitignore`'s `.retrofit-state.json.pre-*`
+    line and is not a marker. Returns the copy's path, or None."""
+    state = root / RETROFIT_STATE
+    if not state.exists():
+        return None
+    backup = root / (RETROFIT_STATE + ".pre-uninstall")
+    n = 1
+    while backup.exists():
+        n += 1
+        backup = root / (RETROFIT_STATE + f".pre-uninstall-{n}")
+    state.rename(backup)
+    with contextlib.suppress(FileNotFoundError):
+        (root / (RETROFIT_STATE + ".lock")).unlink()
+    return str(backup.relative_to(root))
+
+
 def uninstall(root: Path) -> None:
     """Remove only files whose on-disk content still matches what the
     installer wrote; never destroy operator-modified work.
@@ -3895,11 +3915,19 @@ def uninstall(root: Path) -> None:
     the operator's edits because the manifest still carried the original
     digest (the `skipped-local-edit` label was only ever set by a *re-apply*
     between the edit and the uninstall, which most operators never do).
+
+    [retrofit-disable fix round 2] One exception: the retrofit state file is
+    moved aside to a `.pre-uninstall` copy (_retire_retrofit_state), whatever
+    its digest, because while the retrofit route is disabled it would
+    otherwise freeze the tree for good.
     """
     m = _load_manifest(root)
     if not m:
+        moved = _retire_retrofit_state(root)
         print("No installer manifest found; nothing removed "
               "(any generated tree is left intact for manual cleanup).")
+        if moved:
+            print(f"The retrofit state file was moved to {moved}.")
         return
     kept = removed = 0
     for f in reversed(m["files"]):
@@ -3951,16 +3979,14 @@ def uninstall(root: Path) -> None:
                 d.rmdir()
             except OSError:
                 pass
-    # [retrofit-disable fix round 1] The retrofit state file is the
-    # installer's own record, so it goes whatever was kept: a retrofit
-    # marker that was edited, and so kept, is what still freezes the tree.
-    for rel in (RETROFIT_STATE, RETROFIT_STATE + ".lock"):
-        try:
-            (root / rel).unlink()
-        except FileNotFoundError:
-            pass
+    # [retrofit-disable fix rounds 1 and 2] The retrofit state file is moved
+    # aside whatever was kept: a retrofit marker that was edited, and so
+    # kept, is what still freezes the tree.
+    moved = _retire_retrofit_state(root)
     print(f"Uninstall complete. removed={removed} kept={kept} "
           f"(modified files and the manifest/state are left for inspection).")
+    if moved:
+        print(f"The retrofit state file was moved to {moved}.")
 
 
 # --------------------------------------------------------------------------- #
@@ -4768,11 +4794,12 @@ def main(argv: list[str]) -> int:
     # [retrofit-disable] A retrofit project is frozen while the route is
     # disabled (operator rulings 2026-10-16): any other run, a greenfield
     # config included, would convert or rewrite it, so only --uninstall
-    # (above) gets through. RETROFIT_MARKERS reach a clone too.
-    marker = retrofit_marker(root)
+    # (above) gets through. RETROFIT_MARKERS reach a clone too, and a run
+    # from a subdirectory of the project is caught.
+    marker = retrofit_marker_above(root)
     if marker and not retrofit_enabled():
-        print(f"error: {root} holds retrofit files ({marker}), from a "
-              f"retrofit install or what --uninstall kept of one; "
+        print(f"error: {root} is in a retrofit project ({marker}): a retrofit "
+              f"install, a clone of one, or what --uninstall kept of one; "
               f"{RETROFIT_DISABLED_MESSAGE}", file=sys.stderr)
         return 2
 
@@ -4799,11 +4826,8 @@ def main(argv: list[str]) -> int:
     # [retrofit-disable] Refused before every other config check, so the
     # disable is the one reason shown. A `retrofit:` section counts whatever
     # the mode line says (absent, mis-cased, behind a BOM), and a key keeps
-    # counting when it is quoted or carries the BOM itself.
-    keys = ({str(k).lstrip("\ufeff").strip("\"'"): v for k, v in raw.items()}
-            if isinstance(raw, dict) else {})
-    if (not retrofit_enabled() and isinstance(raw, dict)
-            and (keys.get("mode") == "retrofit" or "retrofit" in keys)):
+    # counting when it is quoted or carries the BOM itself (is_retrofit_raw).
+    if not retrofit_enabled() and is_retrofit_raw(raw):
         print(f"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}",
               file=sys.stderr)
         return 2
