@@ -1,0 +1,68 @@
+{
+  "guard": "retrofit-disable: bin/bootstrap-install refuses the retrofit route",
+  "target": "lib/installer.py",
+  "guard_site": "lib/installer.py main() (the state-file freeze after --uninstall; the mode/section refusal after the YAML parse) and apply_plan() (the write side)",
+  "why": [
+    "The operator disabled the retrofit route (backlog Z-72). Each of the",
+    "installer's three refusals can be removed by a one-line edit that",
+    "leaves every source-text pin intact; this set re-measures that each",
+    "removal turns a named behaviour row red."
+  ],
+  "mutations": [
+    {
+      "id": "inst-refusal-dropped",
+      "why": "The mode/section refusal never fires: a retrofit config validates under --print-config.",
+      "find": "if (not retrofit_enabled() and isinstance(raw, dict)\n            and (raw.get(\"mode\") == \"retrofit\" or \"retrofit\" in raw)):",
+      "replace": "if (False and not retrofit_enabled() and isinstance(raw, dict)\n            and (raw.get(\"mode\") == \"retrofit\" or \"retrofit\" in raw)):",
+      "expect": {
+        "test_retrofit_disabled.py": "R1 bin bootstrap-install --print-config"
+      }
+    },
+    {
+      "id": "inst-section-guard-dropped",
+      "why": "Only an exact mode line is refused; a retrofit: section with the mode line missing installs greenfield.",
+      "find": "and (raw.get(\"mode\") == \"retrofit\" or \"retrofit\" in raw)):",
+      "replace": "and (raw.get(\"mode\") == \"retrofit\")):",
+      "expect": {
+        "test_retrofit_disabled.py": "R11 retrofit section, mode-absent"
+      }
+    },
+    {
+      "id": "inst-falls-through",
+      "why": "The refusal prints but does not return, so --dry-run plans the retrofit install.",
+      "find": "        print(f\"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n        return 2\n",
+      "replace": "        print(f\"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n",
+      "expect": {
+        "test_retrofit_disabled.py": "R1 bin bootstrap-install --dry-run"
+      }
+    },
+    {
+      "id": "inst-freeze-dropped",
+      "why": "An existing retrofit install is no longer frozen: a greenfield config converts it.",
+      "find": "if (root / RETROFIT_STATE).exists() and not retrofit_enabled():",
+      "replace": "if False and (root / RETROFIT_STATE).exists() and not retrofit_enabled():",
+      "expect": {
+        "test_retrofit_disabled.py": "greenfield config install"
+      }
+    },
+    {
+      "id": "inst-apply-guard-dropped",
+      "why": "The write side is open again for a caller that skips main().",
+      "find": "if cfg.get(\"mode\") == \"retrofit\" and not retrofit_enabled():\n        raise RuntimeError(RETROFIT_DISABLED_MESSAGE)",
+      "replace": "if False and cfg.get(\"mode\") == \"retrofit\" and not retrofit_enabled():\n        raise RuntimeError(RETROFIT_DISABLED_MESSAGE)",
+      "expect": {
+        "test_retrofit_disabled.py": "R14 apply_plan refuses"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. One word of a comment beside the refusal. It MUST escape.",
+      "find": "disable is the one reason shown",
+      "replace": "disable is the only reason shown",
+      "expect": {
+        "test_retrofit_disabled.py": null
+      }
+    }
+  ]
+}

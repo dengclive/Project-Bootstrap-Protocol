@@ -177,7 +177,7 @@ cases, each blind to the others' findings.
 **Why fan-out.** A sequential reviewer inherits its own earlier framing; a
 second pass by the same agent re-reads the same file with the same priors. The
 failure this repo has actually paid for is *correlated blind spots*, not
-insufficient iterations: `docs/changelog.md:3639` (the 2.7.1 → 2.7.2 section)
+insufficient iterations: `docs/changelog.md:3700` (the 2.7.1 → 2.7.2 section)
 records that **"a judge that only scores designs inherits their shared blind
 spot,"** and issue #54 needed four independent blocks, each catching what the
 previous stage had stated as measured fact.
@@ -186,7 +186,7 @@ previous stage had stated as measured fact.
 "the X-36q record". The sentence is **not** in `docs/deferred-backlog.md` —
 `grep -c "shared blind spot"` there returns 0, and the X-36q row is about the
 invoker-word reduction's five consumers. Its tracked home is
-`docs/changelog.md:3639`; it also appears at
+`docs/changelog.md:3700`; it also appears at
 `.claude/checkpoints/checkpoint-20260806-083157-main.md:118`, which is
 gitignored (`.gitignore:11`) and therefore not citable. Cite the changelog.
 
@@ -431,7 +431,7 @@ failure — landing this time on the maintainer's side of the line, and a spurio
 red suite is expensive enough that the conservative rule is cheaper than the
 measurement.
 
-**`--no-tree-check` is not the remedy.** It exists (`bin/run-tests:147`) and it
+**`--no-tree-check` is not the remedy.** It exists (`bin/run-tests:152`) and it
 is the honest flag when you already know the check cannot hold. But reaching for
 it to make a fleet quiet is the documented operator response to a flaky gate —
 disable it — which is the failure mode the assessment calls blocking. Serialize

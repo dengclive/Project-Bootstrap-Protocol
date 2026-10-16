@@ -1,0 +1,40 @@
+{
+  "guard": "retrofit-disable: retrofit-interview refuses every command",
+  "target": "lib/retrofit_interview.py",
+  "guard_site": "lib/retrofit_interview.py main(), before argparse",
+  "why": [
+    "retrofit-interview is reached through bin/, the module's own __main__",
+    "and the plugin's module copy; all three run main(). This set checks",
+    "that removing the refusal at its top turns a named row red."
+  ],
+  "mutations": [
+    {
+      "id": "ri-refusal-dropped",
+      "why": "The refusal never fires; scan runs and writes its inventory.",
+      "find": "    if not retrofit_enabled():\n        print(f\"retrofit-interview: error:",
+      "replace": "    if False:\n        print(f\"retrofit-interview: error:",
+      "expect": {
+        "test_retrofit_disabled.py": "R5 retrofit-interview bin scan"
+      }
+    },
+    {
+      "id": "ri-falls-through",
+      "why": "The refusal prints but does not return, so analyze runs.",
+      "find": "        print(f\"retrofit-interview: error: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n        return 2\n",
+      "replace": "        print(f\"retrofit-interview: error: {RETROFIT_DISABLED_MESSAGE}\",\n              file=sys.stderr)\n",
+      "expect": {
+        "test_retrofit_disabled.py": "R5 retrofit-interview bin analyze"
+      }
+    },
+    {
+      "control": true,
+      "id": "control-inert-comment",
+      "why": "NEGATIVE CONTROL. One word of the refusal's comment. It MUST escape.",
+      "find": "so --help and a bad\n    # subcommand get the reason too",
+      "replace": "so --help and a wrong\n    # subcommand get the reason too",
+      "expect": {
+        "test_retrofit_disabled.py": null
+      }
+    }
+  ]
+}

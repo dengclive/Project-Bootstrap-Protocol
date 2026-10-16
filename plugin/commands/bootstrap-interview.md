@@ -21,6 +21,13 @@ to review and edit. It proposes, never silently decides; it never guesses the
 project's test/lint/format commands; and it validates its own output with
 `bootstrap-install --print-config`.
 
+**[Dated note 2026-10-16, retrofit disabled.]** Look at the project first. If
+it already holds code that records design choices worth keeping, or it has
+`.claude/.retrofit-state.json`, stop and ask the operator before you go on:
+the retrofit route for an existing codebase is disabled (backlog row Z-72 of
+the Bootstrap Protocol repository), and this interview is for a new project.
+A fresh scaffold doesn't count.
+
 ## Preferred path: drive the tool
 
 1. Get a PRD at the required tier. Ask the operator for its path, and read

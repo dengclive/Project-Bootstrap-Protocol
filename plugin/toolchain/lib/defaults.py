@@ -11,6 +11,7 @@ returning (resolved_cfg, errors). errors non-empty => installer aborts.
 from __future__ import annotations
 
 import copy
+import os
 import re
 
 # ---- [round-4 D12/D18] CONFIG IS AN ATTACK SURFACE -------------------------
@@ -664,6 +665,28 @@ PRINCIPLE_STARTERS = {
 # and the D2 golden test asserts greenfield output is byte-identical).
 # --------------------------------------------------------------------------- #
 MODES = {"bootstrap", "retrofit"}
+
+# [retrofit-disable, 2026-10-16] The retrofit route is DISABLED by directive
+# (2026-10-14) until the retrofit backlog rows are revisited and built; backlog
+# row Z-72 lists them. Refused at every edge: bin/bootstrap-install on a config
+# whose mode is "retrofit" or that has a `retrofit:` section, and on any config
+# over an existing retrofit install (only --uninstall runs there);
+# installer.apply_plan on a retrofit config; retrofit-interview on every
+# subcommand. resolve_config and build_plan still accept retrofit, so the
+# suites that carry retrofit fixtures keep running under bin/run-tests, which
+# sets the override. Re-enabling is the operator's call.
+RETROFIT_ENABLE_ENV = "BOOTSTRAP_ENABLE_RETROFIT"
+RETROFIT_DISABLED_MESSAGE = (
+    "the retrofit route is disabled (directive of 2026-10-14) until its "
+    "backlog rows are built; row Z-72 of docs/deferred-backlog.md in the "
+    "Bootstrap Protocol repository lists them. Stop and ask the operator, "
+    "and do not work around this refusal.")
+
+
+def retrofit_enabled() -> bool:
+    """True only when the test runners' override is set to exactly "1"."""
+    return os.environ.get(RETROFIT_ENABLE_ENV) == "1"
+
 
 RETROFIT_SPEC_STRATEGIES = {"forward-only", "touch-based", "bulk"}
 RETROFIT_PM_STRATEGIES = {"spec_canonical", "pm_canonical", "hybrid"}

@@ -234,6 +234,9 @@ def run_suite(suite):
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     # A stray module beside a script shadows the stdlib; keep the child honest.
     env["PYTHONSAFEPATH"] = "1"
+    # [retrofit-disable] As bin/run-tests: the suites' retrofit fixtures need
+    # the route open; tests/test_retrofit_disabled.py removes it again.
+    env["BOOTSTRAP_ENABLE_RETROFIT"] = "1"
     t0 = time.monotonic()
     r = subprocess.run([sys.executable, path], cwd=WORK, capture_output=True,
                        text=True, env=env)

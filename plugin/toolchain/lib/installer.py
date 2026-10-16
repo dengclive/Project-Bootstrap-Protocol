@@ -38,6 +38,7 @@ from templates import (  # all file bodies live here
     SPEC_VERSIONING_PATH,
     _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
+from defaults import RETROFIT_DISABLED_MESSAGE, retrofit_enabled
 
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
@@ -842,6 +843,10 @@ def apply_plan(root: Path, plan: list[dict], cfg: dict, *,
     the lock writes at most an empty lock file (StateLockHeld; main() exits
     EXIT_LOCKED). The three state writers run inside it and take no lock of
     their own."""
+    # [retrofit-disable] The write side, for a caller that bypasses main()
+    # (the R-9 precedent in _write_state): nothing is planned or written.
+    if cfg.get("mode") == "retrofit" and not retrofit_enabled():
+        raise RuntimeError(RETROFIT_DISABLED_MESSAGE)
     if dry:
         return _apply_plan(root, plan, cfg, dry=dry, force=force,
                            adopt=adopt)
@@ -4751,6 +4756,15 @@ def main(argv: list[str]) -> int:
         uninstall(root)
         return 0
 
+    # [retrofit-disable] An existing retrofit install is frozen while the
+    # route is disabled (operator ruling 2026-10-16): any other run, a
+    # greenfield config included, would convert or rewrite it, so only
+    # --uninstall (above) gets through.
+    if (root / RETROFIT_STATE).exists() and not retrofit_enabled():
+        print(f"error: {root} has a retrofit install ({RETROFIT_STATE}); "
+              f"{RETROFIT_DISABLED_MESSAGE}", file=sys.stderr)
+        return 2
+
     cfg_path = Path(args.config)
     if not cfg_path.is_absolute():
         cfg_path = root / cfg_path
@@ -4770,6 +4784,14 @@ def main(argv: list[str]) -> int:
         return 2
     except (OSError, ValueError) as exc:
         print(f"error: cannot read config {cfg_path}: {exc}", file=sys.stderr)
+        return 2
+    # [retrofit-disable] Refused before every other config check, so the
+    # disable is the one reason shown. A `retrofit:` section counts whatever
+    # the mode line says (absent, mis-cased, behind a BOM).
+    if (not retrofit_enabled() and isinstance(raw, dict)
+            and (raw.get("mode") == "retrofit" or "retrofit" in raw)):
+        print(f"error: {cfg_path}: {RETROFIT_DISABLED_MESSAGE}",
+              file=sys.stderr)
         return 2
     # [WP1 D3] A policy switch that is not true or false is the operator's to
     # fix, and it decides whether a security gate exists, so it is refused
