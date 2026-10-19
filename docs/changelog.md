@@ -158,6 +158,99 @@ Suite 9,462 → **9,668 checks**, 0 failed; 25 suites (the delta includes the
 X-52 line's unrecorded additions — the 4092 → 4104 differential rows among
 them — landing under this release identity).
 
+## Post-2.8.0 — the retrofit route disabled (2026-10-16)
+
+**No version bump** (fix, not surface; freeze exception **86**). **Seam:
+stays at 3.0.0, SUSPENDED.** Dated in-version notes in
+`SEAM-CONTRACT-v3-0-0.md` record the refusals on the `bootstrap-install` row
+and in the paragraph on the interviews (§3.2), and a note at §8.4 records the
+walk: no trigger fires, because the retrofit track is outside Tessera's
+scope.
+
+The operator disabled the retrofit route on 2026-10-14, "until the backlogs
+have been revisited and implemented", and ruled its shape on 2026-10-16.
+Backlog row Z-72 records it. Re-enabling is the operator's call.
+
+**What is refused.** Each command-line refusal exits 2;
+`installer.apply_plan` raises `RuntimeError` with the same message. Every
+refusal writes nothing, names backlog row Z-72 and says to stop and ask the
+operator. None names the override.
+
+- `bin/bootstrap-install`, and the plugin's copy, on a config whose `mode` is
+  `retrofit` or that has a `retrofit:` section (a quoted key or a leading BOM
+  counts too), for an install, `--dry-run`, `--print-config`, `--force` and
+  `--adopt`. The refusal comes ahead of every other config check.
+- `bin/bootstrap-install` on any config in a retrofit project: one that
+  holds `.claude/.retrofit-state.json`, or one of the four files only a
+  retrofit install writes (`.claude/hooks/rollout-schedule.md`,
+  `.claude/inventory/README.md`, `.claude/steering/spec-strategy.md`,
+  `.claude/debt.md`) while its first lines carry that template's signature,
+  so a greenfield project's own file at one of those paths doesn't count. A
+  run from a subdirectory of a project in a git repository, up to the git
+  top level, counts too. The state
+  file is gitignored; the signed files reach a clone or a worktree. Such a
+  project is frozen: it keeps the hooks it has, and only `--uninstall` runs
+  (operator rulings, 2026-10-16). `--uninstall` now moves the retrofit state
+  file to `.claude/.retrofit-state.json.pre-uninstall`, so the operator's
+  runtime decisions survive. Where the install ran, which has the gitignored
+  installer manifest, a clean uninstall releases the project; a marker
+  someone edited, which uninstall keeps, still freezes it, and the refusal
+  names that file. A clone or a worktree has no manifest, so there uninstall
+  removes nothing, and releasing the tree is the operator's call.
+- `bin/bootstrap-interview`'s `synthesize` and `interactive` in a retrofit
+  project, or over a retrofit config, so a greenfield draft never replaces a
+  retrofit config.
+- `installer.apply_plan` on a retrofit config, for a caller that skips the
+  command line.
+- `retrofit-interview` through `bin/`, through `python3
+  lib/retrofit_interview.py` and through the plugin's module copy, on every
+  subcommand, `--help` and a bare call.
+
+**What doesn't change.** `resolve_config` and `build_plan` still accept
+retrofit. A greenfield install emits the same bytes, so no golden digest
+moves.
+
+**The override.** `BOOTSTRAP_ENABLE_RETROFIT=1`, exactly `1`, opens the
+route. `bin/run-tests` and `.claude/mutation-gate.py` set it for the suites
+they run, because many suites install retrofit fixtures, often as contrast
+rows for greenfield. Run directly without it, some of those suites fail; a
+dated README note says to use `bin/run-tests -k <name>`. The new suite
+`tests/test_retrofit_disabled.py` removes the override from its own process
+and every child, so it measures the shipped default.
+
+**Docs.** Dated notes, appended on the same line where a line count is
+pinned: the protocol at the For the AI paragraph, the Prerequisites
+checklist, and two lines of Phase 0 step 1, the environment audit (check for
+`.claude/.retrofit-state.json` too; stop and ask if you find code that
+records design choices worth keeping), with the plugin's copy synced;
+`RETROFIT.md`'s For the AI line, right after its first sentence; four places
+in `README.md`; a paragraph in the plugin's `bootstrap-interview` command;
+and a sentence on exit 2 in its `bootstrap-apply` command. While retrofit is
+disabled, none of them lets a greenfield bootstrap run over an existing
+codebase.
+
+**Freeze exception 86.** One exception covers every frozen source this
+change touches: `lib/defaults.py`, `lib/installer.py`, `lib/interview.py`,
+`lib/retrofit_interview.py` and `bin/run-tests`. No golden re-baseline.
+
+**Tests.** The new suite `tests/test_retrofit_disabled.py` (93 checks) was
+red first. The build's 52 rows reported 4 passed and 48 failed on
+`b2e146a`, the four being rows marked CONTRAST; fix round 1's suite reported
+11 failed on the build commit `f778eff`, fix round 2's reported 6 failed
+on fix round 1's commit `6df122f`, and fix round 3's reported 1 failed on
+fix round 2's commit `3f3acf1`. Mutation
+sets, one per target, use it as their jury, registered in
+`tests/test_trust_ramp.py`. `.claude/mutation-gate.py` sets the override for
+its suites too, so its pin moves. Of the five registered sets that name
+`test_retrofit.py`, the step 7 review ran three in full on `b2e146a` and on
+`f778eff` with the override unset in the calling shell, and each gave the
+same verdict on both (int-word-clamp-sufficiency FAIL, its designed
+DIGEST-ONLY verdict; x54-head-bearing-early-stop and
+x54-arg-scanner-quadratic-and-fork PASS). In the other two
+(prefix-run-language-guard, x54-wrapper-cost), `test_retrofit.py` is only a
+digest suite and no mutation's `expect` names it; the gate runs only the
+`expect` suites, so neither verdict can depend on the retrofit fixtures.
+
 ## Post-2.8.0 — CLAUDE.md, steering and the entry path (WP4) (2026-10-14)
 
 **No version bump** (fix, not surface; freeze exception **85**). One PR, one

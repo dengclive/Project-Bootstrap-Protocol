@@ -115,6 +115,11 @@ def run_one(path):
     # now-ignored-aware tree check would (correctly) flag as pollution.
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    # [retrofit-disable] The retrofit route is refused at every edge (backlog
+    # Z-72). Many suites still install retrofit fixtures, often as contrast
+    # rows for greenfield, so the runner opens it for them;
+    # tests/test_retrofit_disabled.py removes it to check the refusal.
+    env["BOOTSTRAP_ENABLE_RETROFIT"] = "1"
     r = subprocess.run([sys.executable, path], cwd=ROOT,
                        capture_output=True, text=True, env=env)
     elapsed = time.monotonic() - started

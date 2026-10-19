@@ -520,7 +520,10 @@ check("the mutation gate is present and executable",
 # refers to the gate. Editing it now means updating this hash in the same
 # commit, which is the review surface the pin exists to create.
 import hashlib as _hl
-_GATE_SHA = "2e5bac46f5e6610cb7936b667234f32d66bf0218a48c9131268fc90f3a1cfeed"
+# [retrofit-disable, 2026-10-16] Re-pinned: run_suite sets the retrofit
+# override, as bin/run-tests does, so a set naming a suite with retrofit
+# fixtures keeps a green baseline (backlog Z-72).
+_GATE_SHA = "7cf8096ab491fa82dcddd6bfdd4ddb2b5fdbd2863f61c6d1a84746bb725f22d5"
 try:
     with open(_GATE, "rb") as _fh:
         _gsha = _hl.sha256(_fh.read()).hexdigest()
@@ -640,6 +643,50 @@ _REQUIRED_SETS = {
         "controls": ["control-inert-comment"],
         "digest_suites": ["test_greenfield_golden.py"],
         "suites": ["test_substrate_differential.py"],
+    },
+    # [retrofit-disable, 2026-10-16] One set per target, because the gate
+    # binds a single target file; the jury is the suite that removes the
+    # override and checks every refusal (backlog Z-72).
+    "retrofit-disable-installer.json": {
+        "sha256": "35f8290c272b5891e73ad6e43d0cd70a"
+                  "166dc28b370d047494f50263780e613f",
+        "bypasses": ["inst-refusal-dropped", "inst-falls-through",
+                     "inst-freeze-dropped", "inst-apply-guard-dropped",
+                     "inst-hatch-ignored", "inst-uninstall-keeps-state",
+                     "inst-backup-not-kept", "inst-state-follows-symlink",
+                     "inst-nomanifest-keeps-state", "inst-backup-clobbered"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": [],
+        "suites": ["test_retrofit_disabled.py"],
+    },
+    "retrofit-disable-interview.json": {
+        "sha256": "235395fe4448f5955ddb4fa010952f50"
+                  "90f98fa0287c80512ad8a0e27e5c6090",
+        "bypasses": ["ri-refusal-dropped", "ri-falls-through"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": [],
+        "suites": ["test_retrofit_disabled.py"],
+    },
+    "retrofit-disable-bootstrap-interview.json": {
+        "sha256": "8bb3fb1fd06d0d9a7286e9a1481fc6a2"
+                  "c6092eaf63425862c42df516a0759e48",
+        "bypasses": ["bi-refusal-dropped", "bi-config-branch-dropped"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": [],
+        "suites": ["test_retrofit_disabled.py"],
+    },
+    "retrofit-disable-hatch.json": {
+        "sha256": "2c905473a29b84056b5a6bb1d6f161bb"
+                  "8a0e0fd236aa1cedf8456218a078ff0e",
+        "bypasses": ["hatch-truthy", "hatch-stripped", "hatch-always-open",
+                     "msg-names-override", "msg-steers-greenfield",
+                     "msg-no-operator", "markers-state-only",
+                     "signature-ignored", "marker-root-only",
+                     "raw-section-dropped", "raw-keys-unnormalized",
+                     "marker-ends-only", "marker-walk-capped"],
+        "controls": ["control-inert-comment"],
+        "digest_suites": [],
+        "suites": ["test_retrofit_disabled.py"],
     },
 }
 # [2026-09-09 round-7] Walk, and do not filter by extension. `os.listdir` plus

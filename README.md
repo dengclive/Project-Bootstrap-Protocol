@@ -114,6 +114,18 @@ couldn't read. Restore them from the copy.
 If your project already has code that you want to keep, run `RETROFIT.md`
 instead, with `bin/retrofit-interview` in place of `bin/bootstrap-interview`.
 
+**[Dated note 2026-10-16.]** The retrofit route is disabled until its
+backlog rows are built (backlog row Z-72). `bin/bootstrap-install` refuses a
+retrofit config, and every run but `--uninstall` on a project that already
+holds retrofit files (`.claude/.retrofit-state.json`, or another file only a
+retrofit install writes, so a clone counts too); `bin/bootstrap-interview`
+won't write a config there; `bin/retrofit-interview` refuses every command.
+Where the install ran, a clean `--uninstall` releases the project and keeps
+the retrofit state file as a `.pre-uninstall` copy; in a clone it removes
+nothing. Don't run the greenfield route
+over an existing codebase in its place: ask the maintainers instead. The steps below describe the route
+as it will work once it's re-enabled.
+
 1. Start Claude Code at your project's root, as in steps 1 and 2 above, and
    ask Claude: "Read `$T/RETROFIT.md` and retrofit this project."
 2. Claude does R-1 first, then R0 step 1. When that step archives an
@@ -203,7 +215,8 @@ answer (the project name) and press Enter to start it. Input that ends
 partway, after the first answer, takes the proposed default for every later
 question: the tool prints a `warning:` line, and the config's header names
 the values that took their defaults. `retrofit-interview interactive` works
-the same way.
+the same way, once the retrofit route is re-enabled; for now it refuses (see
+[Retrofit an existing project](#retrofit-an-existing-project)).
 
 ### The plugin
 
@@ -224,7 +237,8 @@ don't run the checkout's `bin/`, so a copy of `plugin/` works on its own.
 After the install, `Next steps:` sends Claude to Phases 1 to 8 of that
 `protocol.md` to fill in the steering stubs. The plugin has no retrofit
 command, and it doesn't copy `bin/retrofit-interview`; for an existing
-codebase, follow [Retrofit an existing project](#retrofit-an-existing-project).
+codebase, follow [Retrofit an existing project](#retrofit-an-existing-project),
+where a dated note says the route is disabled for now.
 
 This repository has no marketplace file (`marketplace.json`) yet, so load
 the plugin from a clone:
@@ -679,7 +693,11 @@ and got committed). The check snapshots `git status` with `--ignored
 tracked changes. Outside a git checkout the check is reported as skipped rather
 than passed silently.
 
-Individual suites still run directly when you want one in isolation:
+Individual suites still run directly when you want one in isolation.
+**[Dated note 2026-10-16.]** While the retrofit route is disabled (backlog row
+Z-72), run one through `bin/run-tests -k <name>` instead: the runner opens the
+route for the retrofit fixtures, and some suites, `test_retrofit.py` among
+them, fail when run directly.
 
 ```bash
 python3 tests/test_installer.py           # plan, e2e, AC-A0, R-6, GR2/TEL-01
