@@ -31,10 +31,10 @@ to 30 minutes), and the test and harness PRs #79, #85 and #101.
 **What an operator sees.** The protocol's new head block and the
 Companion's "Migrating from 2.8.0 to 2.9.0" note say it. The retrofit
 route is disabled (backlog Z-72). The "previously denied, now allowed" set
-is not empty; among its members: with `deps.enabled: false`, the dependency gate is
-no longer emitted or wired, and a re-install removes one an earlier install
-wrote (WP1 D3). An agent commit of a file no task file lists, which 2.8.0
-refused, now goes through with a warning, because
+is not empty; among its members: with `deps.enabled: false`, the
+dependency gate is no longer emitted or wired, and a re-install removes one
+an earlier install wrote (WP1 D3); and an agent commit of a file no task
+file lists, which 2.8.0 refused, now goes through with a warning, because
 `hooks.spec_gate_commit_mode` defaults to `warn` (WP3 D2, backlog Z-28);
 `block` keeps it refused. Each landing recorded its own verdict movement;
 this entry does not re-measure against the v2.8.0 tag, as the 2.8.0 entry
