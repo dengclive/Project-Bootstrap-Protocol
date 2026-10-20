@@ -674,7 +674,7 @@ check("... and the edited dispatch kept its old mode (the reason to warn)",
 # --------------------------------------------------------------------------
 print("\n# The check cannot run: block refuses (fail-closed), warn allows")
 # [WP3 critic 1c, operator ruling 2026-10-05] In block mode a check that
-# could not run REFUSES and says it is not a spec refusal (PRD:799-800); in
+# could not run REFUSES and says it is not a spec refusal (PRD:826-827); in
 # warn mode it lets the commit through with the reason. A person's commit
 # is never checked. A missing dispatch or no bash stays fail-open (below).
 proj = new_repo()

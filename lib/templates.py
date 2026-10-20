@@ -36,7 +36,7 @@ assert not set('"$`\\') & set(SPEC_FALLBACK_NOTE_FOREIGN
                                 + SPEC_FALLBACK_NOTE_NOEXEC
                                 + SPEC_FALLBACK_NOTE_HOOKS_OFF)
 
-PROTOCOL_VERSION = "2.8.0"
+PROTOCOL_VERSION = "2.9.0"
 # [WP4 / g5] The normative protocol pair, by FILE NAME. The name records when
 # the pair was cut, not the version it describes (the PRD's filename note), so
 # it is not derived from PROTOCOL_VERSION. Every emitted citation of the
@@ -3758,7 +3758,7 @@ def _sysmsg_json(msg):
 # spec-gate-entry (UserPromptSubmit): additionalContext, which the model and
 # the user both see. Same words as the stderr line it replaces.
 # [WP3 agents-handoff, item 10] The first real-work step, stated once. PRD
-# Phase 10 (PRD:2160) and RETROFIT.md R7 step 8 (:1090) name `/spec-new`
+# Phase 10 (PRD:2189) and RETROFIT.md R7 step 8 (:1090) name `/spec-new`
 # alone, and that does not clear the spec commit gate: /spec-new writes
 # requirements.md, and the gate reads task files (INDEX.md and
 # .claude/specs/*/tasks/*). The file that clears it is the task file
@@ -3767,7 +3767,7 @@ def _sysmsg_json(msg):
 # block (lib/installer.py, next_steps()), so the two cannot drift apart.
 # [WP3 critic 4a] The notice is BUILT from them: it used to be its own
 # literal, which named /spec-new and /spec-decompose only and skipped
-# /spec-review and /plan-review (PRD:1106-1107, lifecycle gates 1 and 2).
+# /spec-review and /plan-review (PRD:1133-1134, lifecycle gates 1 and 2).
 SPEC_START_CHAIN = ("/spec-new <slug> -> /spec-review -> "
                     "/spec-decompose <slug> -> /plan-review")
 SPEC_TASK_FILE = ".claude/specs/<slug>/tasks/<id>.md"
@@ -9018,7 +9018,7 @@ latest="$(ls -t "$S"/.iteration-summary-* 2>/dev/null | head -1 || true)"
 if [ -z "$latest" ] || [ ! -s "$latest" ]; then
   # EXIT 2, NOT 1. This gate used to exit 1 for the one violation it exists
   # to catch. Per 6.D's own exit-code convention (Bootstrap-Protocol-v2-8-0.md
-  # :799-800) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
+  # :826-827) exit 1 is "hook error, TOOL PROCEEDS", and on a Stop hook exit 2
   # means "do not stop" - so the iteration ended exactly as if the summary had
   # been written, and the stderr line below claimed to be "feeding error to
   # next iteration" when exit 1's stderr reaches nobody. The hook was already
@@ -10105,7 +10105,7 @@ entry.
 """
 
 # [WP4 / ruling 7 (c)] escalate writes the decision record PRD Phase 8 asks
-# for when the agent stops for a 🔔 item (:1299, backlog X-30a): the four
+# for when the agent stops for a 🔔 item (:1326, backlog X-30a): the four
 # fields X-30 pinned, in the file decision-required-alarm.sh keys on the
 # payload's session_id. Precedents: _DECISION_LOG_BODY (a record written
 # with the Write and Edit tools) and ack-drift (the substituted path).
@@ -10551,7 +10551,7 @@ _INTEGRATOR_BODY = (
     "Report each file and how you resolved it, the test result, and "
     "anything you could not resolve.\n")
 
-# [WP3 critic 5d, PRD:1159 / Companion:149, A-08] The integrator inherits
+# [WP3 critic 5d, PRD:1186 / Companion:149, A-08] The integrator inherits
 # the main session's model, and its floor is Sonnet. Said where the
 # operator who opens this file reads it, and only while the model is
 # `inherit`: a pinned integrator_model has no floor to keep.
@@ -10615,7 +10615,7 @@ def _isolation_note(cfg):
 
 
 # [WP3 agents-handoff] The reviewer's description is the routing key the main
-# session reads when it delegates (PRD:1145), and the only text of this file it
+# session reads when it delegates (PRD:1172), and the only text of this file it
 # sees, so it carries what to pass in as well as when to call. No ": " inside
 # it: an unquoted colon-space makes the frontmatter invalid YAML (the
 # pr-author and design-review descriptions, WP3 scout).
@@ -10642,14 +10642,14 @@ REVIEWER_DESCRIPTION = (
 REVIEWER_EFFORT = "xhigh"
 
 # The first line of the reviewer's answer. The main session acts on it, and
-# the WP6 completion check (PRD:1527, "reviewer subagent approved") reads it.
+# the WP6 completion check (PRD:1556, "reviewer subagent approved") reads it.
 REVIEWER_VERDICTS = ("approve", "issues", "blocked")
 
 
 def _reviewer_core():
     """[WP3 agents-handoff, item 7] The reviewer prompt, self-contained.
 
-    A subagent does not inherit the main session's system prompt (PRD:1161),
+    A subagent does not inherit the main session's system prompt (PRD:1190),
     so the body says what the caller passes in, what to read, what to check
     and what shape to answer in. Every config-dependent fact is read at run
     time from the file that owns it (the TDD policy from principles.md, the
@@ -10659,7 +10659,7 @@ def _reviewer_core():
     retrofit reviewer; the retrofit one appends its own rules.
 
     Not here, on purpose: the progress.md failed-approaches text. The reviewer
-    is part of the deterministic gate (GR2-01, PRD:1163)."""
+    is part of the deterministic gate (GR2-01, PRD:1192)."""
     verdicts = " | ".join(REVIEWER_VERDICTS)
     return (
         "Self-contained: subagents do not inherit the default system prompt, "
@@ -10741,7 +10741,7 @@ def _reviewer_core():
 
 def _tests_first_section(cfg, retrofit=False):
     """[WP3 agents-handoff, item 8] Gate 4 of the per-task lifecycle
-    (PRD:1109): with TDD on, the implementer writes failing tests before
+    (PRD:1136): with TDD on, the implementer writes failing tests before
     source. Empty when `principles.tdd_policy` is off and no tdd-gate is
     wired. The gate sentences follow the resolved hook set, so a gate the
     config turned off is never described as refusing anything, and a gate
@@ -13766,7 +13766,7 @@ def _merge_back_gates(cfg):
     is advisory PostToolUse feedback that never blocks a commit, so blocking
     on it here would make landing stricter than committing. Nor is
     eval-gate: local merges are not eval-gated by operator decision
-    2026-10-04 (PRD:775, [Amended 2026-10-04, WP2 fix round 2.] (3)); the
+    2026-10-04 (PRD:802, [Amended 2026-10-04, WP2 fix round 2.] (3)); the
     push gate evaluates the merged tree (WP3 d6 conformance verifier,
     INFO)."""
     hooks = cfg.get("_resolved_hooks", ())
@@ -14781,7 +14781,7 @@ def _retrofit_reviewer_agent(cfg):
     # [WP3 agents-handoff] The shared self-contained core (_reviewer_core),
     # then the retrofit rules. The description drops "Retrofit-flavor:" for
     # the same strict-YAML reason as the retrofit implementer's.
-    # [WP3 critic 4d] Self-contained (PRD:1161) for the retrofit rules too:
+    # [WP3 critic 4d] Self-contained (PRD:1190) for the retrofit rules too:
     # they act on "the legacy allowlist" and the danger zones, so the body
     # says where each is listed (the spec-strategy.md markers the gates
     # read; RETROFIT.md:818). Their old "REQUEST ..." outcomes are mapped

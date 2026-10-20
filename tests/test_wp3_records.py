@@ -144,11 +144,16 @@ _CL_RAW = cut(read("docs/changelog.md"),
               "## Post-2.8.0 — hooks that reach the model (WP2)")
 CL = flat(_CL_RAW)
 check("the changelog's WP3 entry is found, above the WP2 entry", bool(CL))
-check("no version bump: PROTOCOL_VERSION is still 2.8.0 in both modules, "
-      "and the entry says freeze exception 84",
-      installer.PROTOCOL_VERSION == templates.PROTOCOL_VERSION == "2.8.0"
-      and "**No version bump** (fix, not surface; freeze exception **84**)"
-      in CL)
+# [v2.9.0 release, 2026-10-20] WP3 bumped no version; the release that ships
+# it did. The record is that the entry says so and sits below the 2.9.0
+# heading, so the check no longer reads the live constant.
+_CL_ALL = read("docs/changelog.md")
+check("no version bump at WP3: the entry says freeze exception 84, and it "
+      "sits below the 2.8.0 -> 2.9.0 release entry that ships it",
+      "**No version bump** (fix, not surface; freeze exception **84**)"
+      in CL
+      and 0 <= _CL_ALL.find("\n## 2.8.0 → 2.9.0 — ")
+      < _CL_ALL.find("\n## Post-2.8.0 — a spec workflow that reaches"))
 
 # The mode WP3 ships. A flip changes DEFAULTS and needs its own record
 # (backlog Z-28), so this row goes red with it.
@@ -638,7 +643,7 @@ _ins = json.loads(P_DEFAULT[".claude/settings.json"]["body"])
 _wrap_runs = [ln for w in (".claude/loop.sh", ".claude/goal-loop.sh")
               for ln in _P_FULL.get(w, {}).get("body", "").split("\n")
               if re.match(r"\s*(exec\s+)?claude\s+-p\b", ln)]
-check("MU-3: PRD :1018 says the installer writes ultracode on by default "
+check("MU-3: PRD :1045 says the installer writes ultracode on by default "
       "and names the flag, which the dispatch command the emitted wrappers "
       "give the operator carries (no wrapper line runs claude -p)",
       defaults.DEFAULTS["workflow"]["ultracode"] is True
@@ -920,7 +925,7 @@ try:
                                    "`revert`", "`rebase`", "`git am`")),
           _dont[:300])
     check("MR-9: git stash and git commit-tree make a commit (rc 0) and fire "
-          "neither hook; Z-29's layer, the changelog and the PRD :767 note "
+          "neither hook; Z-29's layer, the changelog and the PRD :794 note "
           "name both",
           _routes["git stash"] == (0, [])
           and _routes["git commit-tree"] == (0, [])
@@ -1027,7 +1032,7 @@ try:
           and "git merge --abort" not in _m2.stderr, _m2.stderr[-600:])
     _COV = after(anchored_line(SEAM, "- **Coverage.**"),
                  "**[In-version note, 2026-10-05, WP3 / D2")
-    check("merge rule: the PRD :767 note, the changelog, the seam's Coverage "
+    check("merge rule: the PRD :794 note, the changelog, the seam's Coverage "
           "note and the README each state it",
           "the merge's own changes" in _n767
           and "**Merges (operator decision 2026-10-06).**" in CL
@@ -1092,7 +1097,7 @@ try:
           and "below the repository's top level" in _fu.stdout,
           (_fo.stdout[:300], _fu.stdout[:300]))
     _s32_9 = after(_s32, "(9) Since fix round 1")
-    check("below the top: the PRD :767 note, the changelog, the seam "
+    check("below the top: the PRD :794 note, the changelog, the seam "
           "(Coverage and section 3.2 (9)) and the README say what works "
           "there",
           "the check is project-relative" in _n767
@@ -1249,7 +1254,7 @@ check("RR-1: no record states \"each side's commits were checked when they "
       and _rows["Z-29"].count(_false) == _rows["Z-29"].count(_quoted) == 1
       and all(_false not in t for t in (_RDM, _n767, flat(_cov), _SC, _mod)),
       (CL.count(_false), CL.count(_quoted)))
-check("RR-1: the changelog, the README and the PRD :767 note give the real "
+check("RR-1: the changelog, the README and the PRD :794 note give the real "
       "scope: a person's commits are never checked, so a merge can bring in "
       "a file no task file lists",
       "a person's commits are never checked" in _MERGES
@@ -1268,7 +1273,7 @@ check("RR-1: the build's refusal of a teammate's pull is stated for block "
 _sc_code = "\n".join(code_lines(_SC))
 check("MR-1, MR-2: both substrates judge a merge against git merge-tree's "
       "automatic result and read CHERRY_PICK_HEAD and REVERT_HEAD, and the "
-      "changelog, the PRD :767 note, the seam's Coverage note and the README "
+      "changelog, the PRD :794 note, the seam's Coverage note and the README "
       "say so",
       "merge-tree --write-tree" in _sc_code and "merge-tree" in _mod
       and all(h in _sc_code and h in _mod
@@ -1299,7 +1304,7 @@ _old_defer = ("or when the active pre-commit hook's own text runs",
               "or a pre-commit hook that runs `.claude/githooks/dispatch "
               "pre-commit`, is installed",
               "(it defers to either)")
-check("IT-1, IT-5: the changelog, the PRD :767 note and the seam's Coverage "
+check("IT-1, IT-5: the changelog, the PRD :794 note and the seam's Coverage "
       "note say so, and none says the fallback defers to a hook whose text "
       "runs dispatch",
       "byte for byte" in _FALLB and "byte for byte and executable" in _n767
@@ -1338,7 +1343,7 @@ check("IT-1, IT-2: a hook that names the dispatch line gets a warning (the "
 
 # MR-6. The fallback acts on the --continue forms too.
 check("MR-6: both fallbacks act on git merge/cherry-pick/revert --continue, "
-      "and the changelog, the PRD :767 note and the seam's Coverage note "
+      "and the changelog, the PRD :794 note and the seam's Coverage note "
       "name it",
       "(merge|cherry-pick|revert) +--continue" in _SG
       and "(?:merge|cherry-pick|revert)" in _mod
@@ -1893,7 +1898,7 @@ try:
                         "REBASE_HEAD", "git rebase --abort",
                         "git am --abort")))
     check("MR2-3: the changelog's merge item, its 'does not do' list, Z-29's "
-          "layer, the PRD :767 note and the seam's Coverage note say so, and "
+          "layer, the PRD :794 note and the seam's Coverage note say so, and "
           "the no-unstage sentence covers rebase and am",
           "A `git commit` made while a rebase or `git am` is stopped fires "
           "pre-commit too, though their own `--continue` fires no hook"
@@ -1952,7 +1957,7 @@ try:
               "--allow-unrelated-histories", "HEAD", "other")
     check("MR2-1: merge-tree refuses unrelated histories unless told to "
           "allow them; both substrates tell it, and the changelog, the PRD "
-          ":767 note and the seam's Coverage note record the merge rule for "
+          ":794 note and the seam's Coverage note record the merge rule for "
           "them",
           _mt0.returncode not in (0, 1) and _mt1.returncode == 0
           and "--allow-unrelated-histories" in _sc_code
@@ -2059,7 +2064,7 @@ _, _P_SVC = plan_for(_rsvc or "")
 _SC_R = _P_SVC.get(templates.SPEC_CHECK_PATH, {}).get("body", "")
 check("MR2-4: both substrates give the 'older than 2.40' reason only for "
       "an older git, and a picked merge or root commit its own; the "
-      "changelog, Z-41's layer and the PRD :767 note say so",
+      "changelog, Z-41's layer and the PRD :794 note say so",
       "*:old) _what='this git, older than 2.40" in _SC
       and "its commit is a merge or has no parent" in _SC
       and 'elif rule == "old":' in _mod

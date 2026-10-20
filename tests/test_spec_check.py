@@ -456,7 +456,7 @@ try:
           "src/a.py |\n")
     stage(d, ".claude/specs/INDEX.md", "src/a.py")
     rc, out, err = parity("INDEX.md mention", d)
-    check("a staged INDEX.md row naming the path covers it (PRD:767)",
+    check("a staged INDEX.md row naming the path covers it (PRD:794)",
           rc == 0, err)
 
     d = fresh(GF)
@@ -646,7 +646,7 @@ try:
     rc, out, err = chk(d, "--task", T1, "--files", "src/b.py")
     src_, smsg, _ = sdk_check(d, changed=["src/b.py"], task=T1)
     check("--task: INDEX.md's mention does NOT cover (only that task file "
-          "may; PRD:1528), shell == SDK", rc == 2 and out == "src/b.py\n"
+          "may; PRD:1557), shell == SDK", rc == 2 and out == "src/b.py\n"
           and src_ == 2, (rc, out, src_))
     rc, out, err = chk(d, "--files", "-", inp="src/a.py\nsrc/q.py")
     check("--files -: a last line with no newline is still read",
@@ -1180,7 +1180,7 @@ try:
           "passes the PreToolUse fallback", rc == 0, (rc, err))
 
     # [WP3 critic 1b] No repository: nothing to check, on both substrates,
-    # in BLOCK mode (PRD:474 lets a project run without git; at 3d866f4
+    # in BLOCK mode (PRD:501 lets a project run without git; at 3d866f4
     # these passed). Measured before the fix: rc 2 'BLOCKED (fail-closed):
     # spec-check.sh could not run (exit 3)', and an SDK deny.
     d = os.path.join(TMP, "nogit-block")

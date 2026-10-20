@@ -168,8 +168,14 @@ HOOK_PINS = {
             "84c2d532c175ce126a2905c17f8a73c5cae785d2d76804adb297abef2585f32c",
         ".claude/hooks/drift-detector-loop-cooperation.sh":
             "dfeed9329516ef8bda34120fea800a259b8208faec84afc4540cc661037cc377",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release. The head
+        # block moved the protocol 27 lines; this body's one protocol
+        # citation moved with it (:799-800 -> :826-827, the citation
+        # tests/test_doc_citations.py pins). Nothing else moved: with that
+        # citation reverted the body hashes to the pin it replaces,
+        # b154cde91c61..., 0845862's.
         ".claude/hooks/iteration-summary-enforcement.sh":
-            "b154cde91c6104980c9b8e9e91277a499a341ca5a0fde71ce6ed27a58bef6677",
+            "caa4fc9cd60800735e087a437a67ffdbdc1541b6624ff3bd39cb43d774f9c526",
     },
     "design_steering": {
         ".claude/hooks/spec-gate-entry.sh":
@@ -272,8 +278,14 @@ HOOK_PINS = {
             "84c2d532c175ce126a2905c17f8a73c5cae785d2d76804adb297abef2585f32c",
         ".claude/hooks/drift-detector-loop-cooperation.sh":
             "dfeed9329516ef8bda34120fea800a259b8208faec84afc4540cc661037cc377",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release. The head
+        # block moved the protocol 27 lines; this body's one protocol
+        # citation moved with it (:799-800 -> :826-827, the citation
+        # tests/test_doc_citations.py pins). Nothing else moved: with that
+        # citation reverted the body hashes to the pin it replaces,
+        # b154cde91c61..., 0845862's.
         ".claude/hooks/iteration-summary-enforcement.sh":
-            "b154cde91c6104980c9b8e9e91277a499a341ca5a0fde71ce6ed27a58bef6677",
+            "caa4fc9cd60800735e087a437a67ffdbdc1541b6624ff3bd39cb43d774f9c526",
     },
     "fixture E": {
         ".claude/hooks/spec-gate-entry.sh":

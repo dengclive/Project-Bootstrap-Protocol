@@ -593,7 +593,7 @@ def _write(path, text, mode="w"):
 
 
 def preflight(hook, config_text, workdir, layouts=("claude", "root"), worktree=False):
-    """Prove the gate can fire before spending a model call (PRD:817), in
+    """Prove the gate can fire before spending a model call (PRD:844), in
     each layout that will run; with worktree, from a linked worktree too."""
     rows = []
     for layout in layouts:

@@ -2,13 +2,13 @@
 """WP3 agents-handoff: the reviewer prompt, tests-first, the tdd-gate in a
 worktree, and the Phase 10 next step.
 
-1. The reviewer prompt is self-contained (build plan WP3 item 7; PRD:1161):
+1. The reviewer prompt is self-contained (build plan WP3 item 7; PRD:1190):
    it names its inputs (the task file and the diff range, in both forms),
    what to read, what to check, and one answer shape whose first line is a
    verdict. Greenfield and retrofit share the core, and the body is the same
    for every configuration.
 2. The implementer writes failing tests first when TDD is on (item 8;
-   PRD:1109), in both the greenfield and the retrofit body, and every gate
+   PRD:1136), in both the greenfield and the retrofit body, and every gate
    sentence follows the resolved hook set.
 3. The tdd-gate gates a write inside an isolation:worktree checkout, on both
    substrates. At 3d866f4 it allowed every write under .claude/worktrees/,
@@ -703,7 +703,7 @@ _rl = next(ln for ln in open(os.path.join(ROOT, "RETROFIT.md"))
 check("RETROFIT.md:1090: exempt until the allowlist line is deleted",
       "stays exempt until its line is deleted from that list" in _rl)
 
-# [critic 4e] The PRD:1157 note describes the emitted description truly:
+# [critic 4e] The PRD:1184 note describes the emitted description truly:
 # it rewrites the PRD's two sentences and adds two more.
 _prd = open(os.path.join(ROOT, "Bootstrap-Protocol-v2-8-0.md")).read()
 _n = next(ln for ln in _prd.splitlines()
@@ -717,7 +717,7 @@ check("REVIEWER_DESCRIPTION is the PRD's two sentences rewritten plus two",
       "merged." and _sent[1].startswith("Reviews the diff against the "
                                         "originating spec's acceptance "
                                         "criteria"), repr(_sent))
-check("PRD:1157 note: 'rewrites these two sentences and adds two more'",
+check("PRD:1184 note: 'rewrites these two sentences and adds two more'",
       "[Amended 2026-10-05, WP3.]" in _n
       and "rewrites these two sentences and adds two more" in _n
       and '("Use after implementer commits a task, before it is merged.")'
@@ -725,7 +725,7 @@ check("PRD:1157 note: 'rewrites these two sentences and adds two more'",
       and "code-review step" in _n, _n[:400])
 _n9 = next(ln for ln in _prd.splitlines()
            if ln.startswith("4. **Tests written first**"))
-check("PRD:1109 note: Write-only gate, Write and Edit never Bash",
+check("PRD:1136 note: Write-only gate, Write and Edit never Bash",
       "[Amended 2026-10-05, WP3.]" in _n9
       and "It sees the Write tool only" in _n9
       and "never through Bash" in _n9, _n9[-300:])

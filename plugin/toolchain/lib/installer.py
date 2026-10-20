@@ -44,7 +44,7 @@ from defaults import (RETROFIT_DISABLED_MESSAGE, is_retrofit_raw,
 MANIFEST = ".claude/.installer-manifest.json"
 STATE = ".claude/.bootstrap-state.json"
 RETROFIT_STATE = ".claude/.retrofit-state.json"
-PROTOCOL_VERSION = "2.8.0"
+PROTOCOL_VERSION = "2.9.0"
 RETROFIT_PROTOCOL_VERSION = "1.6.2"
 # Seam binds floor (SEAM-CONTRACT v3.0.0, claude_code_runtime; unchanged
 # against the official changelog 2026-07-18): below 2.1.210 a PreToolUse
@@ -2843,7 +2843,7 @@ def _apply_git_hooks(root: Path, plan: list[dict], manifest: dict,
         if code in ("no-repo", "no-git-binary"):
             # Stdout only: with no repository there is no commit to check
             # yet, and a VCS-less project is a valid Phase 0 state
-            # (PRD:474), so this is not a `warning:` on every re-install.
+            # (PRD:501), so this is not a `warning:` on every re-install.
             why_txt = ("this directory is not inside a git repository"
                        if code == "no-repo" else "git is not on PATH")
             print(f"  note   git hooks pre-commit, pre-merge-commit not "
@@ -4557,7 +4557,7 @@ def _unfilled_steering(root: Path) -> list[str]:
 
 def next_steps(root: Path, cfg: dict, paths=None) -> list[str]:
     """[WP3 agents-handoff, item 10] The Phase 10 handoff's "next three
-    things" (PRD:2158-2161; RETROFIT.md R7 step 8), printed after an install
+    things" (PRD:2187-2190; RETROFIT.md R7 step 8), printed after an install
     while the checkout has no task file yet, and empty once it has one.
     [WP4 fix round 1 / NF2] Ruling 1 (a) keeps task files on spec branches
     until a person merges the spec's pull request, so on the default branch

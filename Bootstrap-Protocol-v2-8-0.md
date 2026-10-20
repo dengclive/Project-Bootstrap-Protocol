@@ -1,6 +1,33 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.8.0
+**Version:** 2.9.0
+
+> **v2.9.0 — WP1 to WP4 and the retrofit disable, MINOR (2026-10-20).**
+> Ships everything merged since the v2.8.0 tag: 54 pull requests, #68 to
+> #129. `docs/changelog.md` records them in its "2.8.0 → 2.9.0" entry and
+> the entries headed "Post-2.8.0" below it. The four work packages: a clean
+> gates-off install (WP1), hooks that reach the model (WP2), a spec workflow
+> that reaches a merged commit (WP3), and CLAUDE.md, steering and the entry
+> path (WP4). The other entries are gate fixes and cost bounds. **Why
+> MINOR:** new operator-facing surface (four configuration keys:
+> `commands.eval`, `hooks.spec_gate_commit_mode`,
+> `hooks.spec_gate_commit_prefixes`, `workflow.ultracode`; new installer
+> exit codes and refusals, on the `bootstrap-install` row of
+> `SEAM-CONTRACT-v3-0-0.md` §3.2; new emitted files) plus behavior changes,
+> the v2.7.0 precedent. **What it refuses or removes:** the retrofit route
+> is disabled (backlog Z-72): `bootstrap-install` refuses a `mode: retrofit`
+> config, and every run on a tree a retrofit install wrote except
+> `--uninstall`. With `deps.enabled: false` the dependency gate is neither
+> emitted nor wired, even with `hooks.dependency_gate: true`, and a
+> re-install removes one an earlier install wrote (WP1 D3, an owner ruling).
+> So the "previously denied, now allowed" set is not empty: D3 is its ruled
+> member. Each landing records its own verdict movement; this release does
+> not re-measure against the v2.8.0 tag. This is the first tag at which the
+> pair is named `v2-8-0` (renamed from `v2-6-0` after the v2.8.0 tag,
+> freeze exception 70), and the first with a `LICENSE` file (PR #75).
+> **Seam:** `seam_version` 3.0.0 (MAJOR at WP1), SUSPENDED. At this tag the
+> seam still binds `2.8.0 @ 6f86266`; a follow-up re-points it. Migration:
+> the Companion's "Migrating from 2.8.0 to 2.9.0".
 
 > **v2.8.0 — LIT literature fold, MINOR (2026-08-14).** Nine additive items and
 > one behavioral priming change, from
