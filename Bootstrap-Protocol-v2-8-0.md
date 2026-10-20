@@ -18,12 +18,12 @@
 > removes:** the retrofit route is disabled (backlog Z-72): `bootstrap-install`
 > refuses a `mode: retrofit` config, and on a tree a retrofit install wrote
 > every run except `--uninstall` and `--ic-checks`. The "previously denied,
-> now allowed" set has two ruled members. With `deps.enabled: false` the
-> dependency gate is neither emitted nor wired, even with
-> `hooks.dependency_gate: true`, and a re-install removes one (WP1 D3). An
+> now allowed" set is not empty. Among its members: with `deps.enabled:
+> false` the dependency gate is neither emitted nor wired, even with
+> `hooks.dependency_gate: true`, and a re-install removes one (WP1 D3); an
 > agent commit of a file no task file lists, refused at 2.8.0, now goes
 > through with a warning (`hooks.spec_gate_commit_mode: warn`, WP3 D2;
-> `block` keeps it refused). Each landing records its own verdict movement.
+> `block` keeps it refused). This release does not re-measure the set.
 > First tag with the pair named `v2-8-0` (freeze exception 70) and with a
 > `LICENSE` file (PR #75). **Seam:** `seam_version` 3.0.0 (MAJOR at WP1),
 > SUSPENDED; at this tag it still binds `2.8.0 @ 6f86266`, and a follow-up

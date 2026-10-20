@@ -22,8 +22,8 @@ bounds, a cost measurement and the protocol file rename). Those
 entries keep their "Post-2.8.0" headings: tests and records cite the
 headings as they stand. (b) Work that ships with no entry of its own, named
 here: PR #96 (the C-2 disclosure: autonomous dispatch is no longer
-advertised, freeze exception 76; recorded in the protocol's Phase 9.5 and
-9.6 notes, `docs/production-readiness.md` and the golden digest stacks),
+advertised, freeze exception 76; recorded in the protocol's Phase 9.5, 9.6
+and 9.7 notes, `docs/production-readiness.md` and the golden digest stacks),
 PR #75 (the Apache-2.0 `LICENSE`, so this is the first licensed tag), PR
 #113 (recorded through PR #115's entry), PR #124 (the CI suite timeout, 15
 to 30 minutes), and the test and harness PRs #79, #85 and #101.
@@ -31,7 +31,7 @@ to 30 minutes), and the test and harness PRs #79, #85 and #101.
 **What an operator sees.** The protocol's new head block and the
 Companion's "Migrating from 2.8.0 to 2.9.0" note say it. The retrofit
 route is disabled (backlog Z-72). The "previously denied, now allowed" set
-has two ruled members. With `deps.enabled: false`, the dependency gate is
+is not empty; among its members: with `deps.enabled: false`, the dependency gate is
 no longer emitted or wired, and a re-install removes one an earlier install
 wrote (WP1 D3). An agent commit of a file no task file lists, which 2.8.0
 refused, now goes through with a warning, because
@@ -46,7 +46,7 @@ ship with it open.
 
 **Line citations into the protocol.** The head block moves every later
 protocol line by 27. A script re-pointed 92 line numbers, on 83 lines in
-16 files, and two more were re-pointed by hand. The script reads each
+16 files, and three more were re-pointed by hand. The script reads each
 citing file from the base commit, maps each number through the insertion,
 and asserts the cited text. Eight of those citations (nine numbers) were
 already wrong before this release; each was checked by meaning and now
