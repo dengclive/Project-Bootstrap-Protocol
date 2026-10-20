@@ -408,8 +408,8 @@ anywhere under the repo root.
 (ASSESSED, confirmed by executing its own logic).** CONFIRMED mechanism:
 `tree_state()` (`bin/run-tests:89`) takes a **whole-repo**
 `git status --porcelain --ignored --untracked-files=all` snapshot; `main()`
-takes one at `:162` and one at `:237` and reports the **symmetric difference**
-as pollution at `:250`. It is a global before/after diff over one shared mutable
+takes one at `:167` and one at `:242` and reports the **symmetric difference**
+as pollution at `:255`. It is a global before/after diff over one shared mutable
 resource, with no synchronisation and no attribution — sound **only under a
 single serialised writer**. A fleet falsifies it in both directions at once: a
 concurrent agent's legitimate file is reported as pollution with no pid, suite

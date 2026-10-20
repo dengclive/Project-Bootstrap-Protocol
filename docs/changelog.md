@@ -7275,8 +7275,9 @@ it was `SEAM-CONTRACT-v1-2-0.md` at the Milestone-A pin event: protocol
 `2.8.0` with its commit TODO, and SUSPENDED at the seam-3.0.0 WP1 re-cut;
 the TODO was filled in-version on 2026-10-03 with the WP1 merge commit
 `c642731`, and re-pointed in-version on 2026-10-04 to the WP2 merge
-commit `322b0d3`, on 2026-10-13 to the WP3 merge commit `042d88a` and
-on 2026-10-16 to the WP4 merge commit `6c771f2`). Branch `version-2-1-0`.
+commit `322b0d3`, on 2026-10-13 to the WP3 merge commit `042d88a`, on
+2026-10-16 to the WP4 merge commit `6c771f2` and on 2026-10-19 to the
+retrofit-disable merge commit `6f86266`). Branch `version-2-1-0`.
 
 ### B-pre — `_hook_tier` forcing function (entry precondition)
 

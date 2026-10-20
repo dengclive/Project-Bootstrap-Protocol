@@ -467,8 +467,16 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # refute, posted at 9a in session; ce5c1cd's pushed message claims Z-69 done
 # and re-walked, and 5ae73b4's that re-review 7 found no fault in the new
 # implementer text. Pin moved 51 -> 52 in the same commit.
+# [retrofit-disable closeout, 2026-10-19] The retrofit disable (PR #127,
+# merge 6f86266, freeze exception 86). Graded `harmful` by the same 10b rule:
+# f778eff reached origin with step 7's MAJOR (ROUTES-S7-1: a clone of a
+# retrofit project was not frozen), 6df122f and 3f3acf1 with the MINORs their
+# re-reviews confirmed (6df122f also with critic CR1-1's deletion of the
+# operator's retrofit state), the PR body at 210b6a3 gave CI's gap one cause,
+# pushed messages and the 9a comment overclaim, and parts of confirmed
+# findings merged unfixed. Pin moved 52 -> 53 in the same commit.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 52, f"{len(es)} entries")
+      len(es) == 53, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
