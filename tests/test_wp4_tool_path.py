@@ -1180,7 +1180,7 @@ try:
     # rc 0", the reason its route notes kept Claude off the command. Since
     # 8c both interviews refuse. Each /dev/null run above (stdin at end of
     # file) is paired here with the For-the-AI note that now says so: the
-    # protocol's (its line 283) and RETROFIT.md's (its line 9).
+    # protocol's (its line 310) and RETROFIT.md's (its line 9).
     def for_the_ai_note(rel, verb):
         with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
             hits = [ln for ln in fh.read().split("\n") if ln.startswith(
@@ -1486,8 +1486,18 @@ try:
           and f"pin the annotated git tag `v{_pv}`" in _banner
           and "*Correction (WP4, 2026-10-14):* to follow [Getting started]"
               "(#getting-started), use a clone of `main`." in _bflat
-          and _tag is not None and _tag.group(1) == f"v{_pv}", _bflat[:900])
-    _tagname = _tag.group(1) if _tag else f"v{_pv}"
+          and _tag is not None and _tag.group(1) == "v2.8.0", _bflat[:900])
+    # [v2.9.0 release, 2026-10-20] The correction is about v2.8.0, so that
+    # tag is a literal now, not PROTOCOL_VERSION; a dated update says the
+    # v2.9.0 tag carries the route, and Before you begin names it too. Both
+    # tags are literals, so the next release does not silently re-point them.
+    check("[banner, v2.9.0] a dated update says the v2.9.0 tag carries the "
+          "route, and Before you begin offers that tag or `main`",
+          "*Update (v2.9.0, 2026-10-20):* the `v2.9.0` tag carries that "
+          "route, so a clone at that tag or at `main` will do." in _bflat
+          and "- A clone of this repository at the `v2.9.0` tag or at "
+              "`main` (see the\n  banner)." in README, _bflat[:1200])
+    _tagname = _tag.group(1) if _tag else "v2.8.0"
     _have_tag = GIT and run([GIT, "-C", ROOT, "rev-parse", "-q", "--verify",
                              f"refs/tags/{_tagname}^{{commit}}"]
                             ).returncode == 0
@@ -1506,6 +1516,22 @@ try:
     else:
         print(f"  SKIP  [banner, TRUTH] no {_tagname} tag in this clone (a "
               f"shallow CI checkout fetches none): NOT measured")
+    # Its twin: at the v2.9.0 tag the route exists. Before the operator
+    # pushes the tag, and in CI's shallow checkout, it SKIPs (not counted).
+    _new_tag = "v2.9.0"
+    if GIT and run([GIT, "-C", ROOT, "rev-parse", "-q", "--verify",
+                    f"refs/tags/{_new_tag}^{{commit}}"]).returncode == 0:
+        _ni = run([GIT, "-C", ROOT, "show", f"{_new_tag}:lib/installer.py"])
+        _nd = run([GIT, "-C", ROOT, "cat-file", "-e",
+                   f"{_new_tag}:{PROTOCOL_DOC}"])
+        check(f"[banner, TRUTH] at the {_new_tag} tag the installer prints a "
+              f"Next steps block and {PROTOCOL_DOC} exists, as the update "
+              f"says",
+              _ni.returncode == 0 and "Next steps:" in _ni.stdout
+              and _nd.returncode == 0, (_ni.returncode, _nd.returncode))
+    else:
+        print(f"  SKIP  [banner, TRUTH] no {_new_tag} tag in this clone "
+              f"yet: NOT measured")
     _HIST = ("carries seven",
              "Can Bootstrap-Protocol-v2-0-0.md be a Claude Code plugin")
     _old = [f"README.md:{i}: {ln.strip()[:90]}"

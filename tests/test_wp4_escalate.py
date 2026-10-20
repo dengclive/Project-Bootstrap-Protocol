@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """[WP4 / ruling 7 (c)] The escalate skill: the decision record PRD Phase 8
-asks for when the agent stops for an urgent escalation (:1299, backlog
+asks for when the agent stops for an urgent escalation (:1326, backlog
 X-30a).
 
 CLAUDE.md marks each urgent escalation with a bell and, after the list, says

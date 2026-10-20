@@ -12,7 +12,7 @@ Behavioural, on BOTH substrates, from a real install:
     RUNNER_TAIL_LINES lines, 127 -> deny naming the command), and does NOT
     run it when no prompt file is touched. With commands.eval empty, the
     .last-eval-pass marker is the fallback, and it must be newer than every
-    touched prompt file (PRD :775).
+    touched prompt file (PRD :802).
   * Pushes only (operator decision 2026-10-04): no merge spelling is gated
     and none runs commands.eval, because a PreToolUse hook cannot see the
     incoming tree. The push after a merge is gated on the merged tree.

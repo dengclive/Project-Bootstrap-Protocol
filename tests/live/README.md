@@ -306,7 +306,7 @@ protected path (except under `.claude/worktrees/`, and a worktree's own
 `.claude/specs/` is protected too). In `default` and `acceptEdits` mode an Edit
 or Write there prompts, which a headless run cannot answer, and allow rules do
 not reach it. Only `bypassPermissions` allows the write, and `auto` hands it to
-a classifier; neither may be the dispatch mode (PRD:741).
+a classifier; neither may be the dispatch mode (PRD:768).
 
 The Bash channel is different, and the pilot's six runs did not show it.
 Measured on 2.1.289 after the pilot, one run each, both in `default` mode with
@@ -464,7 +464,7 @@ subagent.
    setting, then recomputes the arm verdicts, the demo and the overall
    verdict. Commit the
    record with the change that sets `hooks.spec_gate_commit_mode` to `block`
-   in `DEFAULTS`, and cite it from the dated PRD:767 note and the changelog.
+   in `DEFAULTS`, and cite it from the dated PRD:794 note and the changelog.
    The test fails if a spec-gate key defaults to `block` without a committed
    record, taken with the installed hook in block mode in the shipped layout,
    that recomputes to `MET`.

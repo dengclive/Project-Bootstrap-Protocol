@@ -1,13 +1,15 @@
 # Bootstrap Protocol — Deterministic Installer + Plugin
 
-> **Current release: v2.8.0.** `PROTOCOL_VERSION = 2.8.0`. **External consumers
-> pin the annotated git tag `v2.8.0`** — pinning a moving `main` is pinning a
+> **Current release: v2.9.0.** `PROTOCOL_VERSION = 2.9.0`. **External consumers
+> pin the annotated git tag `v2.9.0`** — pinning a moving `main` is pinning a
 > branch, not a release. This line was stale at `v2.6.0` through three releases
 > (2.6.1, 2.7.0, 2.7.1) and is now part of the release checklist.
 > *Correction (WP4, 2026-10-14):* to follow [Getting started](#getting-started),
 > use a clone of `main`. The `v2.8.0` tag predates that route: at the tag, the
 > installer prints no `Next steps:` block, and the protocol document has its
 > old file name (see "Why a filename need not match the version" below).
+> *Update (v2.9.0, 2026-10-20):* the `v2.9.0` tag carries that route, so a
+> clone at that tag or at `main` will do.
 >
 > The normative spec is still `Bootstrap-Protocol-v2-8-0.md` +
 > `Bootstrap-Protocol-Companion-v2-8-0.md`: **2.6.1 through 2.7.4 are gate
@@ -18,6 +20,9 @@
 > 2.8.0 is the LIT literature fold — nine additive doc/steering items plus one
 > priming-contract change ([LIT-07]) — amended into the same pair in place,
 > with a v2.8.0 block at the PRD head and a migration note in the Companion.
+> 2.9.0 ships WP1 to WP4 and the retrofit disable, amended into the same
+> pair in the same way: a v2.9.0 block at the PRD head and a migration note
+> in the Companion.
 > **Why a filename need not match the version:** the filename
 > records **when the pair was cut**, not what it describes. Through 2.6.0 a new
 > pair was cut at each MAJOR/MINOR; **since 2.7.0 releases amend the pair in
@@ -71,7 +76,8 @@ stubs, and Claude then fills them in with you.
 - Python 3. The tools use only the standard library; CI tests them on
   Python 3.12.
 - Your project, in a git repository.
-- A clone of this repository at `main` (see the correction in the banner).
+- A clone of this repository at the `v2.9.0` tag or at `main` (see the
+  banner).
 
 ### Bootstrap a new project
 

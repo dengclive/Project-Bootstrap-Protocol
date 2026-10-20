@@ -16,7 +16,7 @@ it adds (ED1).
   B. State-lock idiom. The protocol notes name the sibling lock, scope the
      idiom to scripts (the AI edits the state file with the Edit tool while
      no wrapper or install runs), and the emitted wrappers and .gitignore
-     agree. The :402 note's claim is measured here: a deterministic
+     agree. The :429 note's claim is measured here: a deterministic
      three-writer interleaving loses an entry when the lock is on the state
      file and keeps every entry when it is on the sibling `.lock` (Python
      writers with fcntl.flock; no fcntl counts as a failure, not a pass),
@@ -212,10 +212,10 @@ try:
           and st.get("deferred_items") == {"ci_config_generation": "phase_9"},
           repr({k: st.get(k) for k in seeded}))
     # [WP4 fix round 2 / CR-1] A first install seeds bootstrap_complete
-    # false over the state file Phase 0 wrote, as the :404 note says: on
+    # false over the state file Phase 0 wrote, as the :431 note says: on
     # the documented route that file is there before the first install.
     check("on a first install over the state file Phase 0 wrote, it seeds "
-          "bootstrap_complete: false (the :404 note)",
+          "bootstrap_complete: false (the :431 note)",
           st.get("bootstrap_complete") is False, repr(st.get(
               "bootstrap_complete")))
 finally:
@@ -274,7 +274,7 @@ for w in (".claude/loop.sh", ".claude/goal-loop.sh"):
 check("the emitted .gitignore covers the sibling lock file",
       ".bootstrap-state.json.lock" in _full.get(".claude/.gitignore", ""))
 
-# The measurement behind the :402 note (and the four site notes that defer
+# The measurement behind the :429 note (and the four site notes that defer
 # to it): a deterministic interleaving of three writers, with ONE variable,
 # the lock path. Ported from the WP4 critic's bash prototype to Python, so
 # it needs neither flock(1) nor jq. Marker files order the steps, so no step
@@ -416,7 +416,7 @@ except ImportError:                    # pragma: no cover - not POSIX
 if fcntl is None:                      # pragma: no cover - not POSIX
     print("  NOT measured: no fcntl on this platform, so the lock "
           "interleaving cannot run")
-    check("the :402 lock claim is measured (fcntl is available)", False)
+    check("the :429 lock claim is measured (fcntl is available)", False)
 else:
     _on_state = interleave(True)
     check("lock on the state file + rename loses an entry (deny capability: "
@@ -445,7 +445,7 @@ else:
         _before = os.path.getsize(_st)
         _r = subprocess.run([BASH, "-c", 'exec 9>"$1"', "t", _st],
                             capture_output=True, text=True, timeout=30)
-        check("`exec 9>` on a non-empty state file empties it (the :402 "
+        check("`exec 9>` on a non-empty state file empties it (the :429 "
               "note's hazard)", _r.returncode == 0 and _before > 0
               and os.path.getsize(_st) == 0,
               (_r.returncode, _before, os.path.getsize(_st), _r.stderr))
@@ -465,7 +465,7 @@ CODE_ID = "CLAUDE_CODE_SESSION_ID"
 
 group("[filename] the protocol's filename note and both RETROFIT files name "
       "the current pair", [
-          (PRD, 82, "> code MINOR (two new configuration keys) served by "
+          (PRD, 109, "> code MINOR (two new configuration keys) served by "
            "this one.", NOTE,
            ["Since 2026-08-14 this file is named `v2-8-0`", "PR #72",
             "freeze exception 70", "`Bootstrap-Protocol-v2-6-0.md`"]),
@@ -482,7 +482,7 @@ _AI = "> **For the AI:** When the operator opens this file and asks you to"
 group("[route, D1] the protocol and RETROFIT.md route the AI through the "
       "tools, and the operator's approval of the dry-run plan covers the "
       "install (ruling 6 (a))", [
-          (PRD, 283, _AI + " bootstrap", D1,
+          (PRD, 310, _AI + " bootstrap", D1,
            ["`bootstrap-interview analyze --prd <PRD path>`",
             "`bootstrap-interview synthesize`",
             "`bootstrap-install --dry-run` as the preview",
@@ -492,14 +492,14 @@ group("[route, D1] the protocol and RETROFIT.md route the AI through the "
             "`product.md`, `tech.md`, `structure.md` and `ci-cd.md` are "
             "stubs", "`Next steps:` block names each stub this install still "
             "owns", "`bin/retrofit-interview`"]),
-          (PRD, 781, "3. For each accepted hook, write the script under", D1,
+          (PRD, 808, "3. For each accepted hook, write the script under", D1,
            ["has already written each accepted hook and wired it into "
             "`.claude/settings.json`", "show the operator each script it "
             "wrote and run the checklist below on it"]),
-          (PRD, 2191, "- **Never batch artifacts.**", D1,
+          (PRD, 2218, "- **Never batch artifacts.**", D1,
            ["approval of the `bootstrap-install --dry-run` plan covers the "
             "files the installer writes"]),
-          (PRD, 2192, "- **Always show before writing.**", D1,
+          (PRD, 2219, "- **Always show before writing.**", D1,
            ["the plan lists files, not their contents",
             "each hook script and agent definition the installer wrote, in "
             "its own phase", "change `bootstrap.config.yaml` and "
@@ -531,7 +531,7 @@ check("[route, X12] RETROFIT.md's note gives no --force advice for "
 
 group("[interview, 8c] both route notes say the interactive interview "
       "refuses with no terminal (no 'accepts every')", [
-          (PRD, 283, _AI + " bootstrap", D1,
+          (PRD, 310, _AI + " bootstrap", D1,
            ["Don't run `bootstrap-interview interactive` yourself",
             "with no terminal, it writes no config and exits 2",
             "input that ends early takes the remaining defaults and says "
@@ -545,7 +545,7 @@ group("[interview, 8c] both route notes say the interactive interview "
 
 group("[writes, X9] both route notes send writes under .claude/ through the "
       "Write and Edit tools and stop on a refusal", [
-          (PRD, 283, _AI + " bootstrap", D1,
+          (PRD, 310, _AI + " bootstrap", D1,
            ["with the Write and Edit tools, not with a shell redirect or a "
             "script", "approval prompt for `.claude/` applies",
             "as it does under `claude -p` until D5 is decided, stop and tell "
@@ -558,7 +558,7 @@ group("[writes, X9] both route notes send writes under .claude/ through the "
 
 group("[state keys] bootstrap_complete, protocol_doc and the Phase 9 "
       "decision are named where the protocol writes them", [
-          (PRD, 404, "For state-file migration from older protocol "
+          (PRD, 431, "For state-file migration from older protocol "
            "versions", AMEND,
            ["`completed_phases`", "`last_phase_started`",
             "`bootstrap_complete`", "on a first install",
@@ -567,11 +567,11 @@ group("[state keys] bootstrap_complete, protocol_doc and the Phase 9 "
             "wrote before the key existed",
             "read that as unknown, not as incomplete", "`protocol_doc`",
             "`toolchain/protocol.md`", "`null`"]),
-          (PRD, 1313, "1. Ask: \"Run the workflow as a smoke test?", AMEND,
+          (PRD, 1340, "1. Ask: \"Run the workflow as a smoke test?", AMEND,
            ["`skippable_phase_decisions.phase_9_smoke_test`",
             "`\"run\"` or `\"skip\"`", "`phase_7_6_spec_roster`",
             "`Next steps:` block"]),
-          (PRD, 2158, "2. Update `.claude/.bootstrap-state.json` to mark "
+          (PRD, 2185, "2. Update `.claude/.bootstrap-state.json` to mark "
            "bootstrap complete.", AMEND,
            ["Set `bootstrap_complete: true` after step 3",
             "with the Edit tool, while no loop wrapper or install is "
@@ -580,7 +580,7 @@ group("[state keys] bootstrap_complete, protocol_doc and the Phase 9 "
 
 group("[ledger, g5-2b] the ledger note corrects the token-multiplier "
       "section", [
-          (PRD, 461, "The ledger **links** to the sections that own each "
+          (PRD, 488, "The ledger **links** to the sections that own each "
            "default", NOTE,
            ["Phase 7 step 3 (the cost disclosure), not at Phase 9.5",
             "`protocol_doc`"]),
@@ -594,7 +594,7 @@ check("[ledger] the emitted ledger does what the note says: the cost "
 
 group("[steering, g2] tech.md's two scaffolds and ci-cd.md's one stop, in "
       "both protocols", [
-          (PRD, 613, "5. Write `.claude/steering/tech.md` with explicit",
+          (PRD, 640, "5. Write `.claude/steering/tech.md` with explicit",
            AMEND, ["already has both sections", "`TODO:` paragraph",
                    "never a path", "warns when the Test row does not "
                    "name `commands.test`"]),
@@ -602,11 +602,11 @@ group("[steering, g2] tech.md's two scaffolds and ci-cd.md's one stop, in "
            AMEND, ["`## Do Not Touch` and `## Documentation Policy`",
                    "`TODO:` paragraph", "steps 6 and 7", "never a path",
                    "step 7's drift question"]),
-          (PRD, 725, "4. Write `.claude/steering/ci-cd.md`. Make explicit",
+          (PRD, 752, "4. Write `.claude/steering/ci-cd.md`. Make explicit",
            AMEND, ["Name one stopping point, not two",
                    "stops after it opens a pull request, and a person "
                    "merges it", "stop as `ci-cd.md` says"]),
-          (PRD, 729, "**Exit criteria:** `ci-cd.md` exists. The "
+          (PRD, 756, "**Exit criteria:** `ci-cd.md` exists. The "
            "agent-vs-human line is unambiguous.", AMEND,
            ["opt-out `ci-cd.md`", "stops after its last commit for the "
             "task, and a person pushes"]),
@@ -624,31 +624,31 @@ check("[steering] the emitted ci-cd.md and CLAUDE.md say what the notes "
       and "stop as `ci-cd.md` says." in _rs["CLAUDE.md"], _stop[-500:])
 
 group("[CI, g6-c] CI config generation stays the AI's", [
-          (PRD, 726, "5. **CI config file generation.**", AMEND,
+          (PRD, 753, "5. **CI config file generation.**", AMEND,
            ["The installer writes no CI config file and never changes one",
             "Phase 9 step 8",
             "`deferred_items.ci_config_generation` as you wrote it"]),
       ])
 _ci = sorted(p for p in _gf if p.startswith((".github/", ".gitlab-ci",
                                              "bitbucket-pipelines")))
-check("[CI] the default plan writes no CI config file (the :726 note)",
+check("[CI] the default plan writes no CI config file (the :753 note)",
       not _ci, _ci)
 
 group("[escalate, ruling 7 (c)] every escalate note names the skill and "
       "says where the record can land", [
-          (PRD, 1137, "   - `ack-drift` — writes an acknowledgement", R7C,
+          (PRD, 1164, "   - `ack-drift` — writes an acknowledgement", R7C,
            ["`escalate`", "`/escalate`",
             "`.claude/sessions/.decision-pending-<session-id>`",
             "With `workflow.install_skills` on (the default)",
             "with the skills off it writes no skill, and the `/escalate` "
             "command, like every command, then only names its missing skill "
             "(backlog Z-66)"]),
-          (PRD, 1299, "   - When triggering the decision-required alarm, "
+          (PRD, 1326, "   - When triggering the decision-required alarm, "
            "the agent writes to", R7C,
            ["`/escalate`", "`timestamp:` (from the clock), `reason:`, "
             "`about-to:` and `needs:`", "appends a later record",
             "Inside an implementer worktree"]),
-          (PRD, 1303, "**Exit criteria:** `CLAUDE.md` exists, is thin",
+          (PRD, 1330, "**Exit criteria:** `CLAUDE.md` exists, is thin",
            AMEND, ["`/escalate`", "with `workflow.install_skills` on (the "
                    "default), session hygiene", "With it off, it has "
                    "neither"]),
@@ -670,12 +670,12 @@ _D5 = ("so the record lands only where Claude Code allows writes under "
 group("[escalate, build F5] each escalate note says the record lands only "
       "where Claude Code allows writes under .claude/, and not under "
       "claude -p until D5", [
-          (PRD, 1137, "   - `ack-drift` — writes an acknowledgement", R7C,
+          (PRD, 1164, "   - `ack-drift` — writes an acknowledgement", R7C,
            [_D5]),
-          (PRD, 1299, "   - When triggering the decision-required alarm, "
+          (PRD, 1326, "   - When triggering the decision-required alarm, "
            "the agent writes to", R7C,
            [_D5, "An unattended run therefore still ends with no record."]),
-          (PRD, 1303, "**Exit criteria:** `CLAUDE.md` exists, is thin",
+          (PRD, 1330, "**Exit criteria:** `CLAUDE.md` exists, is thin",
            AMEND, [_D5]),
           (RETRO, 150, "- ✓ **Standard skills** — full BOOTSTRAP set:",
            R7C, [_D5]),
@@ -702,19 +702,19 @@ _keys = re.findall(r"^\s+(timestamp|reason|about-to|needs):", _skill, re.M)
 _n1299 = site(PRD, "   - When triggering the decision-required alarm, the "
                    "agent writes to")[1]
 check("[escalate] the skill writes the record path and the four keys, in "
-      "the order the :1299 note gives",
+      "the order the :1326 note gives",
       ".claude/sessions/.decision-pending-${CLAUDE_SESSION_ID}" in _skill
       and _keys == ["timestamp", "reason", "about-to", "needs"]
       and "date -u +%Y-%m-%dT%H:%M:%SZ" in _skill, (_keys, _skill[:300]))
 _m = re.search(r"Skill-body substitution of .*?\| Claude Code ([\d.]+) "
                r"\(measured", _ledger)
-check("[escalate] the :1299 note's measured version is the ledger's "
+check("[escalate] the :1326 note's measured version is the ledger's "
       "substitution row",
       bool(_m) and f"(measured on Claude Code {_m.group(1)})" in _n1299,
       (_m and _m.group(1), _n1299[-600:]))
 _pointer = [ln for ln in _gf["CLAUDE.md"].splitlines() if "/escalate" in ln]
 _n1303 = site(PRD, "**Exit criteria:** `CLAUDE.md` exists, is thin")[1]
-check("[escalate] the :1303 note quotes the greenfield CLAUDE.md's "
+check("[escalate] the :1330 note quotes the greenfield CLAUDE.md's "
       "/escalate line exactly",
       len(_pointer) == 1 and f"\"{_pointer[0]}\"" in _n1303,
       (_pointer, _n1303[-900:]))
@@ -728,7 +728,7 @@ check("[escalate] both retrofit fixtures emit the skill and no CLAUDE.md "
 
 group("[CLAUDE.md, g1 and X3] what the installer's CLAUDE.md carries, in "
       "both modes", [
-          (PRD, 1303, "**Exit criteria:** `CLAUDE.md` exists, is thin",
+          (PRD, 1330, "**Exit criteria:** `CLAUDE.md` exists, is thin",
            AMEND, ["`deps.enabled: false`", "`secrets.enabled: false`",
                    "failing-test-first step", "the one stop `ci-cd.md` "
                    "states", "Never list", "only on a permission or "
@@ -743,7 +743,7 @@ group("[CLAUDE.md, g1 and X3] what the installer's CLAUDE.md carries, in "
       ])
 _gfoff = plan_of(GATES_OFF)["CLAUDE.md"]
 check("[CLAUDE.md] with the gates off, the greenfield CLAUDE.md names no "
-      "deps.md, secrets.md or never-read path (the :1303 note; the full "
+      "deps.md, secrets.md or never-read path (the :1330 note; the full "
       "matrix is tests/test_wp4_claude_md.py)",
       "deps.md" not in _gfoff and "secrets.md" not in _gfoff
       and "never-read" not in _gfoff)
@@ -786,7 +786,7 @@ check("[plugin] the tree matches the note: the manifest is only under "
 # --------------------------------------------------------------------------- #
 print("\n=== D. Line counts ===")
 # Same-line appends only: a new line moves every citation below it.
-for rel, want in ((PRD, 2349), (COMP, 582), (RETRO, 1598), (RCOMP, 566),
+for rel, want in ((PRD, 2376), (COMP, 584), (RETRO, 1598), (RCOMP, 566),
                   (SEAM, 379)):
     have = DOCS[rel].count("\n")
     check(f"{rel} has exactly {want:,} lines", have == want, have)

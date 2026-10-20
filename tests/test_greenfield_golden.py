@@ -3755,7 +3755,13 @@ EXPECTED_DIGESTS = {
         # previous digest (2b49e07b...), per file: 1 body moves,
         # agents/implementer.md (the urgent list binds the implementer,
         # Z-69), and no other; count 66.
-        "ad5e515d8597e144da4546f50bd3c61e979b37cf5fa78cd2d0390a973da991b5",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release.
+        # Measured on the emitted plans against the previous digest
+        # (ad5e515d...), per file: the version stamp moves
+        # settings.json (_generatedBy) and steering/assumption-ledger.md
+        # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
+        # 66.
+        "6895aeda8408aaabc07ee4d5b3f0300d8e9e848af37cabdec533921e638fcf7b",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4464,7 +4470,15 @@ EXPECTED_DIGESTS = {
         # previous digest (46397983...), per file: 1 body moves,
         # agents/implementer.md (the urgent list binds the implementer,
         # Z-69), and no other; count 78.
-        "a963da97e1e833b8a62fbe6b5447a6766867dd7edcf6b2601c6472fcf1511965",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release.
+        # Measured on the emitted plans against the previous digest
+        # (a963da97...), per file: the version stamp moves
+        # settings.json (_generatedBy) and steering/assumption-ledger.md
+        # (its "protocol 2.9.0"); hooks/iteration-summary-enforcement.sh
+        # moves its one protocol citation (:799-800 -> :826-827, which
+        # tests/test_doc_citations.py pins); no other; 0 added, 0 removed,
+        # count 78.
+        "b614467f2cc6fd521ecdb3f2eb084942d6eab5b7b34abdbfb54efa3d8549b291",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -5100,7 +5114,13 @@ EXPECTED_DIGESTS = {
         # previous digest (3e9f8929...), per file: 1 body moves,
         # agents/implementer.md (the urgent list binds the implementer,
         # Z-69), and no other; count 67.
-        "a6c10556687f28d30b665915abe2cd1f8413de033b1c2878d85991dc08adabc1",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release.
+        # Measured on the emitted plans against the previous digest
+        # (a6c10556...), per file: the version stamp moves
+        # settings.json (_generatedBy) and steering/assumption-ledger.md
+        # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
+        # 67.
+        "f0a8dd7693196410d6e1451261eaa0741c5eee70a1d0fcf8dd69ab4aef6f17ab",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5332,7 +5352,13 @@ EXPECTED_DIGESTS = {
         # previous digest (3f3df46b...), per file: 1 body moves,
         # agents/implementer.md (the urgent list binds the implementer,
         # Z-69), and no other; count 67.
-        "e2021cb283ceaebb3d4243766baf3f4673fc471a073c8bc015eda575ac549235",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release.
+        # Measured on the emitted plans against the previous digest
+        # (e2021cb2...), per file: the version stamp moves
+        # settings.json (_generatedBy) and steering/assumption-ledger.md
+        # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
+        # 67.
+        "f03fe525099ee8fd6ae49ad687a90ab8792d50e02cb7719090ff22745dc90b0b",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5380,7 +5406,13 @@ EXPECTED_DIGESTS = {
         # previous digest (d0a6f1bb...), per file: 1 body moves,
         # agents/implementer.md (the urgent list binds the implementer,
         # Z-69), and no other; count 59.
-        "dfa6f03d06050efe9cfa710abd3ade13ceea14f34df27eb528a8700a95a4a3a1",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release.
+        # Measured on the emitted plans against the previous digest
+        # (dfa6f03d...), per file: the version stamp moves
+        # settings.json (_generatedBy) and steering/assumption-ledger.md
+        # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
+        # 59.
+        "a6ee1a7aaa5b71941a6c6b5fae9cfdf2b44f139e929fc527692b59eddc27fd4a",
 }
 
 EXPECTED_ACTION_COUNTS = {
@@ -5549,8 +5581,10 @@ if _tel_on is not None:
     # bump, the change is unintended -- that is the whole point of pinning it.
     # [freeze-exception no. 68, 2026-08-14] version stamp only: the body
     # interpolates PROTOCOL_VERSION (2.8.0); no other telemetry.md change.
+    # [freeze-exception no. 87, 2026-10-20] version stamp only again
+    # (2.9.0), against the previous digest (9f599f14...).
     EXPECTED_TELEMETRY_BODY = (
-        "9f599f14a391693fa831a21a6c08cc86b5ba5504ec458d6e84da264bbf0a7c3d")
+        "09c058ad302b4e3cf057aaec4b1a2c8c5b14b78954e2d47db9e4c89d7aca4917")
     actual = hashlib.sha256(_tel_on.encode()).hexdigest()
     if os.environ.get("GOLDEN_UPDATE"):
         print(f'  EXPECTED_TELEMETRY_BODY = "{actual}"')
