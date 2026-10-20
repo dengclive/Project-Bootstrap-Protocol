@@ -1180,7 +1180,7 @@ try:
     # rc 0", the reason its route notes kept Claude off the command. Since
     # 8c both interviews refuse. Each /dev/null run above (stdin at end of
     # file) is paired here with the For-the-AI note that now says so: the
-    # protocol's (its line 283) and RETROFIT.md's (its line 9).
+    # protocol's (its line 310) and RETROFIT.md's (its line 9).
     def for_the_ai_note(rel, verb):
         with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
             hits = [ln for ln in fh.read().split("\n") if ln.startswith(

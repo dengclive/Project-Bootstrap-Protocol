@@ -17,41 +17,45 @@ That is 54 pull requests, numbered #68 to #129 (#77 was closed unmerged;
 "Post-2.8.0" below record most of it: the four work packages, WP1 (a clean
 gates-off install), WP2 (hooks that reach the model), WP3 (a spec workflow
 that reaches a merged commit) and WP4 (CLAUDE.md, steering and the entry
-path); the retrofit disable; and twelve gate fixes and cost bounds. Those
+path); the retrofit disable; and twelve smaller entries (gate fixes, cost
+bounds, a cost measurement and the protocol file rename). Those
 entries keep their "Post-2.8.0" headings: tests and records cite the
 headings as they stand. (b) Work that ships with no entry of its own, named
 here: PR #96 (the C-2 disclosure: autonomous dispatch is no longer
-advertised, freeze exception 76, recorded only in the golden digest
-stacks), PR #75 (the Apache-2.0 `LICENSE`, so this is the first licensed
-tag), PR #113 (recorded through PR #115's entry), PR #124 (the CI suite
-timeout, 15 to 30 minutes), and the test and harness PRs #85 and #101.
+advertised, freeze exception 76; recorded in the protocol's Phase 9.5 and
+9.6 notes, `docs/production-readiness.md` and the golden digest stacks),
+PR #75 (the Apache-2.0 `LICENSE`, so this is the first licensed tag), PR
+#113 (recorded through PR #115's entry), PR #124 (the CI suite timeout, 15
+to 30 minutes), and the test and harness PRs #79, #85 and #101.
 
 **What an operator sees.** The protocol's new head block and the
-Companion's "Migrating from 2.8.0 to 2.9.0" note say it. Two points are new
-in kind. The retrofit route is disabled (backlog Z-72). With
-`deps.enabled: false`, the dependency gate is no longer emitted or wired,
-and a re-install removes one an earlier install wrote (WP1 D3, an owner
-ruling). D3 is therefore a ruled member of the "previously denied, now
-allowed" set. Each landing recorded its own verdict movement; this entry
-does not re-measure against the v2.8.0 tag, as the 2.8.0 entry did not
-against v2.7.4. This is also the first tag at which the protocol pair is
-named `v2-8-0` (freeze exception 70). Backlog row W-1a ships open: it says
-its check "should be done before the next release that touches worktrees",
-and the operator ruled on 2026-10-20 to ship with it open.
+Companion's "Migrating from 2.8.0 to 2.9.0" note say it. The retrofit
+route is disabled (backlog Z-72). The "previously denied, now allowed" set
+has two ruled members. With `deps.enabled: false`, the dependency gate is
+no longer emitted or wired, and a re-install removes one an earlier install
+wrote (WP1 D3). An agent commit of a file no task file lists, which 2.8.0
+refused, now goes through with a warning, because
+`hooks.spec_gate_commit_mode` defaults to `warn` (WP3 D2, backlog Z-28);
+`block` keeps it refused. Each landing recorded its own verdict movement;
+this entry does not re-measure against the v2.8.0 tag, as the 2.8.0 entry
+did not against v2.7.4. This is also the first tag at which the protocol
+pair is named `v2-8-0` (freeze exception 70). Backlog row W-1a ships open:
+the backlog's Priority reading says W-1a "should be done before the next
+release that touches worktrees", and the operator ruled on 2026-10-20 to
+ship with it open.
 
 **Line citations into the protocol.** The head block moves every later
-protocol line by 27. A script re-pointed 93 line numbers, on 84 lines in
-16 files. It reads each citing file from the base commit, maps each number through
-the insertion, and asserts the cited text. Eight of those citations (nine
-numbers) were already wrong before this release; each was checked by
-meaning and now names the line it describes. Not moved: historical records (this
+protocol line by 27. A script re-pointed 92 line numbers, on 83 lines in
+16 files, and two more were re-pointed by hand. The script reads each
+citing file from the base commit, maps each number through the insertion,
+and asserts the cited text. Eight of those citations (nine numbers) were
+already wrong before this release; each was checked by meaning and now
+names the line it describes. Not moved: historical records (this
 changelog, the trust-ramp ledger, filed backlog rows written in prose),
 and, by the operator's ruling of 2026-10-20, every emitted citation except
 the one `tests/test_doc_citations.py` pins. The emitted citations left
 stale by 27 are in `lib/templates.py` (at lines 4168, 5358, 5426, 8395,
-12863 and 13701) and `lib/sdk_gates_template.py:4280`. Two citations to
-`:1300` (`lib/templates.py:11795`, `tests/test_merge_back.py:361`) name
-text the protocol no longer holds, and are left as they are.
+12863 and 13701) and `lib/sdk_gates_template.py:4280`.
 
 **Freeze exception 87.** It covers the version bump and the moved
 citation: the 5 greenfield and 2 retrofit aggregate digests,

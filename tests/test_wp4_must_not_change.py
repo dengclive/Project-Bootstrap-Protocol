@@ -21,7 +21,9 @@ suite renders the configs those suites pin. Fixture E, the gates-off config,
 is a literal below until WP4 adds it to the goldens.
 
 A later package that changes a hook on purpose updates these pins under its
-own freeze exception.
+own freeze exception. Freeze exception 87 (the v2.9.0 release) moved two:
+iteration-summary-enforcement.sh in full_autonomous and retrofit agent, by
+one protocol citation.
 
 Run: python3 tests/test_wp4_must_not_change.py
 """
@@ -355,8 +357,8 @@ for _label, _ in FIXTURES:
     _pins, _got = HOOK_PINS.get(_label, {}), ACTUAL[_label]
     _moved = sorted(p for p in _pins if p in _got and _got[p] != _pins[p])
     _missing = sorted(p for p in _pins if p not in _got)
-    check(f"{_label}: its {len(_pins)} pinned hook bodies are byte-identical "
-          f"to 0845862's",
+    check(f"{_label}: its {len(_pins)} pinned hook bodies match their pins "
+          f"(0845862's, or a later freeze exception's)",
           bool(_pins) and not _moved and not _missing,
           "; ".join([f"moved: {p} (sha256 {_got[p][:12]}..., pinned "
                      f"{_pins[p][:12]}...)" for p in _moved]

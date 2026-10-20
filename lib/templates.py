@@ -11792,7 +11792,7 @@ investigate_disagreement: false
 # reports), so CLAUDE.md stays out of the isolation blast radius. Shared by
 # the greenfield and the retrofit CLAUDE.md.
 # [WP3 critic 5a] Compressed to keep the retrofit-agent CLAUDE.md within
-# the ~80 lines of PRD:1300 and Companion:101, and it now carries:
+# the ~80 lines of PRD:1327 and Companion:101, and it now carries:
 #  - the status owner (operator ruling 2026-10-05): the main session sets
 #    `in-progress` and commits the spec before dispatch (the worktree starts
 #    from HEAD, and merge-back refuses a dirty INDEX.md), then `done` after

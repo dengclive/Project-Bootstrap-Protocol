@@ -358,7 +358,7 @@ def _golden_fixture_texts():
     return env
 
 
-# [WP3 critic 5a] PRD:1300 and Companion:101 budget CLAUDE.md at "roughly
+# [WP3 critic 5a] PRD:1327 and Companion:101 budget CLAUDE.md at "roughly
 # 80 lines max"; the D6 landing paragraph took the retrofit-agent fixture
 # to 82 before it was compressed.
 _fx = _golden_fixture_texts()
