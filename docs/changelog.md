@@ -1,5 +1,81 @@
 # Changelog — Bootstrap Protocol implementation
 
+## 2.8.0 → 2.9.0 — WP1 to WP4 and the retrofit disable, a tag-only release (2026-10-20)
+
+**MINOR.** `PROTOCOL_VERSION` 2.8.0 → 2.9.0 in `lib/installer.py` and
+`lib/templates.py`, and in `plugin/.claude-plugin/plugin.json`. The
+operator ruled the release on 2026-10-16: disable retrofit first, then a
+tag-only v2.9.0 in its own PR, with the marketplace file deferred. On
+2026-10-20 the operator ruled its shape: keep the `v2-8-0` file names, add
+a v2.9.0 block at the protocol head, and re-point the seam bind in a
+follow-up PR after the merge. **Seam:** 3.0.0, SUSPENDED. At this tag the
+seam still binds `2.8.0 @ 6f86266`.
+
+**Release identity: everything merged since the v2.8.0 tag ships here.**
+That is 54 pull requests, numbered #68 to #129 (#77 was closed unmerged;
+#106 to #112 are not pull requests). (a) The 17 entries headed
+"Post-2.8.0" below record most of it: the four work packages, WP1 (a clean
+gates-off install), WP2 (hooks that reach the model), WP3 (a spec workflow
+that reaches a merged commit) and WP4 (CLAUDE.md, steering and the entry
+path); the retrofit disable; and twelve smaller entries (gate fixes, cost
+bounds, a cost measurement and the protocol file rename). Those
+entries keep their "Post-2.8.0" headings: tests and records cite the
+headings as they stand. (b) Work that ships with no entry of its own, named
+here: PR #96 (the C-2 disclosure: autonomous dispatch is no longer
+advertised, freeze exception 76; recorded in the protocol's Phase 9.5, 9.6
+and 9.7 notes, `docs/production-readiness.md` and the golden digest stacks),
+PR #75 (the Apache-2.0 `LICENSE`, so this is the first licensed tag), PR
+#113 (recorded through PR #115's entry), PR #124 (the CI suite timeout, 15
+to 30 minutes), and the test and harness PRs #79, #85 and #101.
+
+**What an operator sees.** The protocol's new head block and the
+Companion's "Migrating from 2.8.0 to 2.9.0" note say it. The retrofit
+route is disabled (backlog Z-72). The "previously denied, now allowed" set
+is not empty; among its members: with `deps.enabled: false`, the
+dependency gate is no longer emitted or wired, and a re-install removes one
+an earlier install wrote (WP1 D3); and an agent commit of a file no task
+file lists, which 2.8.0 refused, now goes through with a warning, because
+`hooks.spec_gate_commit_mode` defaults to `warn` (WP3 D2, backlog Z-28);
+`block` keeps it refused. Each landing recorded its own verdict movement;
+this entry does not re-measure against the v2.8.0 tag, as the 2.8.0 entry
+did not against v2.7.4. This is also the first tag at which the protocol
+pair is named `v2-8-0` (freeze exception 70). Backlog row W-1a ships open:
+the backlog's Priority reading says W-1a "should be done before the next
+release that touches worktrees", and the operator ruled on 2026-10-20 to
+ship with it open.
+
+**Line citations into the protocol.** The head block moves every later
+protocol line by 27. A script re-pointed 92 line numbers, on 83 lines in
+16 files, and three more were re-pointed by hand. The script reads each
+citing file from the base commit, maps each number through the insertion,
+and asserts the cited text. Eight of those citations (nine numbers) were
+already wrong before this release; each was checked by meaning and now
+names the line it describes. Not moved: historical records (this
+changelog, the trust-ramp ledger, filed backlog rows written in prose),
+and, by the operator's ruling of 2026-10-20, every emitted citation except
+the one `tests/test_doc_citations.py` pins. The emitted citations left
+stale by 27 are in `lib/templates.py` (at lines 4168, 5358, 5426, 8395,
+12863 and 13701) and `lib/sdk_gates_template.py:4280`.
+
+**Freeze exception 87.** It covers the version bump and the moved
+citation: the 5 greenfield and 2 retrofit aggregate digests,
+`EXPECTED_TELEMETRY_BODY`, the two `test_wp4_must_not_change` rows for
+`iteration-summary-enforcement.sh` (full_autonomous and retrofit agent),
+and the protocol's and the Companion's line counts in
+`tests/test_wp4_protocol_notes.py`. Per file, every fixture moves
+`settings.json` (`_generatedBy`) and `steering/assumption-ledger.md` (its
+"protocol 2.9.0"); the full_autonomous and retrofit agent fixtures also
+move `iteration-summary-enforcement.sh`, by its one citation only. No
+other hook or gate body moves: `gates.py`, `lib/sdk_gates_template.py` and
+`_HOOK_HEADER` are byte-identical.
+
+**Tests.** The bare version bump failed 32 checks in 8 suites, each on a
+version literal, a digest, a header pin, the changelog tripwire or the
+README banner. The README banner's correction keeps naming the v2.8.0 tag;
+a dated update says the v2.9.0 tag carries the Getting started route, and
+`test_wp4_tool_path` pins both tags as literals. Suite, locally: 50 suites,
+14,572 checks, 0 failed.
+
 ## 2.7.4 → 2.8.0 — the LIT literature fold: nine additive items, one priming change (2026-08-14)
 
 **MINOR — it qualifies on both counts, the v2.7.0 shape.** Adopts all ten items

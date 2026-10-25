@@ -21,7 +21,9 @@ suite renders the configs those suites pin. Fixture E, the gates-off config,
 is a literal below until WP4 adds it to the goldens.
 
 A later package that changes a hook on purpose updates these pins under its
-own freeze exception.
+own freeze exception. Freeze exception 87 (the v2.9.0 release) moved two:
+iteration-summary-enforcement.sh in full_autonomous and retrofit agent, by
+one protocol citation.
 
 Run: python3 tests/test_wp4_must_not_change.py
 """
@@ -168,8 +170,14 @@ HOOK_PINS = {
             "84c2d532c175ce126a2905c17f8a73c5cae785d2d76804adb297abef2585f32c",
         ".claude/hooks/drift-detector-loop-cooperation.sh":
             "dfeed9329516ef8bda34120fea800a259b8208faec84afc4540cc661037cc377",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release. The head
+        # block moved the protocol 27 lines; this body's one protocol
+        # citation moved with it (:799-800 -> :826-827, the citation
+        # tests/test_doc_citations.py pins). Nothing else moved: with that
+        # citation reverted the body hashes to the pin it replaces,
+        # b154cde91c61..., 0845862's.
         ".claude/hooks/iteration-summary-enforcement.sh":
-            "b154cde91c6104980c9b8e9e91277a499a341ca5a0fde71ce6ed27a58bef6677",
+            "caa4fc9cd60800735e087a437a67ffdbdc1541b6624ff3bd39cb43d774f9c526",
     },
     "design_steering": {
         ".claude/hooks/spec-gate-entry.sh":
@@ -272,8 +280,14 @@ HOOK_PINS = {
             "84c2d532c175ce126a2905c17f8a73c5cae785d2d76804adb297abef2585f32c",
         ".claude/hooks/drift-detector-loop-cooperation.sh":
             "dfeed9329516ef8bda34120fea800a259b8208faec84afc4540cc661037cc377",
+        # [freeze-exception no. 87, 2026-10-20] v2.9.0 release. The head
+        # block moved the protocol 27 lines; this body's one protocol
+        # citation moved with it (:799-800 -> :826-827, the citation
+        # tests/test_doc_citations.py pins). Nothing else moved: with that
+        # citation reverted the body hashes to the pin it replaces,
+        # b154cde91c61..., 0845862's.
         ".claude/hooks/iteration-summary-enforcement.sh":
-            "b154cde91c6104980c9b8e9e91277a499a341ca5a0fde71ce6ed27a58bef6677",
+            "caa4fc9cd60800735e087a437a67ffdbdc1541b6624ff3bd39cb43d774f9c526",
     },
     "fixture E": {
         ".claude/hooks/spec-gate-entry.sh":
@@ -343,8 +357,8 @@ for _label, _ in FIXTURES:
     _pins, _got = HOOK_PINS.get(_label, {}), ACTUAL[_label]
     _moved = sorted(p for p in _pins if p in _got and _got[p] != _pins[p])
     _missing = sorted(p for p in _pins if p not in _got)
-    check(f"{_label}: its {len(_pins)} pinned hook bodies are byte-identical "
-          f"to 0845862's",
+    check(f"{_label}: its {len(_pins)} pinned hook bodies match their pins "
+          f"(0845862's, or a later freeze exception's)",
           bool(_pins) and not _moved and not _missing,
           "; ".join([f"moved: {p} (sha256 {_got[p][:12]}..., pinned "
                      f"{_pins[p][:12]}...)" for p in _moved]

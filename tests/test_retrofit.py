@@ -1044,10 +1044,10 @@ try:
     check("8.2: retrofit_protocol_version top-level + correct value",
           state.get("retrofit_protocol_version")
           == RETROFIT_PROTOCOL_VERSION)
-    check("8.3: bootstrap_protocol_version matches '2.8.0' literally "
-          "(v2.8.0 release bump; retrofit state also stamps the "
+    check("8.3: bootstrap_protocol_version matches '2.9.0' literally "
+          "(v2.9.0 release bump; retrofit state also stamps the "
           "greenfield PROTOCOL_VERSION per the shared writer)",
-          state["bootstrap_protocol_version"] == "2.8.0")
+          state["bootstrap_protocol_version"] == "2.9.0")
     check("8.4: retrofit_protocol_version matches '1.6.2' literally",
           state["retrofit_protocol_version"] == "1.6.2")
     check("8.5: gate_substrate 'shell' present (IC-3 parity with the "
@@ -2676,10 +2676,16 @@ EXPECTED_RETROFIT_DIGESTS = {
     # (afe60526... / f5987093...): the round's one template change is the
     # implementer body's urgent section, which the retrofit flavour places
     # before its writes section (Z-69); counts 89 / 103 unchanged.
+    # [freeze-exception no. 87, 2026-10-20] v2.9.0 release, against the
+    # previous digests (ba444547... / 4f82c165...): per file, the version
+    # stamp moves settings.json (_generatedBy) and
+    # steering/assumption-ledger.md in both, and the agent fixture's
+    # hooks/iteration-summary-enforcement.sh moves its one protocol citation
+    # (:799-800 -> :826-827); no other; counts 89 / 103 unchanged.
     "service":
-        "ba444547dd5d05da2dead337fb45424e5cc104f05dfaa9e7a8bd2e072ed18988",
+        "a92e198ef3b16134d0b4c764160b33444c1255b9e0bd3944d5318bf3a0db0312",
     "agent":
-        "4f82c1657ab7b4356a9f71ab5675d7a8e74eed3ee86a91d1f3c6952f2e9367b3",
+        "db1830167e6baae93bdf35d883140a5f175e532b66a375e4e29f2cb0abf2e386",
 }
 # Pinned separately so an ADDED or DROPPED retrofit artifact is named as such
 # rather than showing up only as an opaque digest move.

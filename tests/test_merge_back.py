@@ -217,7 +217,7 @@ check("integrator: names `git merge --continue` as the conclusion with no "
       "test gate, not 'any other way'",
       "`git merge --continue` would conclude it with no test gate."
       in " ".join(ib.split()) and "any other way" not in ib)
-# [WP3 critic 5d, PRD:1159, A-08] The Haiku floor, while it inherits.
+# [WP3 critic 5d, PRD:1186, A-08] The Haiku floor, while it inherits.
 _floor = ("If the main session runs on Haiku, set "
           "`workflow.integrator_model: sonnet` in `bootstrap.config.yaml` and "
           "re-install")
@@ -358,7 +358,7 @@ def _golden_fixture_texts():
     return env
 
 
-# [WP3 critic 5a] PRD:1300 and Companion:101 budget CLAUDE.md at "roughly
+# [WP3 critic 5a] PRD:1327 and Companion:101 budget CLAUDE.md at "roughly
 # 80 lines max"; the D6 landing paragraph took the retrofit-agent fixture
 # to 82 before it was compressed.
 _fx = _golden_fixture_texts()
@@ -2943,7 +2943,7 @@ check("no manifest (a fresh clone): still kept, nothing duplicated",
 print("\n== records: the PRD notes say what the code does ==")
 # =========================================================================== #
 _prd = open(os.path.join(ROOT, "Bootstrap-Protocol-v2-8-0.md")).read()
-check("PRD :1018 note: an invalid baseRef declines with exit 3, a null "
+check("PRD :1045 note: an invalid baseRef declines with exit 3, a null "
       "warns (critic 5e)",
       "makes Claude Code ignore the whole file, so the installer then leaves "
       "the file as it is and exits 3" in _prd

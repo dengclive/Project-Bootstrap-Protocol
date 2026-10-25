@@ -1,6 +1,33 @@
 # Project Bootstrap Protocol
 
-**Version:** 2.8.0
+**Version:** 2.9.0
+
+> **v2.9.0 — WP1 to WP4 and the retrofit disable, MINOR (2026-10-20).**
+> Ships everything merged since the v2.8.0 tag: 54 pull requests, #68 to
+> #129, recorded in `docs/changelog.md`'s "2.8.0 → 2.9.0" entry and the
+> entries headed "Post-2.8.0" below it: the four work packages, a clean
+> gates-off install (WP1), hooks that reach the model (WP2), a spec workflow
+> that reaches a merged commit (WP3) and CLAUDE.md, steering and the entry
+> path (WP4); the retrofit disable; and gate fixes, cost bounds, a cost
+> measurement and the file rename. **Why MINOR:** new operator-facing
+> surface (four configuration keys: `commands.eval`,
+> `hooks.spec_gate_commit_mode`, `hooks.spec_gate_commit_prefixes`,
+> `workflow.ultracode`; new installer exit codes and refusals, on the
+> `bootstrap-install` row of `SEAM-CONTRACT-v3-0-0.md` §3.2; new emitted
+> files) plus behavior changes, the v2.7.0 precedent. **What it refuses or
+> removes:** the retrofit route is disabled (backlog Z-72): `bootstrap-install`
+> refuses a `mode: retrofit` config, and on a tree a retrofit install wrote
+> every run except `--uninstall` and `--ic-checks`. The "previously denied,
+> now allowed" set is not empty. Among its members: with `deps.enabled:
+> false` the dependency gate is neither emitted nor wired, even with
+> `hooks.dependency_gate: true`, and a re-install removes one (WP1 D3); an
+> agent commit of a file no task file lists, refused at 2.8.0, now goes
+> through with a warning (`hooks.spec_gate_commit_mode: warn`, WP3 D2;
+> `block` keeps it refused). This release does not re-measure the set.
+> First tag with the pair named `v2-8-0` (freeze exception 70) and with a
+> `LICENSE` file (PR #75). **Seam:** `seam_version` 3.0.0 (MAJOR at WP1),
+> SUSPENDED; at this tag it still binds `2.8.0 @ 6f86266`, and a follow-up
+> re-points it. Migration: the Companion's "Migrating from 2.8.0 to 2.9.0".
 
 > **v2.8.0 — LIT literature fold, MINOR (2026-08-14).** Nine additive items and
 > one behavioral priming change, from
