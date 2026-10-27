@@ -11874,8 +11874,7 @@ def _md_item(marker, text, width=78, indent=0):
 
 
 # [claude-md-tidy-up / item 2] Greenfield's start-and-land paragraph as
-# numbered steps, with the same content and the same gate sentence
-# (`runs`, _LANDING_GATES). Step 1 keeps "Starting a task: on a spec
+# numbered steps, with the same gate sentence (`runs`, _LANDING_GATES). Step 1 keeps "Starting a task: on a spec
 # branch, " (tests/test_merge_back.py). Step 2 ends with the no-worktree
 # case, which skips step 3. Step 3 waits for the script's last line before
 # acting on it, the order the session meets them, and the three outcomes

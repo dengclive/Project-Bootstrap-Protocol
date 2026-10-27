@@ -52,8 +52,8 @@ section: when you change a command in `tech.md`, change it here too.
 golden re-baseline: in each of the five greenfield fixtures one body moves,
 `CLAUDE.md`, and the action counts stay 66, 78, 67, 67 and 59.
 
-**Tests.** `tests/test_wp4_claude_md.py` gains rows a to e, red first: 41
-of their 48 checks failed on `19cd75f`, and the other 7 re-check text the
+**Tests.** `tests/test_wp4_claude_md.py` gains rows a to e, red first: 44
+of their 51 checks failed on `19cd75f`, and the other 7 re-check text the
 change keeps (the gate sentence, no "await its notification", and the
 queue section's disclosure words). Rows f to h are guards, green on
 `19cd75f` by design: no wrapped line starts with a list marker, the budget,

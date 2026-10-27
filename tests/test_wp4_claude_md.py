@@ -503,7 +503,8 @@ _, p = plan_of(with_commands(cfg_text(), test='"make test"',
                              typecheck='"mypy ."', ci_local='"make ci"',
                              eval='"make eval"'))
 check("a: typecheck, ci_local and eval are not listed",
-      list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"],
+      list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"]
+      and len(re.findall(r"^- ", section(md_of(p), "Commands"), re.M)) == 3,
       section(md_of(p), "Commands"))
 
 # b. Any value resolve_config accepts round-trips as one code span.
@@ -521,6 +522,10 @@ for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x", "x`",
           spans == [got], (line.get("Test"), spans))
 
 # c. The start-and-land steps, as a numbered list (greenfield only).
+def _ind(s):
+    return len(s) - len(s.lstrip(" "))
+
+
 def with_hooks(text, **hooks):
     """`text` with `hooks` (key: bool) added to its hooks block."""
     return text.replace("hooks:\n", "hooks:\n" + "".join(
@@ -570,14 +575,21 @@ for gate, text in _LAND_CFGS.items():
     check(f"c ({gate}): never 'await its notification' (WP3 fix1 CR-1)",
           "await its notification" not in fw, fw)
     # Nested under step 3 (its content column is 3), not a list of their
-    # own: flat() above cannot see indentation.
-    _s3 = wf[wf.find("\n3. "):].split("\n\n", 1)[0].split("\n")[1:]
+    # own: flat() above cannot see indentation. Step 3's own continuation
+    # lines sit at column 3, an outcome's at column 5.
+    _s3 = wf[wf.find("\n3. ") + 1:].split("\n\n", 1)[0].split("\n")[1:]
     _outs = [ln for ln in _s3 if ln.lstrip().startswith("- ")]
+    _col, _bad = 3, []
+    for ln in _s3:
+        if ln.lstrip().startswith("- "):
+            _col = 5
+            if _ind(ln) != 3:
+                _bad.append(ln)
+        elif _ind(ln) != _col:
+            _bad.append(ln)
     check(f"c ({gate}): the outcomes are nested in step 3, each continuation "
           f"hung under its text",
-          len(_outs) == 3 and all(ln.startswith("   - ") for ln in _outs)
-          and all(ln.startswith("     ") for ln in _s3
-                  if ln.startswith("    ")), _s3)
+          len(_outs) == 3 and not _bad, _bad or _s3)
 
 # d. The operator-addressed passages are gone.
 for label, (cfg, plan) in PLANS.items():
@@ -609,10 +621,6 @@ check("e: every line of it is at most 78 characters",
 # heading, as a sibling of the item above it (same or shallower indent), or
 # under a line that ends with a colon.
 _MARK = re.compile(r"^\s*(\d+[.)]|[-+*]) ")
-
-
-def _ind(s):
-    return len(s) - len(s.lstrip(" "))
 
 
 for label, (cfg, plan) in PLANS.items():
@@ -656,8 +664,7 @@ for (_fx, _sec, _deps), _want in _RETRO_SHA.items():
 print("\n=== Thin: CLAUDE.md within budget (PRD Phase 8 step 2) ===")
 # g. (guard) The cap is the golden fixtures' (tests/test_merge_back.py) and
 # the PRD's "roughly 80 lines max" (operator ruling 2026-10-28). The matrix
-# varies the commit gates too, since each gives step 2 a different gate
-# sentence.
+# varies the commit gates too, since they choose step 2's gate sentence.
 worst = 0
 for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
         ("off", "encouraged", "required"), (True, False), (True, False),
