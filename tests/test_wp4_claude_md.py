@@ -500,7 +500,8 @@ check("a: the heading names tech.md, where agents read the commands",
       is not None, md[:300])
 _, p = plan_of(with_commands(cfg_text(), test='"make test"',
                              lint='"make lint"', format='"make fmt"',
-                             typecheck='"mypy ."'))
+                             typecheck='"mypy ."', ci_local='"make ci"',
+                             eval='"make eval"'))
 check("a: typecheck, ci_local and eval are not listed",
       list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"],
       section(md_of(p), "Commands"))
@@ -568,6 +569,15 @@ for gate, text in _LAND_CFGS.items():
           fw)
     check(f"c ({gate}): never 'await its notification' (WP3 fix1 CR-1)",
           "await its notification" not in fw, fw)
+    # Nested under step 3 (its content column is 3), not a list of their
+    # own: flat() above cannot see indentation.
+    _s3 = wf[wf.find("\n3. "):].split("\n\n", 1)[0].split("\n")[1:]
+    _outs = [ln for ln in _s3 if ln.lstrip().startswith("- ")]
+    check(f"c ({gate}): the outcomes are nested in step 3, each continuation "
+          f"hung under its text",
+          len(_outs) == 3 and all(ln.startswith("   - ") for ln in _outs)
+          and all(ln.startswith("     ") for ln in _s3
+                  if ln.startswith("    ")), _s3)
 
 # d. The operator-addressed passages are gone.
 for label, (cfg, plan) in PLANS.items():
@@ -646,8 +656,8 @@ for (_fx, _sec, _deps), _want in _RETRO_SHA.items():
 print("\n=== Thin: CLAUDE.md within budget (PRD Phase 8 step 2) ===")
 # g. (guard) The cap is the golden fixtures' (tests/test_merge_back.py) and
 # the PRD's "roughly 80 lines max" (operator ruling 2026-10-28). The matrix
-# varies the commit gates too: with neither, the landing step's gate
-# sentence is longest.
+# varies the commit gates too, since each gives step 2 a different gate
+# sentence.
 worst = 0
 for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
         ("off", "encouraged", "required"), (True, False), (True, False),

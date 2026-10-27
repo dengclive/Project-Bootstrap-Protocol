@@ -15,10 +15,11 @@ the operator's 2026-10-14 directive to backlog retrofit work.
   Format from `commands.*`, each in a code span that holds any value
   `resolve_config` accepts. One that is not set names its key and says to
   re-install. Typecheck, `ci_local` and `eval` stay in `tech.md` only.
-- Starting and landing a task are three numbered steps, with the content of
-  the old paragraph. Step 2 ends with the no-worktree case, which skips
-  step 3. Step 3 waits for the script's last line in this turn, then acts
-  on it, and a `--continue` rerun repeats step 3.
+- Starting and landing a task are three numbered steps, from the old
+  paragraph, in the order the session meets them. Step 2 ends with the
+  no-worktree case and adds that it skips step 3. Step 3 waits for the
+  script's last line in this turn, then acts on it, and adds that the
+  CONFLICT rerun with `--continue` repeats step 3.
 - The two passages addressed to the operator are cut: the opening line
   about staying thin, and the paragraph on the escalation list, which is
   Phase 10 step 5's note to the operator.
@@ -32,10 +33,15 @@ the operator's 2026-10-14 directive to backlog retrofit work.
 **Line budget.** Operator ruling 2026-10-28: the cap in
 `tests/test_wp4_claude_md.py` moves from 76 to 80 lines, the golden cap and
 the protocol's "roughly 80 lines max", and its matrix also varies the two
-commit gates, since with neither the landing step is longest. The golden
+commit gates. The golden
 fixtures' `CLAUDE.md` is 71, 79, 69, 71 and 67 lines (default, full
 autonomous, design steering, SDK callable, gates off). WP6 has to win lines
 back before it adds the loop and goal addenda.
+
+**Upgrading.** A re-install keeps a hand-edited `CLAUDE.md`, and the
+kept-file warning does not check for the Commands section, so that file
+gets neither the section nor a warning. Merge it by hand from a fresh
+install.
 
 **Docs.** One dated note on the protocol's Phase 8 exit-criteria line,
 appended on the same line (the file keeps its 2,376 lines), with the
@@ -57,7 +63,8 @@ greenfield landing rows and keeps the retrofit ones, and
 
 **Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
 contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
-sentinel, §7.2 hook membership, §7.3 marker or `binds` entry changes.
+sentinel, §7.2 hook membership, §7.3 provenance marker or synthesize-file
+contract (ANSWERS key), or `binds` entry changes.
 `CLAUDE.md` appears in the seam only in §3.2's `bootstrap-install` row,
 which says the command writes it and lists the Phase 8 elements whose
 absence the kept-file warning names; the change keeps each of those

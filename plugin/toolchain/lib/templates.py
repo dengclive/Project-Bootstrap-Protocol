@@ -11879,8 +11879,8 @@ def _md_item(marker, text, width=78, indent=0):
 # branch, " (tests/test_merge_back.py). Step 2 ends with the no-worktree
 # case, which skips step 3. Step 3 waits for the script's last line before
 # acting on it, the order the session meets them, and the three outcomes
-# are its sub-bullets; a --continue rerun repeats it, since it can go to
-# the background too.
+# are its sub-bullets; the CONFLICT rerun with --continue repeats it, since
+# it can go to the background too.
 def _landing_steps(runs):
     return "\n" + "".join((
         _md_item("1.", "Starting a task: on a spec branch, set "
@@ -12045,8 +12045,9 @@ def _md_code(s):
 # [claude-md-tidy-up / item 1] The configured test, lint and format
 # commands, first, as tech.md's table holds them (resolve_config has
 # stripped each value; a newline is refused there). One bullet each, set or
-# not, so the line count does not depend on the config; a value is never
-# wrapped, since a code span cannot break. The heading names tech.md: the
+# not, so the line count does not depend on the config. A value is never
+# wrapped: a line break inside it renders as a space and could start a
+# continuation line with a list marker. The heading names tech.md: the
 # agents read their commands there, and Phase 2 may fill it after the
 # install. Typecheck, ci_local and eval are left to tech.md.
 def _claude_md_commands(cfg):
