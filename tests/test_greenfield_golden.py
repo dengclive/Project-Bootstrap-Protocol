@@ -3761,7 +3761,11 @@ EXPECTED_DIGESTS = {
         # settings.json (_generatedBy) and steering/assumption-ledger.md
         # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
         # 66.
-        "6895aeda8408aaabc07ee4d5b3f0300d8e9e848af37cabdec533921e638fcf7b",
+        # [freeze-exception no. 88, 2026-10-28] The emitted CLAUDE.md
+        # tidy-up (build plan section 15). Measured on the emitted plans
+        # against the previous digest (6895aeda...), per file: 1 body moves,
+        # CLAUDE.md, and no other; 0 added, 0 removed, count 66.
+        "2a16d61141030f6f80914d4fc57141e88e417fb897787a6ab4fcf6248299e691",
     #   Adversarial-review round-2 additions inside the same exception
     #   (pre-commit, same named set): loop.sh/goal-loop.sh gain the
     #   transient-path definition (no-rejected-event arm + infra_* knobs,
@@ -4478,7 +4482,11 @@ EXPECTED_DIGESTS = {
         # moves its one protocol citation (:799-800 -> :826-827, which
         # tests/test_doc_citations.py pins); no other; 0 added, 0 removed,
         # count 78.
-        "b614467f2cc6fd521ecdb3f2eb084942d6eab5b7b34abdbfb54efa3d8549b291",
+        # [freeze-exception no. 88, 2026-10-28] The emitted CLAUDE.md
+        # tidy-up (build plan section 15). Measured on the emitted plans
+        # against the previous digest (b614467f...), per file: 1 body moves,
+        # CLAUDE.md, and no other; 0 added, 0 removed, count 78.
+        "854154627ee1d99d713dc8e4c8e3d11c4ae83f9bc6f6e04d010c305d46cbb909",
     # [v2.5.0 DS-01 — new flag-on fixture] Deliberate golden ADDITION (not a
     # re-baseline): a fullstack config with design_steering_enabled: true AND
     # design_review_skill_enabled: true. Pins the three flag-gated artifact
@@ -5120,7 +5128,11 @@ EXPECTED_DIGESTS = {
         # settings.json (_generatedBy) and steering/assumption-ledger.md
         # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
         # 67.
-        "f0a8dd7693196410d6e1451261eaa0741c5eee70a1d0fcf8dd69ab4aef6f17ab",
+        # [freeze-exception no. 88, 2026-10-28] The emitted CLAUDE.md
+        # tidy-up (build plan section 15). Measured on the emitted plans
+        # against the previous digest (f0a8dd76...), per file: 1 body moves,
+        # CLAUDE.md, and no other; 0 added, 0 removed, count 67.
+        "8e3ea4ed13ded7a9042f89f4c2d1d0da48963758dc990d80f533ced42ee5568b",
     # [freeze-exception no. 82, 2026-09-28] wp1-clean-gates-off-install.
     # Deliberate golden ADDITION (not a re-baseline): fixture D, the default
     # config plus gate_substrate "sdk-callable". After WP1 D4 (a) it is the
@@ -5358,7 +5370,11 @@ EXPECTED_DIGESTS = {
         # settings.json (_generatedBy) and steering/assumption-ledger.md
         # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
         # 67.
-        "f03fe525099ee8fd6ae49ad687a90ab8792d50e02cb7719090ff22745dc90b0b",
+        # [freeze-exception no. 88, 2026-10-28] The emitted CLAUDE.md
+        # tidy-up (build plan section 15). Measured on the emitted plans
+        # against the previous digest (f03fe525...), per file: 1 body moves,
+        # CLAUDE.md, and no other; 0 added, 0 removed, count 67.
+        "e121046389f915b6ab8eb40b9287b83fc10de924aa2010ede1219bf62ce8ab49",
     # [freeze-exception no. 85, 2026-10-14] wp4-claude-md-steering-entry.
     # Deliberate golden ADDITION (not a re-baseline): fixture E, the
     # gates-off config (see FIXTURE_GATES_OFF and the `default` note).
@@ -5412,7 +5428,11 @@ EXPECTED_DIGESTS = {
         # settings.json (_generatedBy) and steering/assumption-ledger.md
         # (its "protocol 2.9.0"), and no other; 0 added, 0 removed, count
         # 59.
-        "a6ee1a7aaa5b71941a6c6b5fae9cfdf2b44f139e929fc527692b59eddc27fd4a",
+        # [freeze-exception no. 88, 2026-10-28] The emitted CLAUDE.md
+        # tidy-up (build plan section 15). Measured on the emitted plans
+        # against the previous digest (a6ee1a7a...), per file: 1 body moves,
+        # CLAUDE.md, and no other; 0 added, 0 removed, count 59.
+        "297460a7b2c696b7f2636415990ce1b7253a16507d32d6ba4e4285b4447c08a7",
 }
 
 EXPECTED_ACTION_COUNTS = {

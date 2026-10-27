@@ -287,18 +287,28 @@ for label, text, retro in (("greenfield", CFG, False),
           in _sn, _sn[:900])
     # [WP3 fix1 MB-3, MB-8] Done once the branch merged, whichever line
     # says so (MERGED, CLEANUP MERGED, ALREADY-MERGED naming the merge).
+    # [claude-md-tidy-up] Greenfield gives it as numbered steps (step 3's
+    # outcome bullets); retrofit keeps the paragraph.
     check(f"{label}: CLAUDE.md sets done once the branch merged, and with "
           f"no worktree branch once approved",
-          "Act on its last line: if the branch merged, set `status: done`, "
-          "commit it;" in _flat
-          and "No worktree branch: set `done` once approved." in _flat, _land)
+          ("Act on that line: - If the branch merged, set `status: done` "
+           "and commit it." in _flat
+           and "No worktree branch: set `done` once approved, and skip step "
+           "3." in _flat) if not retro else
+          ("Act on its last line: if the branch merged, set `status: done`, "
+           "commit it;" in _flat
+           and "No worktree branch: set `done` once approved." in _flat),
+          _land)
     # [WP3 fix1 CR-1] Not "await its notification": under claude -p the
     # session then ends, Claude Code stops the script, and the merge is
     # aborted while the session's last words say it is still running.
     check(f"{label}: CLAUDE.md says to wait for the last line in the same "
           f"turn if Claude Code moves the script to the background",
-          "If it goes to the background, wait for that line in this turn "
-          "and commit nothing: ending the turn can stop it." in _flat
+          (("Wait for the script's last line in this turn, even in the "
+            "background, and commit nothing until then: ending the turn can "
+            "stop it." in _flat) if not retro else
+           ("If it goes to the background, wait for that line in this turn "
+            "and commit nothing: ending the turn can stop it." in _flat))
           and "await its notification" not in _flat, _land)
     # [WP4 / g2] The lifecycle now ends at ci-cd.md's one stop.
     check(f"{label}: the lifecycle names the reviewer agent as code-review "
@@ -2961,8 +2971,8 @@ _cmf = " ".join(plan_of(CFG)["CLAUDE.md"]["body"].split())
 check("PRD implementer note: done once the branch merged, and wait for the "
       "last line in the same turn, as the emitted CLAUDE.md says (review "
       "CR-1, MB-3)",
-      "if the branch merged, set `status: done`" in _cmf
-      and "wait for that line in this turn" in _cmf
+      "If the branch merged, set `status: done`" in _cmf
+      and "Wait for the script's last line in this turn" in _cmf
       and "sets `done` once the branch merged (merge-back's MERGED, CLEANUP "
       "MERGED, or an ALREADY-MERGED that names the merge)" in _prd
       and "wait for its last line in the same turn and commit nothing "
