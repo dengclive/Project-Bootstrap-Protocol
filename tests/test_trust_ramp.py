@@ -475,8 +475,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # operator's retrofit state), the PR body at 210b6a3 gave CI's gap one cause,
 # pushed messages and the 9a comment overclaim, and parts of confirmed
 # findings merged unfixed. Pin moved 52 -> 53 in the same commit.
+# [release-v2-9-0 closeout, 2026-10-26] The tag-only v2.9.0 release (PR
+# #130, merge 9d141fb, freeze exception 87) and its seam follow-up (PR #131,
+# merge 6d2cc40). Graded `harmful` by the same 10b rule: e297468 and fe8f763
+# reached origin with the MAJORs the next review round raised (step 7's
+# MS-1 and RA-1; re-review 1's NT-1, a false count of the deny-to-allow set),
+# 12e91fc was pushed red, and the step 9a comment says "2 checks failed",
+# where four did. Pin moved 53 -> 54 in the same commit.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 53, f"{len(es)} entries")
+      len(es) == 54, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
