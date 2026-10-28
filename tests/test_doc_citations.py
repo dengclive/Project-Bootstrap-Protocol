@@ -109,6 +109,11 @@ CITATIONS = [
      "**Fails closed when the parser does not WORK"),
     ("docs/deferred-backlog.md", PRD,
      "**Iteration-summary enforcement** (only if"),
+    # [claude-md-tidy-up closeout] Z-77 (i) and (j).
+    ("docs/deferred-backlog.md", PRD,
+     "The queue-mode reference in CLAUDE.md (if any) adds at most ~50 tokens"),
+    ("docs/deferred-backlog.md", PRD,
+     "**Exit criteria:** `CLAUDE.md` exists, is thin"),
     # EMITTED. This one ships inside .claude/hooks/iteration-summary-enforcement.sh
     # (fixture B / full_autonomous), so correcting it moves a golden digest. It is
     # also the citation a naive scanner misses, because the filename ends one line
