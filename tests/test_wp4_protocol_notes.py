@@ -767,6 +767,7 @@ check("[CLAUDE.md] the :1330 tidy-up note names the Commands section, the "
       and "\n1. Starting a task: on a spec branch," in _gf["CLAUDE.md"]
       and all("## Commands" not in p["CLAUDE.md"]
               and "\n\nStarting a task: on a spec branch," in p["CLAUDE.md"]
+              and "\n1. Starting a task" not in p["CLAUDE.md"]
               for p in (_ra, _rs)),
       _tidy[-1][:600])
 

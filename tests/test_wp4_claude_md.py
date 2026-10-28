@@ -514,17 +514,29 @@ check("a: with all six set, the section is the three bullets and nothing "
       section(md_of(p), "Commands"))
 _, p = plan_of(with_commands(cfg_text(), test='"make test"',
                              typecheck='"mypy ."', eval='"make eval"'))
-check("a: with only test, typecheck and eval set, no typecheck, ci_local or "
-      "eval value is in CLAUDE.md",
+check("a: with only test, typecheck and eval set, the three bullets are "
+      "listed and no typecheck or eval value is in CLAUDE.md",
       not any(v in md_of(p) for v in ("mypy .", "make eval"))
       and list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"]
       and len(section(md_of(p), "Commands").strip().split("\n")) == 3,
+      section(md_of(p), "Commands"))
+_, p = plan_of(with_commands(cfg_text(), typecheck='"mypy ."',
+                             ci_local='"make ci"', eval='"make eval"'))
+check("a: with test, lint and format unset, the section is the three "
+      "not-set bullets, and no typecheck, ci_local or eval value is in "
+      "CLAUDE.md",
+      section(md_of(p), "Commands") == "\n\n" + "".join(
+          f"- {k.title()}: not set (`commands.{k}` in "
+          "`bootstrap.config.yaml`; re-install)\n"
+          for k in ("test", "lint", "format")) + "\n"
+      and not any(v in md_of(p) for v in ("mypy .", "make ci", "make eval")),
       section(md_of(p), "Commands"))
 
 # b. Any value resolve_config accepts round-trips as one code span.
 for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x", "x`",
             "printf '%s' \"$1\"", "pytest @args.txt", "``",
-            "cat < in.txt", "pytest -k 'a  b'"):
+            "cat < in.txt", "pytest -k 'a  b'", "pytest tests/test_*.py",
+            "make test 2>&1", "pytest -k a_b"):
     q = '"' + val.replace("\\", "\\\\").replace('"', '\\"') + '"'
     cfg, errs = resolve_config(load_yaml(with_commands(cfg_text(), test=q)))
     if errs:
@@ -635,7 +647,8 @@ check("e: every line of it is at most 78 characters",
 # a heading, a blockquote, a setext underline or a code fence) turns
 # paragraph text into that block. Any of them is intended after a blank line
 # or a heading. A list marker is also intended as a sibling of the item above
-# it (same or shallower indent), or under a line that ends with a colon. Row
+# it (same or shallower indent), or under step 3's "Act on that line:", the
+# one intended list introduction (a wrap can end any line with a colon). Row
 # g's matrix runs it too, since the PLANS configs carry only the tests gate.
 _LIST = re.compile(r"^\s*(\d+[.)] |[-+*] )")
 _MARK = re.compile(r"^\s*(\d+[.)] |[-+*] |#{1,6}( |$)|>|(-+|=+)\s*$"
@@ -651,9 +664,18 @@ def _bad_starts(md):
                          and (_ind(ln) < _ind(prev)
                               or (_LIST.match(prev)
                                   and _ind(ln) == _ind(prev))
-                              or prev.rstrip().endswith(":"))))]
+                              or prev.rstrip().endswith(
+                                  "Act on that line:"))))]
 
 
+check("f: the indent, sibling and colon exemptions cover list markers only, "
+      "and the colon one covers only its intended line",
+      _bad_starts("   - a\n> b") == ["> b"]
+      and _bad_starts("1. a\n## b") == ["## b"]
+      and _bad_starts("   fails:\n   1) the tests") == ["   1) the tests"]
+      and _bad_starts("   Act on that line:\n   - If") == [],
+      [_bad_starts(x) for x in ("   - a\n> b", "1. a\n## b",
+                                "   fails:\n   1) the tests")])
 for label, (cfg, plan) in PLANS.items():
     bad = _bad_starts(md_of(plan))
     check(f"f ({label}): no wrapped line starts with a block starter", not bad,
@@ -704,7 +726,7 @@ for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
                                  lint='"ruff check ."',
                                  format='"ruff format ."'))
     worst = max(worst, md_of(p).count("\n"))
-    fbad += _bad_starts(md_of(p))
+    fbad += [((tdd, tg, sg), ln) for ln in _bad_starts(md_of(p))]
     n += 1
 check(f"g: CLAUDE.md is at most 80 lines over {n} configs (worst {worst})",
       worst <= 80, worst)
