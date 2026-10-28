@@ -673,6 +673,9 @@ _F_CASES = (("   - a\n> b", ["> b"]), ("1. a\n## b", ["## b"]),
             ("   fails:\n   1) the tests", ["   1) the tests"]),
             ("   the command line:\n   - b", ["   - b"]),
             ("   Act on that line:\n   > b", ["   > b"]),
+            ("   see that line:\n   - b", ["   - b"]),
+            ("   Act on that line: x\n   - b", ["   - b"]),
+            ("> a\n- b", ["- b"]),
             ("   Act on that line:\n   - If", []))
 check("f: the indent, sibling and colon exemptions cover list markers only, "
       "the sibling one only at the same indent, and the colon one only "
