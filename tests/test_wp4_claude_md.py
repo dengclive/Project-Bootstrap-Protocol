@@ -668,14 +668,17 @@ def _bad_starts(md):
                                   "Act on that line:"))))]
 
 
+_F_CASES = (("   - a\n> b", ["> b"]), ("1. a\n## b", ["## b"]),
+            ("- a\n  1) b", ["  1) b"]),
+            ("   fails:\n   1) the tests", ["   1) the tests"]),
+            ("   the command line:\n   - b", ["   - b"]),
+            ("   Act on that line:\n   > b", ["   > b"]),
+            ("   Act on that line:\n   - If", []))
 check("f: the indent, sibling and colon exemptions cover list markers only, "
-      "and the colon one covers only its intended line",
-      _bad_starts("   - a\n> b") == ["> b"]
-      and _bad_starts("1. a\n## b") == ["## b"]
-      and _bad_starts("   fails:\n   1) the tests") == ["   1) the tests"]
-      and _bad_starts("   Act on that line:\n   - If") == [],
-      [_bad_starts(x) for x in ("   - a\n> b", "1. a\n## b",
-                                "   fails:\n   1) the tests")])
+      "the sibling one only at the same indent, and the colon one only "
+      "under its intended line",
+      all(_bad_starts(x) == want for x, want in _F_CASES),
+      [(x, _bad_starts(x)) for x, want in _F_CASES if _bad_starts(x) != want])
 for label, (cfg, plan) in PLANS.items():
     bad = _bad_starts(md_of(plan))
     check(f"f ({label}): no wrapped line starts with a block starter", not bad,
@@ -726,7 +729,8 @@ for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
                                  lint='"ruff check ."',
                                  format='"ruff format ."'))
     worst = max(worst, md_of(p).count("\n"))
-    fbad += [((tdd, tg, sg), ln) for ln in _bad_starts(md_of(p))]
+    fbad += [((tdd, sec, deps, design, tel, modes, tg, sg), ln)
+             for ln in _bad_starts(md_of(p))]
     n += 1
 check(f"g: CLAUDE.md is at most 80 lines over {n} configs (worst {worst})",
       worst <= 80, worst)
