@@ -482,8 +482,15 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # MS-1 and RA-1; re-review 1's NT-1, a false count of the deny-to-allow set),
 # 12e91fc was pushed red, and the step 9a comment says "2 checks failed",
 # where four did. Pin moved 53 -> 54 in the same commit.
+# [claude-md-tidy-up closeout, 2026-10-28] The tidy-up of the greenfield
+# CLAUDE.md (PR #133, merge d93ceec, freeze exception 88). Graded `harmful`
+# by the same 10b rule: e0066ed and 8e4d3cb reached origin with the MINORs
+# the next review round confirmed (step 7's C-2, a false --continue rule in
+# the changelog; re-review 1's NEW-1 and NEW-2), the PR body and 8e4d3cb's
+# message overstated, and RA-6, a false comment the PR wrote, merged
+# undisclosed. Pin moved 54 -> 55 in the same commit.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 54, f"{len(es)} entries")
+      len(es) == 55, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
