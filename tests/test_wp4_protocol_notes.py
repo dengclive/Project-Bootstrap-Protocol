@@ -765,7 +765,9 @@ check("[CLAUDE.md] the :1330 tidy-up note names the Commands section, the "
           "numbered steps", "The retrofit `CLAUDE.md` is unchanged."))
       and "\n## Commands (keep in step with `tech.md`)\n" in _gf["CLAUDE.md"]
       and "\n1. Starting a task: on a spec branch," in _gf["CLAUDE.md"]
-      and all("## Commands" not in p["CLAUDE.md"] for p in (_ra, _rs)),
+      and all("## Commands" not in p["CLAUDE.md"]
+              and "\n\nStarting a task: on a spec branch," in p["CLAUDE.md"]
+              for p in (_ra, _rs)),
       _tidy[-1][:600])
 
 group("[plugin] the Companion's plugin paragraph names the moved manifest, "
