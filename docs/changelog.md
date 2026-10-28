@@ -1,5 +1,75 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.9.0 — the emitted CLAUDE.md tidy-up (2026-10-28)
+
+**No version bump** (fix, not surface; freeze exception **88**). **Seam:
+stays at 3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger, and
+`SEAM-CONTRACT-v3-0-0.md` is unchanged. This is the next-WP item of the
+build plan's 2026-10-16 layer. It changes the greenfield `CLAUDE.md` only:
+every file a retrofit install writes is byte-identical to `19cd75f`'s, by
+the operator's 2026-10-14 directive to backlog retrofit work.
+
+**What changes in the greenfield `CLAUDE.md`.**
+
+- It opens with ``## Commands (keep in step with `tech.md`)``: Test, Lint and
+  Format from `commands.*`, each in a code span that holds any value
+  `resolve_config` accepts. One that is not set names its key and says to
+  re-install. Typecheck, `ci_local` and `eval` stay in `tech.md` only.
+- Starting and landing a task are three numbered steps, from the old
+  paragraph, in the order the session meets them. Step 2 ends with the
+  no-worktree case and adds that it skips step 3. Step 3 waits for the
+  script's last line in this turn, then acts on it, and adds that the
+  CONFLICT rerun with `--continue` repeats step 3.
+- The two passages addressed to the operator are cut: the opening line
+  about staying thin, and the paragraph on the escalation list, which is
+  Phase 10 step 5's note to the operator.
+- The queue-mode paragraph is wrapped at 78 characters. It names
+  `Bootstrap-Protocol-v2-8-0.md` in a code span and points at
+  `assumption-ledger.md` for where that file lives, because the project has
+  no copy. It keeps "UNIMPLEMENTED", "dispatches nothing" and "exits 1".
+- Wording: "set `status: done` and commit it", "Otherwise, do what it
+  names.", and a semicolon in place of a comma splice.
+
+**Line budget.** Operator ruling 2026-10-28: the cap in
+`tests/test_wp4_claude_md.py` moves from 76 to 80 lines, the golden cap and
+the protocol's "roughly 80 lines max", and its matrix also varies the two
+commit gates. The golden
+fixtures' `CLAUDE.md` is 71, 79, 69, 71 and 67 lines (default, full
+autonomous, design steering, SDK callable, gates off). WP6 has to win lines
+back before it adds the loop and goal addenda.
+
+**Upgrading.** A re-install keeps a hand-edited `CLAUDE.md`, and the
+kept-file warning does not check for the Commands section, so that file
+gets neither the section nor a warning. Merge it by hand from a fresh
+install.
+
+**Docs.** One dated note on the protocol's Phase 8 exit-criteria line,
+appended on the same line (the file keeps its 2,376 lines), with the
+plugin's copy synced. It carries Phase 2 step 5's rule over to the new
+section: when you change a command in `tech.md`, change it here too.
+
+**Freeze exception 88.** `lib/templates.py` and its plugin copy. One
+golden re-baseline: in each of the five greenfield fixtures one body moves,
+`CLAUDE.md`, and the action counts stay 66, 78, 67, 67 and 59.
+
+**Tests.** `tests/test_wp4_claude_md.py` gains rows a to e, red first: 44
+of their 51 checks failed on `19cd75f`, and the other 7 re-check text the
+change keeps (the gate sentence, no "await its notification", and the
+queue section's disclosure words). Rows f to h are guards, green on
+`19cd75f` by design: no wrapped line starts with a list marker, the budget,
+and the retrofit `CLAUDE.md` digests. `tests/test_merge_back.py` re-pins its
+greenfield landing rows and keeps the retrofit ones, and
+`tests/test_wp4_protocol_notes.py` pins the note.
+
+**Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
+contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
+sentinel, §7.2 hook membership, §7.3 provenance marker or synthesize-file
+contract (ANSWERS key), or `binds` entry changes.
+`CLAUDE.md` appears in the seam only in §3.2's `bootstrap-install` row,
+which says the command writes it and lists the Phase 8 elements whose
+absence the kept-file warning names; the change keeps each of those
+elements.
+
 ## 2.8.0 → 2.9.0 — WP1 to WP4 and the retrofit disable, a tag-only release (2026-10-20)
 
 **MINOR.** `PROTOCOL_VERSION` 2.8.0 → 2.9.0 in `lib/installer.py` and

@@ -11789,8 +11789,10 @@ investigate_disagreement: false
 # --------------------------------------------------------------------------- #
 # [WP3 / D6] The main session's start and landing instruction. The same
 # text with worktree isolation on or off (it keys on what the implementer
-# reports), so CLAUDE.md stays out of the isolation blast radius. Shared by
-# the greenfield and the retrofit CLAUDE.md.
+# reports), so CLAUDE.md stays out of the isolation blast radius. Both
+# CLAUDE.md variants carry it and share the gate sentence (_LANDING_GATES);
+# [claude-md-tidy-up] greenfield gives it as numbered steps
+# (_landing_steps), retrofit as the paragraph below.
 # [WP3 critic 5a] Compressed to keep the retrofit-agent CLAUDE.md within
 # the ~80 lines of PRD:1327 and Companion:101, and it now carries:
 #  - the status owner (operator ruling 2026-10-05): the main session sets
@@ -11832,16 +11834,21 @@ def _md_fill(text, width=78):
 
 
 def _landing_claude_md(cfg, retrofit=False):
-    """[WP3 / D6, critic 5a] The CLAUDE.md paragraph that starts and lands a
-    task. Its gate sentence follows the gates merge-back runs
-    (_merge_back_gates), never a claim the config makes false."""
+    """[WP3 / D6, critic 5a] The CLAUDE.md text that starts and lands a
+    task: numbered steps for greenfield, a paragraph for retrofit. Its gate
+    sentence follows the gates merge-back runs (_merge_back_gates), never a
+    claim the config makes false."""
     gates = _merge_back_gates(cfg)
     runs = _LANDING_GATES[
         ("tests-retrofit" if retrofit else "tests") if "test-gate" in gates
         else "spec" if gates else "none"]
+    if not retrofit:
+        return _landing_steps(runs)
     # [WP4 / ruling 1 (a)] "on a spec branch, " is the 18-character clause
     # the retrofit-agent fixture's 80 lines leave room for (19 or more takes
     # it to 81, review build N1); /spec-new creates that branch.
+    # [claude-md-tidy-up] Retrofit keeps this paragraph byte for byte
+    # (retrofit is backlogged); greenfield's is _landing_steps.
     return "\n" + _md_fill(
         "Starting a task: on a spec branch, set `status: in-progress` in its "
         "task file, commit `.claude/specs/<slug>/` and "
@@ -11854,6 +11861,45 @@ def _landing_claude_md(cfg, retrofit=False):
         "else do what it names. If it goes to the background, wait for that "
         "line in this turn and commit nothing: ending the turn can stop it. "
         "No worktree branch: set `done` once approved.") + "\n"
+
+
+def _md_item(marker, text, width=78, indent=0):
+    """One Markdown list item: `marker` ("1." or "-") then `text`, wrapped
+    at `width` with its continuation lines hung under the text."""
+    pad = " " * indent
+    hang = pad + " " * (len(marker) + 1)
+    return (pad + marker + " "
+            + _md_fill(text, width - len(hang)).replace("\n", "\n" + hang)
+            + "\n")
+
+
+# [claude-md-tidy-up / item 2] Greenfield's start-and-land paragraph as
+# numbered steps, with the same gate sentence (`runs`, _LANDING_GATES). Step 1 keeps "Starting a task: on a spec
+# branch, " (tests/test_merge_back.py). Step 2 ends with the no-worktree
+# case, which skips step 3. Step 3 waits for the script's last line before
+# acting on it, the order the session meets them, and the three outcomes
+# are its sub-bullets; the CONFLICT rerun with --continue repeats it, since
+# it can go to the background too.
+def _landing_steps(runs):
+    return "\n" + "".join((
+        _md_item("1.", "Starting a task: on a spec branch, set "
+                       "`status: in-progress` in its task file, commit "
+                       "`.claude/specs/<slug>/` and `.claude/specs/INDEX.md`, "
+                       "then dispatch it."),
+        _md_item("2.", "Landing it: after `VERDICT: approve`, run "
+                       f"`{MERGE_BACK_SCRIPT} <branch>` (Bash timeout "
+                       f"600000 ms), never a hand `git merge`. {runs} No "
+                       "worktree branch: set `done` once approved, and skip "
+                       "step 3."),
+        _md_item("3.", "Wait for the script's last line in this turn, even "
+                       "in the background, and commit nothing until then: "
+                       "ending the turn can stop it. Act on that line:"),
+        _md_item("-", "If the branch merged, set `status: done` and commit "
+                      "it.", indent=3),
+        _md_item("-", "On CONFLICT, invoke the integrator with its brief, "
+                      "then rerun with `--continue <branch>` and repeat "
+                      "this step.", indent=3),
+        _md_item("-", "Otherwise, do what it names.", indent=3)))
 
 
 # [WP4 / Phase 8] The steering docs CLAUDE.md names, in PRD Phase 8 order,
@@ -11984,6 +12030,36 @@ def _claude_md_never(cfg):
                               "Commit code without its tests.")))
 
 
+def _md_code(s):
+    """`s` as one Markdown code span, whatever backticks it holds: the
+    fence is one backtick longer than its longest run, and a value that
+    starts or ends with a backtick gets the padding space CommonMark strips
+    (spec 0.31.2, section 6.1)."""
+    run = max((len(r) for r in re.findall(r"`+", s)), default=0)
+    fence = "`" * (run + 1)
+    pad = " " if s[:1] == "`" or s[-1:] == "`" else ""
+    return f"{fence}{pad}{s}{pad}{fence}"
+
+
+# [claude-md-tidy-up / item 1] The configured test, lint and format
+# commands, first, as tech.md's table holds them (resolve_config has
+# stripped each value; a newline is refused there). One bullet each, set or
+# not, so the line count does not depend on the config. A value is never
+# wrapped: a line break inside it renders as a space and could start a
+# continuation line with a list marker. The heading names tech.md: the
+# agents read their commands there, and Phase 2 may fill it after the
+# install. Typecheck, ci_local and eval are left to tech.md.
+def _claude_md_commands(cfg):
+    c = cfg["commands"]
+    return ("## Commands (keep in step with `tech.md`)\n\n" + "".join(
+        f"- {label}: "
+        + (_md_code(c[key]) if c.get(key)
+           else f"not set (`commands.{key}` in `bootstrap.config.yaml`; "
+                "re-install)")
+        + "\n" for label, key in (("Test", "test"), ("Lint", "lint"),
+                                  ("Format", "format"))))
+
+
 # [WP3 / D6, operator ruling 2026-10-05] Both CLAUDE.md lifecycle lines name
 # the reviewer agent as the code-review step (the code-review skill stays a
 # stub; see REVIEWER_DESCRIPTION) and the landing step, merge-back.
@@ -12003,17 +12079,21 @@ def _claude_md(cfg):
                 "why.\n" if cfg["workflow"]["install_skills"] else "")
     queue_section = ""
     if flags["queue_mode_enabled"]:
+        # [claude-md-tidy-up / item 4] Wrapped, and the protocol named in a
+        # code span with a pointer to the assumption ledger, which says
+        # where it lives: the project has no copy of it.
         queue_section = (
-            "\n## Queue mode coordination layer\n\n"
-            "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped it "
-            "dispatches nothing and exits 1. When you complete the dispatch "
-            "loop (Bootstrap-Protocol-v2-8-0.md Phase 9.7), it dispatches "
-            "per-task wrappers from `.claude/queue/backlog.md`; the runner "
-            "does not load this file, the queue is the coordination surface.\n")
+            "\n## Queue mode coordination layer\n\n" + _md_fill(
+                "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped "
+                "it dispatches nothing and exits 1. Once you complete it "
+                f"(Phase 9.7 of `{PROTOCOL_DOC}`; `assumption-ledger.md` "
+                "says where that file lives), it dispatches per-task "
+                "wrappers from `.claude/queue/backlog.md`. The runner does "
+                "not load this file; the queue is the coordination "
+                "surface.") + "\n")
     return f"""# CLAUDE.md
 
-Thin by design: the escalation contract and an index, not a knowledge dump.
-
+{_claude_md_commands(cfg)}
 ## Index (read on demand)
 
 {_claude_md_steering(cfg)}- `.claude/specs/INDEX.md`: the spec roster (columns: the README beside it).
@@ -12036,9 +12116,6 @@ canonical shape of that file lives in `.claude/specs/progress-template.md`.
 {_claude_md_urgent(cfg)}{escalate}
 Non-urgent (in-chat only): ambiguous acceptance criteria, two reasonable
 approaches with material tradeoffs, spec version drift mid-task.
-
-The escalation list is the contract. If the agent escalates outside it, fix
-steering - do not override in-session.
 {queue_section}"""
 
 

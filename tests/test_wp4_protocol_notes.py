@@ -753,6 +753,20 @@ check("[CLAUDE.md] both modes start a task on a spec branch, and /spec-new "
           and "git switch -c spec/<slug>" in
           p.get(".claude/skills/spec-new/SKILL.md", "")
           for p in (_gf, _ra, _rs)))
+# [claude-md-tidy-up] The :1330 note names the Commands section, its sync
+# rule and the numbered steps, and each holds in the emitted files.
+_tidy = _n1303.split("**[Amended 2026-10-28, the CLAUDE.md tidy-up.]**")
+check("[CLAUDE.md] the :1330 tidy-up note names the Commands section, the "
+      "sync rule with tech.md and the numbered steps, and they hold: "
+      "greenfield has the section and the steps, retrofit neither",
+      len(_tidy) == 2
+      and all(s in _tidy[1] for s in (
+          "`## Commands` section", "change this section too",
+          "numbered steps", "The retrofit `CLAUDE.md` is unchanged."))
+      and "\n## Commands (keep in step with `tech.md`)\n" in _gf["CLAUDE.md"]
+      and "\n1. Starting a task: on a spec branch," in _gf["CLAUDE.md"]
+      and all("## Commands" not in p["CLAUDE.md"] for p in (_ra, _rs)),
+      _tidy[-1][:600])
 
 group("[plugin] the Companion's plugin paragraph names the moved manifest, "
       "the prefixed commands and no marketplace", [

@@ -17,6 +17,7 @@ deleted, not reworded: two went red with the block gone, and four sat behind
 Run: python3 tests/test_wp4_claude_md.py
 """
 import ast
+import hashlib
 import itertools
 import os
 import re
@@ -435,19 +436,250 @@ for _fx in ("SERVICE_RETROFIT_CFG", "AGENT_RETROFIT_CFG"):
                   "Urgent items"))
 
 # --------------------------------------------------------------------------- #
+print("\n=== Tidy-up: commands, landing steps, no operator passages "
+      "(build plan section 15) ===")
+# [claude-md-tidy-up] Rows a-e went red on 19cd75f; f-h are guards, green
+# there by design.
+
+
+def with_commands(text, **cmds):
+    """`text` with its commands block replaced by `cmds` (key: value)."""
+    head = text[:text.index("commands:\n")]
+    return head + "commands:\n" + "".join(
+        f"  {k}: {v}\n" for k, v in cmds.items())
+
+
+def code_spans(line):
+    """The contents of each CommonMark code span on `line` (spec 0.31.2,
+    section 6.1): a run of n backticks opens, the next run of exactly n
+    closes, and one space is stripped from each end when both ends have one
+    and the content is not all spaces."""
+    out, i = [], 0
+    while True:
+        m = re.compile(r"`+").search(line, i)
+        if not m:
+            return out
+        n = len(m.group(0))
+        for c in re.compile(r"`+").finditer(line, m.end()):
+            if len(c.group(0)) == n:
+                s = line[m.end():c.start()]
+                if (len(s) >= 2 and s[0] == " " and s[-1] == " "
+                        and s.strip(" ")):
+                    s = s[1:-1]
+                out.append(s)
+                i = c.end()
+                break
+        else:
+            return out
+
+
+def command_bullets(md):
+    """{label: rest of line} for each `- <Label>: ...` bullet under
+    `## Commands`."""
+    return dict(re.findall(r"^- (\w+): (.*)$", section(md, "Commands"),
+                           re.M))
+
+
+# a. The commands section, first, with test, lint and format.
+_, p = plan_of(cfg_text())
+md = md_of(p)
+cb = command_bullets(md)
+check("a: `## Commands` is the first section, right after the H1",
+      md.split("\n## ", 1)[-1].startswith("Commands"), md[:300])
+check("a: it lists Test, Lint and Format, in that order, and nothing else",
+      list(cb) == ["Test", "Lint", "Format"], cb)
+check("a: a set command is shown as configured",
+      cb.get("Test") == "`pytest -q`" and cb.get("Lint") == "`ruff check .`",
+      cb)
+check("a: an empty command says where to set it and that a re-install "
+      "applies it",
+      cb.get("Format") == "not set (`commands.format` in "
+      "`bootstrap.config.yaml`; re-install)", cb)
+check("a: the heading names tech.md, where agents read the commands",
+      re.search(r"^## Commands \(keep in step with `tech\.md`\)$", md, re.M)
+      is not None, md[:300])
+_, p = plan_of(with_commands(cfg_text(), test='"make test"',
+                             lint='"make lint"', format='"make fmt"',
+                             typecheck='"mypy ."', ci_local='"make ci"',
+                             eval='"make eval"'))
+check("a: typecheck, ci_local and eval are not listed",
+      list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"]
+      and len(re.findall(r"^- ", section(md_of(p), "Commands"), re.M)) == 3,
+      section(md_of(p), "Commands"))
+
+# b. Any value resolve_config accepts round-trips as one code span.
+for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x", "x`",
+            "printf '%s' \"$1\""):
+    q = '"' + val.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    cfg, errs = resolve_config(load_yaml(with_commands(cfg_text(), test=q)))
+    if errs:
+        check(f"b: {val!r} is accepted by resolve_config", False, errs)
+        continue
+    got = cfg["commands"]["test"]
+    line = command_bullets(md_of({a["path"]: a for a in build_plan(cfg)}))
+    spans = code_spans(line.get("Test", ""))
+    check(f"b: Test {val!r} renders as exactly one code span holding it",
+          spans == [got], (line.get("Test"), spans))
+
+# c. The start-and-land steps, as a numbered list (greenfield only).
+def _ind(s):
+    return len(s) - len(s.lstrip(" "))
+
+
+def with_hooks(text, **hooks):
+    """`text` with `hooks` (key: bool) added to its hooks block."""
+    return text.replace("hooks:\n", "hooks:\n" + "".join(
+        f"  {k}: {str(v).lower()}\n" for k, v in hooks.items()), 1)
+
+
+_LAND_CFGS = {
+    "tests": cfg_text(),
+    "spec": with_hooks(cfg_text(), test_gate=False),
+    "none": with_hooks(cfg_text(), test_gate=False, spec_gate_commit=False),
+}
+for gate, text in _LAND_CFGS.items():
+    cfg, p = plan_of(text)
+    wf = section(md_of(p), "Workflow")
+    steps = re.findall(r"^(\d+)\. ", wf, re.M)
+    check(f"c ({gate}): three numbered steps", steps == ["1", "2", "3"],
+          wf)
+    fw = flat(wf)
+    check(f"c ({gate}): step 1 starts the task, step 2 lands it",
+          "1. Starting a task: on a spec branch, set `status: in-progress` "
+          "in its task file, commit `.claude/specs/<slug>/` and "
+          "`.claude/specs/INDEX.md`, then dispatch it." in fw
+          and "2. Landing it: after `VERDICT: approve`, run "
+          "`.claude/merge-back.sh <branch>` (Bash timeout 600000 ms), never "
+          "a hand `git merge`." in fw, fw)
+    from templates import _LANDING_GATES
+    check(f"c ({gate}): step 2 carries the gate sentence merge-back runs",
+          _LANDING_GATES[gate] in fw, fw)
+    check(f"c ({gate}): with no worktree branch, done once approved and "
+          f"step 3 skipped",
+          "No worktree branch: set `done` once approved, and skip step 3."
+          in fw, fw)
+    w = fw.find("3. Wait for the script's last line in this turn")
+    check(f"c ({gate}): step 3 waits for the script's last line in this "
+          f"turn, then acts on that line",
+          w >= 0 and "3. Wait for the script's last line in this turn, even "
+          "in the background, and commit nothing until then: ending the turn "
+          "can stop it. Act on that line:" in fw, fw)
+    outs = ("- If the branch merged, set `status: done` and commit it.",
+            "- On CONFLICT, invoke the integrator with its brief, then rerun "
+            "with `--continue <branch>` and repeat this step.",
+            "- Otherwise, do what it names.")
+    check(f"c ({gate}): the three outcomes follow the wait, in order",
+          all(o in fw for o in outs)
+          and w < fw.find(outs[0]) < fw.find(outs[1]) < fw.find(outs[2]),
+          fw)
+    check(f"c ({gate}): never 'await its notification' (WP3 fix1 CR-1)",
+          "await its notification" not in fw, fw)
+    # Nested under step 3 (its content column is 3), not a list of their
+    # own: flat() above cannot see indentation. Step 3's own continuation
+    # lines sit at column 3, an outcome's at column 5.
+    _s3 = wf[wf.find("\n3. ") + 1:].split("\n\n", 1)[0].split("\n")[1:]
+    _outs = [ln for ln in _s3 if ln.lstrip().startswith("- ")]
+    _col, _bad = 3, []
+    for ln in _s3:
+        if ln.lstrip().startswith("- "):
+            _col = 5
+            if _ind(ln) != 3:
+                _bad.append(ln)
+        elif _ind(ln) != _col:
+            _bad.append(ln)
+    check(f"c ({gate}): the outcomes are nested in step 3, each continuation "
+          f"hung under its text",
+          len(_outs) == 3 and not _bad, _bad or _s3)
+
+# d. The operator-addressed passages are gone.
+for label, (cfg, plan) in PLANS.items():
+    fm = flat(md_of(plan))
+    check(f"d ({label}): no 'Thin by design', no contract paragraph",
+          "Thin by design" not in fm
+          and "escalation list is the contract" not in fm
+          and "fix steering" not in fm
+          and "override in-session" not in fm, fm[:400])
+
+# e. The queue section: wrapped, true for an adopter, the C-2 words kept.
+cfg, p = PLANS["all modes, tdd required"]
+qs = section(md_of(p), "Queue mode coordination layer")
+fq = flat(qs)
+check("e: the queue section keeps the C-2 disclosure words",
+      "`.claude/auto.sh` is an UNIMPLEMENTED skeleton: as shipped it "
+      "dispatches nothing and exits 1." in fq, fq)
+from templates import PROTOCOL_DOC
+check("e: it names the protocol in a code span and points at the "
+      "assumption ledger for where that file lives",
+      f"`{PROTOCOL_DOC}`" in fq and "`assumption-ledger.md`" in fq
+      and f"({PROTOCOL_DOC} " not in fq, fq)
+check("e: every line of it is at most 78 characters",
+      qs.strip() and max(len(x) for x in qs.split("\n")) <= 78,
+      max(qs.split("\n"), key=len))
+
+# f. (guard) A wrapped line that starts with a list marker turns paragraph
+# text into a list. A marker line is intended only after a blank line or a
+# heading, as a sibling of the item above it (same or shallower indent), or
+# under a line that ends with a colon.
+_MARK = re.compile(r"^\s*(\d+[.)]|[-+*]) ")
+
+
+for label, (cfg, plan) in PLANS.items():
+    lines = md_of(plan).split("\n")
+    bad = [ln for prev, ln in zip(lines, lines[1:])
+           if _MARK.match(ln)
+           and not (not prev.strip() or prev.startswith("#")
+                    or _ind(ln) < _ind(prev)
+                    or (_MARK.match(prev) and _ind(ln) == _ind(prev))
+                    or prev.rstrip().endswith(":"))]
+    check(f"f ({label}): no wrapped line starts with a list marker", not bad,
+          bad)
+
+# h. (guard) The retrofit CLAUDE.md is byte-identical to 19cd75f's:
+# retrofit is backlogged (build plan section 15, the operator's directive).
+_RETRO_SHA = {
+    ("AGENT_RETROFIT_CFG", True, True):
+        "2299535a987cf8586e4a270e641c6a0f7434932944f251076e73004b3a5de339",
+    ("AGENT_RETROFIT_CFG", True, False):
+        "3cd3dcf1eb17cf2137a3f9ade968c44f3109e9e5a59748a146a9656f9f75a30f",
+    ("AGENT_RETROFIT_CFG", False, True):
+        "0808db825171073c9d75e106724b29919c4e12d716e3a3c694ae01642dc6c31e",
+    ("AGENT_RETROFIT_CFG", False, False):
+        "f9581eac35c37b72d8e460d091fbfab0f1cd31cc10899df28ae010833e585fa8",
+    ("SERVICE_RETROFIT_CFG", True, True):
+        "1882aa7d33a16f35543e760023ac520326783febaad0c500b948e02d0d3a9120",
+    ("SERVICE_RETROFIT_CFG", True, False):
+        "611ec8aa0ca4704ee3309e0b83764cc7f8cc07bf1daa777684183cad8b64fd5f",
+    ("SERVICE_RETROFIT_CFG", False, True):
+        "8443e290399ac13ffd445a7d5477fb99ded3e08b4bd012867ca8fb0d24de4596",
+    ("SERVICE_RETROFIT_CFG", False, False):
+        "5d6ee8c0c0fd57c2a0cbb9982c1277d2addfaaa6aebbb31aa9924197dab1477e",
+}
+for (_fx, _sec, _deps), _want in _RETRO_SHA.items():
+    _, _rp = plan_of(switched(_retrofit_fixture(_fx), _sec, _deps))
+    _got = hashlib.sha256(_rp["CLAUDE.md"]["body"].encode()).hexdigest()
+    check(f"h: retrofit {_fx} (secrets {_sec}, deps {_deps}): CLAUDE.md is "
+          f"byte-identical to 19cd75f's", _got == _want, _got)
+
+# --------------------------------------------------------------------------- #
 print("\n=== Thin: CLAUDE.md within budget (PRD Phase 8 step 2) ===")
-# The golden fixtures' cap is 80 (tests/test_merge_back.py). Over this
-# matrix the plan's budget is 76: the measured worst is 70, and the queue
-# section is the only optional block that adds lines.
+# g. (guard) The cap is the golden fixtures' (tests/test_merge_back.py) and
+# the PRD's "roughly 80 lines max" (operator ruling 2026-10-28). The matrix
+# varies the commit gates too, since they choose step 2's gate sentence.
 worst = 0
-for tdd, sec, deps, design, tel, modes in itertools.product(
+for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
         ("off", "encouraged", "required"), (True, False), (True, False),
-        (True, False), (True, False), (True, False)):
-    _, p = plan_of(cfg_text(tdd=tdd, sec=sec, deps=deps, design=design,
-                            tel=tel, modes=modes, arch="fullstack"))
+        (True, False), (True, False), (True, False), (True, False),
+        (True, False)):
+    text = cfg_text(tdd=tdd, sec=sec, deps=deps, design=design, tel=tel,
+                    modes=modes, arch="fullstack")
+    text = text.replace("hooks:\n", f"hooks:\n  test_gate: {str(tg).lower()}"
+                        f"\n  spec_gate_commit: {str(sg).lower()}\n", 1)
+    _, p = plan_of(with_commands(text, test='"pytest -q"',
+                                 lint='"ruff check ."',
+                                 format='"ruff format ."'))
     worst = max(worst, md_of(p).count("\n"))
-check(f"CLAUDE.md is at most 76 lines over 96 configs (worst {worst})",
-      worst <= 76, worst)
+check(f"g: CLAUDE.md is at most 80 lines over 384 configs (worst {worst})",
+      worst <= 80, worst)
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
