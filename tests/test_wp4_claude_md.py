@@ -506,10 +506,37 @@ check("a: typecheck, ci_local and eval are not listed",
       list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"]
       and len(re.findall(r"^- ", section(md_of(p), "Commands"), re.M)) == 3,
       section(md_of(p), "Commands"))
+check("a: with all six set, the section is the three bullets and nothing "
+      "else, and no typecheck, ci_local or eval value is in CLAUDE.md",
+      section(md_of(p), "Commands") == "\n\n- Test: `make test`\n"
+      "- Lint: `make lint`\n- Format: `make fmt`\n\n"
+      and not any(v in md_of(p) for v in ("mypy .", "make ci", "make eval")),
+      section(md_of(p), "Commands"))
+_, p = plan_of(with_commands(cfg_text(), test='"make test"',
+                             typecheck='"mypy ."', eval='"make eval"'))
+check("a: with only test, typecheck and eval set, the three bullets are "
+      "listed and no typecheck or eval value is in CLAUDE.md",
+      not any(v in md_of(p) for v in ("mypy .", "make eval"))
+      and list(command_bullets(md_of(p))) == ["Test", "Lint", "Format"]
+      and len(section(md_of(p), "Commands").strip().split("\n")) == 3,
+      section(md_of(p), "Commands"))
+_, p = plan_of(with_commands(cfg_text(), typecheck='"mypy ."',
+                             ci_local='"make ci"', eval='"make eval"'))
+check("a: with test, lint and format unset, the section is the three "
+      "not-set bullets, and no typecheck, ci_local or eval value is in "
+      "CLAUDE.md",
+      section(md_of(p), "Commands") == "\n\n" + "".join(
+          f"- {k.title()}: not set (`commands.{k}` in "
+          "`bootstrap.config.yaml`; re-install)\n"
+          for k in ("test", "lint", "format")) + "\n"
+      and not any(v in md_of(p) for v in ("mypy .", "make ci", "make eval")),
+      section(md_of(p), "Commands"))
 
 # b. Any value resolve_config accepts round-trips as one code span.
 for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x", "x`",
-            "printf '%s' \"$1\""):
+            "printf '%s' \"$1\"", "pytest @args.txt", "``",
+            "cat < in.txt", "pytest -k 'a  b'", "pytest tests/test_*.py",
+            "make test 2>&1", "pytest -k a_b"):
     q = '"' + val.replace("\\", "\\\\").replace('"', '\\"') + '"'
     cfg, errs = resolve_config(load_yaml(with_commands(cfg_text(), test=q)))
     if errs:
@@ -616,22 +643,48 @@ check("e: every line of it is at most 78 characters",
       qs.strip() and max(len(x) for x in qs.split("\n")) <= 78,
       max(qs.split("\n"), key=len))
 
-# f. (guard) A wrapped line that starts with a list marker turns paragraph
-# text into a list. A marker line is intended only after a blank line or a
-# heading, as a sibling of the item above it (same or shallower indent), or
-# under a line that ends with a colon.
-_MARK = re.compile(r"^\s*(\d+[.)]|[-+*]) ")
+# f. (guard) A wrapped line that starts with a block starter (a list marker,
+# a heading, a blockquote, a setext underline or a code fence) turns
+# paragraph text into that block. Any of them is intended after a blank line
+# or a heading. A list marker is also intended as a sibling of the item above
+# it (same or shallower indent), or under step 3's "Act on that line:", the
+# one intended list introduction (a wrap can end any line with a colon). Row
+# g's matrix runs it too, since the PLANS configs carry only the tests gate.
+_LIST = re.compile(r"^\s*(\d+[.)] |[-+*] )")
+_MARK = re.compile(r"^\s*(\d+[.)] |[-+*] |#{1,6}( |$)|>|(-+|=+)\s*$"
+                   r"|`{3,}|~{3,})")
 
 
+def _bad_starts(md):
+    lines = md.split("\n")
+    return [ln for prev, ln in zip(lines, lines[1:])
+            if _MARK.match(ln)
+            and not (not prev.strip() or prev.startswith("#")
+                     or (_LIST.match(ln)
+                         and (_ind(ln) < _ind(prev)
+                              or (_LIST.match(prev)
+                                  and _ind(ln) == _ind(prev))
+                              or prev.rstrip().endswith(
+                                  "Act on that line:"))))]
+
+
+_F_CASES = (("   - a\n> b", ["> b"]), ("1. a\n## b", ["## b"]),
+            ("- a\n  1) b", ["  1) b"]),
+            ("   fails:\n   1) the tests", ["   1) the tests"]),
+            ("   the command line:\n   - b", ["   - b"]),
+            ("   Act on that line:\n   > b", ["   > b"]),
+            ("   see that line:\n   - b", ["   - b"]),
+            ("   Act on that line: x\n   - b", ["   - b"]),
+            ("> a\n- b", ["- b"]),
+            ("   Act on that line:\n   - If", []))
+check("f: the indent, sibling and colon exemptions cover list markers only, "
+      "the sibling one only at the same indent, and the colon one only "
+      "under its intended line",
+      all(_bad_starts(x) == want for x, want in _F_CASES),
+      [(x, _bad_starts(x)) for x, want in _F_CASES if _bad_starts(x) != want])
 for label, (cfg, plan) in PLANS.items():
-    lines = md_of(plan).split("\n")
-    bad = [ln for prev, ln in zip(lines, lines[1:])
-           if _MARK.match(ln)
-           and not (not prev.strip() or prev.startswith("#")
-                    or _ind(ln) < _ind(prev)
-                    or (_MARK.match(prev) and _ind(ln) == _ind(prev))
-                    or prev.rstrip().endswith(":"))]
-    check(f"f ({label}): no wrapped line starts with a list marker", not bad,
+    bad = _bad_starts(md_of(plan))
+    check(f"f ({label}): no wrapped line starts with a block starter", not bad,
           bad)
 
 # h. (guard) The retrofit CLAUDE.md is byte-identical to 19cd75f's:
@@ -665,7 +718,8 @@ print("\n=== Thin: CLAUDE.md within budget (PRD Phase 8 step 2) ===")
 # g. (guard) The cap is the golden fixtures' (tests/test_merge_back.py) and
 # the PRD's "roughly 80 lines max" (operator ruling 2026-10-28). The matrix
 # varies the commit gates too, since they choose step 2's gate sentence.
-worst = 0
+worst = n = 0
+fbad = []
 for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
         ("off", "encouraged", "required"), (True, False), (True, False),
         (True, False), (True, False), (True, False), (True, False),
@@ -678,8 +732,13 @@ for tdd, sec, deps, design, tel, modes, tg, sg in itertools.product(
                                  lint='"ruff check ."',
                                  format='"ruff format ."'))
     worst = max(worst, md_of(p).count("\n"))
-check(f"g: CLAUDE.md is at most 80 lines over 384 configs (worst {worst})",
+    fbad += [((tdd, sec, deps, design, tel, modes, tg, sg), ln)
+             for ln in _bad_starts(md_of(p))]
+    n += 1
+check(f"g: CLAUDE.md is at most 80 lines over {n} configs (worst {worst})",
       worst <= 80, worst)
+check(f"f: no wrapped line starts with a block starter over the {n} "
+      "configs", not fbad, fbad[:3])
 
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
