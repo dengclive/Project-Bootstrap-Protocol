@@ -1334,7 +1334,7 @@ try:
     # Eval row exists only with eval-gate.
     print("\n== 9. Z-77 (a): a command holding a pipe or a backtick ==")
     VALS = ("a | b", "a || b", r"grep 'a\|b' f", "echo `date`",
-            "a ``b`` c", "`x", "x`")
+            "a ``b`` c", "`x", "x`", "echo `date` | cat")
     ROWS = (("Test", "test"), ("Lint", "lint"), ("Format", "format"),
             ("Typecheck", "typecheck"), ("CI local", "ci_local"),
             ("Eval", "eval"))
@@ -1437,23 +1437,30 @@ try:
                   len(w) == 1 and "its Test row says `x \\| y`, " in w[0]
                   and q is not None and one_span(q.group(1)) == v
                   and ("since a bare `|` ends a table cell" in w[0])
-                  == ("|" in v), w)
+                  == ("|" in v) and w[0].endswith(": update that row."), w)
             if "|" not in v:
                 continue
             # A Test row kept from an older install, the pipe bare: the
-            # warning quotes the cell as written and names the cell to
-            # write (no value here holds a backtick).
+            # warning quotes the cell as written and names the cell the
+            # writer emits, with or without a manifest.
             old = f"| Test      | `{v}` |"
             as_written = re.split(r"(?<!\\)\|", old.strip("|"))[1].strip()
             write(d, TECH, re.sub(r"^\| Test .*$", lambda _: old, kept,
                                   count=1, flags=re.M))
             w = [x for x in warns(run(d), TECH) if "Test row" in x]
-            cell = "`" + v.replace("|", "\\|") + "`"
+            cell = re.split(r"(?<!\\)\|", rows["Test"].strip("|"))[1].strip()
             check(f"{tag} kept row with the pipe bare: one warning, quoting "
-                  f"the cell as written, that says to update it to {cell}",
+                  f"the cell as written and naming the one tech.md's table "
+                  f"emits, {cell}",
                   len(w) == 1 and f"its Test row says {as_written}, " in w[0]
-                  and f"update that row to {cell}, each `|` written `\\|`"
-                  in w[0], w)
+                  and f"in the table that cell is {cell}, since a bare `|` "
+                  f"ends a table cell. " in w[0], w)
+            os.remove(os.path.join(d, MANIFEST))
+            w = [x for x in warns(run(d), TECH) if "Test row" in x]
+            check(f"{tag} ... and with no installer manifest: the same cell, "
+                  f"then the no-manifest remedy",
+                  len(w) == 1 and f"in the table that cell is {cell}, " in w[0]
+                  and w[0].endswith(no_manifest(TECH)), w)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

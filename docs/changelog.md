@@ -14,9 +14,7 @@ Z-77 (f)'s source comments.
   the fence is one backtick longer than the command's longest run of
   backticks, and each `|` is written `\|`, GFM's escape for a pipe in a
   table cell. The Eval row does the same. Before, `pytest -q | tee log`
-  rendered as the text `` `pytest -q `` with the rest of the row dropped,
-  and a command with a backtick split into a short code span and loose
-  text.
+  rendered as the text `` `pytest -q `` with the rest of the row dropped.
 - `ci-cd.md`'s two PR-check commands and the opted-out variant's test
   command get the same code spans. A pipe needs no escape there.
 - The installer reads a kept `tech.md`'s Test row as GFM does: a cell ends
@@ -47,11 +45,11 @@ Test-row warning. Rewrite the row, or move `tech.md` aside and re-install.
 **Freeze exception 89.** `lib/templates.py`, `lib/installer.py` and their
 plugin copies. No golden re-baseline.
 
-**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 106 of its
-158 checks failed on `e6ac140`. The other 52 hold there by design: pipes in
+**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 138 of its
+192 checks failed on `e6ac140`. The other 54 hold there by design: pipes in
 `ci-cd.md`, which is not a table; a value whose double backticks a
-single-backtick span already holds; and the acceptance checks. Each of 12
-mutants, each undoing one part of the fix, fails between 6 and 86 of them.
+single-backtick span already holds; and the acceptance checks. Each of 15
+mutants, each breaking one part of the fix, fails between 4 and 122 of them.
 
 **Comments.** Two in `lib/templates.py` are corrected: the values in
 `CLAUDE.md`'s Commands section are the ones `tech.md`'s table shows, with
