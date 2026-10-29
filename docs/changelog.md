@@ -45,11 +45,11 @@ Test-row warning. Rewrite the row, or move `tech.md` aside and re-install.
 **Freeze exception 89.** `lib/templates.py`, `lib/installer.py` and their
 plugin copies. No golden re-baseline.
 
-**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 138 of its
-192 checks failed on `e6ac140`. The other 54 hold there by design: pipes in
+**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 155 of its
+209 checks failed on `e6ac140`. The other 54 hold there by design: pipes in
 `ci-cd.md`, which is not a table; a value whose double backticks a
-single-backtick span already holds; and the acceptance checks. Each of 15
-mutants, each breaking one part of the fix, fails between 4 and 122 of them.
+single-backtick span already holds; and the acceptance checks. Each of 19
+mutants of the changed code fails at least one of them.
 
 **Comments.** Two in `lib/templates.py` are corrected: the values in
 `CLAUDE.md`'s Commands section are the ones `tech.md`'s table shows, with

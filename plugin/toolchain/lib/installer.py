@@ -4354,8 +4354,8 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                         f"{rel} was left as it is, and its Test row says "
                         f"{have}, but commands.test is {_md_code(want)}, "
                         f"which is what the gates run"
-                        + (f"; in the table that cell is {_cell_code(want)}, "
-                           "since a bare `|` ends a table cell"
+                        + (f"; in tech.md's table, write it as "
+                           f"{_cell_code(want)}, with each `|` written `\\|`"
                            if "|" in want else "")
                         + f". The implementer and the integrator read the "
                         f"Test command from {rel}"

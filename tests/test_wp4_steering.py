@@ -1420,47 +1420,60 @@ try:
                   f"warning", r.returncode == 0 and skip_line(r.stdout, TECH)
                   and not any("Test row" in w for w in warns(r, TECH)),
                   r.stderr[-600:])
-            # A stale Test row, written with the escape, is quoted as
-            # written; the remedy names the cell to write only for a
-            # command with a pipe.
+            # Two kept Test rows, each with and then without the manifest:
+            # a stale row written with the escape, quoted as written; and,
+            # for a command with a pipe, the row an older install wrote
+            # (`grep 'a\|b' f`'s has no bare pipe, and GFM drops its
+            # backslash). The warning names the cell the writer emits, with
+            # each `|` written `\|`, only for a command with a pipe.
             kept = read(d, TECH)
-            write(d, TECH, re.sub(r"^\| Test .*$",
-                                  lambda _: "| Test      | `x \\| y` |", kept,
-                                  count=1, flags=re.M))
-            w = [x for x in warns(run(d), TECH) if "Test row" in x]
-            q = re.search(r"commands\.test is (.*?), which is", w[0] if w
-                          else "")
-            check(f"{tag} kept stale row `x \\| y`: one warning, quoting it "
-                  f"as written, backslash included, and commands.test as one "
-                  f"code span; it names the cell to write only if the "
-                  f"command holds a pipe",
-                  len(w) == 1 and "its Test row says `x \\| y`, " in w[0]
-                  and q is not None and one_span(q.group(1)) == v
-                  and ("since a bare `|` ends a table cell" in w[0])
-                  == ("|" in v) and w[0].endswith(": update that row."), w)
-            if "|" not in v:
-                continue
-            # A Test row kept from an older install, the pipe bare: the
-            # warning quotes the cell as written and names the cell the
-            # writer emits, with or without a manifest.
-            old = f"| Test      | `{v}` |"
-            as_written = re.split(r"(?<!\\)\|", old.strip("|"))[1].strip()
-            write(d, TECH, re.sub(r"^\| Test .*$", lambda _: old, kept,
-                                  count=1, flags=re.M))
-            w = [x for x in warns(run(d), TECH) if "Test row" in x]
             cell = re.split(r"(?<!\\)\|", rows["Test"].strip("|"))[1].strip()
-            check(f"{tag} kept row with the pipe bare: one warning, quoting "
-                  f"the cell as written and naming the one tech.md's table "
-                  f"emits, {cell}",
-                  len(w) == 1 and f"its Test row says {as_written}, " in w[0]
-                  and f"in the table that cell is {cell}, since a bare `|` "
-                  f"ends a table cell. " in w[0], w)
-            os.remove(os.path.join(d, MANIFEST))
-            w = [x for x in warns(run(d), TECH) if "Test row" in x]
-            check(f"{tag} ... and with no installer manifest: the same cell, "
-                  f"then the no-manifest remedy",
-                  len(w) == 1 and f"in the table that cell is {cell}, " in w[0]
-                  and w[0].endswith(no_manifest(TECH)), w)
+            old = f"| Test      | `{v}` |"
+            olds = [("stale row `x \\| y`", "| Test      | `x \\| y` |",
+                     "`x \\| y`")]
+            if "|" in v:
+                olds.append(("row an older install wrote", old, re.split(
+                    r"(?<!\\)\|", old.strip("|"))[1].strip()))
+            for branch in ("with the manifest", "with no manifest"):
+                end = (no_manifest(TECH) if branch == "with no manifest"
+                       else ": update that row.")
+                for what, row, as_written in olds:
+                    # A run writes the manifest again, so each no-manifest
+                    # run starts without one.
+                    if branch == "with no manifest":
+                        os.remove(os.path.join(d, MANIFEST))
+                    write(d, TECH, re.sub(r"^\| Test .*$", lambda _: row,
+                                          kept, count=1, flags=re.M))
+                    w = [x for x in warns(run(d), TECH) if "Test row" in x]
+                    q = re.search(r"commands\.test is (.*?), which is",
+                                  w[0] if w else "")
+                    named = (f"; in tech.md's table, write it as {cell}, "
+                             f"with each `|` written `\\|`. ")
+                    check(f"{tag} kept {what}, {branch}: one warning, quoting "
+                          f"the row as written and commands.test as one code "
+                          f"span, naming {cell} only if the command holds a "
+                          f"pipe, and ending with the remedy for a tree "
+                          f"{branch}",
+                          len(w) == 1
+                          and f"its Test row says {as_written}, " in w[0]
+                          and q is not None and one_span(q.group(1)) == v
+                          and (named in w[0]) == ("|" in v)
+                          and (("written `\\|`" in w[0]) == ("|" in v))
+                          and w[0].endswith(end), w)
+                    if ((mode, v, what) != ("greenfield", "a | b", olds[0][0])
+                            or branch != "with no manifest"):
+                        continue
+                    # The whole text once, so no glue between parts drifts.
+                    check(f"{tag} kept stale row, no manifest: the warning "
+                          f"word for word",
+                          w == [f"warning: {TECH} was left as it is, and its "
+                                f"Test row says `x \\| y`, but commands.test "
+                                f"is `a | b`, which is what the gates run; in "
+                                f"tech.md's table, write it as `a \\| b`, "
+                                f"with each `|` written `\\|`. The "
+                                f"implementer and the integrator read the "
+                                f"Test command from {TECH}. "
+                                f"{no_manifest(TECH)}"], w)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 
