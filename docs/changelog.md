@@ -1,5 +1,69 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.9.0 — tech.md's command cells (2026-10-29)
+
+**No version bump** (fix, not surface; freeze exception **89**). **Seam:
+stays at 3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger. This is
+the second of the five Z-77 residual PRs: Z-77 (a), Z-68 (p), and two of
+Z-77 (f)'s source comments.
+
+**What changes.**
+
+- `tech.md`'s Project commands table writes each command as one code span,
+  whatever it holds, as the Commands section of `CLAUDE.md` already does:
+  the fence is one backtick longer than the command's longest run of
+  backticks, and each `|` is written `\|`, GFM's escape for a pipe in a
+  table cell. The Eval row does the same. Before, `pytest -q | tee log`
+  rendered as the text `` `pytest -q `` with the rest of the row dropped.
+- `ci-cd.md`'s two PR-check commands and the opted-out variant's test
+  command get the same code spans. A pipe needs no escape there.
+- The installer reads a kept `tech.md`'s Test row as GFM does: a cell ends
+  at a bare `|`, and `\|` is a pipe. A re-install that keeps `tech.md` no
+  longer warns about the row the installer wrote for a command with a pipe.
+  The warning still quotes the cell as written. When `commands.test` holds
+  a pipe, it names the cell to write, with each `|` written `\|`.
+
+**The raw cell.** It differs from the command by a backslash before each
+pipe, and the agents read `tech.md` raw ("Run the Test command from
+`.claude/steering/tech.md`"). Pasted into a shell as written, the cell
+passes `|` to the command as an argument. The operator ruled for the escape
+on 2026-10-29, over a cell that points at the command on its own line below
+the table.
+
+**Both modes.** The retrofit `tech.md` comes from the same `_tech`, and the
+operator ruled on 2026-10-28 to fix both. In either mode, bytes move only
+for a config whose command holds a `|` or a backtick. No golden fixture
+has one, so no golden digest moves. For such a config, the tidy-up entry's
+statement that every retrofit file is byte-identical to `19cd75f`'s no
+longer holds.
+
+**Upgrading.** A re-install keeps a `tech.md` that Phase 2 filled in. If an
+earlier install wrote its Test row for a command with a pipe, or with a
+backtick that the old single-backtick span split, that row still draws the
+Test-row warning. Rewrite the row, or move `tech.md` aside and re-install.
+
+**Freeze exception 89.** `lib/templates.py`, `lib/installer.py` and their
+plugin copies. No golden re-baseline.
+
+**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 155 of its
+209 checks failed on `e6ac140`. The other 54 hold there by design: pipes in
+`ci-cd.md`, which is not a table; a value whose double backticks a
+single-backtick span already holds; and the acceptance checks. Each of 19
+mutants of the changed code fails at least one of them.
+
+**Comments.** Two in `lib/templates.py` are corrected: the values in
+`CLAUDE.md`'s Commands section are the ones `tech.md`'s table shows, with
+`\|` there (Z-77 (f) C-5), and `CLAUDE.md` does not spell out how to write
+the decision record; `/escalate` does (OC-3).
+
+**Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
+contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
+sentinel, §7.2 hook membership, §7.3 provenance marker or synthesize-file
+contract (ANSWERS key), or `binds` entry changes. §3.2's
+`bootstrap-install` row lists a kept `tech.md` "whose Test row does not
+name `commands.test`" among the `warning:` lines. That stays true: the
+change only stops the warning on a row that does name it.
+
 ## Post-2.9.0 — the emitted CLAUDE.md tidy-up (2026-10-28)
 
 **No version bump** (fix, not surface; freeze exception **88**). **Seam:
