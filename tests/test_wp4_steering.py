@@ -1325,6 +1325,122 @@ try:
           len(w5l) == 1 and "Move it aside and re-install, which creates "
           "only CLAUDE.md" in w5l[0] and "before you install" not in w5l[0],
           w5l)
+
+    # ---- 9. Z-77 (a), Z-68 (p): a pipe or a backtick in a command ----- #
+    # GFM ends a table cell at a bare `|` and reads `\|` as a pipe inside
+    # it, so each configured command must be one code span in tech.md's
+    # table, and in ci-cd.md, whatever pipes and backticks it holds; and the
+    # installer must read back the Test row it wrote. ai-agent, because the
+    # Eval row exists only with eval-gate.
+    print("\n== 9. Z-77 (a): a command holding a pipe or a backtick ==")
+    VALS = ("a | b", "a || b", r"grep 'a\|b' f", "echo `date`",
+            "a ``b`` c", "`x", "x`")
+    ROWS = (("Test", "test"), ("Lint", "lint"), ("Format", "format"),
+            ("Typecheck", "typecheck"), ("CI local", "ci_local"),
+            ("Eval", "eval"))
+    BASES = (("greenfield", "project:\n  name: z\n  archetype: ai-agent\n"),
+             ("retrofit", _retrofit_fixture("AGENT_RETROFIT_CFG")))
+    assert all("archetype: ai-agent\n" in b for _, b in BASES)
+
+    def with_cmds(text, cmds):
+        """`text` with its commands section replaced by `cmds` (minyaml
+        keeps a backslash in a double-quoted value as it is)."""
+        return (re.sub(r"^commands:\n(?:  .*\n)*", "", text, flags=re.M)
+                + "commands:\n"
+                + "".join(f'  {k}: "{v}"\n' for k, v in cmds.items()))
+
+    def accepts(text, key, v):
+        return not resolve_config(load_yaml(with_cmds(text, {key: v})))[1]
+
+    def cells(ln):
+        """A GFM table row's cells: split at each bare `|`, then `\\|` is
+        a pipe."""
+        return [c.strip().replace("\\|", "|")
+                for c in re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
+
+    def one_span(s):
+        """The content of `s` when `s` is exactly one CommonMark code span
+        (spec 0.31.2, section 6.1), else None: a run of n backticks opens,
+        the next run of exactly n closes, and one space is stripped from
+        each end when both ends have one and the content is not all
+        spaces."""
+        m = re.match(r"`+", s)
+        if not m:
+            return None
+        n = len(m.group(0))
+        c = next((c for c in re.compile(r"`+").finditer(s, n)
+                  if len(c.group(0)) == n), None)
+        if c is None or c.end() != len(s):
+            return None
+        body = s[n:c.start()]
+        if body[:1] == body[-1:] == " " and body.strip(" "):
+            body = body[1:-1]
+        return body
+
+    for mode, base in BASES:
+        out_base = base.replace("archetype: ai-agent\n",
+                                "archetype: ai-agent\n  cicd_opt_out: true\n")
+        for n, v in enumerate(VALS):
+            keys = [k for _, k in ROWS if accepts(base, k, v)]
+            tag = f"[Z-77 (a) {mode} {v!r}]"
+            check(f"{tag} resolve_config accepts it for test", "test" in keys,
+                  keys)
+            if "test" not in keys:
+                continue
+            t = plan_of(with_cmds(base, {k: v for k in keys}))
+            rows = {cells(ln)[0]: ln for ln in t[TECH].splitlines()
+                    if ln.startswith("| ")}
+            for label, k in ROWS:
+                if k in keys:
+                    got = cells(rows.get(label, "|"))
+                    check(f"{tag} tech.md's {label} row is 2 cells, the "
+                          f"command one code span equal to the value",
+                          len(got) == 2 and one_span(got[1]) == v,
+                          rows.get(label))
+            ci = t[CICD].splitlines()
+            i = ci.index("PR checks must at minimum run:")
+            for j, k in ((1, "test"), (2, "lint")):
+                if k in keys:
+                    check(f"{tag} ci-cd.md's PR check `commands.{k}` is one "
+                          f"code span equal to the value",
+                          ci[i + j][:2] == "- "
+                          and one_span(ci[i + j][2:]) == v, ci[i + j])
+            co = plan_of(with_cmds(out_base, {"test": v}))[CICD].splitlines()
+            i = co.index("The agent still runs the test command locally:")
+            check(f"{tag} the opted-out ci-cd.md's test command is one code "
+                  f"span equal to the value", one_span(co[i + 1]) == v,
+                  co[i + 1])
+            # The installer reads back the row it wrote: a re-install that
+            # keeps tech.md finds the Test row names commands.test.
+            d = proj(f"z77-{mode}-{n}", with_cmds(base, {"test": v}))
+            run(d)
+            ai_writes(d)
+            r = run(d)
+            check(f"{tag} a re-install that keeps tech.md draws no Test-row "
+                  f"warning", r.returncode == 0 and skip_line(r.stdout, TECH)
+                  and not any("Test row" in w for w in warns(r, TECH)),
+                  r.stderr[-600:])
+            if "|" not in v:
+                continue
+            # A Test row kept from an older install, the pipe bare: the
+            # warning quotes the cell as written and says how to write it.
+            kept, old = read(d, TECH), f"| Test      | `{v}` |"
+            as_written = re.split(r"(?<!\\)\|", old.strip("|"))[1].strip()
+            write(d, TECH, re.sub(r"^\| Test .*$", lambda _: old, kept,
+                                  count=1, flags=re.M))
+            w = [x for x in warns(run(d), TECH) if "Test row" in x]
+            check(f"{tag} kept row with the pipe bare: one warning, quoting "
+                  f"the cell as written, that says to write each `|` as `\\|`",
+                  len(w) == 1 and f"its Test row says {as_written}, " in w[0]
+                  and "Write each `|` in the command as `\\|`" in w[0], w)
+            # A stale row written with the escape is quoted with it.
+            write(d, TECH, re.sub(r"^\| Test .*$",
+                                  lambda _: "| Test      | `x \\| y` |", kept,
+                                  count=1, flags=re.M))
+            w = [x for x in warns(run(d), TECH) if "Test row" in x]
+            check(f"{tag} kept stale row `x \\| y`: the warning quotes it "
+                  f"as written, backslash included",
+                  len(w) == 1 and "its Test row says `x \\| y`, " in w[0], w)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

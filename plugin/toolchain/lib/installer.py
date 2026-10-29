@@ -4331,7 +4331,10 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                 + _remedy(rel, ""))
         want = (cfg["commands"].get("test") or "").strip()
         for ln in text.splitlines():
-            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            # [Z-68 (p)] Split at a bare `|` only: the writer puts `\|` for
+            # each pipe in a command (_cell_code), as GFM reads a table.
+            cells = [c.strip() for c in
+                     re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
             if (ln.lstrip().startswith("|") and len(cells) >= 2
                     and cells[0] == "Test"):
                 # [WP4 fix round 1 / F3] Stale only when the cell does not
@@ -4339,16 +4342,19 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                 # fix round 3 / LR-4] Since fix round 2 a code span equal to
                 # the command names it, and with no code span, the cell
                 # equal to it or followed by a parenthetical note (_names).
-                # Quoted as written.
+                # Quoted as written; compared with each `\|` read as `|`.
                 have = cells[1]
-                if want and not _names(have, want):
+                if want and not _names(have.replace("\\|", "|"), want):
                     msgs.append(
                         f"{rel} was left as it is, and its Test row says "
                         f"{have}, but commands.test is `{want}`, which is "
                         f"what the gates run. The implementer and the "
                         f"integrator read the Test command from {rel}"
                         + (". " + _no_manifest_remedy(rel) if rel in unproven
-                           else ": update that row."))
+                           else ": update that row.")
+                        + (" Write each `|` in the command as `\\|` there, "
+                           "or the table cell ends at it." if "|" in want
+                           else ""))
                 break
 
     claude_kept = "CLAUDE.md" in skipped
