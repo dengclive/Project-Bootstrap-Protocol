@@ -13,17 +13,17 @@ Z-77 (f)'s source comments.
   whatever it holds, as the Commands section of `CLAUDE.md` already does:
   the fence is one backtick longer than the command's longest run of
   backticks, and each `|` is written `\|`, GFM's escape for a pipe in a
-  table cell. The Eval row too. Before, `pytest -q | tee log` rendered as
-  the text `` `pytest -q `` with the rest of the row dropped, and
-  ``echo `date` `` as the code `echo ` and the text ``date`` ``.
+  table cell. The Eval row does the same. Before, `pytest -q | tee log`
+  rendered as the text `` `pytest -q `` with the rest of the row dropped,
+  and a command with a backtick split into a short code span and loose
+  text.
 - `ci-cd.md`'s two PR-check commands and the opted-out variant's test
   command get the same code spans. A pipe needs no escape there.
 - The installer reads a kept `tech.md`'s Test row as GFM does: a cell ends
   at a bare `|`, and `\|` is a pipe. A re-install that keeps `tech.md` no
   longer warns about the row the installer wrote for a command with a pipe.
-  The warning still quotes the cell as written, and when `commands.test`
-  holds a pipe it adds: "Write each `|` in the command as `\|` there, or
-  the table cell ends at it."
+  The warning still quotes the cell as written. When `commands.test` holds
+  a pipe, it names the cell to write, with each `|` written `\|`.
 
 **The raw cell.** It differs from the command by a backslash before each
 pipe, and the agents read `tech.md` raw ("Run the Test command from
@@ -40,23 +40,23 @@ statement that every retrofit file is byte-identical to `19cd75f`'s no
 longer holds.
 
 **Upgrading.** A re-install keeps a `tech.md` that Phase 2 filled in. If an
-earlier install wrote its Test row for a command with a pipe or a backtick,
-that row still draws the Test-row warning. Rewrite the row as the warning
-says, or move `tech.md` aside and re-install.
+earlier install wrote its Test row for a command with a pipe, or with a
+backtick that the old single-backtick span split, that row still draws the
+Test-row warning. Rewrite the row, or move `tech.md` aside and re-install.
 
 **Freeze exception 89.** `lib/templates.py`, `lib/installer.py` and their
 plugin copies. No golden re-baseline.
 
-**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 98 of its
-150 checks failed on `e6ac140`. The other 52 hold there by design: pipes in
+**Tests.** `tests/test_wp4_steering.py` gains section 9, red first: 106 of its
+158 checks failed on `e6ac140`. The other 52 hold there by design: pipes in
 `ci-cd.md`, which is not a table; a value whose double backticks a
-single-backtick span already holds; and the acceptance checks. Each of 10
+single-backtick span already holds; and the acceptance checks. Each of 12
 mutants, each undoing one part of the fix, fails between 6 and 86 of them.
 
 **Comments.** Two in `lib/templates.py` are corrected: the values in
 `CLAUDE.md`'s Commands section are the ones `tech.md`'s table shows, with
-`\|` there (Z-77 (f) C-5), and `CLAUDE.md` carries no command that writes
-the decision record (OC-3).
+`\|` there (Z-77 (f) C-5), and `CLAUDE.md` does not spell out how to write
+the decision record; `/escalate` does (OC-3).
 
 **Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
 contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4

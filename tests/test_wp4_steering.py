@@ -1420,27 +1420,40 @@ try:
                   f"warning", r.returncode == 0 and skip_line(r.stdout, TECH)
                   and not any("Test row" in w for w in warns(r, TECH)),
                   r.stderr[-600:])
-            if "|" not in v:
-                continue
-            # A Test row kept from an older install, the pipe bare: the
-            # warning quotes the cell as written and says how to write it.
-            kept, old = read(d, TECH), f"| Test      | `{v}` |"
-            as_written = re.split(r"(?<!\\)\|", old.strip("|"))[1].strip()
-            write(d, TECH, re.sub(r"^\| Test .*$", lambda _: old, kept,
-                                  count=1, flags=re.M))
-            w = [x for x in warns(run(d), TECH) if "Test row" in x]
-            check(f"{tag} kept row with the pipe bare: one warning, quoting "
-                  f"the cell as written, that says to write each `|` as `\\|`",
-                  len(w) == 1 and f"its Test row says {as_written}, " in w[0]
-                  and "Write each `|` in the command as `\\|`" in w[0], w)
-            # A stale row written with the escape is quoted with it.
+            # A stale Test row, written with the escape, is quoted as
+            # written; the remedy names the cell to write only for a
+            # command with a pipe.
+            kept = read(d, TECH)
             write(d, TECH, re.sub(r"^\| Test .*$",
                                   lambda _: "| Test      | `x \\| y` |", kept,
                                   count=1, flags=re.M))
             w = [x for x in warns(run(d), TECH) if "Test row" in x]
-            check(f"{tag} kept stale row `x \\| y`: the warning quotes it "
-                  f"as written, backslash included",
-                  len(w) == 1 and "its Test row says `x \\| y`, " in w[0], w)
+            q = re.search(r"commands\.test is (.*?), which is", w[0] if w
+                          else "")
+            check(f"{tag} kept stale row `x \\| y`: one warning, quoting it "
+                  f"as written, backslash included, and commands.test as one "
+                  f"code span; it names the cell to write only if the "
+                  f"command holds a pipe",
+                  len(w) == 1 and "its Test row says `x \\| y`, " in w[0]
+                  and q is not None and one_span(q.group(1)) == v
+                  and ("since a bare `|` ends a table cell" in w[0])
+                  == ("|" in v), w)
+            if "|" not in v:
+                continue
+            # A Test row kept from an older install, the pipe bare: the
+            # warning quotes the cell as written and names the cell to
+            # write (no value here holds a backtick).
+            old = f"| Test      | `{v}` |"
+            as_written = re.split(r"(?<!\\)\|", old.strip("|"))[1].strip()
+            write(d, TECH, re.sub(r"^\| Test .*$", lambda _: old, kept,
+                                  count=1, flags=re.M))
+            w = [x for x in warns(run(d), TECH) if "Test row" in x]
+            cell = "`" + v.replace("|", "\\|") + "`"
+            check(f"{tag} kept row with the pipe bare: one warning, quoting "
+                  f"the cell as written, that says to update it to {cell}",
+                  len(w) == 1 and f"its Test row says {as_written}, " in w[0]
+                  and f"update that row to {cell}, each `|` written `\\|`"
+                  in w[0], w)
 finally:
     shutil.rmtree(TMP, ignore_errors=True)
 

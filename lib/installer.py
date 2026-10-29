@@ -36,7 +36,8 @@ from templates import (  # all file bodies live here
     TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES,
     INDEX_COLUMNS, PROTOCOL_DOC, SPEC_START_CHAIN, SPEC_TASK_FILE,
     SPEC_VERSIONING_PATH,
-    _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
+    _cell_code, _md_code, _worktrees_on, drop_spec_versioning_pointers,
+    spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
 from defaults import (RETROFIT_DISABLED_MESSAGE, is_retrofit_raw,
                       retrofit_enabled, retrofit_marker_above)
@@ -4343,18 +4344,21 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                 # the command names it, and with no code span, the cell
                 # equal to it or followed by a parenthetical note (_names).
                 # Quoted as written; compared with each `\|` read as `|`.
+                # [Z-77 PR 2 step 7 / RW-1, CC-1] For a command with a pipe,
+                # the remedy names the cell to write: a kept row can read
+                # the same as the command and not name it (`a\|b`).
                 have = cells[1]
                 if want and not _names(have.replace("\\|", "|"), want):
                     msgs.append(
                         f"{rel} was left as it is, and its Test row says "
-                        f"{have}, but commands.test is `{want}`, which is "
-                        f"what the gates run. The implementer and the "
-                        f"integrator read the Test command from {rel}"
+                        f"{have}, but commands.test is {_md_code(want)}, "
+                        f"which is what the gates run. The implementer and "
+                        f"the integrator read the Test command from {rel}"
                         + (". " + _no_manifest_remedy(rel) if rel in unproven
-                           else ": update that row.")
-                        + (" Write each `|` in the command as `\\|` there, "
-                           "or the table cell ends at it." if "|" in want
-                           else ""))
+                           else ": update that row" + (
+                               f" to {_cell_code(want)}, each `|` written "
+                               "`\\|`, since a bare `|` ends a table cell."
+                               if "|" in want else ".")))
                 break
 
     claude_kept = "CLAUDE.md" in skipped

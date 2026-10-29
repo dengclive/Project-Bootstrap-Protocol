@@ -12077,8 +12077,8 @@ def _claude_md_commands(cfg):
 # and sessions references, the TDD-adaptive lifecycle, session hygiene, the
 # Never list, the bell-marked urgent items and, after them, one line that
 # sends the agent to /escalate to write the decision record (backlog X-30a;
-# ruling 7 (c) put the record in a skill, so CLAUDE.md carries no command
-# that writes it).
+# ruling 7 (c) put the record in a skill, so CLAUDE.md does not spell out
+# how to write it; /escalate does).
 # Not here, each with its own package: the loop and goal addenda and the
 # autonomous routing (WP6), and the drift Alert 3 item (tier 3 is not
 # implemented; WP5).
