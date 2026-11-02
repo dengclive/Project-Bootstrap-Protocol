@@ -1334,7 +1334,8 @@ try:
     # Eval row exists only with eval-gate.
     print("\n== 9. Z-77 (a): a command holding a pipe or a backtick ==")
     VALS = ("a | b", "a || b", r"grep 'a\|b' f", "echo `date`",
-            "a ``b`` c", "`x", "x`", "echo `date` | cat")
+            "a ``b`` c", "`x", "x`", "echo `date` | cat",
+            r"printf '%s\n' x | sort")
     ROWS = (("Test", "test"), ("Lint", "lint"), ("Format", "format"),
             ("Typecheck", "typecheck"), ("CI local", "ci_local"),
             ("Eval", "eval"))
