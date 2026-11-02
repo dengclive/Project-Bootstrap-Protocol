@@ -36,7 +36,8 @@ from templates import (  # all file bodies live here
     TEMPLATES, HOOK_EVENT_MAP, HOOK_EXTRA_EVENTS, HOOK_RETIRED_SITES,
     INDEX_COLUMNS, PROTOCOL_DOC, SPEC_START_CHAIN, SPEC_TASK_FILE,
     SPEC_VERSIONING_PATH,
-    _worktrees_on, drop_spec_versioning_pointers, spec_versioning_skipped)
+    _cell_code, _md_code, _worktrees_on, drop_spec_versioning_pointers,
+    spec_versioning_skipped)
 from defaults import policy_switch_errors, resolve_config   # + validation
 from defaults import (RETROFIT_DISABLED_MESSAGE, is_retrofit_raw,
                       retrofit_enabled, retrofit_marker_above)
@@ -4331,7 +4332,10 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                 + _remedy(rel, ""))
         want = (cfg["commands"].get("test") or "").strip()
         for ln in text.splitlines():
-            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            # [Z-68 (p)] Split at a bare `|` only: the writer puts `\|` for
+            # each pipe in a command (_cell_code), as GFM reads a table.
+            cells = [c.strip() for c in
+                     re.split(r"(?<!\\)\|", ln.strip().strip("|"))]
             if (ln.lstrip().startswith("|") and len(cells) >= 2
                     and cells[0] == "Test"):
                 # [WP4 fix round 1 / F3] Stale only when the cell does not
@@ -4339,14 +4343,22 @@ def _steering_warnings(root: Path, summary: dict, cfg: dict,
                 # fix round 3 / LR-4] Since fix round 2 a code span equal to
                 # the command names it, and with no code span, the cell
                 # equal to it or followed by a parenthetical note (_names).
-                # Quoted as written.
+                # Quoted as written; compared with each `\|` read as `|`.
+                # [Z-77 PR 2 step 7 / RW-1, CC-1] For a command with a pipe,
+                # the warning names the cell to write, with or without a
+                # manifest: a kept row can read the same as the command and
+                # not name it (`a\|b`).
                 have = cells[1]
-                if want and not _names(have, want):
+                if want and not _names(have.replace("\\|", "|"), want):
                     msgs.append(
                         f"{rel} was left as it is, and its Test row says "
-                        f"{have}, but commands.test is `{want}`, which is "
-                        f"what the gates run. The implementer and the "
-                        f"integrator read the Test command from {rel}"
+                        f"{have}, but commands.test is {_md_code(want)}, "
+                        f"which is what the gates run"
+                        + (f"; in tech.md's table, write it as "
+                           f"{_cell_code(want)}, with each `|` written `\\|`"
+                           if "|" in want else "")
+                        + f". The implementer and the integrator read the "
+                        f"Test command from {rel}"
                         + (". " + _no_manifest_remedy(rel) if rel in unproven
                            else ": update that row."))
                 break

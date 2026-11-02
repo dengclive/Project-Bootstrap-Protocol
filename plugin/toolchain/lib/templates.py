@@ -243,7 +243,7 @@ def _eval_row(cfg):
     if "eval-gate" not in cfg["_resolved_hooks"]:
         return ""
     ev = (cfg["commands"].get("eval") or "").strip() or "(none)"
-    return f"| Eval      | `{ev}` |\n"
+    return f"| Eval      | {_cell_code(ev)} |\n"
 
 
 # [WP4 / g2] Phase 2 step 3's default "do not touch" suggestions, by
@@ -349,11 +349,11 @@ def _tech(cfg):
 
 | Purpose   | Command |
 |-----------|---------|
-| Test      | `{c['test'] or 'TODO: set commands.test in bootstrap.config.yaml'}` |
-| Lint      | `{c['lint'] or 'TODO: set commands.lint'}` |
-| Format    | `{c['format'] or 'TODO: set commands.format'}` |
-| Typecheck | `{c['typecheck'] or '(none)'}` |
-| CI local  | `{c['ci_local'] or '(none)'}` |
+| Test      | {_cell_code(c['test'] or 'TODO: set commands.test in bootstrap.config.yaml')} |
+| Lint      | {_cell_code(c['lint'] or 'TODO: set commands.lint')} |
+| Format    | {_cell_code(c['format'] or 'TODO: set commands.format')} |
+| Typecheck | {_cell_code(c['typecheck'] or '(none)')} |
+| CI local  | {_cell_code(c['ci_local'] or '(none)')} |
 {_eval_row(cfg)}
 {_command_contract(cfg)}
 {_execution_location(cfg)}
@@ -580,8 +580,8 @@ def _cicd(cfg):
 Branch model and provider are project decisions; record them here.
 
 PR checks must at minimum run:
-- `{c['test'] or 'TODO: commands.test'}`
-- `{c['lint'] or 'TODO: commands.lint'}`
+- {_md_code(c['test'] or 'TODO: commands.test')}
+- {_md_code(c['lint'] or 'TODO: commands.lint')}
 
 ## Agent stopping point
 
@@ -601,7 +601,7 @@ def _cicd_optout(cfg):
 **No CI/CD** (operator opted out in Phase 0).
 
 The agent still runs the test command locally:
-`{c['test'] or 'TODO: set commands.test'}`
+{_md_code(c['test'] or 'TODO: set commands.test')}
 
 Placeholder for future CI addition. Re-run the wizard's CI setup to populate.
 
@@ -12041,14 +12041,23 @@ def _md_code(s):
     return f"{fence}{pad}{s}{pad}{fence}"
 
 
+def _cell_code(s):
+    """[Z-77 (a)] `s` as one code span in a GFM table cell: _md_code, with
+    each `|` written `\\|`, since a bare pipe ends the cell even inside a
+    code span (GFM spec 0.29, section 4.10). The raw cell then differs from
+    the command by those backslashes (operator ruling 2026-10-29)."""
+    return _md_code(s).replace("|", "\\|")
+
+
 # [claude-md-tidy-up / item 1] The configured test, lint and format
-# commands, first, as tech.md's table holds them (resolve_config has
-# stripped each value; a newline is refused there). One bullet each, set or
-# not, so the line count does not depend on the config. A value is never
-# wrapped: a line break inside it renders as a space and could start a
-# continuation line with a list marker. The heading names tech.md: the
-# agents read their commands there, and Phase 2 may fill it after the
-# install. Typecheck, ci_local and eval are left to tech.md.
+# commands, first, as tech.md's table shows them; there each `|` is written
+# `\|` (_cell_code). resolve_config has stripped each value, and a newline
+# is refused there. One bullet each, set or not, so the line count does not
+# depend on the config. A value is never wrapped: a line break inside it
+# renders as a space and could start a continuation line with a list
+# marker. The heading names tech.md: the agents read their commands there,
+# and Phase 2 may fill it after the install. Typecheck, ci_local and eval
+# are left to tech.md.
 def _claude_md_commands(cfg):
     c = cfg["commands"]
     return ("## Commands (keep in step with `tech.md`)\n\n" + "".join(
@@ -12068,7 +12077,8 @@ def _claude_md_commands(cfg):
 # and sessions references, the TDD-adaptive lifecycle, session hygiene, the
 # Never list, the bell-marked urgent items and, after them, one line that
 # sends the agent to /escalate to write the decision record (backlog X-30a;
-# ruling 7 (c) put the record in a skill, so CLAUDE.md carries no command).
+# ruling 7 (c) put the record in a skill, so CLAUDE.md does not spell out
+# how to write it; /escalate does).
 # Not here, each with its own package: the loop and goal addenda and the
 # autonomous routing (WP6), and the drift Alert 3 item (tier 3 is not
 # implemented; WP5).
