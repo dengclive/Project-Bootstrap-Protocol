@@ -26,8 +26,8 @@ the third of the five Z-77 residual PRs: Z-77 (b).
   text, so the hook either does not parse, and every Bash call is refused,
   or runs a different command than the one written. With no bash, the
   message names an unbalanced quote or backtick, or a trailing backslash,
-  then gives the same consequence: this one for test, ci_local and eval,
-  and the bash path's own for lint, format and typecheck. Before, it said
+  then this consequence for test, ci_local and eval, and each key's own
+  parse-failure reason for lint, format and typecheck. Before, it said
   every key's hook would not parse, though no hook runs format or
   typecheck.
 
@@ -52,7 +52,7 @@ format and typecheck, whose probe is already the command alone.
 re-baseline.
 
 **Tests.** `tests/test_command_embedding.py` gains a Z-77 (b) section, red
-first: 26 of its 48 checks failed on `7d939e0`.
+first: 26 of its 51 checks failed on `7d939e0`.
 `tests/test_wp4_claude_md.py` row b and `tests/test_wp4_steering.py`
 section 9 trade `` `x `` and `` x` `` for accepted values that still start
 or end with a backtick.

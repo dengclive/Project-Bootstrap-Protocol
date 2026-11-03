@@ -583,8 +583,9 @@ try:
 
     # [Z-77 (b)] test, ci_local and eval are placed more than once in
     # their hooks, and `bash -n` over that text paired one copy's backtick,
-    # or a quote inside `${ }` or `$( )`, with the next copy's, so the value
-    # was accepted; `echo ${x:-'}` then left test-gate unable to parse.
+    # or a quote inside `$( )`, with the next copy's, so the value was
+    # accepted. test's probe also joined test-gate to ci-mirror, so
+    # `echo ${x:-'}` was accepted for test, and neither hook parses.
     # Without bash the quote scan ignored backticks. Now the command is
     # also parsed alone, and the scan tracks backticks.
     print("\n== Z-77 (b): an unbalanced backtick, with bash and without ==")
@@ -612,14 +613,25 @@ try:
                   by == {}, repr(by)[:400])
     # The reason: where only the command alone fails to parse, the hook
     # pairs it with its own text, and may still parse.
+    PAIRED_CLAUSES = ("Its hook places it more than once",
+                      "pairs it with the hook's own text", "does not PARSE",
+                      "every Bash call is refused", "runs a different command",
+                      "Complete the command")
     by = _errs_under(None, {k: "`x" for k in ALL6})
     for key in ("test", "ci_local", "eval"):
         m = by.get(f"commands.{key}", "")
         check(f"Z-77 (b): commands.{key}'s reason for '`x' says the hook "
               f"pairs it and either does not parse or runs another command",
-              "pairs it with the hook's own text" in m
-              and "does not PARSE" in m and "runs a different command" in m
+              all(c in m for c in PAIRED_CLAUSES)
               and "runs it on a line of its own" not in m, m)
+    # Where the hook's own placement fails to parse, the key's own reason.
+    by2 = _errs_under(None, {k: "echo 'oops" for k in ALL6})
+    for key in ("test", "ci_local", "eval"):
+        m = by2.get(f"commands.{key}", "")
+        check(f"Z-77 (b): commands.{key}'s reason for \"echo 'oops\" is its "
+              f"own, not the paired one",
+              "runs it on a line of its own" in m
+              and "pairs it" not in m, m)
     check("Z-77 (b): commands.lint's reason for '`x' names format-lint-gate",
           "format-lint-gate" in by.get("commands.lint", "")
           and "Bash call" not in by.get("commands.lint", ""), repr(by))
@@ -637,8 +649,7 @@ try:
         m = by.get(f"commands.{key}", "")
         check(f"Z-77 (b): with no bash, commands.{key}'s reason says the "
               f"hook either does not parse or runs another command",
-              "pairs it with the hook's own text" in m
-              and "does not PARSE" in m and "runs a different command" in m
+              all(c in m for c in PAIRED_CLAUSES)
               and "runs it on a line of its own" not in m, m)
     m = by.get("commands.lint", "")
     check("Z-77 (b): with no bash, commands.lint's reason names "
@@ -647,7 +658,8 @@ try:
     for key in ("format", "typecheck"):
         m = by.get(f"commands.{key}", "")
         check(f"Z-77 (b): with no bash, commands.{key}'s reason names no hook",
-              "tech.md" in m and "hook" not in m, m)
+              "tech.md" in m and "hook" not in m
+              and "Complete the command" in m, m)
     # The scan's limits: a trailing backslash after a backtick pair is
     # still refused, and a backtick in a `# comment` is read as code, as a
     # quote there is (B-3), so bash accepts it and the scan does not.

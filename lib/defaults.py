@@ -132,7 +132,7 @@ _PAIRED_KEYS = ("test", "ci_local", "eval")
 
 def _consequence(key: str, paired: bool) -> str:
     """[Z-77 (b) re-review MSG-1, MSG-2] What a refused `key` breaks:
-    `paired` when the hook's own text may pair with it, as it does with any
+    `paired` when the hook's own text may pair with it, as it may with a
     value the quote scan refuses."""
     if paired and key in _PAIRED_KEYS:
         return _PAIRED_CONSEQUENCE
