@@ -1,5 +1,69 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.9.0 — the landing steps in the emitted CLAUDE.md (2026-11-03)
+
+**No version bump** (fix, not surface; freeze exception **91**). **Seam:
+stays at 3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger. This is
+the fourth of the five Z-77 residual PRs: Z-77 (d), (e), and three of
+Z-77 (f)'s source comments. It changes the greenfield `CLAUDE.md` only;
+retrofit's landing paragraph is unchanged.
+
+**What changes in the greenfield `CLAUDE.md`.**
+
+- Step 2's no-worktree case now says to skip the script as well as step 3:
+  "No worktree branch: skip the script and step 3, and set `done` once
+  approved." Before, it came after step 2's instruction to run the script
+  and did not say to skip it (C-3).
+- Step 3 gives its wait a subject (operator ruling D2): "Wait for its last
+  line in this turn, even if it runs in the background, and commit nothing
+  until then: ending the turn can stop it." (C-4).
+- The third outcome reads "Otherwise, do what it names; on a rerun of the
+  script, repeat this step." Before, only the CONFLICT outcome said to
+  repeat step 3, though merge-back's ERROR, REFUSED and NOT-STARTED last
+  lines also name a rerun of the script, and a rerun can go to the
+  background too (C-2).
+
+This supersedes three parts of the tidy-up entry below: its step 2
+description (step 2 now skips the script too), its step 3 description
+(every rerun of the script repeats step 3, not only the CONFLICT one) and
+its quoted "Otherwise, do what it names." wording.
+
+**Line budget.** No line moves: each step keeps its line count, and the
+golden fixtures' `CLAUDE.md` stays 71, 79, 69, 71 and 67 lines (default,
+full autonomous, design steering, SDK callable, gates off).
+
+**Upgrading.** A re-install keeps a hand-edited `CLAUDE.md`, and the
+kept-file warning does not check the landing steps, so that file keeps the
+old steps with no warning. Merge them by hand from a fresh install.
+
+**Freeze exception 91.** `lib/templates.py` and its plugin copy. One
+golden re-baseline: in each of the five greenfield fixtures one body moves,
+`CLAUDE.md`, and the action counts stay 66, 78, 67, 67 and 59.
+
+**Source comments.** The comment above `_LANDING_GATES` says the two
+variants share the gate table, not the sentence, since retrofit takes
+`tests-retrofit` (RA-6). The `/spec-new` comment places greenfield's
+"Starting a task" sentence in `_landing_steps` and retrofit's in
+`_landing_claude_md`. The comment above `_landing_steps` is reflowed (its
+112-character line, RR2-1) and now says that a rerun of the script, on
+CONFLICT or otherwise, repeats step 3.
+
+**Tests.** `tests/test_wp4_claude_md.py` row c re-pins the step text and
+gains a check that the Otherwise outcome repeats step 3 on a rerun, red
+first: 12 of row c's checks failed on `cf4b4f2`, four in each gate
+variant. `tests/test_merge_back.py` re-pins its three greenfield checks of
+the step text (the PRD implementer note's own wording is unchanged), all
+three red on `cf4b4f2`.
+
+**Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
+contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
+sentinel, §7.2 hook membership, §7.3 provenance marker or synthesize-file
+contract (ANSWERS key), or `binds` entry changes.
+`CLAUDE.md` appears in the seam only in §3.2's `bootstrap-install` row,
+which says the command writes it and lists the Phase 8 elements whose
+absence the kept-file warning names; the change keeps each of those
+elements.
+
 ## Post-2.9.0 — an unbalanced backtick in a command (2026-11-03)
 
 **No version bump** (fix, not surface; freeze exception **90**). **Seam:

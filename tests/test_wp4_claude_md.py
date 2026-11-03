@@ -581,24 +581,36 @@ for gate, text in _LAND_CFGS.items():
     from templates import _LANDING_GATES
     check(f"c ({gate}): step 2 carries the gate sentence merge-back runs",
           _LANDING_GATES[gate] in fw, fw)
-    check(f"c ({gate}): with no worktree branch, done once approved and "
-          f"step 3 skipped",
-          "No worktree branch: set `done` once approved, and skip step 3."
-          in fw, fw)
-    w = fw.find("3. Wait for the script's last line in this turn")
+    # [Z-77 (e) C-3] The script and step 3 are skipped, in that order.
+    check(f"c ({gate}): with no worktree branch, the script and step 3 "
+          f"skipped and done once approved",
+          "No worktree branch: skip the script and step 3, and set `done` "
+          "once approved." in fw, fw)
+    # [Z-77 (e) C-4, ruling D2] "its last line": the script's.
+    w = fw.find("3. Wait for its last line in this turn")
     check(f"c ({gate}): step 3 waits for the script's last line in this "
           f"turn, then acts on that line",
-          w >= 0 and "3. Wait for the script's last line in this turn, even "
-          "in the background, and commit nothing until then: ending the turn "
-          "can stop it. Act on that line:" in fw, fw)
+          w >= 0 and "3. Wait for its last line in this turn, even if it "
+          "runs in the background, and commit nothing until then: ending "
+          "the turn can stop it. Act on that line:" in fw, fw)
     outs = ("- If the branch merged, set `status: done` and commit it.",
             "- On CONFLICT, invoke the integrator with its brief, then rerun "
             "with `--continue <branch>` and repeat this step.",
-            "- Otherwise, do what it names.")
+            "- Otherwise, do what it names; on a rerun of the script, repeat "
+            "this step.")
     check(f"c ({gate}): the three outcomes follow the wait, in order",
           all(o in fw for o in outs)
           and w < fw.find(outs[0]) < fw.find(outs[1]) < fw.find(outs[2]),
           fw)
+    # [Z-77 (d) C-2] A rerun a last line names (ERROR, REFUSED,
+    # NOT-STARTED) goes back to the wait, as the CONFLICT rerun does: the
+    # rerun can go to the background too. Anchored to the Otherwise bullet.
+    _ow = fw.find("- Otherwise, do what it names")
+    check(f"c ({gate}): the Otherwise outcome repeats step 3 on a rerun of "
+          f"the script (Z-77 (d))",
+          _ow > w and fw[_ow:].startswith(
+              "- Otherwise, do what it names; on a rerun of the script, "
+              "repeat this step."), fw)
     check(f"c ({gate}): never 'await its notification' (WP3 fix1 CR-1)",
           "await its notification" not in fw, fw)
     # Nested under step 3 (its content column is 3), not a list of their
