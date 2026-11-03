@@ -124,6 +124,19 @@ _PAIRED_CONSEQUENCE = (
     "Its hook places it more than once, and bash pairs it with the hook's own "
     "text, so the hook either does not PARSE, and every Bash call is "
     "refused, or runs a different command than the one written. ")
+# [Z-77 (b) re-review MSG-1] The keys whose hooks place the command more than
+# once. lint's probe holds two copies too, but format-lint-gate places it
+# once, so lint keeps its own reason.
+_PAIRED_KEYS = ("test", "ci_local", "eval")
+
+
+def _consequence(key: str, paired: bool) -> str:
+    """[Z-77 (b) re-review MSG-1, MSG-2] What a refused `key` breaks:
+    `paired` when the hook's own text may pair with it, as it does with any
+    value the quote scan refuses."""
+    if paired and key in _PAIRED_KEYS:
+        return _PAIRED_CONSEQUENCE
+    return _PARSE_CONSEQUENCE.get(key, "")
 
 # The value _shell_parse_error returns when it could not ask bash.
 _NO_BASH = object()
@@ -232,8 +245,8 @@ def _shell_parse_error(cmd: str, key: str = "test"):
     if ctl is None or ctl[0] != 0:
         return _NO_BASH
     # [Z-77 (b)] The command alone in a subshell, the placement every hook
-    # shares, as well: test, ci_local and eval sit in their probe more than
-    # once, and bash can pair a token in one copy with one in the next (a
+    # shares, as well: test, ci_local, eval and lint sit in their probe more
+    # than once, and bash can pair a token in one copy with one in the next (a
     # backtick, or a quote inside `${ }` or `$( )`), so the probe parses
     # where the hook may not.
     from templates import _user_cmd
@@ -502,17 +515,16 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
             if not _quotes_balanced(v):
                 errors.append(
                     f"commands.{key} has an unbalanced quote or backtick, or "
-                    f"a trailing backslash ({v!r}). The emitted hook either "
-                    f"does not PARSE, so every gated action is refused with "
-                    f"a bash syntax error and no explanation of why, or runs "
-                    f"a different command than the one written.")
+                    f"a trailing backslash ({v!r}). "
+                    + _consequence(key, True)
+                    + "Complete the command, or put it in a script and call "
+                    "the script.")
         elif perr is not None:
             said, paired = perr
             errors.append(
                 f"commands.{key} is not a complete shell command "
                 f"({v!r}): bash says {said!r}. "
-                + (_PAIRED_CONSEQUENCE if paired
-                   else _PARSE_CONSEQUENCE.get(key, ""))
+                + _consequence(key, paired)
                 + "Complete the command, or put it in a script and call "
                 "the script.")
 

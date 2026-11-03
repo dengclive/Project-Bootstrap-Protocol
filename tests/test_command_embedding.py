@@ -592,7 +592,7 @@ try:
                "echo $(\"'")
     ACCEPTED = ("echo `date`", "``", '"`echo "x"`"', '"a `b" c`"', "'`'",
                 "a \\`", "echo 'a\\' `date`", "echo `echo \\`date\\``",
-                'echo "\\`"')
+                'echo "\\`"', 'echo "`date`" `pwd`')
     for value in REFUSED:
         by = _errs_under(None, {k: value for k in ALL6})
         check(f"Z-77 (b): with bash, {value!r} is refused for every key",
@@ -618,14 +618,36 @@ try:
         check(f"Z-77 (b): commands.{key}'s reason for '`x' says the hook "
               f"pairs it and either does not parse or runs another command",
               "pairs it with the hook's own text" in m
-              and "runs a different command" in m, m)
+              and "does not PARSE" in m and "runs a different command" in m
+              and "runs it on a line of its own" not in m, m)
     check("Z-77 (b): commands.lint's reason for '`x' names format-lint-gate",
-          "format-lint-gate" in by.get("commands.lint", ""), repr(by))
-    by = _errs_under(_NONE, {"test": "`x"})
-    check("Z-77 (b): with no bash, the reason says the hook may not parse or "
-          "may run another command",
-          "runs a different command" in by.get("commands.test", ""),
-          repr(by))
+          "format-lint-gate" in by.get("commands.lint", "")
+          and "Bash call" not in by.get("commands.lint", ""), repr(by))
+    # lint's probe holds two copies, so it can pair too, but its hook
+    # places the command once: its reason stays its own.
+    m = _errs_under(None, {"lint": '))"`$('}).get("commands.lint", "")
+    check("Z-77 (b): commands.lint's reason for '))\"`$(' names "
+          "format-lint-gate and no Bash call",
+          "format-lint-gate" in m and "Bash call" not in m
+          and "more than once" not in m, m)
+    # With no bash, each key's reason is the one the bash path gives it
+    # when the hook may pair with it.
+    by = _errs_under(_NONE, {k: "`x" for k in ALL6})
+    for key in ("test", "ci_local", "eval"):
+        m = by.get(f"commands.{key}", "")
+        check(f"Z-77 (b): with no bash, commands.{key}'s reason says the "
+              f"hook either does not parse or runs another command",
+              "pairs it with the hook's own text" in m
+              and "does not PARSE" in m and "runs a different command" in m
+              and "runs it on a line of its own" not in m, m)
+    m = by.get("commands.lint", "")
+    check("Z-77 (b): with no bash, commands.lint's reason names "
+          "format-lint-gate and no Bash call",
+          "format-lint-gate" in m and "Bash call" not in m, m)
+    for key in ("format", "typecheck"):
+        m = by.get(f"commands.{key}", "")
+        check(f"Z-77 (b): with no bash, commands.{key}'s reason names no hook",
+              "tech.md" in m and "hook" not in m, m)
     # The scan's limits: a trailing backslash after a backtick pair is
     # still refused, and a backtick in a `# comment` is read as code, as a
     # quote there is (B-3), so bash accepts it and the scan does not.
