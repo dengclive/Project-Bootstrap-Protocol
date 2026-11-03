@@ -438,8 +438,9 @@ finally:
 #       Bash 3.2 misreads a quote or paren in a comment there, so a test
 #       command with `# off :-(` was refused although test-gate parses it.
 #       Each key is now probed with the text ITS hooks emit.
-#  B-3: the quote scan ran first and counts a quote inside a `# comment`;
-#       it now runs only where bash cannot.
+#  B-3: the quote scan ran first and counts a quote inside a `# comment`
+#       (and, since Z-77 (b), a backtick); it now runs only where bash
+#       cannot.
 print("\n== bash-n B-1, B-2, B-3: which bash answers, and where ==")
 _REAL_BASH = shutil.which("bash")
 _stubs = tempfile.mkdtemp(dir=os.environ.get("TMPDIR"))
@@ -579,6 +580,99 @@ try:
         check(f"B-3: {value!r} is still refused for every key ({want})",
               set(by) == {f"commands.{k}" for k in ALL6}
               and all(want in m for m in by.values()), repr(by)[:600])
+
+    # [Z-77 (b)] test, ci_local and eval are placed more than once in
+    # their hooks, and `bash -n` over that text paired one copy's backtick,
+    # or a quote inside `$( )`, with the next copy's, so the value was
+    # accepted. test's probe also joined test-gate to ci-mirror, so
+    # `echo ${x:-'}` was accepted for test, and neither hook parses.
+    # Without bash the quote scan ignored backticks. Now the command is
+    # also parsed alone, and the scan tracks backticks.
+    print("\n== Z-77 (b): an unbalanced backtick, with bash and without ==")
+    REFUSED = ("`x", "x`", "a ` b", '"`"', 'pytest -q "`', "echo ${x:-'}",
+               "echo $(\"'")
+    ACCEPTED = ("echo `date`", "``", '"`echo "x"`"', '"a `b" c`"', "'`'",
+                "a \\`", "echo 'a\\' `date`", "echo `echo \\`date\\``",
+                'echo "\\`"', 'echo "`date`" `pwd`')
+    for value in REFUSED:
+        by = _errs_under(None, {k: value for k in ALL6})
+        check(f"Z-77 (b): with bash, {value!r} is refused for every key",
+              set(by) == {f"commands.{k}" for k in ALL6}
+              and all("not a complete shell command" in m
+                      for m in by.values()), repr(by)[:600])
+        by = _errs_under(_NONE, {k: value for k in ALL6})
+        check(f"Z-77 (b): with no bash, {value!r} is refused for every key "
+              f"as an unbalanced quote or backtick",
+              set(by) == {f"commands.{k}" for k in ALL6}
+              and all("unbalanced quote or backtick" in m
+                      for m in by.values()), repr(by)[:600])
+    for value in ACCEPTED:
+        for where, d in (("with bash", None), ("with no bash", _NONE)):
+            by = _errs_under(d, {k: value for k in ALL6})
+            check(f"Z-77 (b): {where}, {value!r} is accepted for every key",
+                  by == {}, repr(by)[:400])
+    # The reason: where only the command alone fails to parse, the hook
+    # pairs it with its own text, and may still parse.
+    PAIRED_CLAUSES = ("Its hook places it more than once",
+                      "pairs it with the hook's own text", "does not PARSE",
+                      "every Bash call is refused", "runs a different command",
+                      "Complete the command")
+    by = _errs_under(None, {k: "`x" for k in ALL6})
+    for key in ("test", "ci_local", "eval"):
+        m = by.get(f"commands.{key}", "")
+        check(f"Z-77 (b): commands.{key}'s reason for '`x' says the hook "
+              f"pairs it and either does not parse or runs another command",
+              all(c in m for c in PAIRED_CLAUSES)
+              and "runs it on a line of its own" not in m, m)
+    # Where the hook's own placement fails to parse, the key's own reason.
+    by2 = _errs_under(None, {k: "echo 'oops" for k in ALL6})
+    for key in ("test", "ci_local", "eval"):
+        m = by2.get(f"commands.{key}", "")
+        check(f"Z-77 (b): commands.{key}'s reason for \"echo 'oops\" is its "
+              f"own, not the paired one",
+              "runs it on a line of its own" in m
+              and "pairs it" not in m, m)
+    check("Z-77 (b): commands.lint's reason for '`x' names format-lint-gate",
+          "format-lint-gate" in by.get("commands.lint", "")
+          and "Bash call" not in by.get("commands.lint", ""), repr(by))
+    # lint's probe holds two copies, so it can pair too, but its hook
+    # places the command once: its reason stays its own.
+    m = _errs_under(None, {"lint": '))"`$('}).get("commands.lint", "")
+    check("Z-77 (b): commands.lint's reason for '))\"`$(' names "
+          "format-lint-gate and no Bash call",
+          "format-lint-gate" in m and "Bash call" not in m
+          and "more than once" not in m, m)
+    # With no bash, each key's reason is the one the bash path gives it
+    # when the hook may pair with it.
+    by = _errs_under(_NONE, {k: "`x" for k in ALL6})
+    for key in ("test", "ci_local", "eval"):
+        m = by.get(f"commands.{key}", "")
+        check(f"Z-77 (b): with no bash, commands.{key}'s reason says the "
+              f"hook either does not parse or runs another command",
+              all(c in m for c in PAIRED_CLAUSES)
+              and "runs it on a line of its own" not in m, m)
+    m = by.get("commands.lint", "")
+    check("Z-77 (b): with no bash, commands.lint's reason names "
+          "format-lint-gate and no Bash call",
+          "format-lint-gate" in m and "Bash call" not in m, m)
+    for key in ("format", "typecheck"):
+        m = by.get(f"commands.{key}", "")
+        check(f"Z-77 (b): with no bash, commands.{key}'s reason names no hook",
+              "tech.md" in m and "hook" not in m
+              and "Complete the command" in m, m)
+    # The scan's limits: a trailing backslash after a backtick pair is
+    # still refused, and a backtick in a `# comment` is read as code, as a
+    # quote there is (B-3), so bash accepts it and the scan does not.
+    by = _errs_under(_NONE, {k: "echo `date` \\" for k in ALL6})
+    check("Z-77 (b): with no bash, 'echo `date` \\' is refused for every "
+          "key as a trailing backslash",
+          set(by) == {f"commands.{k}" for k in ALL6}
+          and all("trailing backslash" in m for m in by.values()),
+          repr(by)[:600])
+    check("Z-77 (b): 'pytest # `' is accepted with bash ...",
+          _errs_under(None, {"test": "pytest # `"}) == {})
+    check("Z-77 (b): ... and refused with no bash (a known false refusal)",
+          "commands.test" in _errs_under(_NONE, {"test": "pytest # `"}))
 finally:
     os.environ["PATH"] = _PATH0
     shutil.rmtree(_stubs, ignore_errors=True)

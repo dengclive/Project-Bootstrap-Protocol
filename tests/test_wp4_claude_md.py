@@ -533,7 +533,7 @@ check("a: with test, lint and format unset, the section is the three "
       section(md_of(p), "Commands"))
 
 # b. Any value resolve_config accepts round-trips as one code span.
-for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x", "x`",
+for val in ("a | b", "echo `date`", "a ``b`` c", "`x`", "`x` y", "y `x`",
             "printf '%s' \"$1\"", "pytest @args.txt", "``",
             "cat < in.txt", "pytest -k 'a  b'", "pytest tests/test_*.py",
             "make test 2>&1", "pytest -k a_b"):
