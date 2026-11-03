@@ -1,5 +1,63 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.9.0 — an unbalanced backtick in a command (2026-11-03)
+
+**No version bump** (fix, not surface; freeze exception **90**). **Seam:
+stays at 3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger. This is
+the third of the five Z-77 residual PRs: Z-77 (b).
+
+**What changes.**
+
+- With bash on PATH, config validation also parses each command alone in a
+  subshell, as well as where its hooks place it. `commands.test`,
+  `ci_local` and `eval` sit in their hooks more than once, and bash paired a
+  token in one copy with one in the next: a backtick, or a quote inside
+  `${ }` or `$( )`. So `` `x ``, `` x` `` and `echo ${x:-'}` were accepted
+  for those three keys. They are now refused for every key.
+- With no bash on PATH, the quote scan tracks backticks. A backtick, outside
+  quotes or inside `"..."`, opens a command substitution up to the next
+  unescaped backtick, and inside it quotes are text. An unbalanced backtick
+  is refused for every key, and `"a `b" c`"`, which bash accepts, is no
+  longer refused.
+- The refusal names its consequence. Where only the command alone fails to
+  parse, its hook pairs it with the hook's own text, so the hook either
+  does not parse, and every Bash call is refused, or runs a different
+  command than the one written. With no bash, the message names an
+  unbalanced quote or backtick, or a trailing backslash.
+
+**What main did with such a value.** For `` `x `` in `commands.test`,
+test-gate parsed and blocked every commit as "test command not found (exit
+127)". With `echo ${x:-'}`, test-gate did not parse, so every Bash call was
+refused.
+
+**Upgrading.** A config the old installer accepted may now be refused: an
+unbalanced backtick in any key, or a quote that only another copy of the
+command closed. With no bash on PATH, the scan reads a backtick inside a
+`# comment` as code, as it already did a quote, so `pytest # `` is refused
+there, though bash accepts it. No emitted byte changes for any config that
+is still accepted, so no golden digest moves.
+
+**Cost.** One more `bash -n` for test, ci_local, eval and lint; none for
+format and typecheck, whose probe is already the command alone.
+
+**Freeze exception 90.** `lib/defaults.py` and its plugin copy. No golden
+re-baseline.
+
+**Tests.** `tests/test_command_embedding.py` gains a Z-77 (b) section, red
+first: 20 of its 40 checks failed on `7d939e0`. The other 20 hold there by
+design: the balanced backticks the old code already accepted, lint's
+reason, a trailing backslash, and a comment's backtick with bash.
+`tests/test_wp4_claude_md.py` row b and `tests/test_wp4_steering.py`
+section 9 trade `` `x `` and `` x` `` for accepted values that still start
+or end with a backtick.
+
+**Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
+contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
+sentinel, §7.2 hook membership, §7.3 provenance marker or synthesize-file
+contract (ANSWERS key), or `binds` entry changes. §3.2's `bootstrap-install`
+row gives the exit code and error shape of a refused config; both are
+unchanged, and only the set of refused values grows.
+
 ## Post-2.9.0 — tech.md's command cells (2026-10-29)
 
 **No version bump** (fix, not surface; freeze exception **89**). **Seam:

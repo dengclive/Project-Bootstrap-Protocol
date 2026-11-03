@@ -118,6 +118,12 @@ _PARSE_CONSEQUENCE = {
     "typecheck": ("tech.md gives it as the command to run, and it would not "
                   "run. "),
 }
+# [Z-77 (b)] What a command breaks when only its parse alone fails: where
+# its hook places it, bash pairs it with the hook's own text.
+_PAIRED_CONSEQUENCE = (
+    "Its hook places it more than once, and bash pairs it with the hook's own "
+    "text, so the hook either does not PARSE, and every Bash call is "
+    "refused, or runs a different command than the one written. ")
 
 # The value _shell_parse_error returns when it could not ask bash.
 _NO_BASH = object()
@@ -202,12 +208,13 @@ def _bash_n(bash: str, text: str):
 
 def _shell_parse_error(cmd: str, key: str = "test"):
     """[WP2 re-review RR1-EMB-3] bash's syntax error for `cmd` placed where
-    `key`'s hooks place it (_parse_probe), or None when it parses. A
-    command that does not parse there breaks the whole hook, so EVERY Bash
-    call is refused, while `sh -c` would fail only the gated action; one
-    `bash -n` covers a trailing `&&` or `|`, an unbalanced `(`, `$(` or
-    quote, and an unterminated heredoc. Not a trailing backslash: it joins
-    the hook's next line, which parses (_ends_in_escape).
+    `key`'s hooks place it (_parse_probe), and then alone in a subshell
+    ([Z-77 (b)]), with whether only the second failed; or None when both
+    parse. A command that does not parse there breaks the whole hook, so
+    EVERY Bash call is refused, while `sh -c` would fail only the gated
+    action; `bash -n` covers a trailing `&&` or `|`, an unbalanced `(`,
+    `$(`, quote or backtick, and an unterminated heredoc. Not a trailing
+    backslash: it joins the hook's next line, which parses (_ends_in_escape).
 
     [WP2 re-review bash-n B-1] _NO_BASH when bash cannot answer: none on
     PATH (looked up with shutil.which, as `#!/usr/bin/env bash` looks it
@@ -224,27 +231,41 @@ def _shell_parse_error(cmd: str, key: str = "test"):
     ctl = _bash_n(bash, ":\n")
     if ctl is None or ctl[0] != 0:
         return _NO_BASH
-    r = _bash_n(bash, _parse_probe(key, cmd))
-    if r is None:
-        return _NO_BASH
-    rc, err = r
+    # [Z-77 (b)] The command alone in a subshell, the placement every hook
+    # shares, as well: test, ci_local and eval sit in their probe more than
+    # once, and bash can pair a token in one copy with one in the next (a
+    # backtick, or a quote inside `${ }` or `$( )`), so the probe parses
+    # where the hook may not.
+    from templates import _user_cmd
+    probe = _parse_probe(key, cmd)
+    for text in dict.fromkeys((probe, _user_cmd(cmd, "") + "\n")):
+        r = _bash_n(bash, text)
+        if r is None:
+            return _NO_BASH
+        rc, err = r
+        if rc != 0:
+            break
     if rc == 0:
         return None
     lines = [re.sub(r"^(?:\S*bash: )?line \d+: ", "", ln)
              for ln in err.splitlines() if "warning:" not in ln]
-    return (lines[0] if lines else "exit %d" % rc)
+    return (lines[0] if lines else "exit %d" % rc), text != probe
 
 
 def _quotes_balanced(cmd: str) -> bool:
-    """Does `cmd` end outside every quote, with no dangling escape?
+    """Does `cmd` end outside every quote and backtick, with no dangling
+    escape?
 
     Bash's own rule, which is the one that matters: inside `'...'` nothing
     escapes; inside `"..."` a backslash escapes; outside, a backslash escapes.
+    [Z-77 (b)] A backtick, outside quotes or inside `"..."`, opens a command
+    substitution up to the next unescaped backtick; inside it a backslash
+    escapes and quotes are text.
     An unbalanced quote here emits a hook bash cannot PARSE, so every commit
     is refused with a syntax error and no diagnosis - the operator sees a
     broken gate, not a broken config value.
     """
-    state, esc = None, False
+    state, esc, outer = None, False, None
     for ch in cmd:
         if esc:
             esc = False
@@ -252,14 +273,19 @@ def _quotes_balanced(cmd: str) -> bool:
         if state == "'":
             if ch == "'":
                 state = None
-        elif state == '"':
+        elif state == "`":
             if ch == "\\":
                 esc = True
-            elif ch == '"':
-                state = None
+            elif ch == "`":
+                state, outer = outer, None
         elif ch == "\\":
             esc = True
-        elif ch in ("'", '"'):
+        elif state == '"':
+            if ch == '"':
+                state = None
+            elif ch == "`":
+                state, outer = "`", '"'
+        elif ch in ("'", '"', "`"):
             state = ch
     return state is None and not esc
 
@@ -464,8 +490,8 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
                 f"script and call the script.")
             continue
         # [WP2 re-review bash-n B-3] bash -n decides wherever bash runs; the
-        # quote scan, which counts a quote inside a `# comment`, only where
-        # it cannot.
+        # quote scan, which counts a quote or a backtick inside a
+        # `# comment`, only where it cannot.
         perr = _shell_parse_error(v, key)
         if perr is not _NO_BASH and _ends_in_escape(v):
             errors.append(
@@ -475,15 +501,18 @@ def _validate_shell_reaching(cfg: dict, errors: list) -> list:
         elif perr is _NO_BASH:
             if not _quotes_balanced(v):
                 errors.append(
-                    f"commands.{key} has an unbalanced quote or a trailing "
-                    f"backslash ({v!r}). The emitted hook would not PARSE, so "
-                    f"every gated action is refused with a bash syntax error "
-                    f"and no explanation of why.")
+                    f"commands.{key} has an unbalanced quote or backtick, or "
+                    f"a trailing backslash ({v!r}). The emitted hook either "
+                    f"does not PARSE, so every gated action is refused with "
+                    f"a bash syntax error and no explanation of why, or runs "
+                    f"a different command than the one written.")
         elif perr is not None:
+            said, paired = perr
             errors.append(
                 f"commands.{key} is not a complete shell command "
-                f"({v!r}): bash says {perr!r}. "
-                + _PARSE_CONSEQUENCE.get(key, "")
+                f"({v!r}): bash says {said!r}. "
+                + (_PAIRED_CONSEQUENCE if paired
+                   else _PARSE_CONSEQUENCE.get(key, ""))
                 + "Complete the command, or put it in a script and call "
                 "the script.")
 
