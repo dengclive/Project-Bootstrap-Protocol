@@ -52,7 +52,7 @@ format and typecheck, whose probe is already the command alone.
 re-baseline.
 
 **Tests.** `tests/test_command_embedding.py` gains a Z-77 (b) section, red
-first: 26 of its 59 checks failed on `7d939e0`.
+first: 26 of its 67 checks failed on `7d939e0`.
 `tests/test_wp4_claude_md.py` row b and `tests/test_wp4_steering.py`
 section 9 trade `` `x `` and `` x` `` for accepted values that still start
 or end with a backtick.

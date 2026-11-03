@@ -594,7 +594,8 @@ try:
     ACCEPTED = ("echo `date`", "``", '"`echo "x"`"', '"a `b" c`"', "'`'",
                 "a \\`", "echo 'a\\' `date`", "echo `echo \\`date\\``",
                 'echo "\\`"', 'echo "`date`" `pwd`', 'pytest -k "it\'s"',
-                'pytest "$X"', "echo `echo 'a'`", "echo '\"'")
+                'pytest "$X"', "echo `echo 'a'`", "echo '\"'", "echo $HOME",
+                "echo '$HOME'", "echo `echo $`", "echo $`date`")
     for value in REFUSED:
         by = _errs_under(None, {k: value for k in ALL6})
         check(f"Z-77 (b): with bash, {value!r} is refused for every key",
