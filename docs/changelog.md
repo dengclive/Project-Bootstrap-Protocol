@@ -21,8 +21,8 @@ retrofit's landing paragraph is unchanged.
   script, repeat this step." Before, only the CONFLICT outcome said to
   repeat step 3, though merge-back's ERROR, REFUSED and NOT-STARTED last
   lines also name a rerun of the script, and a rerun can go to the
-  background too (C-2). The rerun that CLEANUP lines name, under "If the
-  branch merged", is unchanged and filed.
+  background too (C-2). The rerun a CLEANUP MERGED line names, under "If
+  the branch merged", is unchanged and filed.
 
 This supersedes three parts of the tidy-up entry below: its step 2
 description, its step 3 description and its quoted "Otherwise, do what it
@@ -52,8 +52,8 @@ the CONFLICT one, repeats step 3 on a rerun of the script.
 gains a check that the Otherwise outcome repeats step 3 on a rerun, red
 first: 12 of row c's checks failed on `cf4b4f2`, four in each gate
 variant. `tests/test_merge_back.py` re-pins its three checks of the
-greenfield `CLAUDE.md`'s step text (the PRD implementer note's own wording is unchanged), all
-three red on `cf4b4f2`.
+greenfield `CLAUDE.md`'s step text (the PRD implementer note's own wording
+is unchanged), all three red on `cf4b4f2`.
 
 **Seam — the §8.4 trigger walk.** No trigger fires. No entry point or
 contract-level flag is added (§3.2), and no §4.1 field, §5 event, §7.4
