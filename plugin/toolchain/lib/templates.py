@@ -11791,8 +11791,8 @@ investigate_disagreement: false
 # [WP3 / D6] The main session's start and landing instruction. The same
 # text with worktree isolation on or off (it keys on what the implementer
 # reports), so CLAUDE.md stays out of the isolation blast radius. Both
-# CLAUDE.md variants carry it and share the gate table (_LANDING_GATES),
-# not the sentence (retrofit takes `tests-retrofit`);
+# CLAUDE.md variants carry it and share the gate table (_LANDING_GATES);
+# with the test gate on, retrofit takes `tests-retrofit`;
 # [claude-md-tidy-up] greenfield gives it as numbered steps
 # (_landing_steps), retrofit as the paragraph below.
 # [WP3 critic 5a] Compressed to keep the retrofit-agent CLAUDE.md within
@@ -11881,9 +11881,9 @@ def _md_item(marker, text, width=78, indent=0):
 # (tests/test_merge_back.py). Step 2 ends with the no-worktree case, which
 # skips the script and step 3. Step 3 waits for the script's last line
 # before acting on it, the order the session meets them, and the three
-# outcomes are its sub-bullets. [Z-77 (d)] A rerun of the script, on
-# CONFLICT or otherwise, repeats step 3, since it can go to the background
-# too.
+# outcomes are its sub-bullets. [Z-77 (d)] The Otherwise outcome repeats
+# step 3 on a rerun of the script, as the CONFLICT one does, since a rerun
+# can go to the background too.
 def _landing_steps(runs):
     return "\n" + "".join((
         _md_item("1.", "Starting a task: on a spec branch, set "
