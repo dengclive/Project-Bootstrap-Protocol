@@ -9601,7 +9601,8 @@ def _tdd_stem_rule(cfg, bullet, indent):
 # request, or the last commit) is reached off the default branch. Step 2
 # comes right after the slug is resolved, because the branch is named from
 # it, and before the first write. CLAUDE.md's "Starting a task" sentence
-# says the same ("on a spec branch", _landing_claude_md). [WP4 fix round 3,
+# says the same ("on a spec branch": _landing_steps for greenfield,
+# _landing_claude_md for retrofit). [WP4 fix round 3,
 # operator ruling 2026-10-15: "Simplify, ask when unclear"] From the local
 # default branch after a fast-forward pull: the pull brings in the pull
 # requests a person merged on the remote, an unpushed bootstrap commit
@@ -11790,7 +11791,8 @@ investigate_disagreement: false
 # [WP3 / D6] The main session's start and landing instruction. The same
 # text with worktree isolation on or off (it keys on what the implementer
 # reports), so CLAUDE.md stays out of the isolation blast radius. Both
-# CLAUDE.md variants carry it and share the gate sentence (_LANDING_GATES);
+# CLAUDE.md variants carry it and share the gate table (_LANDING_GATES);
+# with the test gate on, retrofit takes `tests-retrofit`;
 # [claude-md-tidy-up] greenfield gives it as numbered steps
 # (_landing_steps), retrofit as the paragraph below.
 # [WP3 critic 5a] Compressed to keep the retrofit-agent CLAUDE.md within
@@ -11874,12 +11876,14 @@ def _md_item(marker, text, width=78, indent=0):
 
 
 # [claude-md-tidy-up / item 2] Greenfield's start-and-land paragraph as
-# numbered steps, with the same gate sentence (`runs`, _LANDING_GATES). Step 1 keeps "Starting a task: on a spec
-# branch, " (tests/test_merge_back.py). Step 2 ends with the no-worktree
-# case, which skips step 3. Step 3 waits for the script's last line before
-# acting on it, the order the session meets them, and the three outcomes
-# are its sub-bullets; the CONFLICT rerun with --continue repeats it, since
-# it can go to the background too.
+# numbered steps, with the gate sentence for its gates (`runs`,
+# _LANDING_GATES). Step 1 keeps "Starting a task: on a spec branch, "
+# (tests/test_merge_back.py). Step 2 ends with the no-worktree case, which
+# skips the script and step 3. Step 3 waits for the script's last line
+# before acting on it, the order the session meets them, and the three
+# outcomes are its sub-bullets. [Z-77 (d)] The Otherwise outcome repeats
+# step 3 on a rerun of the script, as the CONFLICT one does, since a rerun
+# can go to the background too.
 def _landing_steps(runs):
     return "\n" + "".join((
         _md_item("1.", "Starting a task: on a spec branch, set "
@@ -11889,17 +11893,18 @@ def _landing_steps(runs):
         _md_item("2.", "Landing it: after `VERDICT: approve`, run "
                        f"`{MERGE_BACK_SCRIPT} <branch>` (Bash timeout "
                        f"600000 ms), never a hand `git merge`. {runs} No "
-                       "worktree branch: set `done` once approved, and skip "
-                       "step 3."),
-        _md_item("3.", "Wait for the script's last line in this turn, even "
-                       "in the background, and commit nothing until then: "
-                       "ending the turn can stop it. Act on that line:"),
+                       "worktree branch: skip the script and step 3, and set "
+                       "`done` once approved."),
+        _md_item("3.", "Wait for its last line in this turn, even if it "
+                       "runs in the background, and commit nothing until "
+                       "then: ending the turn can stop it. Act on that line:"),
         _md_item("-", "If the branch merged, set `status: done` and commit "
                       "it.", indent=3),
         _md_item("-", "On CONFLICT, invoke the integrator with its brief, "
                       "then rerun with `--continue <branch>` and repeat "
                       "this step.", indent=3),
-        _md_item("-", "Otherwise, do what it names.", indent=3)))
+        _md_item("-", "Otherwise, do what it names; on a rerun of the "
+                      "script, repeat this step.", indent=3)))
 
 
 # [WP4 / Phase 8] The steering docs CLAUDE.md names, in PRD Phase 8 order,
