@@ -771,6 +771,39 @@ check("[CLAUDE.md] the :1330 tidy-up note names the Commands section, the "
                                 r"Wait for)", p["CLAUDE.md"], re.M)
               for p in (_ra, _rs)),
       _tidy[-1][:600])
+# [Z-77 (i)] The :585 note gives the queue-mode section's size, and it
+# holds: about 390 characters with its heading, not the ~50 tokens the
+# line itself says.
+_n585 = site(PRD, "The queue-mode reference in CLAUDE.md (if any) adds at "
+                  "most ~50 tokens")[1]
+_zi = _n585.split("**[Corrected 2026-11-05, Z-77 (i).]**")
+_qmd = _full["CLAUDE.md"]
+_qsec = (_qmd[_qmd.index("## Queue mode"):].split("\n## ", 1)[0].rstrip("\n")
+         if "## Queue mode" in _qmd else "")
+check("[CLAUDE.md] the :585 note sizes the greenfield queue-mode section at "
+      "about 390 characters, roughly 100 tokens, and it holds",
+      len(_zi) == 2
+      and "about 390 characters, roughly 100 tokens, not 50" in _zi[1]
+      and 350 <= len(_qsec) <= 430, f"{len(_qsec)}: {_zi[-1][:300]}")
+# [Z-77 (a), (j)] The :640 note: escape a pipe in the command table, and
+# change a command in CLAUDE.md's Commands section too; each holds.
+from templates import _cell_code
+group("[tech.md] Phase 2 step 5's note escapes a pipe in the command table "
+      "and sends a command change to CLAUDE.md's Commands section too", [
+          (PRD, 640, "5. Write `.claude/steering/tech.md` with explicit",
+           "**[Amended 2026-11-05, Z-77 (a) and (j).]**",
+           ["write each `|` in a command as `\\|`",
+            "repeats the Test, Lint and Format commands in its Commands "
+            "section", "change it there too"]),
+      ])
+_cmds = _gf["CLAUDE.md"].split("## Commands (keep in step with `tech.md`)\n", 1)
+check("[tech.md] the installer writes a pipe in a command cell as \\|, and "
+      "the greenfield Commands section lists Test, Lint and Format",
+      _cell_code("pytest | tee log") == "`pytest \\| tee log`"
+      and len(_cmds) == 2
+      and re.findall(r"^- (\w+): ", _cmds[1].lstrip("\n").split("\n\n", 1)[0],
+                     re.M) == ["Test", "Lint", "Format"],
+      _cmds[-1][:300])
 
 group("[plugin] the Companion's plugin paragraph names the moved manifest, "
       "the prefixed commands and no marketplace", [

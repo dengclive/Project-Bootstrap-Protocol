@@ -4,8 +4,9 @@
 
 **No version bump** (docs only; no freeze exception). **Seam: stays at
 3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger. This is the last
-of the five Z-77 residual PRs: Z-77 (c), (h), (i) and (j), and a stale
-comment in the readiness runbook. No emitted byte changes.
+of the five Z-77 residual PRs: Z-77 (c), (h), (i) and (j), the protocol
+cue (a) left for it, and a stale comment in the readiness runbook. No
+emitted byte changes.
 
 **What changes.**
 
@@ -17,6 +18,8 @@ comment in the readiness runbook. No emitted byte changes.
   change the command. A dated note on that line adds that the greenfield
   `CLAUDE.md` repeats Test, Lint and Format in its Commands section, so
   change it there too (Z-77 (j)). Before, only the Phase 8 note said so.
+  The same note says to write each `|` in a command as `\|` in the table,
+  as the installer has since Z-77 (a).
 - The Line budget paragraphs of the tidy-up and landing-steps entries below
   name their five fixtures as the greenfield ones and add the two retrofit
   ones, 68 and 80 lines (service, agent): the golden cap covers all seven,
@@ -29,6 +32,10 @@ comment in the readiness runbook. No emitted byte changes.
 
 **Docs.** Both protocol notes are appended to the end of their line, so
 the file keeps its 2,376 lines, and the plugin's copy is synced.
+
+**Tests.** `tests/test_wp4_protocol_notes.py` pins both notes, red first:
+the :585 and :640 rows failed on `fc21a07`. A third row checks what the
+:640 note says of the installer and of the Commands section.
 
 **Seam — the §8.4 trigger walk.** No trigger fires: no code, emitted file,
 entry point, flag, field, event, sentinel, hook, marker or `binds` entry
