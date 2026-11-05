@@ -30,7 +30,7 @@ is not, and that was verified on 2026-08-14, not assumed:
 **Re-verify after any change to this runbook:**
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 tests/test_greenfield_golden.py   # must stay 13/0
+PYTHONDONTWRITEBYTECODE=1 python3 tests/test_greenfield_golden.py   # must report 0 failed
 grep -rln "readiness-runbook\|readiness-queue\|context-check" lib/ bin/ Bootstrap-Protocol-*.md SEAM-CONTRACT-*.md
 # ^ must print nothing
 ```
