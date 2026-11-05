@@ -62,8 +62,8 @@ retrofit's landing paragraph is unchanged.
   script, repeat this step." Before, only the CONFLICT outcome said to
   repeat step 3, though merge-back's ERROR, REFUSED and NOT-STARTED last
   lines also name a rerun of the script, and a rerun can go to the
-  background too (C-2). The rerun a CLEANUP MERGED line names, under "If
-  the branch merged", is unchanged and filed.
+  background too (C-2). A rerun that a line under "If the branch merged"
+  names is unchanged and filed.
 
 This supersedes three parts of the tidy-up entry below: its step 2
 description, its step 3 description and its quoted "Otherwise, do what it
