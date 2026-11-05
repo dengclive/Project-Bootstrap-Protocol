@@ -1,5 +1,39 @@
 # Changelog — Bootstrap Protocol implementation
 
+## Post-2.9.0 — Z-77's record fixes (2026-11-05)
+
+**No version bump** (docs only; no freeze exception). **Seam: stays at
+3.0.0, SUSPENDED.** The §8.4 walk below finds no trigger. This is the last
+of the five Z-77 residual PRs: Z-77 (c), (h), (i) and (j), and a stale
+comment in the readiness runbook. No emitted byte changes.
+
+**What changes.**
+
+- Phase 0.5's token estimate says the queue-mode reference in `CLAUDE.md`
+  adds at most ~50 tokens. A dated note on that line says the section the
+  installer writes into the greenfield `CLAUDE.md` is about 390
+  characters, roughly 100 tokens (Z-77 (i)).
+- Phase 2 step 5 tells you to change a command's row in `tech.md` when you
+  change the command. A dated note on that line adds that the greenfield
+  `CLAUDE.md` repeats Test, Lint and Format in its Commands section, so
+  change it there too (Z-77 (j)). Before, only the Phase 8 note said so.
+- The Line budget paragraphs of the tidy-up and landing-steps entries below
+  name their five fixtures as the greenfield ones and add the two retrofit
+  ones, 68 and 80 lines (service, agent): the golden cap covers all seven,
+  and the retrofit agent fixture is at the cap (Z-77 (h)). Both entries are
+  unreleased, so they are corrected in place.
+- The backlog's Z-77 (c) is narrowed: a null `protocol_doc` leaves one
+  false clause in the ledger, and the row stays backlog-only.
+- The readiness runbook's re-verify comment said the golden suite must stay
+  at 13/0; it now says it must report 0 failed.
+
+**Docs.** Both protocol notes are appended to the end of their line, so
+the file keeps its 2,376 lines, and the plugin's copy is synced.
+
+**Seam — the §8.4 trigger walk.** No trigger fires: no code, emitted file,
+entry point, flag, field, event, sentinel, hook, marker or `binds` entry
+changes.
+
 ## Post-2.9.0 — the landing steps in the emitted CLAUDE.md (2026-11-03)
 
 **No version bump** (fix, not surface; freeze exception **91**). **Seam:
@@ -28,9 +62,10 @@ This supersedes three parts of the tidy-up entry below: its step 2
 description, its step 3 description and its quoted "Otherwise, do what it
 names." wording.
 
-**Line budget.** No line moves: each step keeps its line count, and the
-golden fixtures' `CLAUDE.md` stays 71, 79, 69, 71 and 67 lines (default,
-full autonomous, design steering, SDK callable, gates off).
+**Line budget.** No line moves: each step keeps its line count, the five
+greenfield golden fixtures' `CLAUDE.md` stays 71, 79, 69, 71 and 67 lines
+(default, full autonomous, design steering, SDK callable, gates off), and
+the two retrofit ones stay 68 and 80 (service, agent).
 
 **Upgrading.** A re-install keeps a hand-edited `CLAUDE.md`, and the
 kept-file warning does not check the landing steps, so that file keeps the
@@ -225,10 +260,10 @@ the operator's 2026-10-14 directive to backlog retrofit work.
 **Line budget.** Operator ruling 2026-10-28: the cap in
 `tests/test_wp4_claude_md.py` moves from 76 to 80 lines, the golden cap and
 the protocol's "roughly 80 lines max", and its matrix also varies the two
-commit gates. The golden
-fixtures' `CLAUDE.md` is 71, 79, 69, 71 and 67 lines (default, full
-autonomous, design steering, SDK callable, gates off). WP6 has to win lines
-back before it adds the loop and goal addenda.
+commit gates. The five greenfield golden fixtures' `CLAUDE.md` is 71, 79,
+69, 71 and 67 lines (default, full autonomous, design steering, SDK
+callable, gates off), and the two retrofit ones are 68 and 80 (service,
+agent). WP6 has to win lines back before it adds the loop and goal addenda.
 
 **Upgrading.** A re-install keeps a hand-edited `CLAUDE.md`, and the
 kept-file warning does not check for the Commands section, so that file
