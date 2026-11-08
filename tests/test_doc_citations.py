@@ -114,6 +114,10 @@ CITATIONS = [
      "The queue-mode reference in CLAUDE.md (if any) adds at most ~50 tokens"),
     ("docs/deferred-backlog.md", PRD,
      "**Exit criteria:** `CLAUDE.md` exists, is thin"),
+    # [Z-77 residuals closeout] Z-77's 2026-11-06 layer cites :640, Phase 2
+    # step 5, whose note #140 appended.
+    ("docs/deferred-backlog.md", PRD,
+     "5. Write `.claude/steering/tech.md` with explicit"),
     # EMITTED. This one ships inside .claude/hooks/iteration-summary-enforcement.sh
     # (fixture B / full_autonomous), so correcting it moves a golden digest. It is
     # also the citation a naive scanner misses, because the filename ends one line

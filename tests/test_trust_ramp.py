@@ -489,8 +489,14 @@ check("shipped ledger starts at R0", st["current_rung"] == "R0",
 # the changelog; re-review 1's NEW-1 and NEW-2), the PR body and 8e4d3cb's
 # message overstated, and RA-6, a false comment the PR wrote, merged
 # undisclosed. Pin moved 54 -> 55 in the same commit.
+# [Z-77 residuals closeout, 2026-11-06] Z-77 and Z-68 (p), six PRs (#135 to
+# #140, last merge a519321) and the live walk. Graded `harmful` by the same
+# 10b rule: pushed heads carried what the next round confirmed in every PR,
+# #139's changelog sentence on the CLEANUP rerun merged false, and merged
+# bodies and commit messages still overclaim. Pin moved 55 -> 56 in the same
+# commit.
 check("shipped ledger parses to the expected number of entries",
-      len(es) == 55, f"{len(es)} entries")
+      len(es) == 56, f"{len(es)} entries")
 
 # [x54-completer-cost closeout] PIN THE GRADE, NOT ONLY THE COUNT. The count
 # above catches a DELETED entry and nothing else: mutating this entry's
